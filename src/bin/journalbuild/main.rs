@@ -12,6 +12,7 @@ use parry2d::bounding_volume::Aabb;
 use rand::{Fill};
 
 use std::sync::Arc;
+use ::darkly::engine::DarklyEngine;
 
 type JournalEntryFunc = for<'j> fn(&'j mut Journal<'j>, &'j symboldict::SymbolPathDict) -> JournalManifest<'j>;
 
@@ -160,7 +161,9 @@ fn first_codex<'j>(journal: &'j mut Journal<'j>, symd: &'j symboldict::SymbolPat
     journal.build_entries(|_, _, _| {})
 }
 
-fn legacy_journalbuild(symd: &symboldict::SymbolPathDict, journal_dir: &str, journal_name: &str) {
+const LEGACY_DARKLY_SIZE: f32 = 1080.0;
+
+fn legacy_journalbuild(symd: &symboldict::SymbolPathDict, engine: &mut DarklyEngine, journal_dir: &str, journal_name: &str) {
     let journal_funcs: HashMap<&str, JournalEntryFunc> = HashMap::from([
         ("journal_entry_17", journal_entry_17 as JournalEntryFunc),
         ("journal_entry_18", journal_entry_18 as JournalEntryFunc),
@@ -184,12 +187,15 @@ fn legacy_journalbuild(symd: &symboldict::SymbolPathDict, journal_dir: &str, jou
     manifest.render_all(&dir_name, 2.0);
 
     let pages = manifest.pages();
-    let mut engine = darkly::new_engine(1080, 1080);
     for (page_name, (page_canvas, _))  in pages {
         println!("Rendering with Darkly.");
+        // Fit the longest side to LEGACY_DARKLY_SIZE, preserving aspect ratio.
+        let dims = page_canvas.bounds().extents();
+        let scale = LEGACY_DARKLY_SIZE / dims.x.max(dims.y);
+        darkly::resize_canvas(engine, (dims.x * scale) as u32, (dims.y * scale) as u32);
         let buff = darkly::render_canvas(
             page_canvas,
-            &mut engine,
+            engine,
             "Calligraphy",
             1.0,
             (0.15, 0.25),
@@ -226,9 +232,11 @@ fn main() {
     let journal_name = &args[1];
     let journal_dir = "journals";
     let legacy_flagged = args.iter().find(|f| *f == "--legacy").is_some();
+    // One Darkly engine for the whole run; canvases resize it as needed.
+    let mut darkly_engine = darkly::new_engine(1, 1);
     if legacy_flagged {
         // TODO: eventually I intend to build out the legacy journals into rhai.
-        legacy_journalbuild(&symd, journal_dir, journal_name);
+        legacy_journalbuild(&symd, &mut darkly_engine, journal_dir, journal_name);
         return;
     }
     let symdarc = Arc::new(symd);
@@ -243,5 +251,5 @@ fn main() {
     let output_dir = format!("{}/output", entry_path);
     create_dir(&output_dir);
     entry.clone().publish_pngs(&output_dir);
-    entry.darkly_publish_pngs(&output_dir, 1.0);
+    entry.darkly_publish_pngs(&mut darkly_engine, &output_dir, 1.0);
 }

@@ -9,6 +9,7 @@ use super::symbol::{place_along_path, SymbolPlacementArgs};
 use super::styles;
 use super::canvas::artistic::{BuiltMaze, MazeTraversal, MazeTraversalStrategy};
 use super::darkly;
+use ::darkly::engine::DarklyEngine;
 use crate::composite_from_locktypes;
 use crate::lockbuilder::{Lock, LockConfig, InfoVarType, CompositeLock};
 use crate::lockbuilder::locks::doublering::{DoubleRingLock, DoubleRingOptions, KeyedDoubleRingLock, KeyedDoubleRingOptions};
@@ -37,16 +38,16 @@ impl Entry {
     fn build_extra(builder: &mut TypeBuilder<Self>) {
         builder.with_fn("add_page", Self::add_page);
     }
-    pub fn darkly_publish_pngs(self, dirname: &str, scale: f32) {
+    pub fn darkly_publish_pngs(self, engine: &mut DarklyEngine, dirname: &str, scale: f32) {
         for (i, page) in self.pages.into_iter().enumerate() {
             let canvases = page.canvases();
             for (canvas_i, (canvas, brush_settings)) in canvases.into_iter().enumerate() {
                 let canvas : JournalCanvas = canvas.into();
                 let canvas_dim = canvas.bounds().extents();
-                let mut engine = darkly::new_engine((canvas_dim.x * scale) as u32, (canvas_dim.y * scale) as u32);
+                darkly::resize_canvas(engine, (canvas_dim.x * scale) as u32, (canvas_dim.y * scale) as u32);
                 let br_size = brush_settings.size as f32;
                 let pressure_bounds = (brush_settings.min_pressure as f32, brush_settings.max_pressure as f32);
-                let buff = darkly::render_canvas(&canvas, &mut engine, brush_settings.brush_style.as_str(), br_size, pressure_bounds);
+                let buff = darkly::render_canvas(&canvas, engine, brush_settings.brush_style.as_str(), br_size, pressure_bounds);
                 let filename = format!("{}/darkly_page_{}_{}.png", dirname, i, canvas_i);
                 buff.save(filename).expect("Failed to save png");
             }

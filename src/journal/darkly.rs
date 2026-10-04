@@ -1,5 +1,6 @@
 use darkly::engine::{DarklyEngine, types::StrokeOp, ExportImageResult};
 use darkly::gpu::context::GpuContext;
+use darkly::coord::CanvasRect;
 use image::{ImageBuffer, Rgba};
 use crate::journal::paths::{CurveSample};
 use crate::journal::canvas::{Canvas, ColoredStroke};
@@ -17,6 +18,15 @@ pub fn new_engine(width: u32, height: u32) -> DarklyEngine {
     let mut engine = DarklyEngine::new(gpu, width, height);
     engine.add_raster_layer(None);
     engine
+}
+
+/// Resize the engine's canvas window so a single engine can be reused across
+/// canvases of different sizes. Panics if Darkly rejects the size (zero or
+/// over its max dimension), rather than silently rendering at the old size.
+pub fn resize_canvas(engine: &mut DarklyEngine, width: u32, height: u32) {
+    engine.resize_canvas(CanvasRect::from_xywh(0, 0, width, height));
+    let actual = engine.canvas_dimensions();
+    assert_eq!(actual, (width, height), "Darkly rejected canvas resize to {}x{}", width, height);
 }
 
 pub fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, brush_selection: &str, brush_size: f32, pressure_bounds: (f32, f32)) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
