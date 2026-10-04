@@ -4,6 +4,7 @@ use darkly::coord::CanvasRect;
 use image::{ImageBuffer, Rgba};
 use crate::journal::paths::{CurveSample};
 use crate::journal::canvas::{Canvas, ColoredStroke};
+use std::collections::HashSet;
 
 pub fn new_engine(width: u32, height: u32) -> DarklyEngine {
     let instance_desc = wgpu::InstanceDescriptor::new_without_display_handle();
@@ -42,15 +43,14 @@ pub fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, brush_selection
     engine.brush_set_exposed_port("brush_settings", "size", brush_size).expect("Unable to set brush size");
 
     let strokes = canvas.strokes();
+    let mut warned_colors = HashSet::new();
     for ColoredStroke { path, style } in strokes {
-        let color = match style.color.as_str() {
-            "darkred" => {
-                (0.5, 0.0, 0.0, 1.0)
-            },
-            _ => {
-                (0.0, 0.0, 0.0, 1.0)
-            },
-        };
+        let [cr, cg, cb, ca] = style.rgba().unwrap_or_else(|err| {
+            if warned_colors.insert(style.color.clone()) {
+                eprintln!("{}; drawing in black.", err);
+            }
+            [0.0, 0.0, 0.0, 1.0]
+        });
         let substrokes = path.to_substrokes();
         for substroke in substrokes {
             engine.begin_stroke(layer);
@@ -68,10 +68,10 @@ pub fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, brush_selection
                     rotation: 0.0,
                     tangential_pressure: 0.0,
                     time_ms: 0.0,
-                    cr: color.0,
-                    cb: color.1,
-                    cg: color.2,
-                    ca: color.3,
+                    cr,
+                    cg,
+                    cb,
+                    ca,
                 });
             }
             engine.end_stroke();

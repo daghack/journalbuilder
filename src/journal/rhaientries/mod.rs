@@ -1,4 +1,4 @@
-use rhai::{Engine, ImmutableString, Array, Map, Dynamic, CustomType, TypeBuilder, Scope};
+use rhai::{Engine, EvalAltResult, ImmutableString, Array, Map, Dynamic, CustomType, TypeBuilder, Scope};
 use std::io::{Error, ErrorKind};
 use super::paths::StrokePath;
 use super::symboldict::SymbolPathDict;
@@ -340,11 +340,12 @@ impl From<JournalStrokeStyle> for StrokeStyle {
 }
 
 impl StrokeStyle {
-    pub fn new(width: f64, color: ImmutableString) -> Self {
-        Self {
+    pub fn new(width: f64, color: ImmutableString) -> Result<Self, Box<EvalAltResult>> {
+        super::canvas::parse_color(&color)?;
+        Ok(Self {
             width,
             color
-        }
+        })
     }
     fn build_extra(builder: &mut TypeBuilder<Self>) {
         builder
@@ -556,5 +557,32 @@ impl JournalEngine {
     pub fn build_entry_file(&mut self, rhai_filename: &str) -> Result<Entry, Error> {
         let file_contents = std::fs::read_to_string(rhai_filename)?;
         self.build_entry_str(&file_contents)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn engine() -> JournalEngine {
+        let symd = SymbolPathDict::from_file("config/symbols.json").expect("Failed to load symbols.json");
+        JournalEngine::new(Arc::new(symd))
+    }
+
+    #[test]
+    fn new_strokestyle_accepts_css_colors() {
+        let script = r#"
+            let a = new_strokestyle(1.5, "darkred");
+            let b = new_strokestyle(1.5, "hsl(160, 50%, 40%, 0.8)");
+        "#;
+        assert!(engine().build_entry_str(script).is_ok());
+    }
+
+    #[test]
+    fn new_strokestyle_rejects_bad_color_with_line() {
+        let script = "let ok = new_strokestyle(1.5, \"black\");\nlet bad = new_strokestyle(1.5, \"darkredd\");";
+        let err = engine().build_entry_str(script).err().expect("bad color should fail").to_string();
+        assert!(err.contains("darkredd"), "{}", err);
+        assert!(err.contains("line 2"), "{}", err);
     }
 }

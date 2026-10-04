@@ -16,6 +16,21 @@ pub struct StrokeStyle {
     pub color: StrokeColor,
 }
 
+impl StrokeStyle {
+    /// The stroke color as sRGB RGBA floats in 0-1.
+    pub fn rgba(&self) -> Result<[f32; 4], String> {
+        parse_color(&self.color)
+    }
+}
+
+/// Parse a CSS color string (named, #hex, rgb()/rgba(), hsl()/hsla()) into
+/// sRGB RGBA floats in 0-1.
+pub fn parse_color(color: &str) -> Result<[f32; 4], String> {
+    let c: svgtypes::Color = color.parse()
+        .map_err(|e| format!("Invalid color '{}': {}", color, e))?;
+    Ok([c.red, c.green, c.blue, c.alpha].map(|v| v as f32 / 255.0))
+}
+
 #[derive(Clone, Debug)]
 pub struct ColoredStroke {
     pub path: StrokePath,
@@ -402,5 +417,26 @@ impl Canvas {
             bounds.mins.y - new_bounds.mins.y,
         );
         self.translate_by(translation);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_color;
+
+    #[test]
+    fn parses_css_color_forms() {
+        assert_eq!(parse_color("black"), Ok([0.0, 0.0, 0.0, 1.0]));
+        assert_eq!(parse_color("darkred"), Ok([139.0 / 255.0, 0.0, 0.0, 1.0]));
+        assert_eq!(parse_color("#00ff00"), Ok([0.0, 1.0, 0.0, 1.0]));
+        assert_eq!(parse_color("rgba(0, 0, 0, 0.7)"), Ok([0.0, 0.0, 0.0, 179.0 / 255.0]));
+        // hsl(120, 100%, 50%) is pure green; 4-arg hsl carries alpha.
+        assert_eq!(parse_color("hsl(120, 100%, 50%, 0.8)"), Ok([0.0, 1.0, 0.0, 204.0 / 255.0]));
+    }
+
+    #[test]
+    fn rejects_invalid_colors() {
+        assert!(parse_color("darkredd").is_err());
+        assert!(parse_color("").is_err());
     }
 }
