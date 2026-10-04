@@ -29,3 +29,9 @@ path = "src/lib.rs"
 
 [[bin]]
 name = "journalbuild"
+
+# Optimize dependencies even in dev builds: rendering (resvg, tiny-skia, rhai,
+# kdtree, darkly) is unusably slow unoptimized, while our own crate still
+# rebuilds quickly.
+[profile.dev.package."*"]
+opt-level = 3

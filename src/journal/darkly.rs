@@ -97,8 +97,7 @@ pub fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, brush_selection
                 return buff;
             }
             _ => {
-                std::thread::sleep(std::time::Duration::from_millis(100));
-                println!("Awaiting Export");
+                std::thread::sleep(std::time::Duration::from_millis(2));
             }
         }
     }
