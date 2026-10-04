@@ -83,7 +83,6 @@ pub enum LayoutStyle {
 }
 
 #[derive(Debug, Default, Clone, CustomType)]
-#[rhai_type(extra = Self::build_extra)]
 pub struct BrushSettings {
     brush_style: ImmutableString,
     min_pressure: f64,
@@ -92,6 +91,8 @@ pub struct BrushSettings {
 }
 
 impl BrushSettings {
+    /// `new_brush` is registered in `JournalEngine::new`, which checks the
+    /// name against Darkly's brush library.
     pub fn new_brush(brush_style: &str, min_pressure: f64, max_pressure: f64, size: f64) -> Self {
         Self {
             brush_style: brush_style.into(),
@@ -99,11 +100,6 @@ impl BrushSettings {
             max_pressure,
             size,
         }
-    }
-    fn build_extra(builder: &mut TypeBuilder<Self>) {
-        builder
-            .with_fn("new_brush", Self::new_brush)
-        ;
     }
 }
 
@@ -471,8 +467,22 @@ impl JournalEngine {
             .register_fn("new_strokepath", StrokePath::new);
 
         let load_symdict = symdict.clone();
-        engine.register_fn("load_symbol", move |symname: &str| -> StrokePath {
-            load_symdict.get_strokepath(symname).expect("Unable to load Symbol")
+        engine.register_fn("load_symbol", move |symname: &str| -> Result<StrokePath, Box<EvalAltResult>> {
+            load_symdict.get_strokepath(symname)
+                .ok_or_else(|| format!("load_symbol: unknown symbol '{}'", symname).into())
+        });
+
+        // Validate brush names when the script runs, rather than failing
+        // mid-render when Darkly can't find the brush.
+        let brush_names: Vec<String> = ::darkly::brush::builtin_brushes::all()
+            .into_iter()
+            .map(|brush| brush.metadata.name)
+            .collect();
+        engine.register_fn("new_brush", move |name: &str, min_pressure: f64, max_pressure: f64, size: f64| -> Result<BrushSettings, Box<EvalAltResult>> {
+            if !brush_names.iter().any(|known| known == name) {
+                return Err(format!("new_brush: unknown brush '{}'; available: {}", name, brush_names.join(", ")).into());
+            }
+            Ok(BrushSettings::new_brush(name, min_pressure, max_pressure, size))
         });
 
         let new_lock_lockset = lockset.clone();
@@ -575,6 +585,23 @@ mod tests {
         let script = format!("{}\nlet bad = new_strokestyle(1.5, \"darkredd\", brush);", BRUSH);
         let err = engine().build_entry_str(&script).err().expect("bad color should fail").to_string();
         assert!(err.contains("darkredd"), "{}", err);
+        assert!(err.contains("line 2"), "{}", err);
+    }
+
+    #[test]
+    fn load_symbol_rejects_unknown_name_with_line() {
+        let err = engine().build_entry_str("let ok = load_symbol(\"basic_eye\");\nlet bad = load_symbol(\"no_such_glyph\");")
+            .err().expect("unknown symbol should fail").to_string();
+        assert!(err.contains("unknown symbol 'no_such_glyph'"), "{}", err);
+        assert!(err.contains("line 2"), "{}", err);
+    }
+
+    #[test]
+    fn new_brush_rejects_unknown_name_with_line() {
+        let err = engine().build_entry_str("let ok = new_brush(\"Ink Pen\", 0.2, 0.5, 1.0);\nlet bad = new_brush(\"Crayon\", 0.2, 0.5, 1.0);")
+            .err().expect("unknown brush should fail").to_string();
+        assert!(err.contains("unknown brush 'Crayon'"), "{}", err);
+        assert!(err.contains("Calligraphy"), "error should list available brushes: {}", err);
         assert!(err.contains("line 2"), "{}", err);
     }
 
