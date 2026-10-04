@@ -199,22 +199,27 @@ impl Canvas {
             self.strokes.push(stroke);
         }
     }
-    pub fn translate(&mut self, v: Vec2) {
+    // Transforms modify the canvas in place and also return it, matching
+    // the StrokePath functions, so they can be chained.
+    pub fn translate(&mut self, v: Vec2) -> Canvas {
         let v = v.into();
         for stroke in &mut self.strokes {
             stroke.path.translate_by(v);
         }
+        self.clone()
     }
-    pub fn scale(&mut self, scale: f64) {
+    pub fn scale(&mut self, scale: f64) -> Canvas {
         for stroke in &mut self.strokes {
             stroke.path.scale_by(scale as f32);
         }
+        self.clone()
     }
-    pub fn rotate_around(&mut self, point: Vec2, rad: f64) {
+    pub fn rotate_around(&mut self, point: Vec2, rad: f64) -> Canvas {
         let point = point.into();
         for stroke in &mut self.strokes {
             stroke.path.rotate_around(point, rad as f32);
         }
+        self.clone()
     }
     fn build_extra(builder: &mut TypeBuilder<Self>) {
         builder
@@ -344,6 +349,13 @@ impl StrokeStyle {
     }
 }
 
+/// Apply a by-value StrokePath builder method to a path in place, returning
+/// the updated path.
+fn update_path(path: &mut StrokePath, f: impl FnOnce(StrokePath) -> StrokePath) -> StrokePath {
+    *path = f(std::mem::replace(path, StrokePath::new()));
+    path.clone()
+}
+
 pub struct JournalEngine {
     engine: Engine,
 }
@@ -356,11 +368,14 @@ impl JournalEngine {
         let lockset = Rc::new(RefCell::new(vec![]));
 
         engine.register_type::<StrokePath>()
-            .register_fn("move_to", |path: StrokePath, pos: Vec2| -> StrokePath {
-                path.move_to(pos.x as f32, pos.y as f32)
+            // Every path function both modifies the path in place and returns
+            // it, so `p.line_to(v);`, `p = p.line_to(v);` and chained calls on
+            // temporaries all behave the same.
+            .register_fn("move_to", |path: &mut StrokePath, pos: Vec2| -> StrokePath {
+                update_path(path, |p| p.move_to(pos.x as f32, pos.y as f32))
             })
-            .register_fn("line_to", |path: StrokePath, pos: Vec2| -> StrokePath {
-                path.line_to(pos.x as f32, pos.y as f32)
+            .register_fn("line_to", |path: &mut StrokePath, pos: Vec2| -> StrokePath {
+                update_path(path, |p| p.line_to(pos.x as f32, pos.y as f32))
             })
             .register_fn("fill_with_msg", move |path: &mut StrokePath, style: StrokeStyle, fonts: FontSet, fontsize: f64, msg: &str| -> Vec<Dynamic> {
                 let symdict = &fill_msg_symdict;
@@ -414,15 +429,18 @@ impl JournalEngine {
                 }
                 canvas
             })
-            .register_fn("scale_by", |stroke: &mut StrokePath, scale: f64 | {
+            .register_fn("scale_by", |stroke: &mut StrokePath, scale: f64| -> StrokePath {
                 stroke.scale_by(scale as f32);
+                stroke.clone()
             })
-            .register_fn("translate_by", |stroke: &mut StrokePath, translate: Vec2 | {
+            .register_fn("translate_by", |stroke: &mut StrokePath, translate: Vec2| -> StrokePath {
                 stroke.translate_by(translate.into());
+                stroke.clone()
             })
             .register_fn("rotate_around",
-                |stroke: &mut StrokePath, rot_point: Vec2, rot: f64 | {
+                |stroke: &mut StrokePath, rot_point: Vec2, rot: f64| -> StrokePath {
                     stroke.rotate_around(rot_point.into(), rot as f32);
+                    stroke.clone()
                 },
             )
             .register_fn("left_handed_maze_path", |seed: i64, width: i64, height: i64| -> StrokePath {
@@ -610,6 +628,41 @@ mod tests {
         let err = engine().build_entry_str(r#"let s = new_strokestyle(1.5, "black");"#)
             .err().expect("brushless style should fail").to_string();
         assert!(err.contains("new_strokestyle"), "{}", err);
+    }
+
+    fn path_string(entry_script: &str) -> String {
+        let engine = engine();
+        let path: StrokePath = engine.engine.eval(entry_script).expect("script should evaluate");
+        path.to_string()
+    }
+
+    #[test]
+    fn path_functions_mutate_in_place_and_chain() {
+        // Statement form mutates the variable...
+        let statements = path_string(r#"
+            let p = new_strokepath();
+            p.move_to(new_vec(0.0, 0.0));
+            p.line_to(new_vec(1.0, 0.0));
+            p.scale_by(2.0);
+            p.translate_by(new_vec(1.0, 1.0));
+            p
+        "#);
+        // ...and chaining (including on temporaries) gives the same result.
+        let chained = path_string(r#"
+            new_strokepath().move_to(new_vec(0.0, 0.0)).line_to(new_vec(1.0, 0.0))
+                .scale_by(2.0).translate_by(new_vec(1.0, 1.0))
+        "#);
+        let reassigned = path_string(r#"
+            let p = new_strokepath();
+            p = p.move_to(new_vec(0.0, 0.0));
+            p = p.line_to(new_vec(1.0, 0.0));
+            p = p.scale_by(2.0);
+            p = p.translate_by(new_vec(1.0, 1.0));
+            p
+        "#);
+        assert_eq!(statements, "M 1 1 L 3 1 ");
+        assert_eq!(chained, statements);
+        assert_eq!(reassigned, statements);
     }
 
     #[test]
