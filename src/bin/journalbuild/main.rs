@@ -167,7 +167,7 @@ fn first_codex<'j>(journal: &'j mut Journal<'j>, symd: &'j symboldict::SymbolPat
 
 const LEGACY_DARKLY_SIZE: f32 = 1080.0;
 
-fn legacy_journalbuild(symd: &symboldict::SymbolPathDict, engine: &mut DarklyEngine, journal_dir: &str, journal_name: &str) {
+fn legacy_journalbuild(symd: &symboldict::SymbolPathDict, engine: &mut DarklyEngine, journal_dir: &str, journal_name: &str, plain: bool) {
     let journal_funcs: HashMap<&str, JournalEntryFunc> = HashMap::from([
         ("journal_entry_17", journal_entry_17 as JournalEntryFunc),
         ("journal_entry_18", journal_entry_18 as JournalEntryFunc),
@@ -188,7 +188,11 @@ fn legacy_journalbuild(symd: &symboldict::SymbolPathDict, engine: &mut DarklyEng
         .expect("Journal entry function not found for given journal name");
     let manifest = journal_entry_func(&mut journal, &symd);
     let dir_name = format!("{}/{}/output", journal_dir, journal_name);
-    manifest.render_all(&dir_name, 2.0);
+    if plain {
+        manifest.render_all(&dir_name, 2.0);
+    } else {
+        create_dir(&dir_name);
+    }
 
     let pages = manifest.pages();
     // Legacy journals don't set per-stroke brushes, so everything uses this.
@@ -225,23 +229,64 @@ fn create_dir(dir: &str) {
     }
 }
 
+const USAGE: &str = "Usage: journalbuild <journal_name> [--legacy] [--page N[,N...]] [--no-plain]
+
+  --legacy       Build a legacy JSON journal instead of a rhai one.
+  --page N,...   Render only these rhai pages (0-based). Other pages'
+                 existing output is kept.
+  --no-plain     Skip the plain PNG/SVG output; only render with Darkly.";
+
+struct Args {
+    journal_name: String,
+    legacy: bool,
+    pages: Option<Vec<usize>>,
+    plain: bool,
+}
+
+fn parse_args() -> Result<Args, String> {
+    let mut journal_name = None;
+    let mut legacy = false;
+    let mut pages: Option<Vec<usize>> = None;
+    let mut plain = true;
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--legacy" => legacy = true,
+            "--no-plain" => plain = false,
+            "--page" => {
+                let list = args.next().ok_or("--page needs a page number or list, e.g. --page 0,2")?;
+                let parsed = list.split(',')
+                    .map(|n| n.trim().parse::<usize>().map_err(|_| format!("invalid page number '{}'", n)))
+                    .collect::<Result<Vec<_>, _>>()?;
+                pages.get_or_insert_with(Vec::new).extend(parsed);
+            }
+            flag if flag.starts_with("--") => return Err(format!("unknown option '{}'", flag)),
+            name if journal_name.is_none() => journal_name = Some(name.to_string()),
+            extra => return Err(format!("unexpected argument '{}'", extra)),
+        }
+    }
+    let journal_name = journal_name.ok_or("missing journal name")?;
+    if legacy && pages.is_some() {
+        return Err("--page is only supported for rhai journals".to_string());
+    }
+    Ok(Args { journal_name, legacy, pages, plain })
+}
+
 fn main() {
+    let args = parse_args().unwrap_or_else(|err| {
+        eprintln!("error: {}\n\n{}", err, USAGE);
+        std::process::exit(1);
+    });
     let symd = symboldict::SymbolPathDict::from_file("config/symbols.json")
         .expect("Failed to load symbols.json");
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() < 2 {
-        eprintln!("Usage: {} <journal_name> [--legacy]", args[0]);
-        std::process::exit(1);
-    }
 
-    let journal_name = &args[1];
+    let journal_name = &args.journal_name;
     let journal_dir = "journals";
-    let legacy_flagged = args.iter().find(|f| *f == "--legacy").is_some();
     // One Darkly engine for the whole run; canvases resize it as needed.
     let mut darkly_engine = darkly::new_engine(1, 1);
-    if legacy_flagged {
+    if args.legacy {
         // TODO: eventually I intend to build out the legacy journals into rhai.
-        legacy_journalbuild(&symd, &mut darkly_engine, journal_dir, journal_name);
+        legacy_journalbuild(&symd, &mut darkly_engine, journal_dir, journal_name, args.plain);
         return;
     }
     let symdarc = Arc::new(symd);
@@ -253,8 +298,23 @@ fn main() {
     let entry = engine
         .build_entry_file(&journal_path)
         .expect("Failed to execute result.");
+    if let Some(pages) = &args.pages {
+        if let Some(bad) = pages.iter().find(|&&p| p >= entry.page_count()) {
+            eprintln!("error: page {} doesn't exist; {} has {} page(s) (0-{})",
+                bad, journal_name, entry.page_count(), entry.page_count().saturating_sub(1));
+            std::process::exit(1);
+        }
+    }
     let output_dir = format!("{}/output", entry_path);
-    create_dir(&output_dir);
-    entry.clone().publish_pngs(&output_dir);
-    entry.darkly_publish_pngs(&mut darkly_engine, &output_dir, 1.0);
+    if args.pages.is_some() {
+        // Rendering a subset: keep the other pages' existing output.
+        std::fs::create_dir_all(&output_dir).expect("Failed to create output directory");
+    } else {
+        create_dir(&output_dir);
+    }
+    let only = args.pages.as_deref();
+    if args.plain {
+        entry.publish_pngs(&output_dir, only);
+    }
+    entry.darkly_publish_pngs(&mut darkly_engine, &output_dir, 1.0, only);
 }

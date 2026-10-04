@@ -39,8 +39,17 @@ impl Entry {
     fn build_extra(builder: &mut TypeBuilder<Self>) {
         builder.with_fn("add_page", Self::add_page);
     }
-    pub fn darkly_publish_pngs(self, engine: &mut DarklyEngine, dirname: &str, scale: f32) {
-        for (i, page) in self.pages.into_iter().enumerate() {
+    pub fn page_count(&self) -> usize {
+        self.pages.len()
+    }
+    /// Pages to publish with their original indices: all of them, or only
+    /// those listed in `only`.
+    fn selected_pages<'a>(&'a self, only: Option<&'a [usize]>) -> impl Iterator<Item = (usize, &'a Page)> + 'a {
+        self.pages.iter().enumerate()
+            .filter(move |(i, _)| only.map_or(true, |pages| pages.contains(i)))
+    }
+    pub fn darkly_publish_pngs(&self, engine: &mut DarklyEngine, dirname: &str, scale: f32, only: Option<&[usize]>) {
+        for (i, page) in self.selected_pages(only) {
             let canvases = page.canvases();
             for (canvas_i, canvas) in canvases.into_iter().enumerate() {
                 let canvas : JournalCanvas = canvas.into();
@@ -53,21 +62,21 @@ impl Entry {
             }
         }
     }
-    pub fn publish_pngs(self, dirname: &str) {
-        println!("Publishing Svgs:");
-        for (i, page) in self.pages.into_iter().enumerate() {
-            let page_canvas: JournalCanvas = page.into();
+    pub fn publish_pngs(&self, dirname: &str, only: Option<&[usize]>) {
+        println!("Publishing PNGs:");
+        for (i, page) in self.selected_pages(only) {
+            let page_canvas: JournalCanvas = page.clone().into();
             let canvas_style = CanvasStyleOptions {
                 roughness: 1.0,
                 point_sample_distance: 1.0,
                 trail_off_percent: 0.15,
                 noise_amplitude: 0.3,
             };
-            let svg = page_canvas.to_png(2.0, Some(&canvas_style));
+            let png = page_canvas.to_png(2.0, Some(&canvas_style));
             let filename = format!("{}/page_{}.png", dirname, i);
             println!("\t - {}", filename);
             let failmsg = format!("Failed to write page: {}", i);
-            std::fs::write(filename, svg).expect(&failmsg);
+            std::fs::write(filename, png).expect(&failmsg);
         }
     }
 }
