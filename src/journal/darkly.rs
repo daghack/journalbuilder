@@ -1,12 +1,17 @@
 use darkly::engine::{DarklyEngine, types::StrokeOp, ExportImageResult};
 use darkly::gpu::context::GpuContext;
 use darkly::coord::CanvasRect;
+use darkly::config::ConfigValue;
 use image::{ImageBuffer, Rgba};
 use crate::journal::paths::{CurveSample};
 use crate::journal::canvas::{Canvas, ColoredStroke};
 use std::collections::HashSet;
 
 pub fn new_engine(width: u32, height: u32) -> DarklyEngine {
+    // Stroke prediction extrapolates and re-renders a tail ahead of the pen
+    // to hide input latency; offline it only costs time. (Config is
+    // thread-local, so this applies to engines used on this thread.)
+    darkly::config::set("input.predictionHorizon", ConfigValue::Float(0.0));
     let instance_desc = wgpu::InstanceDescriptor::new_without_display_handle();
     let instance = wgpu::Instance::new(instance_desc);
     let adapter = smol::block_on(
@@ -29,6 +34,14 @@ pub fn resize_canvas(engine: &mut DarklyEngine, width: u32, height: u32) {
     let actual = engine.canvas_dimensions();
     assert_eq!(actual, (width, height), "Darkly rejected canvas resize to {}x{}", width, height);
 }
+
+/// Distance between points fed to Darkly, in canvas units. Darkly's
+/// stabilizer needs dense input: sparser spacing breaks up strokes.
+const SAMPLE_SPACING: f32 = 1.0;
+/// Simulated pen speed used to timestamp points (250 px/s, i.e. one sample
+/// every 4ms at 1px spacing, roughly a 250Hz tablet). Darkly's stabilizer
+/// reads `time_ms`, so feeding all zeros gives it no cadence to work with.
+const PEN_SPEED_PX_PER_MS: f64 = 0.25;
 
 pub fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, brush_selection: &str, brush_size: f32, pressure_bounds: (f32, f32)) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
     let (pressure_min, pressure_max) = pressure_bounds;
@@ -54,7 +67,7 @@ pub fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, brush_selection
         let substrokes = path.to_substrokes();
         for substroke in substrokes {
             engine.begin_stroke(layer);
-            let samples = substroke.get_point_samples(1.0);
+            let samples = substroke.get_point_samples(SAMPLE_SPACING);
             let sample_count = samples.len();
             for (i, CurveSample { point,  .. }) in samples.into_iter().enumerate() {
                 let t_param = i as f32 / sample_count as f32;
@@ -67,7 +80,7 @@ pub fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, brush_selection
                     y_tilt: 0.0,
                     rotation: 0.0,
                     tangential_pressure: 0.0,
-                    time_ms: 0.0,
+                    time_ms: i as f64 * SAMPLE_SPACING as f64 / PEN_SPEED_PX_PER_MS,
                     cr,
                     cg,
                     cb,
