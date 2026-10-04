@@ -48,7 +48,7 @@ impl Entry {
         self.pages.iter().enumerate()
             .filter(move |(i, _)| only.map_or(true, |pages| pages.contains(i)))
     }
-    pub fn darkly_publish_pngs(&self, engine: &mut DarklyEngine, dirname: &str, scale: f32, only: Option<&[usize]>) {
+    pub fn darkly_publish_pngs(&self, engine: &mut DarklyEngine, dirname: &str, scale: f32, supersample: u32, only: Option<&[usize]>) {
         for (i, page) in self.selected_pages(only) {
             let canvases = page.canvases();
             for (canvas_i, canvas) in canvases.into_iter().enumerate() {
@@ -57,8 +57,11 @@ impl Entry {
                 // Canvas units are pixels at scale 1, so brushes scale with
                 // the render. Every rhai stroke style carries a brush, so no
                 // default is needed.
-                darkly::resize_canvas(engine, (canvas_dim.x * scale) as u32, (canvas_dim.y * scale) as u32);
-                let buff = darkly::render_canvas(&canvas, engine, None, scale);
+                let buff = darkly::render_canvas_scaled(
+                    &canvas, engine, None,
+                    (canvas_dim.x * scale) as u32, (canvas_dim.y * scale) as u32,
+                    scale, supersample,
+                );
                 let filename = format!("{}/darkly_page_{}_{}.png", dirname, i, canvas_i);
                 buff.save(filename).expect("Failed to save png");
             }

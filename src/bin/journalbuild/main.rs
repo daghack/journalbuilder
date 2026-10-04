@@ -167,7 +167,7 @@ fn first_codex<'j>(journal: &'j mut Journal<'j>, symd: &'j symboldict::SymbolPat
 
 const LEGACY_DARKLY_SIZE: f32 = 1080.0;
 
-fn legacy_journalbuild(symd: &symboldict::SymbolPathDict, engine: &mut DarklyEngine, journal_dir: &str, journal_name: &str, dir_name: &str, plain: bool, scale: f32) {
+fn legacy_journalbuild(symd: &symboldict::SymbolPathDict, engine: &mut DarklyEngine, journal_dir: &str, journal_name: &str, dir_name: &str, plain: bool, scale: f32, supersample: u32) {
     let journal_funcs: HashMap<&str, JournalEntryFunc> = HashMap::from([
         ("journal_entry_17", journal_entry_17 as JournalEntryFunc),
         ("journal_entry_18", journal_entry_18 as JournalEntryFunc),
@@ -208,8 +208,11 @@ fn legacy_journalbuild(symd: &symboldict::SymbolPathDict, engine: &mut DarklyEng
         let fit = LEGACY_DARKLY_SIZE * scale / dims.x.max(dims.y);
         // Brush sizes are relative to the LEGACY_DARKLY_SIZE render, so
         // they scale with --scale.
-        darkly::resize_canvas(engine, (dims.x * fit) as u32, (dims.y * fit) as u32);
-        let buff = darkly::render_canvas(page_canvas, engine, Some(&default_brush), scale);
+        let buff = darkly::render_canvas_scaled(
+            page_canvas, engine, Some(&default_brush),
+            (dims.x * fit) as u32, (dims.y * fit) as u32,
+            scale, supersample,
+        );
         let filename = format!("{}/darkly_{}.png", dir_name, page_name);
         println!("\t - {}", filename);
         buff.save(filename).expect("Failed to save png");
@@ -231,7 +234,7 @@ fn create_dir(dir: &str) {
 }
 
 const USAGE: &str = "Usage: journalbuild <journal_name> [--legacy] [--page N[,N...]] [--no-plain]
-                    [--scale S] [--journals-dir DIR] [--output-dir DIR]
+                    [--scale S] [--supersample K] [--journals-dir DIR] [--output-dir DIR]
 
   --legacy            Build a legacy JSON journal instead of a rhai one.
   --page N,...        Render only these rhai pages (0-based). Other pages'
@@ -240,6 +243,9 @@ const USAGE: &str = "Usage: journalbuild <journal_name> [--legacy] [--page N[,N.
   --scale S           Scale output images (default 1.0), brushes included.
                       Darkly work scales with output size, so e.g. 0.25
                       renders much faster.
+  --supersample K     Render Darkly output at K times the size and filter it
+                      back down (default 1). Smooths thin strokes; costs
+                      roughly K times the render time.
   --journals-dir DIR  Directory containing journals (default: journals).
   --output-dir DIR    Where to write renders (default: <journal>/output).";
 
@@ -250,6 +256,7 @@ struct Args {
     pages: Option<Vec<usize>>,
     plain: bool,
     scale: f32,
+    supersample: u32,
     output_dir: Option<String>,
 }
 
@@ -259,6 +266,7 @@ fn parse_args() -> Result<Args, String> {
     let mut pages: Option<Vec<usize>> = None;
     let mut plain = true;
     let mut scale = 1.0;
+    let mut supersample = 1;
     let mut journals_dir = "journals".to_string();
     let mut output_dir = None;
     let mut args = std::env::args().skip(1);
@@ -270,6 +278,11 @@ fn parse_args() -> Result<Args, String> {
                 let value = args.next().ok_or("--scale needs a value, e.g. --scale 0.25")?;
                 scale = value.parse::<f32>().ok().filter(|s| *s > 0.0)
                     .ok_or(format!("invalid scale '{}'; expected a positive number", value))?;
+            }
+            "--supersample" => {
+                let value = args.next().ok_or("--supersample needs a value, e.g. --supersample 2")?;
+                supersample = value.parse::<u32>().ok().filter(|k| *k >= 1)
+                    .ok_or(format!("invalid supersample '{}'; expected a whole number >= 1", value))?;
             }
             "--journals-dir" => {
                 journals_dir = args.next().ok_or("--journals-dir needs a directory")?;
@@ -293,7 +306,7 @@ fn parse_args() -> Result<Args, String> {
     if legacy && pages.is_some() {
         return Err("--page is only supported for rhai journals".to_string());
     }
-    Ok(Args { journal_name, journals_dir, legacy, pages, plain, scale, output_dir })
+    Ok(Args { journal_name, journals_dir, legacy, pages, plain, scale, supersample, output_dir })
 }
 
 fn main() {
@@ -312,7 +325,7 @@ fn main() {
     let mut darkly_engine = darkly::new_engine(1, 1);
     if args.legacy {
         // TODO: eventually I intend to build out the legacy journals into rhai.
-        legacy_journalbuild(&symd, &mut darkly_engine, journal_dir, journal_name, &output_dir, args.plain, args.scale);
+        legacy_journalbuild(&symd, &mut darkly_engine, journal_dir, journal_name, &output_dir, args.plain, args.scale, args.supersample);
         return;
     }
     let symdarc = Arc::new(symd);
@@ -341,5 +354,5 @@ fn main() {
     if args.plain {
         entry.publish_pngs(&output_dir, args.scale, only);
     }
-    entry.darkly_publish_pngs(&mut darkly_engine, &output_dir, args.scale, only);
+    entry.darkly_publish_pngs(&mut darkly_engine, &output_dir, args.scale, args.supersample, only);
 }

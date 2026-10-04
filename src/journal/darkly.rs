@@ -2,7 +2,7 @@ use darkly::engine::{DarklyEngine, types::StrokeOp, ExportImageResult};
 use darkly::gpu::context::GpuContext;
 use darkly::coord::CanvasRect;
 use darkly::config::ConfigValue;
-use image::{ImageBuffer, Rgba};
+use image::{ImageBuffer, Rgba, imageops::FilterType};
 use crate::journal::paths::{CurveSample};
 use crate::journal::canvas::{Brush, Canvas, ColoredStroke};
 use std::collections::HashSet;
@@ -45,14 +45,54 @@ const SAMPLE_SPACING_PX: f32 = 1.0;
 /// reads `time_ms`, so feeding all zeros gives it no cadence to work with.
 const PEN_SPEED_PX_PER_MS: f64 = 0.25;
 
-/// Render a canvas with Darkly into the engine's current canvas size.
+/// Render a canvas with Darkly into a `width` x `height` image.
 ///
 /// `brush_scale` multiplies every brush size: brush sizes are in pixels, so
 /// a render at a different scale must scale them too to look the same.
+/// With `supersample` > 1 the canvas is rendered at that multiple of the
+/// size (brushes included) and filtered back down, which smooths the
+/// aliasing Darkly produces for brush marks thinner than about a pixel.
 ///
 /// Each stroke is drawn with its own brush, or `default_brush` if it has
 /// none; panics if a stroke has neither.
-pub fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, default_brush: Option<&Brush>, brush_scale: f32) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+pub fn render_canvas_scaled(
+    canvas: &Canvas,
+    engine: &mut DarklyEngine,
+    default_brush: Option<&Brush>,
+    width: u32,
+    height: u32,
+    brush_scale: f32,
+    supersample: u32,
+) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+    let k = supersample.max(1);
+    resize_canvas(engine, width * k, height * k);
+    let rendered = render_canvas(canvas, engine, default_brush, brush_scale * k as f32);
+    if k == 1 {
+        rendered
+    } else {
+        downsample(&rendered, width, height)
+    }
+}
+
+/// Resize an RGBA image with a Lanczos filter, in premultiplied alpha so the
+/// transparent background's color doesn't bleed into stroke edges.
+fn downsample(image: &ImageBuffer<Rgba<u8>, Vec<u8>>, width: u32, height: u32) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+    let premultiplied = ImageBuffer::from_fn(image.width(), image.height(), |x, y| {
+        let [r, g, b, a] = image.get_pixel(x, y).0.map(|v| v as f32 / 255.0);
+        Rgba([r * a, g * a, b * a, a])
+    });
+    let resized = image::imageops::resize(&premultiplied, width, height, FilterType::Lanczos3);
+    ImageBuffer::from_fn(width, height, |x, y| {
+        // Lanczos overshoots slightly; clamp alpha, and color to at most alpha.
+        let [r, g, b, a] = resized.get_pixel(x, y).0;
+        let a = a.clamp(0.0, 1.0);
+        let unpremultiply = |c: f32| if a > 0.0 { (c.clamp(0.0, a) / a * 255.0).round() as u8 } else { 0 };
+        Rgba([unpremultiply(r), unpremultiply(g), unpremultiply(b), (a * 255.0).round() as u8])
+    })
+}
+
+/// Render a canvas into the engine's current canvas size.
+fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, default_brush: Option<&Brush>, brush_scale: f32) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
     let layer = engine.add_raster_layer(None);
     let (engine_canvas_width, engine_canvas_height) = engine.canvas_dimensions();
     let bounds = canvas.bounds();

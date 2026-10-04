@@ -2,7 +2,8 @@
 # Quick end-to-end smoke test for journalbuild.
 #
 #   1. Runs `cargo test`, which evaluates every rhai journal script.
-#   2. Renders the small fixture in tests/smoke_journals at full scale.
+#   2. Renders the small fixture in tests/smoke_journals at full scale, and
+#      one page of it supersampled.
 #   3. Renders every journal in journals/ at reduced scale: rhai journals
 #      page 0 only, legacy journals whole, Darkly output only.
 #
@@ -74,6 +75,8 @@ render() {
 echo "== renders"
 render fixture darkly_page_0_0.png darkly_page_1_0.png darkly_page_1_1.png page_0.png page_1.png \
 	-- smoke --journals-dir tests/smoke_journals
+render fixture-supersampled darkly_page_0_0.png \
+	-- smoke --journals-dir tests/smoke_journals --page 0 --no-plain --supersample 2
 
 for journal in journals/*/; do
 	name=$(basename "$journal")
