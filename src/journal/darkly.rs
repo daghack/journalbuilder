@@ -35,9 +35,11 @@ pub fn resize_canvas(engine: &mut DarklyEngine, width: u32, height: u32) {
     assert_eq!(actual, (width, height), "Darkly rejected canvas resize to {}x{}", width, height);
 }
 
-/// Distance between points fed to Darkly, in canvas units. Darkly's
-/// stabilizer needs dense input: sparser spacing breaks up strokes.
-const SAMPLE_SPACING: f32 = 1.0;
+/// Distance between points fed to Darkly, in output pixels. Darkly's
+/// stabilizer needs dense input in pixel space: sparser spacing breaks up
+/// strokes, while denser spacing only costs time. Measuring in pixels keeps
+/// the work proportional to the output size, so smaller renders are faster.
+const SAMPLE_SPACING_PX: f32 = 1.0;
 /// Simulated pen speed used to timestamp points (250 px/s, i.e. one sample
 /// every 4ms at 1px spacing, roughly a 250Hz tablet). Darkly's stabilizer
 /// reads `time_ms`, so feeding all zeros gives it no cadence to work with.
@@ -52,6 +54,7 @@ pub fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, default_brush: 
     let canvas_dims = bounds.extents();
     let w_ratio =  engine_canvas_width as f32 / canvas_dims.x as f32;
     let h_ratio = engine_canvas_height as f32 / canvas_dims.y as f32;
+    let sample_spacing = SAMPLE_SPACING_PX / w_ratio.max(h_ratio);
 
     let strokes = canvas.strokes();
     let mut warned_colors = HashSet::new();
@@ -82,7 +85,7 @@ pub fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, default_brush: 
         let substrokes = path.to_substrokes();
         for substroke in substrokes {
             engine.begin_stroke(layer);
-            let samples = substroke.get_point_samples(SAMPLE_SPACING);
+            let samples = substroke.get_point_samples(sample_spacing);
             let sample_count = samples.len();
             for (i, CurveSample { point,  .. }) in samples.into_iter().enumerate() {
                 let t_param = i as f32 / sample_count as f32;
@@ -95,7 +98,7 @@ pub fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, default_brush: 
                     y_tilt: 0.0,
                     rotation: 0.0,
                     tangential_pressure: 0.0,
-                    time_ms: i as f64 * SAMPLE_SPACING as f64 / PEN_SPEED_PX_PER_MS,
+                    time_ms: i as f64 * SAMPLE_SPACING_PX as f64 / PEN_SPEED_PX_PER_MS,
                     cr,
                     cg,
                     cb,

@@ -62,7 +62,7 @@ impl Entry {
             }
         }
     }
-    pub fn publish_pngs(&self, dirname: &str, only: Option<&[usize]>) {
+    pub fn publish_pngs(&self, dirname: &str, scale: f32, only: Option<&[usize]>) {
         println!("Publishing PNGs:");
         for (i, page) in self.selected_pages(only) {
             let page_canvas: JournalCanvas = page.clone().into();
@@ -72,7 +72,7 @@ impl Entry {
                 trail_off_percent: 0.15,
                 noise_amplitude: 0.3,
             };
-            let png = page_canvas.to_png(2.0, Some(&canvas_style));
+            let png = page_canvas.to_png(2.0 * scale, Some(&canvas_style));
             let filename = format!("{}/page_{}.png", dirname, i);
             println!("\t - {}", filename);
             let failmsg = format!("Failed to write page: {}", i);

@@ -167,7 +167,7 @@ fn first_codex<'j>(journal: &'j mut Journal<'j>, symd: &'j symboldict::SymbolPat
 
 const LEGACY_DARKLY_SIZE: f32 = 1080.0;
 
-fn legacy_journalbuild(symd: &symboldict::SymbolPathDict, engine: &mut DarklyEngine, journal_dir: &str, journal_name: &str, plain: bool) {
+fn legacy_journalbuild(symd: &symboldict::SymbolPathDict, engine: &mut DarklyEngine, journal_dir: &str, journal_name: &str, plain: bool, scale: f32) {
     let journal_funcs: HashMap<&str, JournalEntryFunc> = HashMap::from([
         ("journal_entry_17", journal_entry_17 as JournalEntryFunc),
         ("journal_entry_18", journal_entry_18 as JournalEntryFunc),
@@ -189,7 +189,7 @@ fn legacy_journalbuild(symd: &symboldict::SymbolPathDict, engine: &mut DarklyEng
     let manifest = journal_entry_func(&mut journal, &symd);
     let dir_name = format!("{}/{}/output", journal_dir, journal_name);
     if plain {
-        manifest.render_all(&dir_name, 2.0);
+        manifest.render_all(&dir_name, 2.0 * scale);
     } else {
         create_dir(&dir_name);
     }
@@ -206,8 +206,8 @@ fn legacy_journalbuild(symd: &symboldict::SymbolPathDict, engine: &mut DarklyEng
         println!("Rendering with Darkly.");
         // Fit the longest side to LEGACY_DARKLY_SIZE, preserving aspect ratio.
         let dims = page_canvas.bounds().extents();
-        let scale = LEGACY_DARKLY_SIZE / dims.x.max(dims.y);
-        darkly::resize_canvas(engine, (dims.x * scale) as u32, (dims.y * scale) as u32);
+        let fit = LEGACY_DARKLY_SIZE * scale / dims.x.max(dims.y);
+        darkly::resize_canvas(engine, (dims.x * fit) as u32, (dims.y * fit) as u32);
         let buff = darkly::render_canvas(page_canvas, engine, Some(&default_brush));
         let filename = format!("{}/darkly_{}.png", dir_name, page_name);
         println!("\t - {}", filename);
@@ -230,17 +230,21 @@ fn create_dir(dir: &str) {
 }
 
 const USAGE: &str = "Usage: journalbuild <journal_name> [--legacy] [--page N[,N...]] [--no-plain]
+                    [--scale S]
 
-  --legacy       Build a legacy JSON journal instead of a rhai one.
-  --page N,...   Render only these rhai pages (0-based). Other pages'
-                 existing output is kept.
-  --no-plain     Skip the plain PNG/SVG output; only render with Darkly.";
+  --legacy            Build a legacy JSON journal instead of a rhai one.
+  --page N,...        Render only these rhai pages (0-based). Other pages'
+                      existing output is kept.
+  --no-plain          Skip the plain PNG/SVG output; only render with Darkly.
+  --scale S           Scale output images (default 1.0). Darkly work scales
+                      with output size, so e.g. 0.25 renders much faster.";
 
 struct Args {
     journal_name: String,
     legacy: bool,
     pages: Option<Vec<usize>>,
     plain: bool,
+    scale: f32,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -248,11 +252,17 @@ fn parse_args() -> Result<Args, String> {
     let mut legacy = false;
     let mut pages: Option<Vec<usize>> = None;
     let mut plain = true;
+    let mut scale = 1.0;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--legacy" => legacy = true,
             "--no-plain" => plain = false,
+            "--scale" => {
+                let value = args.next().ok_or("--scale needs a value, e.g. --scale 0.25")?;
+                scale = value.parse::<f32>().ok().filter(|s| *s > 0.0)
+                    .ok_or(format!("invalid scale '{}'; expected a positive number", value))?;
+            }
             "--page" => {
                 let list = args.next().ok_or("--page needs a page number or list, e.g. --page 0,2")?;
                 let parsed = list.split(',')
@@ -269,7 +279,7 @@ fn parse_args() -> Result<Args, String> {
     if legacy && pages.is_some() {
         return Err("--page is only supported for rhai journals".to_string());
     }
-    Ok(Args { journal_name, legacy, pages, plain })
+    Ok(Args { journal_name, legacy, pages, plain, scale })
 }
 
 fn main() {
@@ -286,7 +296,7 @@ fn main() {
     let mut darkly_engine = darkly::new_engine(1, 1);
     if args.legacy {
         // TODO: eventually I intend to build out the legacy journals into rhai.
-        legacy_journalbuild(&symd, &mut darkly_engine, journal_dir, journal_name, args.plain);
+        legacy_journalbuild(&symd, &mut darkly_engine, journal_dir, journal_name, args.plain, args.scale);
         return;
     }
     let symdarc = Arc::new(symd);
@@ -314,7 +324,7 @@ fn main() {
     }
     let only = args.pages.as_deref();
     if args.plain {
-        entry.publish_pngs(&output_dir, only);
+        entry.publish_pngs(&output_dir, args.scale, only);
     }
-    entry.darkly_publish_pngs(&mut darkly_engine, &output_dir, 1.0, only);
+    entry.darkly_publish_pngs(&mut darkly_engine, &output_dir, args.scale, only);
 }
