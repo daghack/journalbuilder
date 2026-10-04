@@ -1,5 +1,5 @@
 use crate::lockbuilder::*;
-use crate::journal::canvas::artistic::{BuiltMaze, MazeOptions, MazeTraversal, MazeTraversalStrategy, MazeDirection};
+use crate::journal::canvas::artistic::{BuiltMaze, MazeOptions, MazeTraversalStrategy};
 use rand::{Fill};
 use std::error::Error;
 
@@ -23,8 +23,6 @@ impl Fill for SymbolInfo {
 pub struct MazeLock {
     pub input_base: u32,
     pub strategy: MazeTraversalStrategy,
-    pub maze: Option<BuiltMaze<SymbolInfo>>,
-    pub seed: Option<u64>,
 }
 
 impl MazeLock {
@@ -32,17 +30,7 @@ impl MazeLock {
         Ok(MazeLock {
             strategy: options.strategy, 
             input_base: options.input_base,
-            maze: None,
-            seed: None,
         })
-    }
-    fn get_computed_maze(&mut self, maze_text: &mut Vec<u32>, random_seed: u64) -> &BuiltMaze<SymbolInfo> {
-        if self.maze.is_none() || self.seed != Some(random_seed) {
-            let built_maze = Self::generate_maze(maze_text, random_seed);
-            self.maze = Some(built_maze);
-            self.seed = Some(random_seed);
-        }
-        self.maze.as_ref().expect("Maze should be computed")
     }
     pub fn generate_maze(maze_text: &mut Vec<u32>, random_seed: u64) -> BuiltMaze<SymbolInfo> {
         if maze_text.len() % 2 == 0 {

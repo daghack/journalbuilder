@@ -4,7 +4,6 @@ pub mod paths;
 pub mod styles;
 pub mod symboldict;
 pub mod img;
-pub mod parse;
 pub mod rhaientries;
 pub mod darkly;
 
@@ -108,22 +107,6 @@ impl<'p> JournalManifest<'p> {
     pub fn pages(&self) -> &'p HashMap<String, (Canvas, Option<CanvasStyleOptions>)> {
         self.pages
     }
-    pub fn render_to_pngs(&self, dir: &str, scale: f32) {
-        Self::create_dir(dir);
-        for (page_name, (canvas, style_opts)) in self.pages.iter() {
-            let filename = format!("{}/{}.png", dir, page_name);
-            let png_data = canvas.to_png(scale, style_opts.as_ref());
-            std::fs::write(filename, png_data).expect("Failed to write PNG file");
-        }
-    }
-    pub fn render_to_svgs(&self, dir: &str) {
-        Self::create_dir(dir);
-        for (page_name, (canvas, style_opts)) in self.pages.iter() {
-            let filename = format!("{}/{}.svg", dir, page_name);
-            let svg_data = canvas.to_svg(style_opts.as_ref());
-            std::fs::write(filename, svg_data).expect("Failed to write SVG file");
-        }
-    }
     fn create_dir(dir: &str) {
         if !std::path::Path::new(dir).exists() {
             std::fs::create_dir_all(dir).expect("Failed to create output directory");
@@ -169,16 +152,6 @@ pub struct Journal<'sd> {
 }
 
 impl<'sd> Journal<'sd> {
-    pub fn new(symd: &'sd symboldict::SymbolPathDict) -> Self {
-        Journal {
-            entries: HashMap::new(),
-            pages: HashMap::new(),
-            symd: Some(symd),
-        }
-    }
-    pub fn pages(&self) -> &HashMap<String, (Canvas, Option<CanvasStyleOptions>)> {
-        &self.pages
-    }
     fn add_page_entry(&mut self, page_name: String, page: Canvas, style: Option<CanvasStyleOptions>) {
         self.pages.insert(page_name, (page, style));
     }

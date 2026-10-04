@@ -61,7 +61,6 @@ fn journal_entry_18<'j>(journal: &'j mut Journal<'j>, symd: &'j symboldict::Symb
             bounds,
             symbol_scale,
             avoid_tree: None,
-            expected_stroke_width: Some(8.0),
         };
 
         let textbox = TextBox::new(textbox_opts);

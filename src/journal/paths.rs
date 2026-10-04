@@ -548,10 +548,8 @@ pub fn curve_samples(cmd: &PathCmd, start: Vec2, current: Vec2, sample_count: us
 }
 
 pub trait CurveStepper {
-    fn current_along(&self) -> f32;
     fn step(&mut self, distance: f32) -> Option<CurveSample>;
     fn prospective_step(&self, distance: f32) -> Option<CurveSample>;
-    fn reset(&mut self);
 }
 
 type CurveIndex = usize;
@@ -566,9 +564,6 @@ pub struct SubstrokeStepper {
 }
 
 impl CurveStepper for SubstrokeStepper {
-    fn current_along(&self) -> f32 {
-        self.current_along
-    }
     fn step(&mut self, distance: f32) -> Option<CurveSample> {
         if distance < 0.0 {
             return None;
@@ -591,10 +586,6 @@ impl CurveStepper for SubstrokeStepper {
         let target_distance = self.current_along + distance;
         SubstrokeStepper::forward_seek(None, target_distance, &self.samples)
             .map(|(_, _, sample)| sample)
-    }
-    fn reset(&mut self) {
-        self.last_index.set((0, 0));
-        self.current_along = 0.0;
     }
 }
 
@@ -635,12 +626,6 @@ impl SubstrokeStepper {
             samples.push(sample);
         }
         samples
-    }
-    pub fn is_finished(&self) -> bool {
-        // if the current along is greater than the sum of the lengths of all curves, we are
-        // finished
-        let total_length: f32 = self.samples.iter().map(|(_, length, _)| *length).sum();
-        self.current_along >= total_length
     }
 
     fn forward_seek(starting_indices: Option<(CurveIndex, SampleIndex)>, target_distance: f32, curves: &Vec<AugCurveSampleInfo>) -> Option<(CurveIndex, SampleIndex, CurveSample)> {
@@ -703,9 +688,6 @@ pub struct ChildStepper<'parent>{
 }
 
 impl<'parent> CurveStepper for ChildStepper<'parent> {
-    fn current_along(&self) -> f32 {
-        self.current_along
-    }
     fn step(&mut self, distance: f32) -> Option<CurveSample> {
         self.prospective_step(distance).map(|sample| {
             self.current_along += distance;
@@ -722,9 +704,6 @@ impl<'parent> CurveStepper for ChildStepper<'parent> {
         let target_distance = self.current_along + distance;
         SubstrokeStepper::forward_seek(None, target_distance, self.parent_samples)
             .map(|(_, _, sample)| sample)
-    }
-    fn reset(&mut self) {
-        self.current_along = 0.0;
     }
 }
 #[derive(Debug, Clone)]

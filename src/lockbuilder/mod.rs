@@ -208,18 +208,6 @@ impl InfoVar {
 pub type InfoVarSet = HashMap<String, InfoVar>;
 pub type InfoVarTypeSet = HashMap<String, InfoVarType>;
 
-pub fn rename_infovar_set_key(mut infovar_set: InfoVarSet, old_key: &str, new_key: &str) -> InfoVarSet {
-    if let Some(value) = infovar_set.remove(old_key) {
-        infovar_set.insert(new_key.to_string(), value);
-    }
-    infovar_set
-}
-
-pub fn add_infovar(mut infovar_set: InfoVarSet, key: &str, infovar: InfoVar) -> InfoVarSet {
-    infovar_set.insert(key.to_string(), infovar);
-    infovar_set
-}
-
 pub trait Lock {
     fn description(&self) -> String;
     fn inputs(&self) -> InfoVarTypeSet;
@@ -358,32 +346,6 @@ pub struct CompositeLock {
 impl CompositeLock {
     pub fn add_static_input(&mut self, input_name: String, input_value: InfoVar) {
         self.static_inputs.insert(input_name, input_value);
-    }
-    pub fn from_lock(lock_name: &str, lock: impl Lock + 'static) -> Result<Self, Box<dyn Error>> {
-        let inputs = lock.inputs();
-        let mut lock_inputs = HashMap::new();
-        for (input_name, input_type) in inputs {
-            let input_name = format!("{}.{}", lock_name, input_name);
-            lock_inputs.insert(input_name, input_type);
-        }
-
-        let outputs = lock.outputs();
-        let mut lock_outputs = HashMap::new();
-        for (output_name, output_type) in outputs {
-            let output_name = format!("{}.{}", lock_name, output_name);
-            lock_outputs.insert(output_name, output_type);
-        }
-        let mut complock = CompositeLock {
-            name: lock_name.to_string(),
-            locks: vec![(lock_name.to_string(), Rc::new(lock) as Rc<dyn Lock>)].into_iter().collect(),
-            connections: vec![],
-            cached_inputs: lock_inputs,
-            cached_outputs: lock_outputs,
-            exec_graph: None,
-            static_inputs: HashMap::new(),
-        };
-        complock.build_execution_graph();
-        Ok(complock)
     }
     pub fn from_lockconfig(lock_config: LockConfig, f: impl Fn(&LockTypeConfig) -> Result<Rc<dyn Lock>, Box<dyn Error>>) -> Result<CompositeLock, Box<dyn Error>> {
         let mut cl = lock_config.into_composite_lock(f)?;

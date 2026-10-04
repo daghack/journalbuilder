@@ -80,9 +80,6 @@ impl <'symdict> SymbolStringBuilder<'symdict> {
     pub fn add_filter<F: Fn(&mut Symbol) + 'static>(&mut self, filter: F) {
         self.filters.push(Box::new(filter));
     }
-    pub fn add_collection_filter<F: Fn(&mut Vec<Symbol>) + 'static>(&mut self, filter: F) {
-        self.collection_filters.push(Box::new(filter));
-    }
     pub fn build(&self, s: &str) -> Vec<Symbol> {
         let mut symbols = Vec::new();
         for c in s.chars() {
@@ -146,48 +143,6 @@ pub fn lowercase_builder<'sd>(symdict: &'sd SymbolPathDict, prefix: &str) -> Sym
                 // choose a random key from possible_keys
                 let selection = rand::random::<u32>() % possible_keys.len() as u32;
                 key = possible_keys[selection as usize].clone();
-            }
-            if let Some(sym_base) = symd.get_symbol_base(&key) {
-                return Symbol::new_default_from_base_rc(sym_base);
-            } else {
-                //print to stderr that the symbol was not found
-                eprintln!("Symbol '{}' not found in symbol dictionary, using 'X' instead.", key);
-                return Symbol::new_default_from_base_rc(symd.get_symbol_base("X").unwrap());
-            }
-        }
-    })
-}
-
-pub fn mixedcase_builder<'sd>(symdict: &'sd SymbolPathDict, prefix_upper: &str, prefix_lower: &str) -> SymbolStringBuilder<'sd> {
-    let prefix_upper = prefix_upper.to_string();
-    let prefix_lower = prefix_lower.to_string();
-    SymbolStringBuilder::<'sd>::new(symdict, move |symd, c| {
-        let prefix = if c.is_uppercase() { &prefix_upper } else { &prefix_lower };
-        let prefix_alternative = if c.is_uppercase() { &prefix_lower } else { &prefix_upper };
-        let c = c.to_lowercase().next().unwrap_or(' ');
-        if c.is_whitespace() {
-            if c == ' ' || c == '\n' {
-                return Symbol::new_default_from_base_rc(Rc::new(SymbolBase::new(SymbolType::Blank(1.0, 1.0))));
-            } else if c == '\t' {
-                return Symbol::new_default_from_base_rc(Rc::new(SymbolBase::new(SymbolType::Blank(4.0, 1.0))));
-            } else {
-                return Symbol::new_default_from_base_rc(symd.get_symbol_base("X").unwrap());
-            }
-        } else {
-            let mut key = format!("{}_{}", prefix, c);
-            let possible_keys = symd.symbols_with_prefix(key.as_str());
-            if !possible_keys.is_empty() {
-                // choose a random key from possible_keys
-                let selection = rand::random::<u32>() % possible_keys.len() as u32;
-                key = possible_keys[selection as usize].clone();
-            } else {
-                // try the alternative prefix
-                key = format!("{}_{}", prefix_alternative, c);
-                let possible_keys = symd.symbols_with_prefix(key.as_str());
-                if !possible_keys.is_empty() {
-                    let selection = rand::random::<u32>() % possible_keys.len() as u32;
-                    key = possible_keys[selection as usize].clone();
-                }
             }
             if let Some(sym_base) = symd.get_symbol_base(&key) {
                 return Symbol::new_default_from_base_rc(sym_base);

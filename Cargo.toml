@@ -4,55 +4,27 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-base64 = "0.22.1"
-flate2 = "1.1.2"
-js-sys = "0.3.77"
+darkly = { git = "https://github.com/darkly-art/darkly.git", tag = "v0.7.0" }
+image = "0.25.10"
+kdtree = "0.7.0"
+noise = "0.9.0"
 parry2d = "0.26.1"
 petgraph = "0.7.1"
 rand = "0.9.0"
+rayon = "1.11.0"
 regex = "1.11.1"
 resvg = "0.45.1"
+rhai = "1.25.1"
 serde = { version = "1.0.140", features = ["derive"] }
 serde_json = "1.0.140"
+smol = "2.0.2"
 tiny-skia = "0.11.4"
 usvg = "0.45.1"
-wasm-bindgen = "0.2.100"
-noise = "0.9.0"
-kdtree = "0.7.0"
-rayon = "1.11.0"
-stretch = "0.3.2"
-markdown = "1.0.0"
-rhai = "1.25.1"
-darkly = { git = "https://github.com/darkly-art/darkly.git", tag = "v0.7.0" }
-smol = "2.0.2"
 wgpu = "29.0.4"
-image = "0.25.10"
-exr = "1.74.2"
 
 [lib]
 name = "scribe"
 path = "src/lib.rs"
-version = "0.1.0"
-crate-type = ["cdylib", "rlib"]
-
-[target.wasm32-unknown-unknown]
-rustflags = ['--cfg', 'getrandom_backend="wasm_js"']
-
-
-#[[bin]]
-#name = "obsidian_plugin"
 
 [[bin]]
 name = "journalbuild"
-
-[[bin]]
-name = "lisvg"
-
-[[example]]
-name = "darkly_int"
-
-[[example]]
-name = "drawing_canvas"
-
-[[example]]
-name = "playground"

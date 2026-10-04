@@ -19,9 +19,6 @@ pub mod mergealpha {
                 base_n: options.base_n,
             })
         }
-        pub fn default() -> MergeAlphaInputs {
-            MergeAlphaInputs { input_count: 2, base_n: 26 }
-        }
         pub fn extract_var_data(&self, var: &InfoVar, var_key: &str) -> Result<Vec<u32>, Box<dyn Error>> {
             // in the error case, specify the var_key in the error message
             if !var.is(InfoVarType::BaseNSymbol(self.base_n)) {
@@ -171,108 +168,6 @@ pub mod splitsymbols {
             let merged_var = InfoVar::new_with(InfoVarType::BaseNSymbol(self.base_n), merged_data);
             let mut output_set = InfoVarSet::new();
             output_set.insert("plain_text".to_string(), merged_var);
-            Ok(output_set)
-        }
-    }
-}
-
-pub mod basechange {
-    use crate::lockbuilder::*;
-    use std::error::Error;
-    use serde::{Serialize, Deserialize};
-
-    #[derive(Serialize, Deserialize)]
-    pub struct BaseChangeOptions {
-        pub from_base: u32,
-        pub to_base: u32,
-    }
-    pub struct BaseChangeLock {
-        pub from_base: u32,
-        pub to_base: u32,
-    }
-    impl BaseChangeLock {
-        pub fn new(options: BaseChangeOptions) -> Result<BaseChangeLock, Box<dyn Error>> {
-            Ok(BaseChangeLock {
-                from_base: options.from_base,
-                to_base: options.to_base,
-            })
-        }
-    }
-    fn change_symbol_base(symbol: u32, to_base: u32) -> Vec<u32> {
-        let mut result = Vec::new();
-        let mut value = symbol;
-        if value == 0 {
-            result.push(0);
-        } else {
-            while value > 0 {
-                result.push(value % to_base);
-                value /= to_base;
-            }
-            result.reverse();
-        }
-        result
-    }
-    impl Lock for BaseChangeLock {
-        fn description(&self) -> String {
-            format!("change_base_{}_to_{}", self.from_base, self.to_base)
-        }
-        fn inputs(&self) -> InfoVarTypeSet {
-            let mut inputs = InfoVarTypeSet::new();
-            inputs.insert("input_symbols".to_string(), InfoVarType::BaseNSymbol(self.from_base));
-            inputs
-        }
-        fn outputs(&self) -> InfoVarTypeSet {
-            let mut outputs = InfoVarTypeSet::new();
-            outputs.insert("output_symbols".to_string(), InfoVarType::BaseNSymbol(self.to_base));
-            outputs.insert("symbol_counts".to_string(), InfoVarType::LockProcessInfo);
-            outputs
-        }
-        fn lock_info(&self, inputs: &InfoVarSet) -> Result<InfoVarSet, Box<dyn Error>> {
-            let input_var = inputs.get("input_symbols").ok_or("input_symbols not found")?;
-            if !input_var.is(InfoVarType::BaseNSymbol(self.from_base)) {
-                return Err(format!("input_symbols is not a BaseNSymbol({})", self.from_base).into());
-            }
-            let input_data : &Vec<u32> = input_var.borrow_data()?;
-            let mut output_data : Vec<u32> = Vec::new();
-            let mut symbol_counts : Vec<usize> = Vec::new();
-            for &symbol in input_data.iter() {
-                let start_index = output_data.len();
-                let mut changed_symbols = change_symbol_base(symbol, self.to_base);
-                output_data.append(&mut changed_symbols);
-                symbol_counts.push(output_data.len() - start_index);
-            } 
-            let output_var = InfoVar::new_with(InfoVarType::BaseNSymbol(self.to_base), output_data);
-            let mut output_set = InfoVarSet::new();
-            output_set.insert("output_symbols".to_string(), output_var);
-            output_set.insert("symbol_counts".to_string(), InfoVar::new_with(InfoVarType::LockProcessInfo, symbol_counts));
-            Ok(output_set)
-        }
-        fn unlock_info(&self, outputs: &InfoVarSet) -> Result<InfoVarSet, Box<dyn Error>> {
-            let output_var = outputs.get("output_symbols").ok_or("output_symbols not found")?;
-            if !output_var.is(InfoVarType::BaseNSymbol(self.to_base)) {
-                return Err(format!("output_symbols is not a BaseNSymbol({})", self.to_base).into());
-            }
-            let output_data : &Vec<u32> = output_var.borrow_data()?;
-            let mut reconstructed_symbols : Vec<u32> = Vec::new();
-            // Reconstruct original symbols using symbol counts
-            // Then use those symbols as digits to convert back to from_base
-            // Assume symbol_counts are stored in output_data
-            let symbol_counts = outputs.get("symbol_counts").ok_or("symbol_counts not found")?;
-            let symbol_counts : &Vec<usize> = symbol_counts.borrow_data()?;
-            let mut index = 0;
-            for &count in symbol_counts.iter() {
-                let symbol_slice = &output_data[index..index + count];
-                // Convert symbol_slice from to_base back to from_base
-                let mut value = 0u32;
-                for &digit in symbol_slice.iter() {
-                    value = value * self.to_base + digit;
-                }
-                reconstructed_symbols.push(value);
-                index += count;
-            }
-            let reconstructed_var = InfoVar::new_with(InfoVarType::BaseNSymbol(self.from_base), reconstructed_symbols);
-            let mut output_set = InfoVarSet::new();
-            output_set.insert("input_symbols".to_string(), reconstructed_var);
             Ok(output_set)
         }
     }

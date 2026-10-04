@@ -1,6 +1,6 @@
 use rhai::{Engine, ImmutableString, Array, Map, Dynamic, CustomType, TypeBuilder, Scope};
 use std::io::{Error, ErrorKind};
-use super::paths::{StrokePath, PathCmd};
+use super::paths::StrokePath;
 use super::symboldict::SymbolPathDict;
 use super::canvas::Canvas as JournalCanvas;
 use super::canvas::StrokeStyle as JournalStrokeStyle;
@@ -36,17 +36,6 @@ impl Entry {
     }
     fn build_extra(builder: &mut TypeBuilder<Self>) {
         builder.with_fn("add_page", Self::add_page);
-    }
-    pub fn publish_svgs(self, dirname: &str) {
-        println!("Publishing Svgs:");
-        for (i, page) in self.pages.into_iter().enumerate() {
-            let page_canvas: JournalCanvas = page.into();
-            let svg = page_canvas.to_svg(None);
-            let filename = format!("{}/page_{}.svg", dirname, i);
-            println!("\t - {}", filename);
-            let failmsg = format!("Failed to write page: {}", i);
-            std::fs::write(filename, svg).expect(&failmsg);
-        }
     }
     pub fn darkly_publish_pngs(self, dirname: &str, scale: f32) {
         for (i, page) in self.pages.into_iter().enumerate() {
@@ -365,7 +354,6 @@ impl StrokeStyle {
 
 pub struct JournalEngine {
     engine: Engine,
-    lockset: Rc<RefCell<Vec<CompositeLock>>>,
 }
 
 impl JournalEngine {
@@ -550,7 +538,6 @@ impl JournalEngine {
 
         JournalEngine {
             engine,
-            lockset,
         }
     }
     pub fn build_entry_str(&mut self, script_str: &str) -> Result<Entry, Error> {

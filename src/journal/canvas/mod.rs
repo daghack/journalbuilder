@@ -4,8 +4,6 @@ use crate::journal::{symbol::AvoidanceKdTree, StrokePath, img::pixmap_from_svg_t
 use parry2d::math::{Vec2};
 use noise::{NoiseFn, Perlin};
 use parry2d::bounding_volume;
-use resvg::tiny_skia::ColorU8;
-use kdtree::KdTree;
 
 pub mod textbox;
 pub mod artistic;
@@ -45,49 +43,6 @@ impl Into<StrokePath> for CanvasShape {
                 StrokePath::line(start, end)
             }
         }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub enum CanvasColorMap {
-    SvgFile(String),
-    SvgBytes(Vec<u8>),
-}
-
-pub type ColorKdTree = KdTree<f32, (ColorU8, Vec2), [f32; 2]>;
-
-impl CanvasColorMap {
-    pub fn into_kdtree(self, sample_spacing: f32, target_width: f32, target_height: f32) -> ColorKdTree {
-        let svg_data = match self {
-            Self::SvgFile(filename) => {
-                std::fs::read(filename).expect("Failed to read SVG file")
-            },
-            Self::SvgBytes(bytes) => bytes,
-        };
-        let svg_tree = usvg::Tree::from_data(&svg_data, &usvg::Options::default()).expect("Failed to parse SVG");
-        let width = svg_tree.size().width();
-        let height = svg_tree.size().height();
-        let scale_width = target_width / width;
-        let scale_height = target_height / height;
-        let pixmap = pixmap_from_svg_tree(&svg_tree, scale_width, scale_height);
-        let mut color_tree = KdTree::new(2);
-        let total_pixels = pixmap.width() * pixmap.height();
-        let step = (sample_spacing as u32).max(1);
-        for y in (0..pixmap.height()).step_by(step as usize) {
-            for x in (0..pixmap.width()).step_by(step as usize) {
-                let i = (y * pixmap.width() + x) as usize;
-                if i >= total_pixels as usize {
-                    continue;
-                }
-                let pixel = pixmap.pixels()[i];
-                let point = Vec2::new(x as f32, y as f32);
-                let color = pixel.demultiply();
-                color_tree.add([x as f32, y as f32], (color, point)).unwrap();
-            }
-        }
-
-
-        color_tree
     }
 }
 

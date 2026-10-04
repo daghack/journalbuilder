@@ -5,7 +5,7 @@ use crate::lockbuilder::locks::maze::{SymbolInfo};
 use crate::journal::canvas::{Canvas, StrokeStyle, CanvasShape, textbox::{TextBox, TextBoxOptions, TextBoxLineMode}};
 use crate::journal::JournalEntry;
 use crate::journal::symboldict;
-use crate::journal::symbol::{Symbol, AvoidanceKdTree};
+use crate::journal::symbol::Symbol;
 use crate::journal::paths::StrokePath;
 use crate::journal::styles;
 
@@ -68,7 +68,6 @@ pub fn build_maze_canvas_from_entry(entry: &JournalEntry, symd: &symboldict::Sym
     let bounds = maze_bounds.scaled_wrt_center(Vec2::new(1.2, 1.2));
     let symbol_scale = 52.0;
     let avoid_scale = symbol_scale / 2.0;
-    let expected_width = Some(1.5);
     let avoid_tree = Some(&avoid_canvas.get_avoid_tree(avoid_scale));
     let textbox = TextBox::new(TextBoxOptions {
         jagged_edge: 0.0,
@@ -76,7 +75,6 @@ pub fn build_maze_canvas_from_entry(entry: &JournalEntry, symd: &symboldict::Sym
         layout: TextBoxLineMode::Flat,
         symbol_scale: symbol_scale,
         avoid_tree,
-        expected_stroke_width: expected_width,
     });
 
     let msg_str = output_value_strings.get("maze_content.key").expect("maze_content.key not found");
@@ -101,32 +99,6 @@ pub fn build_maze_canvas_from_entry(entry: &JournalEntry, symd: &symboldict::Sym
         base_canvas.add_strokes(symbol, StrokeStyle {
             color: "darkred".to_string(),
             width: 1.5,
-        });
-    }
-    base_canvas
-}
-
-pub fn build_balanced_ternary_canvas_0() -> Canvas {
-    let mut base_canvas = Canvas::new();
-    let radius = 50.0;
-    let cell_width = radius * 1.5;
-    let symd = symboldict::SymbolPathDict::from_file("config/symbols.json").expect("Failed to load symbols.json");
-
-    // we're going to draw a circle of 27 balanced ternary symbols,
-    // with the value of 0 at the top, increasing clockwise and
-    // decreasing counter-clockwise.
-    for i in -13..=13 {
-        let angle = (i as f32) * (2.0 * std::f32::consts::PI / 27.0) - (std::f32::consts::PI / 2.0);
-        let x = angle.cos() * cell_width;
-        let y = angle.sin() * cell_width;
-        let symbol_name = format!("balanced_ternary_{}", i);
-        let mut new_symbol = symd.new_symbol(&symbol_name).expect("Symbol not found");
-        new_symbol.set_position(Vec2::new(x, y));
-        new_symbol.rotate_rad_by(angle + (std::f32::consts::PI / 2.0));
-        new_symbol.scale_by(radius);
-        base_canvas.add_strokes(new_symbol, StrokeStyle {
-            color: "black".to_string(),
-            width: 5.0,
         });
     }
     base_canvas
@@ -330,7 +302,6 @@ pub fn splat_msg_overtop(canvas: &Canvas, symd: &symboldict::SymbolPathDict, msg
             bounds: msg_bounds,
             symbol_scale,
             avoid_tree: Some(&avoid_tree),
-            expected_stroke_width: Some(3.0),
         });
         let (mut placed, unplaced) = textbox.fill_bounds_with(symbols);
         if unplaced.len() > 0 {
@@ -558,16 +529,6 @@ impl<T> BuiltMaze<T> where
         } else {
             None
         }
-    }
-    pub fn cell_in_dir(&self, position: &MazePosition, direction: &MazeDirection) -> Option<&MazeLockCell<T>> {
-        let dir_vec = match direction {
-            MazeDirection::North => (0, -1),
-            MazeDirection::East => (1, 0),
-            MazeDirection::South => (0, 1),
-            MazeDirection::West => (-1, 0),
-        };
-        let neighbor_pos = (position.0 + dir_vec.0, position.1 + dir_vec.1);
-        self.cell_at(&neighbor_pos)
     }
     pub fn neighbors_of(&self, position: &MazePosition) -> Option<Vec<MazePosition>> {
         if let Some(neighbor_indices) = self.pos_neighbors.get(position) {

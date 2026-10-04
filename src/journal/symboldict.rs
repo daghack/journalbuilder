@@ -29,20 +29,6 @@ pub struct SymbolPathDict {
     symbol_base: HashMap<String, Rc<SymbolBase>>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct SymbolSetPath {
-    adj: Option<AdjType>,
-    path: String,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct SymbolSet {
-    pub set_name: String,
-    pub set_description: String,
-    pub ordered_symbols: Vec<String>,
-    pub symbol_paths: Vec<SymbolSetPath>,
-}
-
 impl SymbolPathDict {
     pub fn from_file(file: &str) -> Result<SymbolPathDict, io::Error> {
         // read the json file and parse it into a Vec<SymbolEntry>
@@ -83,9 +69,6 @@ impl SymbolPathDict {
     }
     pub fn get_symbol_base(&self, name: &str) -> Option<Rc<SymbolBase>> {
         self.symbol_base.get(name).cloned()
-    }
-    pub fn keys(&self) -> Vec<String> {
-        self.symbols.keys().cloned().collect()
     }
     pub fn new_symbol(&self, name: &str) -> Option<Symbol> {
         let origin = Vec2::new(0.0, 0.0);
