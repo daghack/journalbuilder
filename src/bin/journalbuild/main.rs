@@ -2,7 +2,7 @@ use scribe::journal::{Journal, JournalManifest, JournalPage};
 use scribe::journal::rhaientries::{JournalEngine};
 use scribe::journal::canvas::artistic::*;
 use scribe::journal::{symboldict, darkly};
-use scribe::journal::canvas::{Canvas, StrokeStyle, CanvasShape};
+use scribe::journal::canvas::{Brush, Canvas, StrokeStyle, CanvasShape};
 use scribe::journal::styles::{ternary_builder};
 use std::collections::HashMap;
 use scribe::journal::canvas::textbox::{TextBox, TextBoxOptions, TextBoxLineMode};
@@ -98,6 +98,7 @@ fn journal_entry_18<'j>(journal: &'j mut Journal<'j>, symd: &'j symboldict::Symb
                     page_canvas.add_strokes(symbol, StrokeStyle {
                         color: color.to_string(),
                         width: 2.0,
+                        brush: None,
                     });
                 }
             }
@@ -132,6 +133,7 @@ fn first_codex<'j>(journal: &'j mut Journal<'j>, symd: &'j symboldict::SymbolPat
             base_canvas.add_strokes(circle.clone(), StrokeStyle {
                 color: "hsla(150, 30%, 50%, 0.1)".to_string(),
                 width: 2.5,
+                brush: None,
             });
         }
         let drawn_canvas = symbols_in_circle(symbols, &SymbolCircleParams {
@@ -142,10 +144,12 @@ fn first_codex<'j>(journal: &'j mut Journal<'j>, symd: &'j symboldict::SymbolPat
                 stroke_style: StrokeStyle {
                     color: "rgba(0, 0, 0, 0.7)".to_string(),
                     width: 2.5,
+                    brush: None,
                 },
                 fill_style: Some(StrokeStyle {
                     color: "hsla(150, 30%, 70%, 0.3)".to_string(),
                     width: 2.0,
+                    brush: None,
                 }),
             }),
             symbol_scale,
@@ -187,19 +191,20 @@ fn legacy_journalbuild(symd: &symboldict::SymbolPathDict, engine: &mut DarklyEng
     manifest.render_all(&dir_name, 2.0);
 
     let pages = manifest.pages();
+    // Legacy journals don't set per-stroke brushes, so everything uses this.
+    let default_brush = Brush {
+        name: "Calligraphy".to_string(),
+        size: 0.7,
+        min_pressure: 0.15,
+        max_pressure: 0.25,
+    };
     for (page_name, (page_canvas, _))  in pages {
         println!("Rendering with Darkly.");
         // Fit the longest side to LEGACY_DARKLY_SIZE, preserving aspect ratio.
         let dims = page_canvas.bounds().extents();
         let scale = LEGACY_DARKLY_SIZE / dims.x.max(dims.y);
         darkly::resize_canvas(engine, (dims.x * scale) as u32, (dims.y * scale) as u32);
-        let buff = darkly::render_canvas(
-            page_canvas,
-            engine,
-            "Calligraphy",
-            1.0,
-            (0.15, 0.25),
-        );
+        let buff = darkly::render_canvas(page_canvas, engine, Some(&default_brush));
         let filename = format!("{}/darkly_{}.png", dir_name, page_name);
         println!("\t - {}", filename);
         buff.save(filename).expect("Failed to save png");

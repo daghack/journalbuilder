@@ -14,6 +14,19 @@ pub type StrokeColor = String;
 pub struct StrokeStyle {
     pub width: f32,
     pub color: StrokeColor,
+    /// Brush used when rendering with Darkly; `None` uses the renderer's
+    /// default brush.
+    pub brush: Option<Brush>,
+}
+
+/// A Darkly brush preset and the settings it is drawn with.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Brush {
+    /// Darkly brush preset name, e.g. "Calligraphy" or "Rough Ink".
+    pub name: String,
+    pub size: f32,
+    pub min_pressure: f32,
+    pub max_pressure: f32,
 }
 
 impl StrokeStyle {

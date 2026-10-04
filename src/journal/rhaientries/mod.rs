@@ -5,6 +5,7 @@ use super::symboldict::SymbolPathDict;
 use super::canvas::Canvas as JournalCanvas;
 use super::canvas::StrokeStyle as JournalStrokeStyle;
 use super::canvas::CanvasStyleOptions;
+use super::canvas::Brush;
 use super::symbol::{place_along_path, SymbolPlacementArgs};
 use super::styles;
 use super::canvas::artistic::{BuiltMaze, MazeTraversal, MazeTraversalStrategy};
@@ -41,13 +42,12 @@ impl Entry {
     pub fn darkly_publish_pngs(self, engine: &mut DarklyEngine, dirname: &str, scale: f32) {
         for (i, page) in self.pages.into_iter().enumerate() {
             let canvases = page.canvases();
-            for (canvas_i, (canvas, brush_settings)) in canvases.into_iter().enumerate() {
+            for (canvas_i, canvas) in canvases.into_iter().enumerate() {
                 let canvas : JournalCanvas = canvas.into();
                 let canvas_dim = canvas.bounds().extents();
                 darkly::resize_canvas(engine, (canvas_dim.x * scale) as u32, (canvas_dim.y * scale) as u32);
-                let br_size = brush_settings.size as f32;
-                let pressure_bounds = (brush_settings.min_pressure as f32, brush_settings.max_pressure as f32);
-                let buff = darkly::render_canvas(&canvas, engine, brush_settings.brush_style.as_str(), br_size, pressure_bounds);
+                // Every rhai stroke style carries a brush, so no default is needed.
+                let buff = darkly::render_canvas(&canvas, engine, None);
                 let filename = format!("{}/darkly_page_{}_{}.png", dirname, i, canvas_i);
                 buff.save(filename).expect("Failed to save png");
             }
@@ -107,19 +107,30 @@ impl BrushSettings {
     }
 }
 
+impl From<BrushSettings> for Brush {
+    fn from(bs: BrushSettings) -> Brush {
+        Brush {
+            name: bs.brush_style.to_string(),
+            size: bs.size as f32,
+            min_pressure: bs.min_pressure as f32,
+            max_pressure: bs.max_pressure as f32,
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone, CustomType)]
 #[rhai_type(extra = Self::build_extra)]
 pub struct Page {
     pub metadata: PageMetadata,
-    canvases: Vec<(Canvas, BrushSettings)>,
+    canvases: Vec<Canvas>,
     layout: LayoutStyle,
 }
 
 impl Page {
-    pub fn add_canvas(&mut self, canvas: Canvas, brush_settings: BrushSettings) {
-        self.canvases.push((canvas, brush_settings))
+    pub fn add_canvas(&mut self, canvas: Canvas) {
+        self.canvases.push(canvas)
     }
-    pub fn canvases(&self) -> &Vec<(Canvas, BrushSettings)> {
+    pub fn canvases(&self) -> &Vec<Canvas> {
         &self.canvases
     }
     fn build_extra(builder: &mut TypeBuilder<Self>) {
@@ -136,7 +147,7 @@ impl Into<JournalCanvas> for Page {
             LayoutStyle::Layer => {
                 let mut combined = JournalCanvas::new();
                 for canvas in self.canvases {
-                    combined.merge_canvas(canvas.0.into());
+                    combined.merge_canvas(canvas.into());
                 }
                 combined
             }
@@ -250,18 +261,6 @@ impl Into<JournalCanvas> for &Canvas {
     }
 }
 
-impl From<JournalCanvas> for Canvas {
-    fn from(jc: JournalCanvas) -> Self {
-        let mut canvas = Canvas::default();
-        for stroke in jc.strokes().into_iter() {
-            let path = stroke.path.clone();
-            let style = StrokeStyle::from(stroke.style.clone());
-            canvas.add_strokepath(path, style);
-        }
-        canvas
-    }
-}
-
 #[derive(Debug, Clone, CustomType)]
 pub struct MarkdownContent {
 }
@@ -318,7 +317,9 @@ impl Into<styles::FontSet> for FontSet {
 #[rhai_type(extra = Self::build_extra)]
 pub struct StrokeStyle {
     width: f64,
-    color: ImmutableString
+    color: ImmutableString,
+    #[rhai_type(skip)]
+    brush: BrushSettings,
 }
 
 impl Into<JournalStrokeStyle> for StrokeStyle {
@@ -326,25 +327,18 @@ impl Into<JournalStrokeStyle> for StrokeStyle {
         JournalStrokeStyle {
             width: self.width as f32,
             color: self.color.to_string(),
-        }
-    }
-}
-
-impl From<JournalStrokeStyle> for StrokeStyle {
-    fn from(jss: JournalStrokeStyle) -> StrokeStyle {
-        StrokeStyle {
-            width: jss.width as f64,
-            color: jss.color.into(),
+            brush: Some(self.brush.into()),
         }
     }
 }
 
 impl StrokeStyle {
-    pub fn new(width: f64, color: ImmutableString) -> Result<Self, Box<EvalAltResult>> {
+    pub fn new(width: f64, color: ImmutableString, brush: BrushSettings) -> Result<Self, Box<EvalAltResult>> {
         super::canvas::parse_color(&color)?;
         Ok(Self {
             width,
-            color
+            color,
+            brush,
         })
     }
     fn build_extra(builder: &mut TypeBuilder<Self>) {
@@ -373,7 +367,6 @@ impl JournalEngine {
                 path.line_to(pos.x as f32, pos.y as f32)
             })
             .register_fn("fill_with_msg", move |path: &mut StrokePath, style: StrokeStyle, fonts: FontSet, fontsize: f64, msg: &str| -> Vec<Dynamic> {
-                let style: JournalStrokeStyle = style.into();
                 let symdict = &fill_msg_symdict;
                 let fontset : styles::FontSet = fonts.into();
                 let builder = fontset.into_symbol_string_builder(&symdict);
@@ -388,8 +381,7 @@ impl JournalEngine {
                     let (placed, unplaced) = place_along_path(symbols.drain(..).collect(), path, &args);
                     let mut canvas = Canvas::default();
                     for symbol in placed {
-                        let style: StrokeStyle = style.clone().into();
-                        canvas.add_strokepath(symbol.placed_strokepath(), style);
+                        canvas.add_strokepath(symbol.placed_strokepath(), style.clone());
                     }
                     all_canvases.push(Dynamic::from(canvas));
                     symbols = unplaced;
@@ -398,7 +390,6 @@ impl JournalEngine {
             })
             .register_fn("fit_msg_to",
                 move |path: &mut StrokePath, style: StrokeStyle, fonts : FontSet, msg: &str| -> Canvas {
-                let style: JournalStrokeStyle = style.into();
                 let mut canvas = Canvas::default();
                 let symdict = &fit_msg_symdict;
                 let fontset : styles::FontSet = fonts.into();
@@ -423,8 +414,7 @@ impl JournalEngine {
                 args.symbol_scale = window_min;
                 let (placed, _) = place_along_path(symbols, path, &args);
                 for symbol in placed {
-                    let style: StrokeStyle = style.clone().into();
-                    canvas.add_strokepath(symbol.placed_strokepath(), style);
+                    canvas.add_strokepath(symbol.placed_strokepath(), style.clone());
                 }
                 canvas
             })
@@ -569,20 +559,51 @@ mod tests {
         JournalEngine::new(Arc::new(symd))
     }
 
+    const BRUSH: &str = r#"let brush = new_brush("Calligraphy", 0.25, 0.5, 1.0);"#;
+
     #[test]
     fn new_strokestyle_accepts_css_colors() {
-        let script = r#"
-            let a = new_strokestyle(1.5, "darkred");
-            let b = new_strokestyle(1.5, "hsl(160, 50%, 40%, 0.8)");
-        "#;
-        assert!(engine().build_entry_str(script).is_ok());
+        let script = format!(r#"{}
+            let a = new_strokestyle(1.5, "darkred", brush);
+            let b = new_strokestyle(1.5, "hsl(160, 50%, 40%, 0.8)", brush);
+        "#, BRUSH);
+        assert!(engine().build_entry_str(&script).is_ok());
     }
 
     #[test]
     fn new_strokestyle_rejects_bad_color_with_line() {
-        let script = "let ok = new_strokestyle(1.5, \"black\");\nlet bad = new_strokestyle(1.5, \"darkredd\");";
-        let err = engine().build_entry_str(script).err().expect("bad color should fail").to_string();
+        let script = format!("{}\nlet bad = new_strokestyle(1.5, \"darkredd\", brush);", BRUSH);
+        let err = engine().build_entry_str(&script).err().expect("bad color should fail").to_string();
         assert!(err.contains("darkredd"), "{}", err);
         assert!(err.contains("line 2"), "{}", err);
+    }
+
+    #[test]
+    fn new_strokestyle_requires_brush() {
+        let err = engine().build_entry_str(r#"let s = new_strokestyle(1.5, "black");"#)
+            .err().expect("brushless style should fail").to_string();
+        assert!(err.contains("new_strokestyle"), "{}", err);
+    }
+
+    #[test]
+    fn per_stroke_brushes_reach_journal_canvas() {
+        let script = r#"
+            let ink = new_strokestyle(1.5, "black", new_brush("Rough Ink", 0.25, 0.5, 1.0));
+            let calli = new_strokestyle(1.5, "darkred", new_brush("Calligraphy", 1.0, 1.0, 0.8));
+            let path = new_strokepath().move_to(new_vec(0.0, 0.0)).line_to(new_vec(10.0, 10.0));
+            let canvas = new_canvas();
+            canvas.add_strokepath(path, ink);
+            canvas.add_strokepath(path, calli);
+            let page = new_page();
+            page.add_canvas(canvas);
+            journal_entry.add_page(page);
+        "#;
+        let entry = engine().build_entry_str(script).expect("script should run");
+        let jc: JournalCanvas = entry.pages[0].canvases()[0].clone().into();
+        let brushes: Vec<_> = jc.strokes().iter()
+            .map(|s| s.style.brush.clone().expect("rhai strokes always have a brush"))
+            .map(|b| (b.name, b.size))
+            .collect();
+        assert_eq!(brushes, vec![("Rough Ink".to_string(), 1.0), ("Calligraphy".to_string(), 0.8)]);
     }
 }

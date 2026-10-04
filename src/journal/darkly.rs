@@ -4,7 +4,7 @@ use darkly::coord::CanvasRect;
 use darkly::config::ConfigValue;
 use image::{ImageBuffer, Rgba};
 use crate::journal::paths::{CurveSample};
-use crate::journal::canvas::{Canvas, ColoredStroke};
+use crate::journal::canvas::{Brush, Canvas, ColoredStroke};
 use std::collections::HashSet;
 
 pub fn new_engine(width: u32, height: u32) -> DarklyEngine {
@@ -43,21 +43,36 @@ const SAMPLE_SPACING: f32 = 1.0;
 /// reads `time_ms`, so feeding all zeros gives it no cadence to work with.
 const PEN_SPEED_PX_PER_MS: f64 = 0.25;
 
-pub fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, brush_selection: &str, brush_size: f32, pressure_bounds: (f32, f32)) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
-    let (pressure_min, pressure_max) = pressure_bounds;
-    let pressure_range = pressure_max - pressure_min;
+/// Render a canvas with Darkly. Each stroke is drawn with its own brush, or
+/// `default_brush` if it has none; panics if a stroke has neither.
+pub fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, default_brush: Option<&Brush>) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
     let layer = engine.add_raster_layer(None);
     let (engine_canvas_width, engine_canvas_height) = engine.canvas_dimensions();
     let bounds = canvas.bounds();
     let canvas_dims = bounds.extents();
     let w_ratio =  engine_canvas_width as f32 / canvas_dims.x as f32;
     let h_ratio = engine_canvas_height as f32 / canvas_dims.y as f32;
-    engine.brush_load(brush_selection).expect("Failed to load brush.");
-    engine.brush_set_exposed_port("brush_settings", "size", brush_size).expect("Unable to set brush size");
 
     let strokes = canvas.strokes();
     let mut warned_colors = HashSet::new();
+    // Only reload the brush / reset its size when they change between strokes.
+    let mut loaded_name: Option<&str> = None;
+    let mut loaded_size: Option<f32> = None;
     for ColoredStroke { path, style } in strokes {
+        let brush = style.brush.as_ref().or(default_brush)
+            .expect("Stroke has no brush and no default brush was given");
+        if loaded_name != Some(brush.name.as_str()) {
+            engine.brush_load(&brush.name)
+                .unwrap_or_else(|e| panic!("Failed to load brush '{}': {}", brush.name, e));
+            loaded_name = Some(brush.name.as_str());
+            loaded_size = None;
+        }
+        if loaded_size != Some(brush.size) {
+            engine.brush_set_exposed_port("brush_settings", "size", brush.size).expect("Unable to set brush size");
+            loaded_size = Some(brush.size);
+        }
+        let pressure_min = brush.min_pressure;
+        let pressure_range = brush.max_pressure - brush.min_pressure;
         let [cr, cg, cb, ca] = style.rgba().unwrap_or_else(|err| {
             if warned_colors.insert(style.color.clone()) {
                 eprintln!("{}; drawing in black.", err);

@@ -58,10 +58,12 @@ pub fn build_maze_canvas_from_entry(entry: &JournalEntry, symd: &symboldict::Sym
         base_canvas.add_strokes(new_symbol.clone(), StrokeStyle {
             color: color.to_string(),
             width: 5.0,
+            brush: None,
         });
         avoid_canvas.add_strokes(new_symbol, StrokeStyle {
             color: color.to_string(),
             width: 2.0,
+            brush: None,
         });
     }
     let maze_bounds = avoid_canvas.bounds();
@@ -99,6 +101,7 @@ pub fn build_maze_canvas_from_entry(entry: &JournalEntry, symd: &symboldict::Sym
         base_canvas.add_strokes(symbol, StrokeStyle {
             color: "darkred".to_string(),
             width: 1.5,
+            brush: None,
         });
     }
     base_canvas
@@ -125,6 +128,7 @@ pub fn build_balanced_ternary_canvas(symd: &symboldict::SymbolPathDict) -> Canva
         let canvasdrawoptions = StrokeStyle {
             color: "black".to_string(),
             width: stroke_width,
+            brush: None,
         };
         let symbol_name = format!("balanced_ternary_{}", i);
         let mut new_symbol = symd.new_symbol(&symbol_name).expect("Symbol not found");
@@ -177,6 +181,7 @@ pub fn build_balanced_ternary_canvas(symd: &symboldict::SymbolPathDict) -> Canva
         let canvasdrawoptions = StrokeStyle {
             color: "black".to_string(),
             width: inner_stroke_width,
+            brush: None,
         };
         let digit = i * 3;
         let symbol_name = format!("balanced_ternary_{}", digit);
@@ -229,6 +234,7 @@ pub fn build_balanced_ternary_canvas(symd: &symboldict::SymbolPathDict) -> Canva
         let canvasdrawoptions = StrokeStyle {
             color: "black".to_string(),
             width: inmost_stroke_width,
+            brush: None,
         };
         let digit = i * 9;
         let symbol_name = format!("balanced_ternary_{}", digit);
@@ -256,6 +262,7 @@ pub fn build_balanced_ternary_canvas(symd: &symboldict::SymbolPathDict) -> Canva
         }, StrokeStyle {
             color: "black".to_string(),
             width: inmost_stroke_width,
+            brush: None,
         });
     }
 
@@ -317,6 +324,7 @@ pub fn splat_msg_overtop(canvas: &Canvas, symd: &symboldict::SymbolPathDict, msg
             canvas.add_strokes(symbol, StrokeStyle {
                 color: color.to_string(),
                 width,
+                brush: None,
             });
         }
         return Some(canvas);
@@ -383,6 +391,7 @@ pub fn symbols_in_circle(symbols: Vec<Symbol>, params: &SymbolCircleParams) -> C
         StrokeStyle {
             color: "black".to_string(),
             width: 3.0,
+            brush: None,
         }
     };
     let mut canvas = Canvas::new();

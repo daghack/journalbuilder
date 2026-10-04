@@ -18,16 +18,16 @@ let paragraphs = [
 
 let maze_canvases = [];
 let origin = new_vec(0.0, 0.0);
-let style = new_strokestyle(1.5, "darkred");
-let copper_font = new_fontset(["loche_upper"], ["sharp_lower", "loche_lower"]);
 let brush_style = new_brush("Calligraphy", 1.0, 1.0, 0.8);
+let style = new_strokestyle(1.5, "darkred", brush_style);
+let copper_font = new_fontset(["loche_upper"], ["sharp_lower", "loche_lower"]);
 
 for (paragraph, index) in paragraphs {
 	let maze_path = left_handed_maze_path(index, 10, 10);
 	maze_path.scale_by(100.0);
 	let maze_canvas = maze_path.fit_msg_to(style, copper_font, paragraph);
 	let page = new_page();
-	page.add_canvas(maze_canvas, brush_style);
+	page.add_canvas(maze_canvas);
 	journal_entry.add_page(page);
 }
 
