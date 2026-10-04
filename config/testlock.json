@@ -1,0 +1,31 @@
+{
+	"name" : "test_lock",
+	"locks" : {
+		"shift2" : {
+			"type_name": "shift_cipher",
+			"options": {
+				"shift": 2,
+				"base": 26
+			}
+		},
+		"shift4" : {
+			"type_name": "shift_cipher",
+			"options": {
+				"shift": 4,
+				"base": 26
+			}
+		},
+		"huff_26_3" : {
+			"type_name": "huffman_encoding",
+			"options": {
+				"incoming_base": 26,
+				"outgoing_base": 7,
+				"frequency_counts" : {}
+			}
+		}
+	},
+	"connections" : [
+		["shift2.cipher_text", "shift4.plain_text"],
+		["shift4.cipher_text", "huff_26_3.incoming"]
+	]
+}

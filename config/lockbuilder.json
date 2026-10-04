@@ -1,0 +1,17 @@
+{
+	"name" : "lockbuilder",
+	"locks" : {
+		"shift4" : {
+			"type_name": "shift_cipher",
+			"options": {
+				"base": 27,
+				"shift": 4
+			}
+		}
+	},
+	"connections": [
+	],
+	"static_inputs": {
+		"shift4.plain_text": "b27:IN SEARCH OF A CREATURE LIKE ME"
+	}
+}

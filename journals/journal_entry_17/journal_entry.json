@@ -1,0 +1,71 @@
+{
+	"journal_entry_17" : {
+		"canvas_options": {
+			"roughness": 2.0,
+			"point_sample_distance": 1.0,
+			"trail_off_percent": 0.15,
+			"noise_amplitude": 1.5
+		},
+		"shorts": [
+			"Lying to you is my new favorite sin, Copper.",
+			"It is not enough. It is never enough. Again and again I have pressed pen to page, onl y to know that they will be insufficient. Words are not my strength.",
+			"Do you enjoy stargazing? Have you died before? Noviember Atesh, Copper, Crom, Lonan Welcome you to share your story of Death as we gaze at the night sky.",
+			"The man wrapped in snakeskin has a box with a secret in it. Who is wearing snakeskin and where does he keep his boxes?",
+			"I am beginning to understand that while Alcona and I may be both Collectors, there is a great and hungry chasm between her experience of the warband and my own.",
+			"I am beginning to wonder if so much of what I knew of the Collectors was, in fact, true mostly of Jakem and the other Lazerines within the warband.",
+			"Walking thoughts still ill-informed, but the man in the snake skin sets my eyes upon a destination - feet, find me my path.",
+			"Who was Sir Ingrid? Not Max, I think. Have I forgotten you, and why?",
+			"Hold the Hunger, Hunt and Harvest come before Feast.",
+			"A bone that heals wrong must be shattered again if it is to bear weight.",
+			"To reforge the soul, one must first break it.",
+			"Let the wound reopen, let the mind split anew.",
+			"A bone that heals wrong must be shattered again if it is to bear weight.",
+			"To reforge the soul, one must first break it. Let the wound reopen, let the mind split anew.",
+			"slit you open from navel to lip to catalogue everything I find within",
+			"unspin your organs across the floor before pinning them on sheets of cardboard",
+			"slim chance of winning when our game is only in its beginning",
+			"Do you see this world for what it is?",
+			"There is no number of walking sticks I could retrieve to balance out the ruin I have wrought"
+		],
+		"named_entries": {
+			"prime_sub.plain_text": "b27:IT IS A TRULY AND DEEPLY INCONVENIENT TIME FOR THE BENALIONS TO BE SO CONCERNED WITH THE DETAILS OF THEIR RITES I DO NOT INTEND TO END IN COMPLETE MY BLASPHEMIES NOR IS THE INQUISITIONERS PRICE TO NECESSARILY CLEANSE ME A PRICE I FIND MYSELF WILLING OR ABLE TO PAY PERHAPS WHAT THEY CALL MEANING IS NOT THE SAME AS THAT WHICH I PURSUE FOR WHAT I PURSUE I FIND AMONG THE THORNS IN TOWN WHATEVER PRICE AND POWER THEY ARE SUPPOSED TO HAVE PAID",
+			"conversion": "b27:I AM BEGINNING TO DOUBT MY CONVERSION IF IN EVERY WAY I AM PULLED TO HER AND HER HUNGERS HOW AM I TO BE ANYTHING OTHER THAN HER CREATURE AS BEFORE"
+		},
+		"journal_locks" : {
+			"page_one_lock": {
+				"locks" : {
+					"prime_sub" : {
+						"type_name": "substitution_cipher",
+						"options": {
+							"base_n": 27
+						}
+					},
+					"maze_content" : {
+						"type_name": "vigenere_cipher",
+						"options": {
+							"key_base": 27,
+							"plain_base": 27,
+							"cipher_base": 27
+						}
+					},
+					"maze_encode" : {
+						"type_name": "maze_lock",
+						"options": {
+							"input_base": 27,
+							"strategy": "LeftHanded"
+						}
+					}
+				},
+				"static_inputs": {
+					"prime_sub.ordering": "b27:IKBNAZXYFTQWJ HRGLMOUVCPEDS",
+					"maze_content.plain_text": "entry:conversion",
+					"maze_encode.random_seed": "b10:10843"
+				},
+				"connections": [
+					["prime_sub.cipher_text", "maze_content.key"],
+					["maze_content.cipher_text",  "maze_encode.maze_text"]
+				]
+			}
+		}
+	}
+}

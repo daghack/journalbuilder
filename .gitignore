@@ -1,0 +1,10 @@
+/target
+.DS_Store
+
+# Generated output
+/journals/*/output/
+/markdown_output/
+/pkg/
+/flamegraph.svg
+/darkly_output.png
+/test_eye.svg
