@@ -413,6 +413,28 @@ impl StrokePath {
         path = path.close_path();
         path
     }
+    /// A circular arc from `start_rad` to `end_rad` (either direction),
+    /// built from cubic segments of at most 90 degrees each.
+    pub fn arc(center: Vec2, radius: f32, start_rad: f32, end_rad: f32) -> Self {
+        let sweep = end_rad - start_rad;
+        let segments = ((sweep.abs() / std::f32::consts::FRAC_PI_2).ceil() as usize).max(1);
+        let step = sweep / segments as f32;
+        // Control-point distance for a cubic approximating a circular arc.
+        let k = 4.0 / 3.0 * (step / 4.0).tan() * radius;
+        let point = |a: f32| center + Vec2::new(a.cos(), a.sin()) * radius;
+        let tangent = |a: f32| Vec2::new(-a.sin(), a.cos()) * k;
+        let start = point(start_rad);
+        let mut path = StrokePath::new().move_to(start.x, start.y);
+        for i in 0..segments {
+            let a0 = start_rad + step * i as f32;
+            let a1 = a0 + step;
+            let (p0, p3) = (point(a0), point(a1));
+            let c1 = p0 + tangent(a0);
+            let c2 = p3 - tangent(a1);
+            path = path.cubic_curve_to(c1.x, c1.y, c2.x, c2.y, p3.x, p3.y);
+        }
+        path
+    }
     pub fn line(start: Vec2, end: Vec2) -> Self {
         let mut path = StrokePath::new();
         path = path.move_to(start.x, start.y);
@@ -830,4 +852,40 @@ fn bq_interp(p0: Vec2, p1: Vec2, p2: Vec2, t: f32) -> Vec2 {
 fn l_interp(p0: Vec2, p1: Vec2, t: f32) -> Vec2 {
     let u = 1.0 - t;
     u * p0 + t * p1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cubic_ends(path: &StrokePath) -> Vec<Vec2> {
+        path.commands.iter().filter_map(|cmd| match cmd {
+            PathCmd::MoveTo(x, y) | PathCmd::CubicCurveTo(_, _, _, _, x, y) => Some(Vec2::new(*x, *y)),
+            _ => None,
+        }).collect()
+    }
+
+    fn close(a: Vec2, b: Vec2) -> bool {
+        (a - b).length() < 1e-4
+    }
+
+    #[test]
+    fn arc_splits_into_quarter_segments_and_hits_endpoints() {
+        let center = Vec2::new(1.0, 2.0);
+        // 270 degrees: three segments, ending at angle 3pi/2.
+        let path = StrokePath::arc(center, 2.0, 0.0, 1.5 * std::f32::consts::PI);
+        let ends = cubic_ends(&path);
+        assert_eq!(ends.len(), 4); // move_to + 3 cubics
+        assert!(close(ends[0], Vec2::new(3.0, 2.0)));
+        assert!(close(ends[1], Vec2::new(1.0, 4.0)));
+        assert!(close(ends[3], Vec2::new(1.0, 0.0)));
+    }
+
+    #[test]
+    fn arc_runs_backwards_for_negative_sweep() {
+        let path = StrokePath::arc(Vec2::new(0.0, 0.0), 1.0, 0.0, -std::f32::consts::FRAC_PI_2);
+        let ends = cubic_ends(&path);
+        assert_eq!(ends.len(), 2);
+        assert!(close(ends[1], Vec2::new(0.0, -1.0)));
+    }
 }

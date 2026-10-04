@@ -482,7 +482,32 @@ impl JournalEngine {
                 }
                 path
             })
-            .register_fn("new_strokepath", StrokePath::new);
+            .register_fn("new_strokepath", StrokePath::new)
+            .register_fn("cubic_to", |path: &mut StrokePath, c1: Vec2, c2: Vec2, end: Vec2| -> StrokePath {
+                update_path(path, |p| p.cubic_curve_to(
+                    c1.x as f32, c1.y as f32, c2.x as f32, c2.y as f32, end.x as f32, end.y as f32,
+                ))
+            })
+            .register_fn("quad_to", |path: &mut StrokePath, control: Vec2, end: Vec2| -> StrokePath {
+                update_path(path, |p| p.quadratic_curve_to(
+                    control.x as f32, control.y as f32, end.x as f32, end.y as f32,
+                ))
+            })
+            .register_fn("close", |path: &mut StrokePath| -> StrokePath {
+                update_path(path, |p| p.close_path())
+            })
+            .register_fn("new_circle", |center: Vec2, radius: f64| -> StrokePath {
+                StrokePath::circle(center.into(), radius as f32)
+            })
+            .register_fn("new_rectangle", |center: Vec2, width: f64, height: f64| -> StrokePath {
+                StrokePath::rectangle(center.into(), width as f32, height as f32)
+            })
+            .register_fn("new_line", |start: Vec2, end: Vec2| -> StrokePath {
+                StrokePath::line(start.into(), end.into())
+            })
+            .register_fn("new_arc", |center: Vec2, radius: f64, start_rad: f64, end_rad: f64| -> StrokePath {
+                StrokePath::arc(center.into(), radius as f32, start_rad as f32, end_rad as f32)
+            });
 
         let load_symdict = symdict.clone();
         engine.register_fn("load_symbol", move |symname: &str| -> Result<StrokePath, Box<EvalAltResult>> {
@@ -663,6 +688,18 @@ mod tests {
         assert_eq!(statements, "M 1 1 L 3 1 ");
         assert_eq!(chained, statements);
         assert_eq!(reassigned, statements);
+    }
+
+    #[test]
+    fn shape_and_curve_functions_build_paths() {
+        assert_eq!(path_string("new_line(new_vec(0.0, 0.0), new_vec(2.0, 3.0))"), "M 0 0 L 2 3 ");
+        assert_eq!(path_string("new_rectangle(new_vec(0.0, 0.0), 2.0, 4.0)"), "M -1 -2 L 1 -2 L 1 2 L -1 2 Z ");
+        assert_eq!(
+            path_string("new_strokepath().move_to(new_vec(0.0, 0.0)).quad_to(new_vec(1.0, 1.0), new_vec(2.0, 0.0)).cubic_to(new_vec(3.0, 1.0), new_vec(4.0, 1.0), new_vec(5.0, 0.0)).close()"),
+            "M 0 0 Q 1 1 2 0 C 3 1 4 1 5 0 Z ",
+        );
+        // A circle is four cubic quarter-arcs.
+        assert_eq!(path_string("new_circle(new_vec(0.0, 0.0), 1.0)").matches('C').count(), 4);
     }
 
     #[test]
