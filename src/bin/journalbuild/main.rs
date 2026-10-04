@@ -167,7 +167,7 @@ fn first_codex<'j>(journal: &'j mut Journal<'j>, symd: &'j symboldict::SymbolPat
 
 const LEGACY_DARKLY_SIZE: f32 = 1080.0;
 
-fn legacy_journalbuild(symd: &symboldict::SymbolPathDict, engine: &mut DarklyEngine, journal_dir: &str, journal_name: &str, plain: bool, scale: f32) {
+fn legacy_journalbuild(symd: &symboldict::SymbolPathDict, engine: &mut DarklyEngine, journal_dir: &str, journal_name: &str, dir_name: &str, plain: bool, scale: f32) {
     let journal_funcs: HashMap<&str, JournalEntryFunc> = HashMap::from([
         ("journal_entry_17", journal_entry_17 as JournalEntryFunc),
         ("journal_entry_18", journal_entry_18 as JournalEntryFunc),
@@ -187,11 +187,10 @@ fn legacy_journalbuild(symd: &symboldict::SymbolPathDict, engine: &mut DarklyEng
     let journal_entry_func = journal_funcs.get(journal_name)
         .expect("Journal entry function not found for given journal name");
     let manifest = journal_entry_func(&mut journal, &symd);
-    let dir_name = format!("{}/{}/output", journal_dir, journal_name);
     if plain {
-        manifest.render_all(&dir_name, 2.0 * scale);
+        manifest.render_all(dir_name, 2.0 * scale);
     } else {
-        create_dir(&dir_name);
+        create_dir(dir_name);
     }
 
     let pages = manifest.pages();
@@ -230,21 +229,25 @@ fn create_dir(dir: &str) {
 }
 
 const USAGE: &str = "Usage: journalbuild <journal_name> [--legacy] [--page N[,N...]] [--no-plain]
-                    [--scale S]
+                    [--scale S] [--journals-dir DIR] [--output-dir DIR]
 
   --legacy            Build a legacy JSON journal instead of a rhai one.
   --page N,...        Render only these rhai pages (0-based). Other pages'
                       existing output is kept.
   --no-plain          Skip the plain PNG/SVG output; only render with Darkly.
   --scale S           Scale output images (default 1.0). Darkly work scales
-                      with output size, so e.g. 0.25 renders much faster.";
+                      with output size, so e.g. 0.25 renders much faster.
+  --journals-dir DIR  Directory containing journals (default: journals).
+  --output-dir DIR    Where to write renders (default: <journal>/output).";
 
 struct Args {
     journal_name: String,
+    journals_dir: String,
     legacy: bool,
     pages: Option<Vec<usize>>,
     plain: bool,
     scale: f32,
+    output_dir: Option<String>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -253,6 +256,8 @@ fn parse_args() -> Result<Args, String> {
     let mut pages: Option<Vec<usize>> = None;
     let mut plain = true;
     let mut scale = 1.0;
+    let mut journals_dir = "journals".to_string();
+    let mut output_dir = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -262,6 +267,12 @@ fn parse_args() -> Result<Args, String> {
                 let value = args.next().ok_or("--scale needs a value, e.g. --scale 0.25")?;
                 scale = value.parse::<f32>().ok().filter(|s| *s > 0.0)
                     .ok_or(format!("invalid scale '{}'; expected a positive number", value))?;
+            }
+            "--journals-dir" => {
+                journals_dir = args.next().ok_or("--journals-dir needs a directory")?;
+            }
+            "--output-dir" => {
+                output_dir = Some(args.next().ok_or("--output-dir needs a directory")?);
             }
             "--page" => {
                 let list = args.next().ok_or("--page needs a page number or list, e.g. --page 0,2")?;
@@ -279,7 +290,7 @@ fn parse_args() -> Result<Args, String> {
     if legacy && pages.is_some() {
         return Err("--page is only supported for rhai journals".to_string());
     }
-    Ok(Args { journal_name, legacy, pages, plain, scale })
+    Ok(Args { journal_name, journals_dir, legacy, pages, plain, scale, output_dir })
 }
 
 fn main() {
@@ -291,12 +302,14 @@ fn main() {
         .expect("Failed to load symbols.json");
 
     let journal_name = &args.journal_name;
-    let journal_dir = "journals";
+    let journal_dir = args.journals_dir.as_str();
+    let output_dir = args.output_dir.clone()
+        .unwrap_or_else(|| format!("{}/{}/output", journal_dir, journal_name));
     // One Darkly engine for the whole run; canvases resize it as needed.
     let mut darkly_engine = darkly::new_engine(1, 1);
     if args.legacy {
         // TODO: eventually I intend to build out the legacy journals into rhai.
-        legacy_journalbuild(&symd, &mut darkly_engine, journal_dir, journal_name, args.plain, args.scale);
+        legacy_journalbuild(&symd, &mut darkly_engine, journal_dir, journal_name, &output_dir, args.plain, args.scale);
         return;
     }
     let symdarc = Arc::new(symd);
@@ -315,7 +328,6 @@ fn main() {
             std::process::exit(1);
         }
     }
-    let output_dir = format!("{}/output", entry_path);
     if args.pages.is_some() {
         // Rendering a subset: keep the other pages' existing output.
         std::fs::create_dir_all(&output_dir).expect("Failed to create output directory");
