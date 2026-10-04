@@ -54,9 +54,11 @@ impl Entry {
             for (canvas_i, canvas) in canvases.into_iter().enumerate() {
                 let canvas : JournalCanvas = canvas.into();
                 let canvas_dim = canvas.bounds().extents();
+                // Canvas units are pixels at scale 1, so brushes scale with
+                // the render. Every rhai stroke style carries a brush, so no
+                // default is needed.
                 darkly::resize_canvas(engine, (canvas_dim.x * scale) as u32, (canvas_dim.y * scale) as u32);
-                // Every rhai stroke style carries a brush, so no default is needed.
-                let buff = darkly::render_canvas(&canvas, engine, None);
+                let buff = darkly::render_canvas(&canvas, engine, None, scale);
                 let filename = format!("{}/darkly_page_{}_{}.png", dirname, i, canvas_i);
                 buff.save(filename).expect("Failed to save png");
             }

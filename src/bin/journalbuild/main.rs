@@ -206,8 +206,10 @@ fn legacy_journalbuild(symd: &symboldict::SymbolPathDict, engine: &mut DarklyEng
         // Fit the longest side to LEGACY_DARKLY_SIZE, preserving aspect ratio.
         let dims = page_canvas.bounds().extents();
         let fit = LEGACY_DARKLY_SIZE * scale / dims.x.max(dims.y);
+        // Brush sizes are relative to the LEGACY_DARKLY_SIZE render, so
+        // they scale with --scale.
         darkly::resize_canvas(engine, (dims.x * fit) as u32, (dims.y * fit) as u32);
-        let buff = darkly::render_canvas(page_canvas, engine, Some(&default_brush));
+        let buff = darkly::render_canvas(page_canvas, engine, Some(&default_brush), scale);
         let filename = format!("{}/darkly_{}.png", dir_name, page_name);
         println!("\t - {}", filename);
         buff.save(filename).expect("Failed to save png");
@@ -235,8 +237,9 @@ const USAGE: &str = "Usage: journalbuild <journal_name> [--legacy] [--page N[,N.
   --page N,...        Render only these rhai pages (0-based). Other pages'
                       existing output is kept.
   --no-plain          Skip the plain PNG/SVG output; only render with Darkly.
-  --scale S           Scale output images (default 1.0). Darkly work scales
-                      with output size, so e.g. 0.25 renders much faster.
+  --scale S           Scale output images (default 1.0), brushes included.
+                      Darkly work scales with output size, so e.g. 0.25
+                      renders much faster.
   --journals-dir DIR  Directory containing journals (default: journals).
   --output-dir DIR    Where to write renders (default: <journal>/output).";
 

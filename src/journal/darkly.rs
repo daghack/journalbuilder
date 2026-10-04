@@ -45,9 +45,14 @@ const SAMPLE_SPACING_PX: f32 = 1.0;
 /// reads `time_ms`, so feeding all zeros gives it no cadence to work with.
 const PEN_SPEED_PX_PER_MS: f64 = 0.25;
 
-/// Render a canvas with Darkly. Each stroke is drawn with its own brush, or
-/// `default_brush` if it has none; panics if a stroke has neither.
-pub fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, default_brush: Option<&Brush>) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+/// Render a canvas with Darkly into the engine's current canvas size.
+///
+/// `brush_scale` multiplies every brush size: brush sizes are in pixels, so
+/// a render at a different scale must scale them too to look the same.
+///
+/// Each stroke is drawn with its own brush, or `default_brush` if it has
+/// none; panics if a stroke has neither.
+pub fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, default_brush: Option<&Brush>, brush_scale: f32) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
     let layer = engine.add_raster_layer(None);
     let (engine_canvas_width, engine_canvas_height) = engine.canvas_dimensions();
     let bounds = canvas.bounds();
@@ -70,9 +75,10 @@ pub fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, default_brush: 
             loaded_name = Some(brush.name.as_str());
             loaded_size = None;
         }
-        if loaded_size != Some(brush.size) {
-            engine.brush_set_exposed_port("brush_settings", "size", brush.size).expect("Unable to set brush size");
-            loaded_size = Some(brush.size);
+        let size = brush.size * brush_scale;
+        if loaded_size != Some(size) {
+            engine.brush_set_exposed_port("brush_settings", "size", size).expect("Unable to set brush size");
+            loaded_size = Some(size);
         }
         let pressure_min = brush.min_pressure;
         let pressure_range = brush.max_pressure - brush.min_pressure;
