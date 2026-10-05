@@ -98,6 +98,26 @@ for cell in maze.cells() {
 			.translate_by(new_vec(cell.x * cell_size, cell.y * cell_size)),
 		outline);
 }
+// Shade the maze's start, then flow the key around the glyphs in a box a
+// little larger than the maze.
+maze_canvas.add_strokepath(new_circle(new_vec(0.0, 0.0), cell_size * 0.75).hatch(3.0, random_range(0.0, 6.28), 1.0), shade);
+let b = maze_canvas.bounds();
+let around = new_textbox(#{
+	center: b.center, width: b.width * 1.3, height: b.height * 1.3,
+	symbol_scale: 12.0, avoid: maze_canvas,
+});
+let key = around.fill(ternary_font("balanced_ternary").glyphs("key key key key key key key key key key"));
+maze_canvas.add_glyphs(key.placed, text);
+
+// Words wrapped into two small boxes, side by side.
+let boxes = new_textbox(#{ center: new_vec(0.0, 0.0), width: 60, height: 30, symbol_scale: 9.0, layout: "words", jagged_edge: 0.5 })
+	.place_all(lowercase_font("loche_upper").glyphs("words wrap at the spaces between them and spill into another box"));
+for (block, i) in boxes {
+	for g in block {
+		maze_canvas.add_glyph(g.translate_by(new_vec(i * 70.0, b.max.y + 40.0)), text);
+	}
+}
+
 let page_three = new_page();
 page_three.add_canvas(maze_canvas);
 journal_entry.add_page(page_three);

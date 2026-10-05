@@ -1,4 +1,5 @@
 mod glyphs;
+mod layout;
 mod locks;
 mod random;
 
@@ -488,6 +489,7 @@ impl JournalEngine {
         });
 
         glyphs::register(&mut engine, symdict.clone(), rng.clone());
+        layout::register(&mut engine, rng.clone());
         locks::register(&mut engine);
 
         engine
