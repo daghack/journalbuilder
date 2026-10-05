@@ -4,7 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-darkly = { git = "https://github.com/darkly-art/darkly.git", tag = "v0.7.0" }
+# Fork with DarklyEngine::stroke_path (batched offline strokes); switch back
+# to darkly-art/darkly once it lands upstream.
+darkly = { git = "https://github.com/daghack/darkly.git", branch = "offline-stroke-path" }
 image = "0.25.10"
 kdtree = "0.7.0"
 noise = "0.9.0"

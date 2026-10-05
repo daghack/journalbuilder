@@ -130,13 +130,16 @@ fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, default_brush: Opti
         });
         let substrokes = path.to_substrokes();
         for substroke in substrokes {
-            engine.begin_stroke(layer);
+            // One stroke_path call per substroke: Darkly stabilizes and draws
+            // the whole stroke at once, instead of re-rendering and
+            // committing on every point as live stroke_to does.
+            let mut ops = Vec::new();
             let samples = substroke.get_point_samples(sample_spacing);
             let sample_count = samples.len();
             for (i, CurveSample { point,  .. }) in samples.into_iter().enumerate() {
                 let t_param = i as f32 / sample_count as f32;
                 let pressure = style.width * (t_param * pressure_range + pressure_min);
-                engine.stroke_to(StrokeOp::BrushStroke {
+                ops.push(StrokeOp::BrushStroke {
                     x: (point.x - bounds.mins.x) * w_ratio,
                     y: (point.y - bounds.mins.y) * h_ratio,
                     pressure,
@@ -151,7 +154,7 @@ fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, default_brush: Opti
                     ca,
                 });
             }
-            engine.end_stroke();
+            engine.stroke_path(layer, &ops).expect("stroke_path failed");
         }
     }
 
