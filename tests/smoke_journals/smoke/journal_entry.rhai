@@ -56,6 +56,11 @@ for i in 0..word.len() {
 shapes.add_glyphs(word, text);
 shapes.add_glyph(glyph("basic_eye").scale_by(24.0).translate_by(new_vec(-150.0, 0.0)), accent);
 
+// Notes scattered over the page, clear of the drawing and each other.
+let notes = shapes.splat_msgs(["smoke rises", "glass breaks"], lowercase_font("loche_upper"), faint,
+	#{ symbol_scale: 12.0, width_range: [60, 100], height_range: [30, 50] });
+shapes.add_canvas(notes);
+
 let page_one = new_page();
 page_one.add_canvas(shapes);
 journal_entry.add_page(page_one);

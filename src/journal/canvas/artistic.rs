@@ -287,86 +287,106 @@ pub fn random_bounding_box(canvas: &Canvas, width_bounds: (f32, f32), height_bou
     )
 }
 
-pub fn splat_msg_overtop(canvas: &Canvas, symd: &symboldict::SymbolPathDict, msg: &str, width_bounds: (f32, f32), height_bounds: (f32, f32), symbol_scale: f32, width: f32, color: &str, max_attempts: usize, rng: &mut dyn RngCore) -> Option<Canvas> {
-    let mut builder = styles::lowercase_builder(&symd, "loche_upper");
-    builder.add_filter(|s, rng| {
-        let rand_rot_var = std::f32::consts::PI / 8.0;
-        let rand_rot = rng.random::<f32>() * rand_rot_var - (rand_rot_var / 2.0);
-        let rand_scale_var = 0.3;
-        let rand_scale = 1.0 + (rng.random::<f32>() * rand_scale_var - (rand_scale_var / 2.0));
-        s.scale_by(rand_scale);
-        s.rotate_rad_by(rand_rot);
-    });
-    let mut symbols = builder.build(msg, rng);
-    let mut current_attempt = 0;
-    let avoid_scale = symbol_scale / 2.0;
-    let avoid_tree = canvas.get_avoid_tree(avoid_scale);
-    while current_attempt <= max_attempts {
-        let msg_bounds = random_bounding_box(canvas, width_bounds, height_bounds, rng);
-        current_attempt += 1;
+/// Turn and resize each symbol at random: by up to `rotation` radians and
+/// `scale` (a fraction of its size) either way.
+pub fn jitter_symbols(symbols: &mut [Symbol], rotation: f32, scale: f32, rng: &mut dyn RngCore) {
+    for symbol in symbols {
+        let rand_rot = rng.random::<f32>() * 2.0 * rotation - rotation;
+        let rand_scale = 1.0 + rng.random::<f32>() * 2.0 * scale - scale;
+        symbol.scale_by(rand_scale);
+        symbol.rotate_rad_by(rand_rot);
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SplatOptions {
+    pub symbol_scale: f32,
+    /// Range of message box widths and heights to try.
+    pub width_range: (f32, f32),
+    pub height_range: (f32, f32),
+    pub jagged_edge: f32,
+    /// Boxes to try for each message before backing off.
+    pub max_attempts: usize,
+}
+
+/// Give up after backing off this many times in one splat.
+const MAX_SPLAT_BACKOFFS: usize = 100;
+
+/// Try random boxes over `working` until `symbols` fit in one, clear of
+/// everything already drawn.
+fn splat_one(working: &Canvas, symbols: &[Symbol], opts: &SplatOptions, rng: &mut dyn RngCore) -> Option<Vec<Symbol>> {
+    let avoid_tree = working.get_avoid_tree(opts.symbol_scale / 2.0);
+    for _ in 0..opts.max_attempts {
         let textbox = TextBox::new(TextBoxOptions {
-            jagged_edge: 0.1,
+            jagged_edge: opts.jagged_edge,
             layout: TextBoxLineMode::Flat,
-            bounds: msg_bounds,
-            symbol_scale,
+            bounds: random_bounding_box(working, opts.width_range, opts.height_range, rng),
+            symbol_scale: opts.symbol_scale,
             avoid_tree: Some(&avoid_tree),
         });
-        let (mut placed, unplaced) = textbox.fill_bounds_with(symbols, rng);
-        if unplaced.len() > 0 {
-            for symbol in &mut placed {
-                symbol.scale_by( 1.0 / symbol.scale());
-            }
-            placed.extend(unplaced);
-            symbols = placed;
-            continue; // try again
+        // Place copies, so a failed attempt leaves the symbols untouched.
+        let (placed, unplaced) = textbox.fill_bounds_with(symbols.to_vec(), rng);
+        if unplaced.is_empty() {
+            return Some(placed);
         }
-        let mut canvas = Canvas::new();
-        for symbol in placed {
-            canvas.add_strokes(symbol, StrokeStyle {
-                color: color.to_string(),
-                width,
-                brush: None,
-            });
-        }
-        return Some(canvas);
     }
     None
 }
 
-pub fn draw_msgs_overtop(canvas: &mut Canvas, symd: &symboldict::SymbolPathDict, msgs: &Vec<String>, width_bounds: (f32, f32), height_bounds: (f32, f32), symbol_scale: f32, width: f32, color: &str, rng: &mut dyn RngCore) {
-    // this is good for a hack, but it would be much better
-    // to subdivide the canvas into N boxes and try to fit messages into them
-    if msgs.len() == 0 {
-        return;
-    }
-    let max_attempts_per_msg = 100 as usize;
-    let mut attempted_placements = 0;
-    let mut placed_canvases = Vec::new();
-    let mut placed_canvas = canvas.clone();
-    while placed_canvases.len() < msgs.len() {
-        let next_msg = &msgs[placed_canvases.len()];
-        let textcanvas = splat_msg_overtop(&placed_canvas, symd, next_msg, width_bounds, height_bounds, symbol_scale, width, color, max_attempts_per_msg, rng);
-        if let Some(textcanvas) = textcanvas {
-            placed_canvas.draw_canvas(&textcanvas);
-            placed_canvases.push(textcanvas);
+/// Scatter messages over `canvas` in randomly sized boxes, each clear of the
+/// canvas and of the messages before it, returning each message's placed
+/// symbols in order. `style` is only used to account for stroke width while
+/// placing. When a message won't fit, the most recent messages are taken
+/// back (more of them the more often it happens) and placed again.
+pub fn splat_msgs(canvas: &Canvas, msgs: &[Vec<Symbol>], opts: &SplatOptions, style: &StrokeStyle, rng: &mut dyn RngCore) -> Result<Vec<Vec<Symbol>>, String> {
+    let mut placed: Vec<Vec<Symbol>> = Vec::new();
+    let mut working = canvas.clone();
+    let mut backoffs = 0;
+    while placed.len() < msgs.len() {
+        let next = placed.len();
+        if let Some(symbols) = splat_one(&working, &msgs[next], opts, rng) {
+            working.add_strokes(symbols.clone(), style.clone());
+            placed.push(symbols);
             continue;
-        } else {
-            attempted_placements += 1;
-            if placed_canvases.len() == 0 {
-                eprintln!("Warning: Failed to splat message '{}' onto canvas even with no other messages placed", next_msg);
-                return;
-            }
-            let todrop = attempted_placements / 3 + 1;
-            placed_canvases.truncate(placed_canvases.len() - todrop);
-            placed_canvas = canvas.clone();
-            for placed in placed_canvases.iter() {
-
-                placed_canvas.draw_canvas(placed);
-            }
+        }
+        if placed.is_empty() {
+            return Err(format!("message {} doesn't fit in {} tries even with no other messages placed", next, opts.max_attempts));
+        }
+        backoffs += 1;
+        if backoffs > MAX_SPLAT_BACKOFFS {
+            return Err(format!("gave up after taking messages back {} times; message {} still doesn't fit", MAX_SPLAT_BACKOFFS, next));
+        }
+        placed.truncate(placed.len().saturating_sub(backoffs / 3 + 1));
+        working = canvas.clone();
+        for symbols in &placed {
+            working.add_strokes(symbols.clone(), style.clone());
         }
     }
-    for placed in placed_canvases.into_iter() {
-        canvas.merge_canvas(placed);
+    Ok(placed)
+}
+
+pub fn draw_msgs_overtop(canvas: &mut Canvas, symd: &symboldict::SymbolPathDict, msgs: &Vec<String>, width_bounds: (f32, f32), height_bounds: (f32, f32), symbol_scale: f32, width: f32, color: &str, rng: &mut dyn RngCore) {
+    let builder = styles::lowercase_builder(&symd, "loche_upper");
+    let msgs: Vec<Vec<Symbol>> = msgs.iter().map(|msg| {
+        let mut symbols = builder.build(msg, rng);
+        jitter_symbols(&mut symbols, std::f32::consts::PI / 16.0, 0.15, rng);
+        symbols
+    }).collect();
+    let opts = SplatOptions {
+        symbol_scale,
+        width_range: width_bounds,
+        height_range: height_bounds,
+        jagged_edge: 0.1,
+        max_attempts: 101,
+    };
+    let style = StrokeStyle { color: color.to_string(), width, brush: None };
+    match splat_msgs(canvas, &msgs, &opts, &style, rng) {
+        Ok(placed) => for symbols in placed {
+            for symbol in symbols {
+                canvas.add_strokes(symbol, style.clone());
+            }
+        },
+        Err(err) => eprintln!("Warning: couldn't splat messages: {}", err),
     }
 }
 

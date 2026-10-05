@@ -15,6 +15,17 @@
 //! let res = tb.fill(font.glyphs(msg));   // #{ placed: [..], unplaced: [..] }
 //! let blocks = tb.place_all(glyphs);     // one array per filled box
 //!
+//! // Scatter messages over a canvas in random boxes, clear of its strokes
+//! // and of each other. Returns a canvas with just the messages.
+//! let notes = page_canvas.splat_msgs(["first note", "second note"], font, style, #{
+//!     symbol_scale: 23.0,
+//!     width_range: [200, 500], height_range: [300, 600],   // box sizes to try
+//!     rotation_jitter: 0.196,     // radians either way (default pi/16)
+//!     scale_jitter: 0.15,         // fraction either way (default 0.15)
+//!     jagged_edge: 0.1,           // default 0.1
+//!     max_attempts: 100,          // boxes per message before backing off
+//! });
+//!
 //! // Hatch the inside of a closed path.
 //! let shading = new_circle(new_vec(0.0, 0.0), 20.0).hatch(3.0, random_range(0.0, 6.28), 3.0);
 //! ```
@@ -27,10 +38,15 @@ use parry2d::bounding_volume::Aabb;
 use parry2d::math::Vec2 as PVec;
 use rhai::{Array, Dynamic, Engine, EvalAltResult, Map};
 use std::rc::Rc;
+use std::sync::Arc;
 
-use super::glyphs::{glyph_array, Glyph};
+use super::glyphs::{add_glyph, glyph_array, Glyph};
 use super::random::SharedRng;
-use super::{Canvas, Vec2};
+use super::{Canvas, StrokeStyle, Vec2};
+use crate::journal::canvas::artistic::{jitter_symbols, splat_msgs, SplatOptions};
+use crate::journal::canvas::StrokeStyle as JournalStrokeStyle;
+use crate::journal::styles::Font;
+use crate::journal::symboldict::SymbolPathDict;
 use crate::journal::canvas::textbox::{TextBox as CoreTextBox, TextBoxLineMode, TextBoxOptions};
 use crate::journal::canvas::Canvas as JournalCanvas;
 use crate::journal::paths::StrokePath;
@@ -70,38 +86,60 @@ pub struct TextBox {
 
 const TEXTBOX_KEYS: [&str; 8] = ["center", "width", "height", "symbol_scale", "layout", "jagged_edge", "avoid", "avoid_radius"];
 
-/// A number option, accepting ints as well as floats.
-fn number(options: &Map, key: &str) -> RhaiResult<Option<f32>> {
-    match options.get(key) {
-        None => Ok(None),
-        Some(v) => v.as_float().map(|f| f as f32)
-            .or_else(|_| v.as_int().map(|i| i as f32))
-            .map(Some)
-            .map_err(|type_name| format!("new_textbox: '{}' should be a number, got {}", key, type_name).into()),
+fn check_keys(caller: &str, options: &Map, known: &[&str]) -> RhaiResult<()> {
+    match options.keys().find(|k| !known.contains(&k.as_str())) {
+        Some(key) => Err(format!("{}: unknown option '{}'; options: {}", caller, key, known.join(", ")).into()),
+        None => Ok(()),
     }
 }
 
-fn positive(options: &Map, key: &str) -> RhaiResult<f32> {
-    match number(options, key)? {
+fn as_number(caller: &str, what: &str, v: &Dynamic) -> RhaiResult<f32> {
+    v.as_float().map(|f| f as f32)
+        .or_else(|_| v.as_int().map(|i| i as f32))
+        .map_err(|type_name| format!("{}: {} should be a number, got {}", caller, what, type_name).into())
+}
+
+/// A number option, accepting ints as well as floats.
+fn number(caller: &str, options: &Map, key: &str) -> RhaiResult<Option<f32>> {
+    options.get(key).map(|v| as_number(caller, &format!("'{}'", key), v)).transpose()
+}
+
+fn positive(caller: &str, options: &Map, key: &str) -> RhaiResult<f32> {
+    match number(caller, options, key)? {
         Some(n) if n > 0.0 => Ok(n),
-        Some(n) => Err(format!("new_textbox: '{}' must be positive, got {}", key, n).into()),
-        None => Err(format!("new_textbox: missing '{}'", key).into()),
+        Some(n) => Err(format!("{}: '{}' must be positive, got {}", caller, key, n).into()),
+        None => Err(format!("{}: missing '{}'", caller, key).into()),
     }
+}
+
+/// A required `[low, high]` option of positive numbers.
+fn range(caller: &str, options: &Map, key: &str) -> RhaiResult<(f32, f32)> {
+    let bad = || -> Box<EvalAltResult> { format!("{}: '{}' should be [low, high], two positive numbers with low <= high", caller, key).into() };
+    let pair = options.get(key)
+        .ok_or_else(|| -> Box<EvalAltResult> { format!("{}: missing '{}'", caller, key).into() })?
+        .clone().into_array().map_err(|_| bad())?;
+    if pair.len() != 2 {
+        return Err(bad());
+    }
+    let (low, high) = (as_number(caller, &format!("'{}'", key), &pair[0])?, as_number(caller, &format!("'{}'", key), &pair[1])?);
+    if !(low > 0.0 && low <= high) {
+        return Err(bad());
+    }
+    Ok((low, high))
 }
 
 impl TextBox {
     fn new(options: Map) -> RhaiResult<TextBox> {
-        if let Some(key) = options.keys().find(|k| !TEXTBOX_KEYS.contains(&k.as_str())) {
-            return Err(format!("new_textbox: unknown option '{}'; options: {}", key, TEXTBOX_KEYS.join(", ")).into());
-        }
+        const CALLER: &str = "new_textbox";
+        check_keys(CALLER, &options, &TEXTBOX_KEYS)?;
         let center: PVec = options.get("center")
             .ok_or("new_textbox: missing 'center'")?
             .clone().try_cast::<Vec2>()
             .ok_or("new_textbox: 'center' should be a vec")?
             .into();
-        let half = PVec::new(positive(&options, "width")?, positive(&options, "height")?) / 2.0;
-        let symbol_scale = positive(&options, "symbol_scale")?;
-        let jagged_edge = number(&options, "jagged_edge")?.unwrap_or(0.0);
+        let half = PVec::new(positive(CALLER, &options, "width")?, positive(CALLER, &options, "height")?) / 2.0;
+        let symbol_scale = positive(CALLER, &options, "symbol_scale")?;
+        let jagged_edge = number(CALLER, &options, "jagged_edge")?.unwrap_or(0.0);
         let layout = match options.get("layout").map(|l| l.to_string()).as_deref() {
             None | Some("flat") => TextBoxLineMode::Flat,
             Some("words") => TextBoxLineMode::WordsByBlankSymbol,
@@ -111,7 +149,7 @@ impl TextBox {
             None => None,
             Some(canvas) => {
                 let canvas = canvas.clone().try_cast::<Canvas>().ok_or("new_textbox: 'avoid' should be a canvas")?;
-                let radius = match number(&options, "avoid_radius")? {
+                let radius = match number(CALLER, &options, "avoid_radius")? {
                     Some(r) if r > 0.0 => r,
                     Some(r) => return Err(format!("new_textbox: 'avoid_radius' must be positive, got {}", r).into()),
                     None => symbol_scale / 2.0,
@@ -171,7 +209,55 @@ fn hatch(path: &StrokePath, spacing: f64, angle: f64, roughness: f64, rng: &Shar
     Ok(hatching)
 }
 
-pub fn register(engine: &mut Engine, rng: SharedRng) {
+const SPLAT_KEYS: [&str; 7] = ["symbol_scale", "width_range", "height_range", "rotation_jitter", "scale_jitter", "jagged_edge", "max_attempts"];
+
+fn splat(canvas: &Canvas, msgs: Array, font: &Font, style: StrokeStyle, options: Map, symdict: &SymbolPathDict, rng: &SharedRng) -> RhaiResult<Canvas> {
+    const CALLER: &str = "splat_msgs";
+    check_keys(CALLER, &options, &SPLAT_KEYS)?;
+    let max_attempts = match options.get("max_attempts") {
+        None => 100,
+        Some(n) => match n.as_int() {
+            Ok(n) if n >= 1 => n as usize,
+            _ => return Err(format!("{}: 'max_attempts' should be a whole number of at least 1, got {}", CALLER, n).into()),
+        },
+    };
+    let opts = SplatOptions {
+        symbol_scale: positive(CALLER, &options, "symbol_scale")?,
+        width_range: range(CALLER, &options, "width_range")?,
+        height_range: range(CALLER, &options, "height_range")?,
+        jagged_edge: number(CALLER, &options, "jagged_edge")?.unwrap_or(0.1),
+        max_attempts,
+    };
+    let rotation_jitter = number(CALLER, &options, "rotation_jitter")?.unwrap_or(std::f32::consts::PI / 16.0);
+    let scale_jitter = number(CALLER, &options, "scale_jitter")?.unwrap_or(0.15);
+    if !(rotation_jitter >= 0.0) || !(0.0..1.0).contains(&scale_jitter) {
+        return Err(format!("{}: 'rotation_jitter' can't be negative and 'scale_jitter' must be in [0, 1)", CALLER).into());
+    }
+    let msgs = msgs.into_iter().enumerate().map(|(i, msg)| {
+        msg.into_immutable_string()
+            .map_err(|type_name| -> Box<EvalAltResult> { format!("{}: message {} is a {}, not a string", CALLER, i, type_name).into() })
+    }).collect::<RhaiResult<Vec<_>>>()?;
+
+    let builder = font.builder(symdict);
+    let mut rng = rng.borrow_mut();
+    let symbol_msgs: Vec<Vec<Symbol>> = msgs.iter().map(|msg| {
+        let mut symbols = builder.build(msg, &mut *rng);
+        jitter_symbols(&mut symbols, rotation_jitter, scale_jitter, &mut *rng);
+        symbols
+    }).collect();
+    let journal_canvas: JournalCanvas = canvas.into();
+    let journal_style: JournalStrokeStyle = style.clone().into();
+    let placed = splat_msgs(&journal_canvas, &symbol_msgs, &opts, &journal_style, &mut *rng)
+        .map_err(|err| format!("{}: {}", CALLER, err))?;
+
+    let mut splatted = Canvas::default();
+    for symbol in placed.into_iter().flatten() {
+        add_glyph(&mut splatted, &Glyph(symbol), &style);
+    }
+    Ok(splatted)
+}
+
+pub fn register(engine: &mut Engine, symdict: Arc<SymbolPathDict>, rng: SharedRng) {
     engine.register_type_with_name::<TextBox>("TextBox");
     engine.register_fn("bounds", bounds);
     engine.register_fn("new_textbox", TextBox::new);
@@ -202,6 +288,11 @@ pub fn register(engine: &mut Engine, rng: SharedRng) {
             to_place = rest;
         }
         Ok(blocks)
+    });
+
+    let r = rng.clone();
+    engine.register_fn("splat_msgs", move |canvas: &mut Canvas, msgs: Array, font: Font, style: StrokeStyle, options: Map| -> RhaiResult<Canvas> {
+        splat(canvas, msgs, &font, style, options, &symdict, &r)
     });
 
     engine.register_fn("hatch", move |path: &mut StrokePath, spacing: f64, angle: f64, roughness: f64| -> RhaiResult<StrokePath> {
@@ -314,6 +405,71 @@ mod tests {
         assert!(!hatching(1).is_empty());
         assert_eq!(hatching(1), hatching(1));
         assert_ne!(hatching(1), hatching(2));
+    }
+
+    const SPLAT_SETUP: &str = r#"
+        let style = new_strokestyle(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
+        let base = new_canvas();
+        base.add_strokepath(new_rectangle(new_vec(0.0, 0.0), 800.0, 800.0), style);
+        base.add_strokepath(new_circle(new_vec(0.0, 0.0), 150.0), style);
+        let msgs = ["ash and oak", "a quiet note", "the last word"];
+        let opts = #{ symbol_scale: 20.0, width_range: [150, 250], height_range: [100, 200] };
+    "#;
+
+    fn splat_glyph_positions(seed: i64) -> Vec<(f32, f32)> {
+        let script = format!(r#"{}
+            seed({});
+            let notes = base.splat_msgs(msgs, lowercase_font("loche_upper"), style, opts);
+            let page = new_page();
+            page.add_canvas(notes);
+            journal_entry.add_page(page);
+        "#, SPLAT_SETUP, seed);
+        let entry = engine().build_entry_str(&script).expect("script should run");
+        entry.pages[0].canvases()[0].strokes.iter().map(|stroke| {
+            let points = stroke.path.points_within();
+            let sum = points.iter().fold(parry2d::math::Vec2::ZERO, |acc, p| acc + *p);
+            let c = sum / points.len() as f32;
+            (c.x, c.y)
+        }).collect()
+    }
+
+    #[test]
+    fn splat_places_every_message_clear_of_the_canvas() {
+        let glyphs = splat_glyph_positions(5);
+        // One stroke per non-blank glyph: 9 + 10 + 11 letters.
+        assert_eq!(glyphs.len(), 30);
+        for (x, y) in &glyphs {
+            let r = (x * x + y * y).sqrt();
+            assert!((r - 150.0).abs() > 5.0, "glyph at ({}, {}) sits on the circle", x, y);
+            assert!(x.abs() < 400.0 && y.abs() < 400.0, "glyph at ({}, {}) is off the canvas", x, y);
+        }
+        assert_eq!(glyphs, splat_glyph_positions(5));
+        assert_ne!(glyphs, splat_glyph_positions(6));
+    }
+
+    #[test]
+    fn splat_fails_when_a_message_cannot_fit() {
+        let err = fails(&format!(r#"{}
+            opts.symbol_scale = 400.0;
+            opts.max_attempts = 5;
+            base.splat_msgs(msgs, lowercase_font("loche_upper"), style, opts);
+        "#, SPLAT_SETUP));
+        assert!(err.contains("splat_msgs: message 0 doesn't fit in 5 tries"), "{}", err);
+    }
+
+    #[test]
+    fn bad_splat_options_fail_at_their_line() {
+        for (change, want) in [
+            ("opts.remove(\"width_range\");", "missing 'width_range'"),
+            ("opts.height_range = [300, 100];", "'height_range' should be [low, high]"),
+            ("opts.max_attempts = 0;", "'max_attempts' should be a whole number"),
+            ("opts.scale_jitter = 1.5;", "'scale_jitter' must be in [0, 1)"),
+            ("opts.colour = 1;", "unknown option 'colour'"),
+            ("msgs.push(3);", "message 3 is a i64"),
+        ] {
+            let err = fails(&format!("{}\n{}\nbase.splat_msgs(msgs, lowercase_font(\"loche_upper\"), style, opts);", SPLAT_SETUP, change));
+            assert!(err.contains(want) && err.contains("line 10"), "{}: {}", want, err);
+        }
     }
 
     #[test]

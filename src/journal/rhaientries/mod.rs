@@ -489,7 +489,7 @@ impl JournalEngine {
         });
 
         glyphs::register(&mut engine, symdict.clone(), rng.clone());
-        layout::register(&mut engine, rng.clone());
+        layout::register(&mut engine, symdict.clone(), rng.clone());
         locks::register(&mut engine);
 
         engine
