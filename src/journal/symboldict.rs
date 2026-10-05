@@ -77,8 +77,12 @@ impl SymbolPathDict {
             missing: RefCell::default(),
         })
     }
+    /// Symbol names starting with `prefix`, sorted so that a seeded pick
+    /// among them is the same every run.
     pub fn symbols_with_prefix(&self, prefix: &str) -> Vec<String> {
-        self.symbols.keys().filter(|k| k.starts_with(prefix)).cloned().collect()
+        let mut names: Vec<String> = self.symbols.keys().filter(|k| k.starts_with(prefix)).cloned().collect();
+        names.sort();
+        names
     }
     pub fn get_strokepath(&self, name: &str) -> Option<StrokePath> {
         self.symbols.get(name).cloned()

@@ -13,10 +13,11 @@ use std::collections::{HashMap, HashSet};
 use serde::{Serialize, Deserialize};
 use petgraph::graph::{UnGraph, NodeIndex};
 use petgraph::algo::min_spanning_tree;
-use rand::{Rng, SeedableRng, Fill};
+use rand::{Rng, RngCore, SeedableRng, Fill};
 use std::default::Default;
 
 pub fn build_maze_canvas_from_entry(entry: &JournalEntry, symd: &symboldict::SymbolPathDict) -> Canvas {
+    let rng: &mut dyn RngCore = &mut rand::rng();
     let input_vars = InfoVarSet::new();
     let journal_lock = entry.lock_entries.get("page_one_lock").expect("maze_lock not found");
 
@@ -80,8 +81,8 @@ pub fn build_maze_canvas_from_entry(entry: &JournalEntry, symd: &symboldict::Sym
     });
 
     let msg_str = output_value_strings.get("maze_content.key").expect("maze_content.key not found");
-    let symbols = styles::ternary_builder(&symd, "balanced_ternary").build(msg_str);
-    let (text_symbols, unplaced) = textbox.fill_bounds_with(symbols);
+    let symbols = styles::ternary_builder(&symd, "balanced_ternary").build(msg_str, rng);
+    let (text_symbols, unplaced) = textbox.fill_bounds_with(symbols, rng);
     if unplaced.len() > 0 {
         eprintln!("Warning: Not all text symbols were placed in the textbox");
         eprintln!("{} symbols were not placed", unplaced.len());
@@ -90,10 +91,10 @@ pub fn build_maze_canvas_from_entry(entry: &JournalEntry, symd: &symboldict::Sym
     let pos_offset_variance = 5.0;
     let rotation_variance = std::f32::consts::PI / 16.0;
     for mut symbol in text_symbols {
-        let rand_scale = 1.0 + (rand::random::<f32>() * scale_variance - (scale_variance / 2.0));
-        let rand_offset_x = (rand::random::<f32>() * pos_offset_variance) - (pos_offset_variance / 2.0);
-        let rand_offset_y = (rand::random::<f32>() * pos_offset_variance) - (pos_offset_variance / 2.0);
-        let rand_rot = rand::random::<f32>() * rotation_variance - (rotation_variance / 2.0);
+        let rand_scale = 1.0 + (rng.random::<f32>() * scale_variance - (scale_variance / 2.0));
+        let rand_offset_x = (rng.random::<f32>() * pos_offset_variance) - (pos_offset_variance / 2.0);
+        let rand_offset_y = (rng.random::<f32>() * pos_offset_variance) - (pos_offset_variance / 2.0);
+        let rand_rot = rng.random::<f32>() * rotation_variance - (rotation_variance / 2.0);
         symbol.scale_by(rand_scale);
         let pos = symbol.position();
         symbol.set_position(Vec2::new(pos.x + rand_offset_x, pos.y + rand_offset_y));
@@ -269,39 +270,39 @@ pub fn build_balanced_ternary_canvas(symd: &symboldict::SymbolPathDict) -> Canva
     base_canvas
 }
 
-pub fn random_bounding_box(canvas: &Canvas, width_bounds: (f32, f32), height_bounds: (f32, f32)) -> parry2d::bounding_volume::Aabb {
+pub fn random_bounding_box(canvas: &Canvas, width_bounds: (f32, f32), height_bounds: (f32, f32), rng: &mut dyn RngCore) -> parry2d::bounding_volume::Aabb {
     let minx = canvas.bounds().mins.x;
     let miny = canvas.bounds().mins.y;
     let maxx = canvas.bounds().maxs.x;
     let maxy = canvas.bounds().maxs.y;
     let width_range = width_bounds.1 - width_bounds.0;
     let height_range = height_bounds.1 - height_bounds.0;
-    let width = rand::random::<f32>() * width_range + width_bounds.0;
-    let height = rand::random::<f32>() * height_range + height_bounds.0;
-    let tlx = rand::random::<f32>() * (maxx - minx - width) + minx;
-    let tly = rand::random::<f32>() * (maxy - miny - height) + miny;
+    let width = rng.random::<f32>() * width_range + width_bounds.0;
+    let height = rng.random::<f32>() * height_range + height_bounds.0;
+    let tlx = rng.random::<f32>() * (maxx - minx - width) + minx;
+    let tly = rng.random::<f32>() * (maxy - miny - height) + miny;
     parry2d::bounding_volume::Aabb::new(
         Vec2::new(tlx, tly),
         Vec2::new(tlx + width, tly + height),
     )
 }
 
-pub fn splat_msg_overtop(canvas: &Canvas, symd: &symboldict::SymbolPathDict, msg: &str, width_bounds: (f32, f32), height_bounds: (f32, f32), symbol_scale: f32, width: f32, color: &str, max_attempts: usize) -> Option<Canvas> {
+pub fn splat_msg_overtop(canvas: &Canvas, symd: &symboldict::SymbolPathDict, msg: &str, width_bounds: (f32, f32), height_bounds: (f32, f32), symbol_scale: f32, width: f32, color: &str, max_attempts: usize, rng: &mut dyn RngCore) -> Option<Canvas> {
     let mut builder = styles::lowercase_builder(&symd, "loche_upper");
-    builder.add_filter(|s| {
+    builder.add_filter(|s, rng| {
         let rand_rot_var = std::f32::consts::PI / 8.0;
-        let rand_rot = rand::random::<f32>() * rand_rot_var - (rand_rot_var / 2.0);
+        let rand_rot = rng.random::<f32>() * rand_rot_var - (rand_rot_var / 2.0);
         let rand_scale_var = 0.3;
-        let rand_scale = 1.0 + (rand::random::<f32>() * rand_scale_var - (rand_scale_var / 2.0));
+        let rand_scale = 1.0 + (rng.random::<f32>() * rand_scale_var - (rand_scale_var / 2.0));
         s.scale_by(rand_scale);
         s.rotate_rad_by(rand_rot);
     });
-    let mut symbols = builder.build(msg);
+    let mut symbols = builder.build(msg, rng);
     let mut current_attempt = 0;
     let avoid_scale = symbol_scale / 2.0;
     let avoid_tree = canvas.get_avoid_tree(avoid_scale);
     while current_attempt <= max_attempts {
-        let msg_bounds = random_bounding_box(canvas, width_bounds, height_bounds);
+        let msg_bounds = random_bounding_box(canvas, width_bounds, height_bounds, rng);
         current_attempt += 1;
         let textbox = TextBox::new(TextBoxOptions {
             jagged_edge: 0.1,
@@ -310,7 +311,7 @@ pub fn splat_msg_overtop(canvas: &Canvas, symd: &symboldict::SymbolPathDict, msg
             symbol_scale,
             avoid_tree: Some(&avoid_tree),
         });
-        let (mut placed, unplaced) = textbox.fill_bounds_with(symbols);
+        let (mut placed, unplaced) = textbox.fill_bounds_with(symbols, rng);
         if unplaced.len() > 0 {
             for symbol in &mut placed {
                 symbol.scale_by( 1.0 / symbol.scale());
@@ -332,7 +333,7 @@ pub fn splat_msg_overtop(canvas: &Canvas, symd: &symboldict::SymbolPathDict, msg
     None
 }
 
-pub fn draw_msgs_overtop(canvas: &mut Canvas, symd: &symboldict::SymbolPathDict, msgs: &Vec<String>, width_bounds: (f32, f32), height_bounds: (f32, f32), symbol_scale: f32, width: f32, color: &str) {
+pub fn draw_msgs_overtop(canvas: &mut Canvas, symd: &symboldict::SymbolPathDict, msgs: &Vec<String>, width_bounds: (f32, f32), height_bounds: (f32, f32), symbol_scale: f32, width: f32, color: &str, rng: &mut dyn RngCore) {
     // this is good for a hack, but it would be much better
     // to subdivide the canvas into N boxes and try to fit messages into them
     if msgs.len() == 0 {
@@ -344,7 +345,7 @@ pub fn draw_msgs_overtop(canvas: &mut Canvas, symd: &symboldict::SymbolPathDict,
     let mut placed_canvas = canvas.clone();
     while placed_canvases.len() < msgs.len() {
         let next_msg = &msgs[placed_canvases.len()];
-        let textcanvas = splat_msg_overtop(&placed_canvas, symd, next_msg, width_bounds, height_bounds, symbol_scale, width, color, max_attempts_per_msg);
+        let textcanvas = splat_msg_overtop(&placed_canvas, symd, next_msg, width_bounds, height_bounds, symbol_scale, width, color, max_attempts_per_msg, rng);
         if let Some(textcanvas) = textcanvas {
             placed_canvas.draw_canvas(&textcanvas);
             placed_canvases.push(textcanvas);
@@ -384,7 +385,7 @@ pub struct SymbolCircleParams {
     pub symbol_scale: f32,
 }
 
-pub fn symbols_in_circle(symbols: Vec<Symbol>, params: &SymbolCircleParams) -> Canvas {
+pub fn symbols_in_circle(symbols: Vec<Symbol>, params: &SymbolCircleParams, rng: &mut dyn RngCore) -> Canvas {
     let stroke_style = if let Some(style_opts) = &params.style_options {
         style_opts.stroke_style.clone()
     } else {
@@ -416,8 +417,8 @@ pub fn symbols_in_circle(symbols: Vec<Symbol>, params: &SymbolCircleParams) -> C
                 for substroke in background_circle_ss {
                     // a small random offset for the ray stroke fill
                     for _ in 0..3 {
-                        let rand_rad_offset = rand::random::<f32>() * std::f32::consts::TAU;
-                        let stroke = substroke.ray_stroke_fill(3.0, rand_rad_offset, 3.0);
+                        let rand_rad_offset = rng.random::<f32>() * std::f32::consts::TAU;
+                        let stroke = substroke.ray_stroke_fill(3.0, rand_rad_offset, 3.0, rng);
                         canvas.add_strokes(stroke, fill_style.clone());
                     }
                 }

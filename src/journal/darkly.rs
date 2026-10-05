@@ -110,6 +110,7 @@ fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, default_brush: Opti
     // Only reload the brush / reset its size when they change between strokes.
     let mut loaded_name: Option<&str> = None;
     let mut loaded_size: Option<f32> = None;
+    let mut stroke_index: u32 = 0;
     for ColoredStroke { path, style } in strokes {
         let brush = style.brush.as_ref().or(default_brush)
             .expect("Stroke has no brush and no default brush was given");
@@ -134,6 +135,11 @@ fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, default_brush: Opti
         });
         let substrokes = path.to_substrokes();
         for substroke in substrokes {
+            // Darkly seeds each stroke's random brush texture from the wall
+            // clock by default; numbering the strokes instead makes renders
+            // reproducible while keeping neighbouring strokes distinct.
+            engine.set_stroke_seed(Some(stroke_index));
+            stroke_index = stroke_index.wrapping_add(1);
             // One stroke_path call per substroke: Darkly stabilizes and draws
             // the whole stroke at once, instead of re-rendering and
             // committing on every point as live stroke_to does.

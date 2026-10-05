@@ -370,8 +370,11 @@ pub struct JournalEngine {
 impl JournalEngine {
     pub fn new(symdict: Arc<SymbolPathDict>) -> Self {
         let mut engine = Engine::new();
+        let rng = random::register(&mut engine);
         let fit_msg_symdict = symdict.clone();
         let fill_msg_symdict = symdict.clone();
+        let fill_msg_rng = rng.clone();
+        let fit_msg_rng = rng.clone();
 
         engine.register_type::<StrokePath>()
             // Every path function both modifies the path in place and returns
@@ -393,7 +396,7 @@ impl JournalEngine {
                 };
 
                 let mut all_canvases = Vec::new();
-                let mut symbols = builder.build(msg);
+                let mut symbols = builder.build(msg, &mut *fill_msg_rng.borrow_mut());
                 while symbols.len() > 0 {
                     let (placed, unplaced) = place_along_path(symbols.drain(..).collect(), path, &args);
                     let mut canvas = Canvas::default();
@@ -411,7 +414,7 @@ impl JournalEngine {
                 let symdict = &fit_msg_symdict;
                 let fontset : styles::FontSet = fonts.into();
                 let builder = fontset.into_symbol_string_builder(&symdict);
-                let symbols = builder.build(msg);
+                let symbols = builder.build(msg, &mut *fit_msg_rng.borrow_mut());
                 let mut args = SymbolPlacementArgs{
                     avoid_kdtree: None,
                     symbol_scale: 20.0,
@@ -515,7 +518,6 @@ impl JournalEngine {
         });
 
         locks::register(&mut engine);
-        random::register(&mut engine);
 
         engine
             .build_type::<FontSet>()
@@ -663,6 +665,32 @@ mod tests {
             if missing["~"].tried != ["copper_upper_~"] { throw "unexpected tried list: " + missing["~"].tried; }
         "#;
         engine().build_entry_str(script).expect("script should run");
+    }
+
+    /// The svg of the first page of `script`'s entry, built by a fresh engine.
+    fn page_svg(script: &str) -> String {
+        let entry = engine().build_entry_str(script).expect("script should run");
+        let canvas: JournalCanvas = entry.pages[0].clone().into();
+        canvas.to_svg(None)
+    }
+
+    #[test]
+    fn glyph_variants_follow_the_seed() {
+        // copper_lower has several variants of most letters, so the text's
+        // glyphs depend on which variant each pick lands on.
+        let script = |seed: i64| format!(r#"{}
+            seed({});
+            let style = new_strokestyle(1.5, "black", brush);
+            let font = new_fontset(["copper_upper"], ["copper_lower"]);
+            let path = new_strokepath().move_to(new_vec(0.0, 0.0)).line_to(new_vec(2000.0, 0.0));
+            let page = new_page();
+            page.add_canvas(path.fit_msg_to(style, font, "a banana and an aardvark"));
+            journal_entry.add_page(page);
+        "#, BRUSH, seed);
+        // Each engine loads its own dictionary, so this also checks the pick
+        // doesn't depend on hash map order.
+        assert_eq!(page_svg(&script(3)), page_svg(&script(3)));
+        assert_ne!(page_svg(&script(3)), page_svg(&script(4)));
     }
 
     #[test]

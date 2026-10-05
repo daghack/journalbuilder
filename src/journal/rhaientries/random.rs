@@ -9,6 +9,9 @@
 //! let pick = random_range(0, 4);           // integer in 0..4
 //! if random() < 0.25 { ... }               // float in [0, 1)
 //! ```
+//!
+//! Native helpers that make random choices (glyph variants, text layout,
+//! hatching) draw from the same generator, so `seed` fixes those too.
 
 use rhai::{Engine, EvalAltResult};
 use rand::rngs::StdRng;
@@ -21,7 +24,12 @@ pub const DEFAULT_SEED: u64 = 0;
 
 type RhaiResult<T> = Result<T, Box<EvalAltResult>>;
 
-pub fn register(engine: &mut Engine) {
+/// An engine's generator, shared between the script functions and the
+/// native helpers.
+pub type SharedRng = Rc<RefCell<StdRng>>;
+
+/// Register the random functions, returning the generator they share.
+pub fn register(engine: &mut Engine) -> SharedRng {
     let rng = Rc::new(RefCell::new(StdRng::seed_from_u64(DEFAULT_SEED)));
 
     let r = rng.clone();
@@ -40,13 +48,15 @@ pub fn register(engine: &mut Engine) {
         Ok(r.borrow_mut().random_range(low..high))
     });
 
-    let r = rng;
+    let r = rng.clone();
     engine.register_fn("random_range", move |low: f64, high: f64| -> RhaiResult<f64> {
         if !(low < high) {
             return Err(format!("random_range: empty range {}..{}; the low end must be below the high end", low, high).into());
         }
         Ok(r.borrow_mut().random_range(low..high))
     });
+
+    rng
 }
 
 #[cfg(test)]

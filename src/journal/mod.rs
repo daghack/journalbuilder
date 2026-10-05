@@ -160,7 +160,7 @@ impl<'sd> Journal<'sd> {
         let symd = self.symd.unwrap();
         match page {
             JournalPage::SplatMsgsOnCanvas(mut canvas, msgs, sym_scale, width, color) => {
-                draw_msgs_overtop(&mut canvas, symd, &msgs, (200.0, 500.0), (300.0, 600.0), sym_scale, width, &color);
+                draw_msgs_overtop(&mut canvas, symd, &msgs, (200.0, 500.0), (300.0, 600.0), sym_scale, width, &color, &mut rand::rng());
                 self.add_page_entry(page_name, canvas, style);
             },
             JournalPage::CanvasIllustration(canvas) => {

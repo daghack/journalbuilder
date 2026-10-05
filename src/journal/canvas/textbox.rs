@@ -2,6 +2,7 @@ use parry2d::bounding_volume;
 use crate::journal::symbol::{Symbol, SymbolPlacementArgs, AvoidanceKdTree, place_along_path, place_words_along_path};
 use crate::journal::paths::StrokePath;
 use parry2d::math::{Vec2};
+use rand::{Rng, RngCore};
 
 #[derive(Clone)]
 pub struct TextBoxOptions<'kd> {
@@ -40,8 +41,8 @@ impl<'kd> TextBox<'kd> {
             symbol_scale: options.symbol_scale,
         }
     }
-    pub fn fill_line_with(&self, symbols: Vec<Symbol>, y_pos: f32) -> (Vec<Symbol>, Vec<Symbol>) {
-        let offset_x = rand::random::<f32>() * self.jagged_edge * self.symbol_scale;
+    pub fn fill_line_with(&self, symbols: Vec<Symbol>, y_pos: f32, rng: &mut dyn RngCore) -> (Vec<Symbol>, Vec<Symbol>) {
+        let offset_x = rng.random::<f32>() * self.jagged_edge * self.symbol_scale;
         let current_x = self.bounds.mins.x + offset_x;
         let width = (self.bounds.extents().x * 1.05) - offset_x;
         let stroke = StrokePath::new().move_to(current_x, y_pos).line_to(current_x + width, y_pos);
@@ -60,13 +61,13 @@ impl<'kd> TextBox<'kd> {
             },
         }
     }
-    pub fn fill_bounds_with(&self, mut to_place: Vec<Symbol>) -> (Vec<Symbol>, Vec<Symbol>) {
+    pub fn fill_bounds_with(&self, mut to_place: Vec<Symbol>, rng: &mut dyn RngCore) -> (Vec<Symbol>, Vec<Symbol>) {
         let min_y = self.bounds.mins.y;
         let mut current_y = min_y;
         let height = self.bounds.extents().y;
         let mut placed_symbols = Vec::new();
         while current_y - min_y < height {
-            let (mut placed_line, not_placed) = self.fill_line_with(to_place, current_y);
+            let (mut placed_line, not_placed) = self.fill_line_with(to_place, current_y, rng);
             to_place = not_placed;
             let mut max_height: f32 = 0.0;
             for symbol in &mut placed_line {
@@ -87,11 +88,11 @@ impl<'kd> TextBox<'kd> {
         }
         (placed_symbols, to_place)
     }
-    pub fn place_all_symbols(&self, mut symbols: Vec<Symbol>) -> Vec<Vec<Symbol>> {
+    pub fn place_all_symbols(&self, mut symbols: Vec<Symbol>, rng: &mut dyn RngCore) -> Vec<Vec<Symbol>> {
         // This effectively calls fill_bounds_with_ repeatedly until all symbols are placed
         let mut all_symbols = Vec::new();
         loop {
-            let (placed_symbols, not_placed) = self.fill_bounds_with(symbols);
+            let (placed_symbols, not_placed) = self.fill_bounds_with(symbols, rng);
             if placed_symbols.is_empty() {
                 break;
             }

@@ -3,6 +3,8 @@ use parry2d::math::{Vec2, Rot2};
 use parry2d::query::RayCast;
 use std::ops::Add;
 use std::cell::Cell;
+use rand::{Rng, RngCore, SeedableRng};
+use rand::rngs::StdRng;
 
 fn rotate_around_point(point: Vec2, angle: f32) -> Vec2 {
     let rot = Rot2::new(angle);
@@ -18,9 +20,9 @@ pub enum PathCmd {
     ClosePath,
 }
 
-fn roughen_point(point: Vec2, r: f32) -> Vec2 {
-    let random_theta = rand::random::<f32>() * std::f32::consts::PI * 2.0;
-    let random_magnitude = (rand::random::<f32>() - 0.5) * 2.0 * r;
+fn roughen_point(point: Vec2, r: f32, rng: &mut dyn RngCore) -> Vec2 {
+    let random_theta = rng.random::<f32>() * std::f32::consts::PI * 2.0;
+    let random_magnitude = (rng.random::<f32>() - 0.5) * 2.0 * r;
     point + Vec2::new(random_magnitude * random_theta.cos(), random_magnitude * random_theta.sin())
 }
 
@@ -469,13 +471,18 @@ impl StrokePath {
     }
     pub fn get_hull_points(&self) -> Vec<Vec2> {
         let substrokes = &self.to_substrokes();
-        substrokes.into_iter().flat_map(|substroke| {
-            substroke.get_point_samples(0.01).into_iter().map(|sample| {
-                let rand_offset_amount = 0.01;
-                let rand_offset = rand::random::<f32>() * rand_offset_amount - (rand_offset_amount / 2.0);
-                sample.point + Vec2::new(rand_offset, rand_offset)
-            })
-        }).collect()
+        // The jitter keeps the hull from degenerating on straight runs; a
+        // fixed seed keeps hulls, and so symbol placement, the same every run.
+        let mut rng = StdRng::seed_from_u64(0);
+        let rand_offset_amount = 0.01;
+        let mut points = Vec::new();
+        for substroke in substrokes {
+            for sample in substroke.get_point_samples(0.01) {
+                let rand_offset = rng.random::<f32>() * rand_offset_amount - (rand_offset_amount / 2.0);
+                points.push(sample.point + Vec2::new(rand_offset, rand_offset));
+            }
+        }
+        points
     }
     pub fn commands(&self) -> &Vec<PathCmd> {
         &self.commands
@@ -766,7 +773,7 @@ impl SubstrokePath {
         let mut stepper = SubstrokeStepper::new(self, 50);
         stepper.generate_equidistant_samples(distance_interval)
     }
-    pub fn ray_stroke_fill(&self, step_distance: f32, stroke_angle: f32, roughness: f32) -> StrokePath {
+    pub fn ray_stroke_fill(&self, step_distance: f32, stroke_angle: f32, roughness: f32, rng: &mut dyn RngCore) -> StrokePath {
         let samples = self
             .get_point_samples(step_distance)
             .into_iter()
@@ -827,8 +834,8 @@ impl SubstrokePath {
                 kept_intersections.pop();
             }
             for i in (0..kept_intersections.len()).step_by(2) {
-                let entry_point = roughen_point(kept_intersections[i].0, roughness);
-                let exit_point = roughen_point(kept_intersections[i + 1].0, roughness);
+                let entry_point = roughen_point(kept_intersections[i].0, roughness, rng);
+                let exit_point = roughen_point(kept_intersections[i + 1].0, roughness, rng);
                 fill_path = fill_path
                     .line_to(entry_point.x, entry_point.y)
                     .line_to(exit_point.x, exit_point.y);

@@ -1,6 +1,7 @@
 use crate::journal::symboldict::SymbolPathDict;
 use crate::journal::symbol::{Symbol, SymbolBase, SymbolType};
 
+use rand::{Rng, RngCore};
 use std::rc::Rc;
 
 /// The base-27 balanced-ternary symbol for a character, from -13 to 13:
@@ -22,35 +23,33 @@ pub fn balanced_base27_symbol(c: char) -> i32 {
 pub struct SymbolStringBuilder<'symdict> {
     symdict: &'symdict SymbolPathDict,
     transformer: StrToSymTransformer<'symdict>,
-    filters: Vec<Box<dyn Fn(&mut Symbol)>>,
-    collection_filters: Vec<Box<dyn Fn(&mut Vec<Symbol>)>>,
+    filters: Vec<Box<dyn Fn(&mut Symbol, &mut dyn RngCore)>>,
 }
 
-pub type StrToSymTransformer<'symdict> = Box<dyn Fn(&'symdict SymbolPathDict, char) -> Symbol>;
+/// Turns one character into a symbol. Any random choice (such as which
+/// variant of a glyph to draw) comes from the `rng` passed to `build`, so
+/// seeded callers get the same symbols every run.
+pub type StrToSymTransformer<'symdict> = Box<dyn Fn(&'symdict SymbolPathDict, char, &mut dyn RngCore) -> Symbol>;
 
 impl <'symdict> SymbolStringBuilder<'symdict> {
-    pub fn new<F: Fn(&'symdict SymbolPathDict, char) -> Symbol + 'static>(symdict: &'symdict SymbolPathDict, transformer: F) -> Self {
+    pub fn new<F: Fn(&'symdict SymbolPathDict, char, &mut dyn RngCore) -> Symbol + 'static>(symdict: &'symdict SymbolPathDict, transformer: F) -> Self {
         Self {
             symdict,
             transformer: Box::new(transformer),
             filters: Vec::new(),
-            collection_filters: Vec::new(),
         }
     }
-    pub fn add_filter<F: Fn(&mut Symbol) + 'static>(&mut self, filter: F) {
+    pub fn add_filter<F: Fn(&mut Symbol, &mut dyn RngCore) + 'static>(&mut self, filter: F) {
         self.filters.push(Box::new(filter));
     }
-    pub fn build(&self, s: &str) -> Vec<Symbol> {
+    pub fn build(&self, s: &str, rng: &mut dyn RngCore) -> Vec<Symbol> {
         let mut symbols = Vec::new();
         for c in s.chars() {
-            let mut symbol = (self.transformer)(self.symdict, c);
+            let mut symbol = (self.transformer)(self.symdict, c, rng);
             for filter in &self.filters {
-                filter(&mut symbol);
+                filter(&mut symbol, rng);
             }
             symbols.push(symbol);
-        }
-        for collection_filter in &self.collection_filters {
-            collection_filter(&mut symbols);
         }
         symbols
     }
@@ -58,7 +57,7 @@ impl <'symdict> SymbolStringBuilder<'symdict> {
 
 pub fn ternary_builder<'sd>(symdict: &'sd SymbolPathDict, prefix: &str) -> SymbolStringBuilder<'sd> {
     let prefix = prefix.to_string();
-    SymbolStringBuilder::<'sd>::new(symdict, move |symd, c| {
+    SymbolStringBuilder::<'sd>::new(symdict, move |symd, c, _rng| {
         let key = format!("{}_{}", prefix, balanced_base27_symbol(c));
         match symd.get_symbol_base(&key) {
             Some(sym_base) => Symbol::new_default_from_base_rc(sym_base),
@@ -69,7 +68,7 @@ pub fn ternary_builder<'sd>(symdict: &'sd SymbolPathDict, prefix: &str) -> Symbo
 
 pub fn lowercase_builder<'sd>(symdict: &'sd SymbolPathDict, prefix: &str) -> SymbolStringBuilder<'sd> {
     let prefix = prefix.to_string();
-    SymbolStringBuilder::<'sd>::new(symdict, move |symd, original| {
+    SymbolStringBuilder::<'sd>::new(symdict, move |symd, original, rng| {
         let c = original.to_lowercase().next().unwrap_or(' ');
         if c.is_whitespace() {
             if c == ' ' || c == '\n' {
@@ -84,8 +83,7 @@ pub fn lowercase_builder<'sd>(symdict: &'sd SymbolPathDict, prefix: &str) -> Sym
             let possible_keys = symd.symbols_with_prefix(key.as_str());
             if !possible_keys.is_empty() {
                 // choose a random key from possible_keys
-                let selection = rand::random::<u32>() % possible_keys.len() as u32;
-                key = possible_keys[selection as usize].clone();
+                key = possible_keys[rng.random_range(0..possible_keys.len())].clone();
             }
             match symd.get_symbol_base(&key) {
                 Some(sym_base) => Symbol::new_default_from_base_rc(sym_base),
@@ -106,7 +104,7 @@ impl FontSet {
         FontSet{upper_fonts, lower_fonts}
     }
     pub fn into_symbol_string_builder<'sd>(self, symdict: &'sd SymbolPathDict) -> SymbolStringBuilder<'sd> {
-        SymbolStringBuilder::<'sd>::new(symdict, move |symd, c| {
+        SymbolStringBuilder::<'sd>::new(symdict, move |symd, c, rng| {
             let FontSet{upper_fonts, lower_fonts} = &self;
             let prefix_c = c.to_lowercase().next().unwrap_or(' ');
             if prefix_c.is_whitespace() {
@@ -139,8 +137,7 @@ impl FontSet {
                 }
                 match chosen_keys {
                     Some(keys) => {
-                        let selection = rand::random::<u32>() % keys.len() as u32;
-                        let key = keys[selection as usize].clone();
+                        let key = keys[rng.random_range(0..keys.len())].clone();
                         match symd.get_symbol_base(&key) {
                             Some(sym_base) => Symbol::new_default_from_base_rc(sym_base),
                             None => symd.fallback_symbol(c, &[key]),

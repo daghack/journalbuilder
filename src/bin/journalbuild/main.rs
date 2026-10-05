@@ -48,9 +48,10 @@ fn journal_entry_18<'j>(journal: &'j mut Journal<'j>, symd: &'j symboldict::Symb
         let spider_web = entry.named_entries.get("spider_web")
             .expect("Entry 'spider_web' not found in journal entry");
 
-        let fateful_symbols = builder.build(fateful_pages);
+        let rng: &mut dyn rand::RngCore = &mut rand::rng();
+        let fateful_symbols = builder.build(fateful_pages, rng);
 
-        let spider_symbols = builder.build(spider_web);
+        let spider_symbols = builder.build(spider_web, rng);
 
         let bounds = Aabb::new(
             Vec2::new(-textbox_width / 2.0, -textbox_height / 2.0),
@@ -65,8 +66,8 @@ fn journal_entry_18<'j>(journal: &'j mut Journal<'j>, symd: &'j symboldict::Symb
         };
 
         let textbox = TextBox::new(textbox_opts);
-        let fateful_sym_set = textbox.place_all_symbols(fateful_symbols);
-        let spider_sym_set = textbox.place_all_symbols(spider_symbols);
+        let fateful_sym_set = textbox.place_all_symbols(fateful_symbols, rng);
+        let spider_sym_set = textbox.place_all_symbols(spider_symbols, rng);
         let total_count = (fateful_sym_set.len() + spider_sym_set.len()) as f32 / 2.0;
         let canvas_count = total_count.sqrt().ceil() as usize;
 
@@ -127,7 +128,7 @@ fn first_codex<'j>(journal: &'j mut Journal<'j>, symd: &'j symboldict::SymbolPat
         let first_half = &symbol_set[0..half_ring];
         let second_half = &symbol_set[symbol_set.len() - half_ring..].chars().collect::<String>();
         let msg = format!(" {}{}", first_half, second_half);
-        let symbols = builder.build(msg.as_str());
+        let symbols = builder.build(msg.as_str(), &mut rand::rng());
         let circle_count = 5;
         for _ in 0..circle_count {
             base_canvas.add_strokes(circle.clone(), StrokeStyle {
@@ -153,7 +154,7 @@ fn first_codex<'j>(journal: &'j mut Journal<'j>, symd: &'j symboldict::SymbolPat
                 }),
             }),
             symbol_scale,
-        });
+        }, &mut rand::rng());
         base_canvas.merge_canvas(drawn_canvas);
     }
     journal.add_symboldict(&symd);
