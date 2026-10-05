@@ -1,4 +1,6 @@
-use rhai::{Engine, EvalAltResult, ImmutableString, Array, Map, Dynamic, CustomType, TypeBuilder, Scope};
+mod locks;
+
+use rhai::{Engine, EvalAltResult, ImmutableString, Array, Dynamic, CustomType, TypeBuilder, Scope};
 use std::io::{Error, ErrorKind};
 use super::paths::StrokePath;
 use super::symboldict::SymbolPathDict;
@@ -11,13 +13,9 @@ use super::styles;
 use super::canvas::artistic::{BuiltMaze, MazeTraversal, MazeTraversalStrategy};
 use super::darkly;
 use ::darkly::engine::DarklyEngine;
-use crate::lockbuilder::{Lock, LockConfig, InfoVarType, CompositeLock};
-use crate::lockbuilder::registry::build_lock;
 use parry2d::math::Vec2 as PVec;
 
 use std::sync::Arc;
-use std::rc::Rc;
-use std::cell::RefCell;
 
 #[derive(Debug, Default, Clone, CustomType)]
 #[rhai_type(extra = Self::build_extra)]
@@ -373,7 +371,6 @@ impl JournalEngine {
         let mut engine = Engine::new();
         let fit_msg_symdict = symdict.clone();
         let fill_msg_symdict = symdict.clone();
-        let lockset = Rc::new(RefCell::new(vec![]));
 
         engine.register_type::<StrokePath>()
             // Every path function both modifies the path in place and returns
@@ -536,39 +533,8 @@ impl JournalEngine {
             Ok(BrushSettings::new_brush(name, min_pressure, max_pressure, size))
         });
 
-        let new_lock_lockset = lockset.clone();
-        engine.register_fn("lock_inputs", move |lock_index: &i64| -> Map {
-            let mut inputs = Map::new();
-            if let Some(lock) = new_lock_lockset.borrow().get(*lock_index as usize) {
-                Lock::inputs(lock).iter().for_each(|(var_name, var_type)| {
-                    let str = match var_type {
-                        InfoVarType::String => {
-                            "String".into()
-                        }
-                        InfoVarType::BaseNSymbol(symbol_count) => {
-                            format!("Base{}Symbol", symbol_count)
-                        }
-                        _ => {
-                            "Unknown".into()
-                        }
-                    };
-                    inputs.insert(var_name.into(), str.into());
-                });
-            }
-            inputs
-        });
+        locks::register(&mut engine);
 
-        let new_lock_lockset = lockset.clone();
-        engine.register_fn("new_lock", move |lock_config: &str| -> Result<i64, Box<EvalAltResult>> {
-            let lock_config: LockConfig = serde_json::from_str(lock_config)
-                .map_err(|e| format!("new_lock: invalid lock definition: {}", e))?;
-            let lock = CompositeLock::from_lockconfig(lock_config, |config| build_lock(&config.type_name, &config.options))
-                .map_err(|e| format!("new_lock: {}", e))?;
-            let mut lockset = new_lock_lockset.borrow_mut();
-            let index = lockset.len();
-            lockset.push(lock);
-            Ok(index as i64)
-        });
         engine
             .build_type::<FontSet>()
             .build_type::<Vec2>()
@@ -701,25 +667,6 @@ mod tests {
         );
         // A circle is four cubic quarter-arcs.
         assert_eq!(path_string("new_circle(new_vec(0.0, 0.0), 1.0)").matches('C').count(), 4);
-    }
-
-    #[test]
-    fn new_lock_builds_every_registry_type_including_maze() {
-        let script = r#"
-            let index = new_lock(`{"name": "maze", "locks": {"m": {"type_name": "maze_lock",
-                "options": {"input_base": 27, "strategy": "LeftHanded"}}},
-                "connections": [], "static_inputs": {}}`);
-            if index != 0 { throw "unexpected index"; }
-        "#;
-        engine().build_entry_str(script).expect("maze_lock should build");
-    }
-
-    #[test]
-    fn new_lock_reports_unknown_type_with_line() {
-        let script = "let ok = 1;\nlet bad = new_lock(`{\"name\": \"x\", \"locks\": {\"a\": {\"type_name\": \"rot13\", \"options\": {}}}, \"connections\": [], \"static_inputs\": {}}`);";
-        let err = engine().build_entry_str(script).err().expect("unknown type should fail").to_string();
-        assert!(err.contains("unknown lock type 'rot13'"), "{}", err);
-        assert!(err.contains("line 2"), "{}", err);
     }
 
     #[test]
