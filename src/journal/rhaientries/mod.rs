@@ -10,7 +10,7 @@ use super::canvas::CanvasStyleOptions;
 use super::canvas::Brush;
 use super::symbol::{place_along_path, SymbolPlacementArgs};
 use super::styles;
-use super::canvas::artistic::{BuiltMaze, MazeTraversal, MazeTraversalStrategy};
+use super::canvas::artistic::{BuiltMaze, MazeTraversalStrategy};
 use super::darkly;
 use ::darkly::engine::DarklyEngine;
 use parry2d::math::Vec2 as PVec;
@@ -453,39 +453,7 @@ impl JournalEngine {
                 let width = width as u64;
                 let height = height as u64;
                 let maze = BuiltMaze::<[i64; 1]>::new(seed, width as u32, height as u32);
-                let strategy = MazeTraversalStrategy::LeftHanded;
-                let traversal = MazeTraversal::new((0,0), strategy);
-                let mut path = StrokePath::new();
-                let mut current = (0, 0);
-                let mut visited = std::collections::HashSet::<(i32, i32)>::new();
-                for (step, _) in traversal.into_iter(&maze) {
-                    if maze.are_neighbors(&current, &step) {
-                        path = path.line_to(step.0 as f32, step.1 as f32);
-                    } else {
-                        let neighbors = maze.neighbors_of(&step).unwrap();
-                        let mut visited_neighbor = None;
-                        for neighbor in neighbors {
-                            if visited.contains(&neighbor) {
-                                visited_neighbor = Some(neighbor);
-                                break;
-                            }
-                        }
-                        match visited_neighbor {
-                            None => {
-                                path = path
-                                    .move_to(step.0 as f32, step.1 as f32)
-                            }
-                            Some(n) => {
-                                path = path
-                                    .move_to(n.0 as f32, n.1 as f32)
-                                    .line_to(step.0 as f32, step.1 as f32);
-                            }
-                        }
-                    }
-                    visited.insert(step);
-                    current = step;
-                }
-                path
+                maze.corridor_path(MazeTraversalStrategy::LeftHanded)
             })
             .register_fn("new_strokepath", StrokePath::new)
             .register_fn("cubic_to", |path: &mut StrokePath, c1: Vec2, c2: Vec2, end: Vec2| -> StrokePath {

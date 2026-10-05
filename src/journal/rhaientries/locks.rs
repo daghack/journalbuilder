@@ -16,7 +16,9 @@ use crate::lockbuilder::{
     symbols_to_string, CompositeLock, InfoVar, InfoVarGraphType, InfoVarSet, InfoVarType, Lock,
     LockConfig, LockTypeConfig,
 };
+use crate::lockbuilder::locks::maze::LockedMaze;
 use crate::lockbuilder::registry::build_lock;
+use crate::journal::paths::StrokePath;
 use std::collections::HashMap;
 
 type RhaiResult<T> = Result<T, Box<EvalAltResult>>;
@@ -26,6 +28,7 @@ pub fn register(engine: &mut Engine) {
         .build_type::<LockBuilder>()
         .build_type::<LockValue>()
         .build_type::<LockResult>()
+        .build_type::<Maze>()
         .register_fn("new_lock", LockBuilder::new)
         .register_fn("symbols", symbols);
 }
@@ -183,6 +186,13 @@ impl LockValue {
         self.text().unwrap_or_else(|_| format!("<{}>", self.type_name()))
     }
 
+    /// A maze output as a `Maze`, for drawing.
+    fn maze(&mut self) -> RhaiResult<Maze> {
+        self.var.borrow_data::<LockedMaze>()
+            .map(|locked| Maze { locked: locked.clone() })
+            .map_err(|_| format!("maze: a {} value isn't a maze", type_name(&self.var.var_type)).into())
+    }
+
     fn symbol_data(&self) -> RhaiResult<&Vec<u32>> {
         self.var.borrow_data::<Vec<u32>>().map_err(|_| format!("a {} value has no symbols", type_name(&self.var.var_type)).into())
     }
@@ -196,6 +206,7 @@ impl CustomType for LockValue {
             .with_fn("base", Self::base)
             .with_fn("symbols", Self::symbols)
             .with_fn("type_name", Self::type_name)
+            .with_fn("maze", Self::maze)
             .with_fn("to_string", Self::to_string)
             .with_fn("to_debug", Self::to_string);
     }
@@ -239,6 +250,59 @@ impl CustomType for LockResult {
             .with_fn("text", Self::text)
             .with_fn("values", Self::values)
             .with_fn("trace", Self::trace);
+    }
+}
+
+/// A maze from a maze lock, for drawing. Cells sit on an integer grid:
+/// nodes at even coordinates, passages between connected nodes. Each cell
+/// holds one symbol of the locked text.
+#[derive(Clone)]
+pub struct Maze {
+    locked: LockedMaze,
+}
+
+impl Maze {
+    /// Grid width in cells (passages included).
+    fn width(&mut self) -> i64 {
+        self.locked.maze.all_cells().iter().map(|c| c.position.0).max().map_or(0, |x| x as i64 + 1)
+    }
+
+    /// Grid height in cells (passages included).
+    fn height(&mut self) -> i64 {
+        self.locked.maze.all_cells().iter().map(|c| c.position.1).max().map_or(0, |y| y as i64 + 1)
+    }
+
+    /// Every cell, in the order the text was written into the maze:
+    /// `#{ x, y, symbol, step }`.
+    fn cells(&mut self) -> Array {
+        self.locked.maze.iter_inners(self.locked.strategy)
+            .enumerate()
+            .map(|(step, ((x, y), inner))| {
+                let mut cell = Map::new();
+                cell.insert("x".into(), Dynamic::from(x as i64));
+                cell.insert("y".into(), Dynamic::from(y as i64));
+                cell.insert("symbol".into(), Dynamic::from(inner.symbol as i64));
+                cell.insert("step".into(), Dynamic::from(step as i64));
+                Dynamic::from_map(cell)
+            })
+            .collect()
+    }
+
+    /// A path along the corridors, in grid units, following the same
+    /// traversal the text was written in.
+    fn path(&mut self) -> StrokePath {
+        self.locked.maze.corridor_path(self.locked.strategy)
+    }
+}
+
+impl CustomType for Maze {
+    fn build(mut builder: TypeBuilder<Self>) {
+        builder
+            .with_name("Maze")
+            .with_fn("width", Self::width)
+            .with_fn("height", Self::height)
+            .with_fn("cells", Self::cells)
+            .with_fn("path", Self::path);
     }
 }
 
@@ -338,6 +402,7 @@ fn sorted_names_of<'a>(names: impl Iterator<Item = &'a String>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
 
     fn engine() -> Engine {
         let mut engine = Engine::new();
@@ -453,6 +518,59 @@ mod tests {
             assert!(err.contains(expected), "expected {:?} in: {}", expected, err);
             assert!(err.contains("line 2"), "expected line 2 in: {}", err);
         }
+    }
+
+    const MAZE: &str = r#"
+        let lock = new_lock("m").add("m", "maze_lock", #{ input_base: 27, strategy: "LeftHanded" })
+            .set_input("m.random_seed", symbols(10, "42"));
+        let maze = lock.run(#{ "m.maze_text": symbols(27, "HELLO WORLD") }).get("m.generated_maze").maze();
+    "#;
+
+    #[test]
+    fn maze_cells_hold_the_text_in_write_order() {
+        let cells: Array = eval(&format!("{} maze.cells()", MAZE));
+        let cells: Vec<Map> = cells.into_iter().map(|c| c.cast::<Map>()).collect();
+        let field = |c: &Map, k: &str| c[k].clone().cast::<i64>();
+        let steps: Vec<i64> = cells.iter().map(|c| field(c, "step")).collect();
+        assert_eq!(steps, (0..cells.len() as i64).collect::<Vec<_>>());
+        // "HELLO WORLD" in base 27, then zero padding to fill the maze.
+        let symbols: Vec<i64> = cells.iter().map(|c| field(c, "symbol")).collect();
+        assert_eq!(&symbols[..11], &[8, 5, 12, 12, 15, 0, 23, 15, 18, 12, 4]);
+        assert!(symbols[11..].iter().all(|&s| s == 0), "{:?}", symbols);
+        // Every cell has a distinct grid position, starting at the origin.
+        let positions: HashSet<(i64, i64)> = cells.iter().map(|c| (field(c, "x"), field(c, "y"))).collect();
+        assert_eq!(positions.len(), cells.len());
+        assert_eq!((field(&cells[0], "x"), field(&cells[0], "y")), (0, 0));
+    }
+
+    #[test]
+    fn maze_size_covers_its_cells() {
+        let size: Array = eval(&format!(r#"{}
+            let w = maze.width(); let h = maze.height();
+            for c in maze.cells() {{ if c.x >= w || c.y >= h {{ throw "cell outside the grid"; }} }}
+            [w, h]
+        "#, MAZE));
+        let (w, h) = (size[0].clone().cast::<i64>(), size[1].clone().cast::<i64>());
+        // 11 symbols need 6 nodes; MazeLock sizes mazes to stay square, so
+        // that's 3x3 nodes rather than 3x2: 5x5 grid cells with the
+        // passages between them.
+        assert_eq!((w, h), (5, 5));
+    }
+
+    #[test]
+    fn maze_path_follows_the_corridors() {
+        let path: StrokePath = eval(&format!("{} maze.path()", MAZE));
+        let path = path.to_string();
+        assert!(path.starts_with("M 0 0 "), "{}", path);
+        // Every coordinate is a grid cell inside the maze.
+        let numbers: Vec<f32> = path.split_whitespace().filter_map(|t| t.parse().ok()).collect();
+        assert!(numbers.iter().all(|&n| n >= 0.0 && n <= 4.0 && n.fract() == 0.0), "{}", path);
+    }
+
+    #[test]
+    fn maze_rejects_non_maze_values() {
+        let err = error("let ok = 1;\nsymbols(27, \"HI\").maze();");
+        assert!(err.contains("isn't a maze") && err.contains("line 2"), "{}", err);
     }
 
     #[test]

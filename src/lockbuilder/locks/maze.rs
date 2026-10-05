@@ -19,6 +19,14 @@ impl Fill for SymbolInfo {
 }
 
 
+/// A maze lock's `generated_maze` output: the maze, with the text written
+/// into its cells in `strategy`'s traversal order.
+#[derive(Clone, Debug)]
+pub struct LockedMaze {
+    pub maze: BuiltMaze<SymbolInfo>,
+    pub strategy: MazeTraversalStrategy,
+}
+
 #[derive(Clone, Debug)]
 pub struct MazeLock {
     pub input_base: u32,
@@ -116,7 +124,7 @@ impl Lock for MazeLock {
         let mut output_set = InfoVarSet::new();
         output_set.insert("generated_maze".to_string(), InfoVar::new_with(
             InfoVarType::Graph(InfoVarGraphType::MazeLock),
-            generated_maze,
+            LockedMaze { maze: generated_maze, strategy: self.strategy },
         ));
         output_set.insert("random_seed".to_string(), InfoVar::new_with(
             InfoVarType::BaseNSymbol(10),
@@ -142,7 +150,7 @@ impl Lock for MazeLock {
         for &digit in random_seed_data.iter() {
             random_seed_value = random_seed_value * 10 + (digit as u64);
         }
-        let generated_maze_data : &BuiltMaze<SymbolInfo> = generated_maze.borrow_data()?;
+        let generated_maze_data : &BuiltMaze<SymbolInfo> = &generated_maze.borrow_data::<LockedMaze>()?.maze;
         let text_length = inputs.get("text_length").ok_or("text_length not found")?;
         if !text_length.is(InfoVarType::LockProcessInfo) {
             return Err("text_length is not LockProcessInfo".into());
@@ -167,3 +175,4 @@ impl Lock for MazeLock {
         Ok(output_set)
     }
 }
+

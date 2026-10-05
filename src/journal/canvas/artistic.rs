@@ -1,7 +1,7 @@
 use parry2d::math::{Vec2};
 
 use crate::lockbuilder::*;
-use crate::lockbuilder::locks::maze::{SymbolInfo};
+use crate::lockbuilder::locks::maze::{LockedMaze, SymbolInfo};
 use crate::journal::canvas::{Canvas, StrokeStyle, CanvasShape, textbox::{TextBox, TextBoxOptions, TextBoxLineMode}};
 use crate::journal::JournalEntry;
 use crate::journal::symboldict;
@@ -24,7 +24,7 @@ pub fn build_maze_canvas_from_entry(entry: &JournalEntry, symd: &symboldict::Sym
     let output_value_strings = string_infovar_set(&lock_output);
     let mut base_canvas = Canvas::new();
     let mut avoid_canvas = Canvas::new();
-    let generate_maze : &BuiltMaze<SymbolInfo> = lock_output.get("maze_encode.generated_maze").expect("generated_maze not found").borrow_data::<BuiltMaze<SymbolInfo>>().expect("generated_maze is not a BuiltMaze");
+    let generate_maze : &BuiltMaze<SymbolInfo> = &lock_output.get("maze_encode.generated_maze").expect("generated_maze not found").borrow_data::<LockedMaze>().expect("generated_maze is not a LockedMaze").maze;
 
     let radius = 50.0;
     let cell_width = radius;
@@ -575,6 +575,32 @@ impl<T> BuiltMaze<T> where
     }
     pub fn all_cells(&self) -> &Vec<MazeLockCell<T>> {
         &self.cells
+    }
+    /// A path along the maze's corridors, in grid units, following the
+    /// traversal order: a line between consecutive connected cells, and a
+    /// jump back to the branch point whenever the traversal backtracks.
+    pub fn corridor_path(&self, strategy: MazeTraversalStrategy) -> StrokePath {
+        let mut path = StrokePath::new();
+        let mut current = (0, 0);
+        let mut visited = HashSet::<MazePosition>::new();
+        for (step, _) in self.iter_inners(strategy) {
+            if self.are_neighbors(&current, &step) {
+                path = path.line_to(step.0 as f32, step.1 as f32);
+            } else {
+                let neighbors = self.neighbors_of(&step).unwrap_or_default();
+                match neighbors.into_iter().find(|n| visited.contains(n)) {
+                    None => path = path.move_to(step.0 as f32, step.1 as f32),
+                    Some(n) => {
+                        path = path
+                            .move_to(n.0 as f32, n.1 as f32)
+                            .line_to(step.0 as f32, step.1 as f32);
+                    }
+                }
+            }
+            visited.insert(step);
+            current = step;
+        }
+        path
     }
 }
 
