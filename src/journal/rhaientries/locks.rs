@@ -389,11 +389,7 @@ mod tests {
         "#, CHAIN);
         let recovered: Array = eval(&script);
         let recovered: Vec<String> = recovered.into_iter().map(|v| v.cast::<String>()).collect();
-        // MazeLock pads its text with zero symbols to fill a rectangular maze
-        // and doesn't strip them on unlock, so the Vigenère layer decodes
-        // that padding into trailing letters. Only the prefix round-trips.
-        assert!(recovered[0].starts_with("THE CONVERSION"), "{:?}", recovered);
-        assert_eq!(recovered[1], "THE KEY");
+        assert_eq!(recovered, vec!["THE CONVERSION", "THE KEY"]);
     }
 
     #[test]

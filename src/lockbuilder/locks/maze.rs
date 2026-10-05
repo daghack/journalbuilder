@@ -76,6 +76,12 @@ impl Lock for MazeLock {
             "random_seed".to_string(),
             InfoVarType::BaseNSymbol(10),
         );
+        // The maze pads the text with zero symbols to fill its cells; the
+        // original length lets unlocking strip that padding again.
+        outputs.insert(
+            "text_length".to_string(),
+            InfoVarType::LockProcessInfo,
+        );
         outputs
     }
     fn lock_info(&self, inputs: &InfoVarSet) -> Result<InfoVarSet, Box<dyn Error>> {
@@ -93,6 +99,7 @@ impl Lock for MazeLock {
             random_seed_value = random_seed_value * 10 + (digit as u64);
         }
         let maze_text_data : &Vec<u32> = maze_text.borrow_data()?;
+        let text_length = maze_text_data.len();
         let mut maze_text_vec = maze_text_data.clone();
         let mut generated_maze = Self::generate_maze(&mut maze_text_vec, random_seed_value);
 
@@ -115,6 +122,10 @@ impl Lock for MazeLock {
             InfoVarType::BaseNSymbol(10),
             random_seed_data.clone(),
         ));
+        output_set.insert("text_length".to_string(), InfoVar::new_with(
+            InfoVarType::LockProcessInfo,
+            text_length,
+        ));
         Ok(output_set)
     }
     fn unlock_info(&self, inputs: &InfoVarSet) -> Result<InfoVarSet, Box<dyn Error>> {
@@ -132,11 +143,18 @@ impl Lock for MazeLock {
             random_seed_value = random_seed_value * 10 + (digit as u64);
         }
         let generated_maze_data : &BuiltMaze<SymbolInfo> = generated_maze.borrow_data()?;
+        let text_length = inputs.get("text_length").ok_or("text_length not found")?;
+        if !text_length.is(InfoVarType::LockProcessInfo) {
+            return Err("text_length is not LockProcessInfo".into());
+        }
+        let text_length: usize = *text_length.borrow_data()?;
         let mut decoded_maze = Vec::new();
         for (pos, _) in generated_maze_data.iter_inners(self.strategy) {
             let cell = generated_maze_data.cell_at(&pos).expect("Cell should exist");
             decoded_maze.push(cell.inner.symbol);
         }
+        // Drop the padding the maze added to fill its cells.
+        decoded_maze.truncate(text_length);
         let mut output_set = InfoVarSet::new();
         output_set.insert("maze_text".to_string(), InfoVar::new_with(
             InfoVarType::BaseNSymbol(self.input_base),
