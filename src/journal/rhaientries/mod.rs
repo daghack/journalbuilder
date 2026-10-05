@@ -11,14 +11,8 @@ use super::styles;
 use super::canvas::artistic::{BuiltMaze, MazeTraversal, MazeTraversalStrategy};
 use super::darkly;
 use ::darkly::engine::DarklyEngine;
-use crate::composite_from_locktypes;
 use crate::lockbuilder::{Lock, LockConfig, InfoVarType, CompositeLock};
-use crate::lockbuilder::locks::doublering::{DoubleRingLock, DoubleRingOptions, KeyedDoubleRingLock, KeyedDoubleRingOptions};
-use crate::lockbuilder::locks::util::mergealpha::{MergeAlphaInputs, MergeAlpha26Options};
-use crate::lockbuilder::locks::util::splitsymbols::{SplitSymbolsLock, SplitSymbolsOptions};
-use crate::lockbuilder::locks::shift::{ShiftCipherLock, ShiftCipherOptions, VignCipherLock, VignCipherOptions};
-use crate::lockbuilder::locks::huffman::{HuffmanEncodingLock, HuffmanEncodingOptions};
-use crate::lockbuilder::locks::substitution::{SubstitutionCipherLock, SubstitutionCipherOptions};
+use crate::lockbuilder::registry::build_lock;
 use parry2d::math::Vec2 as PVec;
 
 use std::sync::Arc;
@@ -565,22 +559,15 @@ impl JournalEngine {
         });
 
         let new_lock_lockset = lockset.clone();
-        engine.register_fn("new_lock", move |lock_config: &str| -> i64 {
-            let lock_config: LockConfig = serde_json::from_str(lock_config).expect("Failed to parse lock definition");
-            let lock = composite_from_locktypes!(lock_config,
-                "shift_cipher", ShiftCipherLock, ShiftCipherOptions,
-                "vigenere_cipher", VignCipherLock, VignCipherOptions,
-                "huffman_encoding", HuffmanEncodingLock, HuffmanEncodingOptions,
-                "doublering", DoubleRingLock, DoubleRingOptions,
-                "keyed_doublering", KeyedDoubleRingLock, KeyedDoubleRingOptions,
-                "merge_alpha", MergeAlphaInputs, MergeAlpha26Options,
-                "split_symbols", SplitSymbolsLock, SplitSymbolsOptions,
-                "substitution_cipher", SubstitutionCipherLock, SubstitutionCipherOptions,
-            ).expect("Failed to create lock from config.");
+        engine.register_fn("new_lock", move |lock_config: &str| -> Result<i64, Box<EvalAltResult>> {
+            let lock_config: LockConfig = serde_json::from_str(lock_config)
+                .map_err(|e| format!("new_lock: invalid lock definition: {}", e))?;
+            let lock = CompositeLock::from_lockconfig(lock_config, |config| build_lock(&config.type_name, &config.options))
+                .map_err(|e| format!("new_lock: {}", e))?;
             let mut lockset = new_lock_lockset.borrow_mut();
             let index = lockset.len();
             lockset.push(lock);
-            index as i64
+            Ok(index as i64)
         });
         engine
             .build_type::<FontSet>()
@@ -714,6 +701,25 @@ mod tests {
         );
         // A circle is four cubic quarter-arcs.
         assert_eq!(path_string("new_circle(new_vec(0.0, 0.0), 1.0)").matches('C').count(), 4);
+    }
+
+    #[test]
+    fn new_lock_builds_every_registry_type_including_maze() {
+        let script = r#"
+            let index = new_lock(`{"name": "maze", "locks": {"m": {"type_name": "maze_lock",
+                "options": {"input_base": 27, "strategy": "LeftHanded"}}},
+                "connections": [], "static_inputs": {}}`);
+            if index != 0 { throw "unexpected index"; }
+        "#;
+        engine().build_entry_str(script).expect("maze_lock should build");
+    }
+
+    #[test]
+    fn new_lock_reports_unknown_type_with_line() {
+        let script = "let ok = 1;\nlet bad = new_lock(`{\"name\": \"x\", \"locks\": {\"a\": {\"type_name\": \"rot13\", \"options\": {}}}, \"connections\": [], \"static_inputs\": {}}`);";
+        let err = engine().build_entry_str(script).err().expect("unknown type should fail").to_string();
+        assert!(err.contains("unknown lock type 'rot13'"), "{}", err);
+        assert!(err.contains("line 2"), "{}", err);
     }
 
     #[test]

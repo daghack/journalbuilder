@@ -10,21 +10,13 @@ pub mod darkly;
 pub use paths::StrokePath;
 
 use serde::{Deserialize};
-use std::rc::Rc;
 use std::collections::HashMap;
 
-use crate::composite_from_locktypes;
 use crate::lockbuilder::*;
-use crate::lockbuilder::locks::maze::{MazeLock};
-use crate::lockbuilder::locks::doublering::{DoubleRingLock, DoubleRingOptions, KeyedDoubleRingLock, KeyedDoubleRingOptions};
-use crate::lockbuilder::locks::util::mergealpha::{MergeAlphaInputs, MergeAlpha26Options};
-use crate::lockbuilder::locks::util::splitsymbols::{SplitSymbolsLock, SplitSymbolsOptions};
-use crate::lockbuilder::locks::shift::{ShiftCipherLock, ShiftCipherOptions, VignCipherLock, VignCipherOptions};
-use crate::lockbuilder::locks::huffman::{HuffmanEncodingLock, HuffmanEncodingOptions};
-use crate::lockbuilder::locks::substitution::{SubstitutionCipherLock, SubstitutionCipherOptions};
+use crate::lockbuilder::registry::build_lock;
 use crate::journal::canvas::{Canvas, CanvasStyleOptions};
 
-use crate::journal::canvas::artistic::{MazeOptions, draw_msgs_overtop};
+use crate::journal::canvas::artistic::draw_msgs_overtop;
 
 #[derive(Debug, Clone)]
 pub struct JournalEntry {
@@ -62,17 +54,8 @@ impl<'de> Deserialize<'de> for JournalEntry {
                     }
                 }
             }
-            let mut lock = composite_from_locktypes!(lock_config,
-                "shift_cipher", ShiftCipherLock, ShiftCipherOptions,
-                "vigenere_cipher", VignCipherLock, VignCipherOptions,
-                "huffman_encoding", HuffmanEncodingLock, HuffmanEncodingOptions,
-                "doublering", DoubleRingLock, DoubleRingOptions,
-                "keyed_doublering", KeyedDoubleRingLock, KeyedDoubleRingOptions,
-                "merge_alpha", MergeAlphaInputs, MergeAlpha26Options,
-                "split_symbols", SplitSymbolsLock, SplitSymbolsOptions,
-                "substitution_cipher", SubstitutionCipherLock, SubstitutionCipherOptions,
-                "maze_lock", MazeLock, MazeOptions
-            ).expect("Failed to create lock from config");
+            let mut lock = CompositeLock::from_lockconfig(lock_config, |config| build_lock(&config.type_name, &config.options))
+                .map_err(|e| serde::de::Error::custom(format!("journal lock '{}': {}", key, e)))?;
             for (key, input_var_type) in lock.inputs().into_iter() {
                 // if the key exists in the named_entries,
                 // add it as a static input (after parsing)

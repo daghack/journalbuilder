@@ -1,0 +1,90 @@
+//! The single list of lock types that can be built by name, shared by the
+//! legacy JSON journals and the rhai API.
+
+use super::Lock;
+use super::locks::doublering::{DoubleRingLock, KeyedDoubleRingLock};
+use super::locks::huffman::HuffmanEncodingLock;
+use super::locks::maze::MazeLock;
+use super::locks::shift::{ShiftCipherLock, VignCipherLock};
+use super::locks::substitution::SubstitutionCipherLock;
+use super::locks::util::mergealpha::MergeAlphaInputs;
+use super::locks::util::splitsymbols::SplitSymbolsLock;
+use serde::de::DeserializeOwned;
+use std::error::Error;
+use std::rc::Rc;
+
+/// Every lock type name `build_lock` accepts.
+pub const LOCK_TYPES: &[&str] = &[
+    "shift_cipher",
+    "vigenere_cipher",
+    "huffman_encoding",
+    "doublering",
+    "keyed_doublering",
+    "merge_alpha",
+    "split_symbols",
+    "substitution_cipher",
+    "maze_lock",
+];
+
+/// Build a lock of the named type from its JSON options.
+pub fn build_lock(type_name: &str, options: &serde_json::Value) -> Result<Rc<dyn Lock>, Box<dyn Error>> {
+    match type_name {
+        "shift_cipher" => make(type_name, options, ShiftCipherLock::new),
+        "vigenere_cipher" => make(type_name, options, VignCipherLock::new),
+        "huffman_encoding" => make(type_name, options, HuffmanEncodingLock::new),
+        "doublering" => make(type_name, options, DoubleRingLock::new),
+        "keyed_doublering" => make(type_name, options, KeyedDoubleRingLock::new),
+        "merge_alpha" => make(type_name, options, MergeAlphaInputs::new),
+        "split_symbols" => make(type_name, options, SplitSymbolsLock::new),
+        "substitution_cipher" => make(type_name, options, SubstitutionCipherLock::new),
+        "maze_lock" => make(type_name, options, MazeLock::new),
+        _ => Err(format!("unknown lock type '{}'; available: {}", type_name, LOCK_TYPES.join(", ")).into()),
+    }
+}
+
+fn make<O, L>(
+    type_name: &str,
+    options: &serde_json::Value,
+    new: impl FnOnce(O) -> Result<L, Box<dyn Error>>,
+) -> Result<Rc<dyn Lock>, Box<dyn Error>>
+where
+    O: DeserializeOwned,
+    L: Lock + 'static,
+{
+    let options: O = serde_json::from_value(options.clone())
+        .map_err(|e| format!("invalid options for lock type '{}': {}", type_name, e))?;
+    let lock = new(options).map_err(|e| format!("cannot create '{}' lock: {}", type_name, e))?;
+    Ok(Rc::new(lock))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_listed_type_is_buildable_by_name() {
+        // Empty options fail to parse, but must not be reported as an
+        // unknown type: that would mean LOCK_TYPES and the match disagree.
+        for type_name in LOCK_TYPES {
+            let err = build_lock(type_name, &serde_json::json!({})).err().map(|e| e.to_string());
+            assert!(
+                err.as_deref().map_or(true, |e| !e.contains("unknown lock type")),
+                "{} is listed but not handled: {:?}", type_name, err,
+            );
+        }
+    }
+
+    #[test]
+    fn builds_a_lock_from_options() {
+        let lock = build_lock("substitution_cipher", &serde_json::json!({ "base_n": 27 })).expect("should build");
+        assert!(lock.inputs().contains_key("plain_text"), "{:?}", lock.inputs());
+    }
+
+    #[test]
+    fn reports_unknown_type_and_bad_options() {
+        let unknown = build_lock("rot13", &serde_json::json!({})).err().unwrap().to_string();
+        assert!(unknown.contains("unknown lock type 'rot13'") && unknown.contains("maze_lock"), "{}", unknown);
+        let bad = build_lock("substitution_cipher", &serde_json::json!({ "base_n": "lots" })).err().unwrap().to_string();
+        assert!(bad.contains("invalid options for lock type 'substitution_cipher'"), "{}", bad);
+    }
+}

@@ -1,4 +1,5 @@
 pub mod locks;
+pub mod registry;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::{DfsPostOrder, Walker};
 use serde::{Serialize, Deserialize};
@@ -21,44 +22,6 @@ macro_rules! base_n_input_set {
         }
     };
 }
-
-#[macro_export]
-macro_rules! composite_from_locktypes {
-    ($lock_config:expr, $($lock_type:literal, $lock_struct:ident, $lock_options:ident),+ $(,)?) => {
-        {
-            CompositeLock::from_lockconfig($lock_config, |lock_type_config| {
-                match lock_type_config.type_name.as_str() {
-                    $( $lock_type => {
-                        let options: $lock_options = serde_json::from_value(lock_type_config.options.clone())
-                            .expect(&format!("Failed to parse options for lock type: {}", $lock_type));
-                        let lock_instance = $lock_struct::new(options).expect(&format!("Failed to create lock instance for type: {}", $lock_type));
-                        Ok(Rc::new(lock_instance) as Rc<dyn Lock>)
-                    }, )+
-                    _ => Err(format!("Unknown lock type: {}", lock_type_config.type_name).into()),
-                }
-            })
-        }
-    };
-}
-#[macro_export]
-macro_rules! composite_from_config_func {
-    ($($lock_type:literal, $lock_struct:ident, $lock_options:ident),+ $(,)?) => {
-        {
-            |lock_type_config: &LockTypeConfig| {
-                match lock_type_config.type_name.as_str() {
-                    $( $lock_type => {
-                        let options: $lock_options = serde_json::from_value(lock_type_config.options.clone())
-                            .expect(&format!("Failed to parse options for lock type: {}", $lock_type));
-                        let lock_instance = $lock_struct::new(options).expect(&format!("Failed to create lock instance for type: {}", $lock_type));
-                        Ok(Rc::new(lock_instance) as Rc<dyn Lock>)
-                    }, )+
-                    _ => Err(format!("Unknown lock type: {}", lock_type_config.type_name).into()),
-                }
-            }
-        }
-    };
-}
-
 
 pub fn symbols_to_string(symbols: &[u32], base: u32) -> String {
     if base == 10 {
