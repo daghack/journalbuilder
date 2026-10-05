@@ -62,12 +62,16 @@ pub fn render_canvas_scaled(
     width: u32,
     height: u32,
     brush_scale: f32,
-    supersample: u32,
+    supersample: f32,
 ) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
-    let k = supersample.max(1);
-    resize_canvas(engine, width * k, height * k);
-    let rendered = render_canvas(canvas, engine, default_brush, brush_scale * k as f32);
-    if k == 1 {
+    let k = supersample.max(1.0);
+    // Fractional factors are fine: the render rounds to whole pixels, and
+    // the filter scales back down by any ratio.
+    let render_width = (width as f32 * k).round() as u32;
+    let render_height = (height as f32 * k).round() as u32;
+    resize_canvas(engine, render_width, render_height);
+    let rendered = render_canvas(canvas, engine, default_brush, brush_scale * k);
+    if (render_width, render_height) == (width, height) {
         rendered
     } else {
         downsample(&rendered, width, height)

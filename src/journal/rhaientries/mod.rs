@@ -41,7 +41,7 @@ impl Entry {
         self.pages.iter().enumerate()
             .filter(move |(i, _)| only.map_or(true, |pages| pages.contains(i)))
     }
-    pub fn darkly_publish_pngs(&self, engine: &mut DarklyEngine, dirname: &str, scale: f32, supersample: u32, only: Option<&[usize]>) {
+    pub fn darkly_publish_pngs(&self, engine: &mut DarklyEngine, dirname: &str, scale: f32, supersample: f32, only: Option<&[usize]>) {
         for (i, page) in self.selected_pages(only) {
             let canvases = page.canvases();
             for (canvas_i, canvas) in canvases.into_iter().enumerate() {
