@@ -1,4 +1,5 @@
 mod locks;
+mod random;
 
 use rhai::{Engine, EvalAltResult, ImmutableString, Array, Dynamic, CustomType, TypeBuilder, Scope};
 use std::io::{Error, ErrorKind};
@@ -502,6 +503,7 @@ impl JournalEngine {
         });
 
         locks::register(&mut engine);
+        random::register(&mut engine);
 
         engine
             .build_type::<FontSet>()

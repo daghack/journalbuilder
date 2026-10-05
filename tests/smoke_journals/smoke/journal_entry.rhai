@@ -28,9 +28,10 @@ shapes.add_strokepath(
 		.close(),
 	accent);
 
-// A symbol, transformed with chained calls.
+// A symbol, transformed with chained calls, at a seeded random tilt.
+seed(3);
 shapes.add_strokepath(
-	load_symbol("basic_eye").scale_by(30.0).rotate_around(new_vec(0.0, 0.0), 0.3).translate_by(new_vec(0.0, 0.0)),
+	load_symbol("basic_eye").scale_by(30.0).rotate_around(new_vec(0.0, 0.0), random_range(-0.3, 0.3)).translate_by(new_vec(0.0, 0.0)),
 	outline);
 
 // Text fitted along an arc.
