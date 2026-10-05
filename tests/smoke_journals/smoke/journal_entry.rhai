@@ -1,6 +1,6 @@
 // Smoke-test fixture: small, so it renders in seconds, but it exercises
-// every rhai feature journals rely on. Rendered by scripts/smoke.sh and
-// evaluated by tests/journal_scripts.rs.
+// every rhai feature journals rely on, including lock chains and mazes.
+// Rendered by scripts/smoke.sh and evaluated by tests/journal_scripts.rs.
 
 let ink_pen = new_brush("Ink Pen", 0.3, 0.7, 1.0);
 let rough = new_brush("Rough Ink", 0.25, 0.5, 1.0);
@@ -52,3 +52,32 @@ let page_two = new_page();
 page_two.add_canvas(maze_canvas);
 page_two.add_canvas(filled[0].translate(new_vec(0.0, 160.0)));
 journal_entry.add_page(page_two);
+
+// ---- page three: a lock chain drawn as a maze of glyphs ----
+let lock = new_lock("smoke_lock")
+	.add("sub", "substitution_cipher", #{ base_n: 27 })
+	.add("vig", "vigenere_cipher", #{ key_base: 27, plain_base: 27, cipher_base: 27 })
+	.add("maze", "maze_lock", #{ input_base: 27, strategy: "RightHanded" })
+	.connect("sub.cipher_text", "vig.key")
+	.connect("vig.cipher_text", "maze.maze_text")
+	.set_input("sub.ordering", symbols(27, "IKBNAZXYFTQWJ HRGLMOUVCPEDS"))
+	.set_input("maze.random_seed", symbols(10, "7"));
+let plain = "every lock opens";
+let result = lock.run(#{ "sub.plain_text": symbols(27, "key"), "vig.plain_text": symbols(27, plain) });
+if lock.unlock(result).text("vig.plain_text") != plain.to_upper() {
+	throw "smoke lock didn't round-trip";
+}
+
+let maze = result.get("maze.generated_maze").maze();
+let cell_size = 24.0;
+let maze_canvas = new_canvas();
+maze_canvas.add_strokepath(maze.path().scale_by(cell_size), faint);
+for cell in maze.cells() {
+	maze_canvas.add_strokepath(
+		load_symbol("balanced_ternary_" + (cell.symbol - 13)).scale_by(cell_size / 2.0)
+			.translate_by(new_vec(cell.x * cell_size, cell.y * cell_size)),
+		outline);
+}
+let page_three = new_page();
+page_three.add_canvas(maze_canvas);
+journal_entry.add_page(page_three);
