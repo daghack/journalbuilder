@@ -3,60 +3,20 @@ use crate::journal::symbol::{Symbol, SymbolBase, SymbolType};
 
 use std::rc::Rc;
 
-fn to_balanced_ternary(n: i32) -> Vec<i8> {
-    if n == 0 {
-        return vec![0];
+/// The base-27 balanced-ternary symbol for a character, from -13 to 13:
+/// the 26 ASCII letters take the non-zero symbols (a..=m -> 1..=13,
+/// n..=z -> -13..=-1, case-insensitively), and everything else (space,
+/// digits, punctuation, non-ASCII letters) shares 0.
+pub fn balanced_base27_symbol(c: char) -> i32 {
+    if !c.is_ascii_alphabetic() {
+        return 0;
     }
-    let mut num = n;
-    let mut digits = Vec::new();
-    while num != 0 {
-        let mut remainder = num % 3;
-        num /= 3;
-        if remainder == 2 {
-            remainder = -1;
-            num += 1;
-        } else if remainder == -2 {
-            remainder = 1;
-            num -= 1;
-        }
-        digits.push(remainder as i8);
+    let ordinal = (c.to_ascii_lowercase() as u8 - b'a') as i32;
+    if ordinal < 13 {
+        ordinal + 1
+    } else {
+        ordinal - 26
     }
-    digits
-}
-
-fn to_balanced_ternary_digits(n: i32, tern_per_digit: usize) -> Vec<Vec<i8>> {
-    let ternary = to_balanced_ternary(n);
-    let mut digits = Vec::new();
-    let mut current_digit = Vec::new();
-    for (i, &digit) in ternary.iter().enumerate() {
-        current_digit.push(digit);
-        if (i + 1) % tern_per_digit == 0 {
-            digits.push(current_digit);
-            current_digit = Vec::new();
-        }
-    }
-    if !current_digit.is_empty() {
-        digits.push(current_digit);
-    }
-    digits
-}
-
-fn from_balanced_ternary(digits: &Vec<i8>) -> i32 {
-    let mut value = 0;
-    for (i, &digit) in digits.iter().enumerate() {
-        value += (digit as i32) * 3_i32.pow(i as u32);
-    }
-    value
-}
-
-fn into_balanced_ternary_ints(n: i32, tern_per_digit: usize) -> Vec<i32> {
-    let balanced_ternary_digits = to_balanced_ternary_digits(n, tern_per_digit);
-    let mut ints = Vec::new();
-    for digit in balanced_ternary_digits {
-        let int_value = from_balanced_ternary(&digit);
-        ints.push(int_value);
-    }
-    ints
 }
 
 pub struct SymbolStringBuilder<'symdict> {
@@ -99,28 +59,14 @@ impl <'symdict> SymbolStringBuilder<'symdict> {
 pub fn ternary_builder<'sd>(symdict: &'sd SymbolPathDict, prefix: &str) -> SymbolStringBuilder<'sd> {
     let prefix = prefix.to_string();
     SymbolStringBuilder::<'sd>::new(symdict, move |symd, c| {
-        let c = c.to_lowercase().next().unwrap_or(' ');
-        let char_int = if c.is_alphabetic() {
-            let char_ord = c as i32 - 'a' as i32;
-            let which_half = char_ord / 13;
-            let char_ord = char_ord - (26 * which_half);
-            char_ord + (1 - which_half)
+        let key = format!("{}_{}", prefix, balanced_base27_symbol(c));
+        if let Some(sym_base) = symd.get_symbol_base(&key) {
+            Symbol::new_default_from_base_rc(sym_base)
         } else {
-            0
-        };
-        let ternary_digits = into_balanced_ternary_ints(char_int, 3);
-        for digit in ternary_digits.iter() {
-            let key = format!("{}_{}", prefix, digit);
-            if let Some(sym_base) = symd.get_symbol_base(&key) {
-                return Symbol::new_default_from_base_rc(sym_base);
-            } else {
-                //print to stderr that the symbol was not found
-                eprintln!("Symbol '{}' not found in symbol dictionary, using 'X' instead.", key);
-                return Symbol::new_default_from_base_rc(symd.get_symbol_base("X").unwrap());
-            }
+            //print to stderr that the symbol was not found
+            eprintln!("Symbol '{}' not found in symbol dictionary, using 'X' instead.", key);
+            Symbol::new_default_from_base_rc(symd.get_symbol_base("X").unwrap())
         }
-        eprintln!("No valid symbol found for character '{}', using 'X' instead.", c);
-        return Symbol::new_default_from_base_rc(symd.get_symbol_base("X").unwrap());
     })
 }
 
@@ -217,5 +163,29 @@ impl FontSet {
                 }
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::balanced_base27_symbol;
+
+    #[test]
+    fn letters_take_the_nonzero_base27_symbols() {
+        assert_eq!(balanced_base27_symbol('a'), 1);
+        assert_eq!(balanced_base27_symbol('m'), 13);
+        assert_eq!(balanced_base27_symbol('n'), -13);
+        assert_eq!(balanced_base27_symbol('z'), -1);
+        assert_eq!(balanced_base27_symbol('Q'), balanced_base27_symbol('q'));
+        let all: std::collections::HashSet<i32> = ('a'..='z').map(balanced_base27_symbol).collect();
+        assert_eq!(all.len(), 26);
+        assert!(all.iter().all(|&v| v != 0 && (-13..=13).contains(&v)));
+    }
+
+    #[test]
+    fn everything_else_shares_zero() {
+        for c in [' ', '\n', '7', '.', ',', '\'', 'é', 'ß', 'λ'] {
+            assert_eq!(balanced_base27_symbol(c), 0, "{:?}", c);
+        }
     }
 }
