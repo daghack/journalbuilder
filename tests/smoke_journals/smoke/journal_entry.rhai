@@ -37,6 +37,25 @@ shapes.add_strokepath(
 // Text fitted along an arc.
 shapes.add_canvas(new_arc(new_vec(80.0, 60.0), 150.0, 3.4, 6.0).fit_msg_to(text, font, "smoke and mirrors"));
 
+// Glyphs: a ring of ternary glyphs, a lowercase-font word, and a named
+// glyph, placed and turned by hand.
+let ring = ternary_font("balanced_ternary").glyphs("smoke");
+for (g, i) in ring {
+	let angle = i * 6.283 / ring.len();
+	g.scale = 20.0;
+	g.position = new_vec(-150.0 + 40.0 * angle.cos(), 40.0 * angle.sin());
+	g.rotate_by(angle);
+	shapes.add_glyph(g, outline);
+}
+// A for loop's variable is a copy, so index to change the glyphs in place.
+let word = lowercase_font("loche_upper").glyphs("ash");
+for i in 0..word.len() {
+	word[i].scale = 18.0;
+	word[i].position = new_vec(-180.0 + i * 20.0, 100.0);
+}
+shapes.add_glyphs(word, text);
+shapes.add_glyph(glyph("basic_eye").scale_by(24.0).translate_by(new_vec(-150.0, 0.0)), accent);
+
 let page_one = new_page();
 page_one.add_canvas(shapes);
 journal_entry.add_page(page_one);

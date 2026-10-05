@@ -1,7 +1,8 @@
+mod glyphs;
 mod locks;
 mod random;
 
-use rhai::{Engine, EvalAltResult, ImmutableString, Array, Dynamic, CustomType, TypeBuilder, Scope};
+use rhai::{Engine, EvalAltResult, ImmutableString, Dynamic, CustomType, TypeBuilder, Scope};
 use std::io::{Error, ErrorKind};
 use super::paths::StrokePath;
 use super::symboldict::SymbolPathDict;
@@ -10,7 +11,7 @@ use super::canvas::StrokeStyle as JournalStrokeStyle;
 use super::canvas::CanvasStyleOptions;
 use super::canvas::Brush;
 use super::symbol::{place_along_path, SymbolPlacementArgs};
-use super::styles;
+use super::styles::Font;
 use super::canvas::artistic::{BuiltMaze, MazeTraversalStrategy};
 use super::darkly;
 use ::darkly::engine::DarklyEngine;
@@ -296,33 +297,6 @@ impl Stroke {
 
 #[derive(Debug, Clone, CustomType)]
 #[rhai_type(extra = Self::build_extra)]
-pub struct FontSet {
-    upper: Array,
-    lower: Array
-
-}
-
-impl FontSet {
-    pub fn new(upper: Array, lower: Array) -> Self {
-        Self { upper, lower }
-    }
-    fn build_extra(builder: &mut TypeBuilder<Self>) {
-        builder
-            .with_fn("new_fontset", Self::new)
-        ;
-    }
-}
-
-impl Into<styles::FontSet> for FontSet {
-    fn into(self) -> styles::FontSet {
-        let upper = self.upper.into_iter().map(Dynamic::cast).collect();
-        let lower = self.lower.into_iter().map(Dynamic::cast).collect();
-        styles::FontSet::new(upper, lower)
-    }
-}
-
-#[derive(Debug, Clone, CustomType)]
-#[rhai_type(extra = Self::build_extra)]
 pub struct StrokeStyle {
     width: f64,
     color: ImmutableString,
@@ -386,10 +360,8 @@ impl JournalEngine {
             .register_fn("line_to", |path: &mut StrokePath, pos: Vec2| -> StrokePath {
                 update_path(path, |p| p.line_to(pos.x as f32, pos.y as f32))
             })
-            .register_fn("fill_with_msg", move |path: &mut StrokePath, style: StrokeStyle, fonts: FontSet, fontsize: f64, msg: &str| -> Vec<Dynamic> {
-                let symdict = &fill_msg_symdict;
-                let fontset : styles::FontSet = fonts.into();
-                let builder = fontset.into_symbol_string_builder(&symdict);
+            .register_fn("fill_with_msg", move |path: &mut StrokePath, style: StrokeStyle, font: Font, fontsize: f64, msg: &str| -> Vec<Dynamic> {
+                let builder = font.builder(&fill_msg_symdict);
                 let args = SymbolPlacementArgs{
                     avoid_kdtree: None, 
                     symbol_scale: fontsize as f32,
@@ -409,11 +381,9 @@ impl JournalEngine {
                 all_canvases
             })
             .register_fn("fit_msg_to",
-                move |path: &mut StrokePath, style: StrokeStyle, fonts : FontSet, msg: &str| -> Canvas {
+                move |path: &mut StrokePath, style: StrokeStyle, font: Font, msg: &str| -> Canvas {
                 let mut canvas = Canvas::default();
-                let symdict = &fit_msg_symdict;
-                let fontset : styles::FontSet = fonts.into();
-                let builder = fontset.into_symbol_string_builder(&symdict);
+                let builder = font.builder(&fit_msg_symdict);
                 let symbols = builder.build(msg, &mut *fit_msg_rng.borrow_mut());
                 let mut args = SymbolPlacementArgs{
                     avoid_kdtree: None,
@@ -517,10 +487,10 @@ impl JournalEngine {
             Ok(BrushSettings::new_brush(name, min_pressure, max_pressure, size))
         });
 
+        glyphs::register(&mut engine, symdict.clone(), rng.clone());
         locks::register(&mut engine);
 
         engine
-            .build_type::<FontSet>()
             .build_type::<Vec2>()
             .build_type::<EntryMetadata>()
             .build_type::<Entry>()

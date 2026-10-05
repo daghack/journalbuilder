@@ -103,6 +103,10 @@ impl FontSet {
     pub fn new(upper_fonts: Vec<String>, lower_fonts: Vec<String>) -> Self {
         FontSet{upper_fonts, lower_fonts}
     }
+    /// Every font prefix this set draws from, upper fonts first.
+    pub fn prefixes(&self) -> impl Iterator<Item = &str> {
+        self.upper_fonts.iter().chain(&self.lower_fonts).map(String::as_str)
+    }
     pub fn into_symbol_string_builder<'sd>(self, symdict: &'sd SymbolPathDict) -> SymbolStringBuilder<'sd> {
         SymbolStringBuilder::<'sd>::new(symdict, move |symd, c, rng| {
             let FontSet{upper_fonts, lower_fonts} = &self;
@@ -147,6 +151,37 @@ impl FontSet {
                 }
             }
         })
+    }
+}
+
+/// A way of turning text into symbols, for anything that draws text.
+#[derive(Clone, Debug)]
+pub enum Font {
+    /// Glyphs looked up in a list of fonts, in order: the lower fonts for
+    /// lowercase letters and the upper fonts for everything else.
+    Set(FontSet),
+    /// Base-27 balanced-ternary glyphs, `{prefix}_-13` to `{prefix}_13`
+    /// (see `balanced_base27_symbol`).
+    Ternary(String),
+    /// Glyphs from one font, `{prefix}_{c}` for each character lowercased,
+    /// picking among the font's variants of it at random.
+    Lowercase(String),
+}
+
+impl Font {
+    pub fn builder<'sd>(&self, symdict: &'sd SymbolPathDict) -> SymbolStringBuilder<'sd> {
+        match self {
+            Font::Set(set) => set.clone().into_symbol_string_builder(symdict),
+            Font::Ternary(prefix) => ternary_builder(symdict, prefix),
+            Font::Lowercase(prefix) => lowercase_builder(symdict, prefix),
+        }
+    }
+    /// The font prefixes this font draws from.
+    pub fn prefixes(&self) -> Vec<&str> {
+        match self {
+            Font::Set(set) => set.prefixes().collect(),
+            Font::Ternary(prefix) | Font::Lowercase(prefix) => vec![prefix.as_str()],
+        }
     }
 }
 
