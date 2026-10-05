@@ -60,14 +60,15 @@ impl<'de> Deserialize<'de> for JournalEntry {
                 // if the key exists in the named_entries,
                 // add it as a static input (after parsing)
                 if let Some(entry_value) = helper.named_entries.get(&key) {
-                    let entry_value: InfoVar = entry_value.clone().into();
+                    let entry_value = parse_info_var(entry_value)
+                        .map_err(|e| serde::de::Error::custom(format!("named entry '{}': {}", key, e)))?;
                     if input_var_type != entry_value.var_type {
                         return Err(serde::de::Error::custom(format!(
                             "Type mismatch for static input '{}': expected {:?}, got {:?}",
                             key, input_var_type, entry_value.var_type
                         )));
                     }
-                    lock.add_static_input(key, entry_value.clone().into());
+                    lock.add_static_input(key, entry_value);
                 }
             }
             lock_entries.insert(key, lock);
@@ -186,4 +187,25 @@ impl<'de> Deserialize<'de> for Journal<'de> {
 pub enum JournalPage{
     CanvasIllustration(Canvas),
     SplatMsgsOnCanvas(Canvas, Vec<String>, f32, f32, String),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invalid_named_entry_fails_to_load() {
+        let json = serde_json::json!({
+            "shorts": [],
+            "canvas_options": null,
+            "named_entries": { "s.plain_text": "b27:HELLO, WORLD" },
+            "journal_locks": { "page": {
+                "locks": { "s": { "type_name": "substitution_cipher", "options": { "base_n": 27 } } },
+                "connections": [],
+                "static_inputs": { "s.ordering": "b27:IKBNAZXYFTQWJ HRGLMOUVCPEDS" },
+            } },
+        });
+        let err = serde_json::from_value::<JournalEntry>(json).err().expect("invalid entry should fail").to_string();
+        assert!(err.contains("named entry 's.plain_text'") && err.contains("','"), "{}", err);
+    }
 }

@@ -13,7 +13,7 @@
 
 use rhai::{Array, CustomType, Dynamic, Engine, EvalAltResult, Map, TypeBuilder};
 use crate::lockbuilder::{
-    symbols_to_string, CompositeLock, InfoVar, InfoVarGraphType, InfoVarSet, InfoVarType, Lock,
+    base_n_symbols, symbols_to_string, CompositeLock, InfoVar, InfoVarGraphType, InfoVarSet, InfoVarType, Lock,
     LockConfig, LockTypeConfig,
 };
 use crate::lockbuilder::locks::maze::LockedMaze;
@@ -310,31 +310,9 @@ impl CustomType for Maze {
 /// base 27 takes letters and spaces, other bases up to 26 take the first
 /// `base` letters (case-insensitive). Anything else is an error.
 fn symbols(base: i64, text: &str) -> RhaiResult<LockValue> {
-    if !(2..=27).contains(&base) {
-        return Err(format!("symbols: base must be between 2 and 27, got {}", base).into());
-    }
-    let base = base as u32;
-    if let Some(bad) = text.chars().find(|&c| !is_symbol(c, base)) {
-        return Err(format!("symbols: '{}' isn't a base-{} symbol ({})", bad, base, symbol_help(base)).into());
-    }
-    Ok(LockValue { var: InfoVar::from(format!("b{}:{}", base, text)) })
-}
-
-fn is_symbol(c: char, base: u32) -> bool {
-    let upper = c.to_ascii_uppercase();
-    match base {
-        10 => c.is_ascii_digit(),
-        27 => c == ' ' || upper.is_ascii_uppercase(),
-        _ => upper.is_ascii_uppercase() && (upper as u32 - 'A' as u32) < base,
-    }
-}
-
-fn symbol_help(base: u32) -> String {
-    match base {
-        10 => "digits 0-9".to_string(),
-        27 => "letters and spaces".to_string(),
-        _ => format!("letters A-{}", (b'A' + base as u8 - 1) as char),
-    }
+    let base = u32::try_from(base).map_err(|_| format!("symbols: base must be between 2 and 27, got {}", base))?;
+    let data = base_n_symbols(base, text).map_err(|e| format!("symbols: {}", e))?;
+    Ok(LockValue { var: InfoVar::new_with(InfoVarType::BaseNSymbol(base), data) })
 }
 
 fn compile(config: &LockConfig, fixed_inputs: &[(String, InfoVar)]) -> Result<CompositeLock, String> {

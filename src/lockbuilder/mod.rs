@@ -91,51 +91,49 @@ impl std::fmt::Debug for InfoVar {
     }
 }
 
-impl From<String> for InfoVar {
-    fn from(s: String) -> Self {
-        let base_n_regex = regex::Regex::new(r"^b(\d+):(.*)").unwrap();
-        if let Some(caps) = base_n_regex.captures(&s) {
-            let base_n = caps.get(1).unwrap().as_str().parse::<u32>().unwrap();
-            let data = caps.get(2).unwrap().as_str().to_string();
-            //filter out character not in 'A'-('A'+base_n-1) after converting to uppercase
-            //special case for commonly used bases
-            match base_n {
-                10 => {
-                    let data: Vec<u32> = data.chars()
-                        .filter(|c| c.is_ascii_digit())
-                        .map(|c| (c as u8 - b'0') as u32)
-                        .collect();
-                    return InfoVar::new_with(InfoVarType::BaseNSymbol(base_n), data);
-                },
-                27 => {
-                    let data: Vec<u32> = data.to_ascii_uppercase().chars()
-                        .filter_map(|c| {
-                            if c == ' ' {
-                                Some(0)
-                            } else if c >= 'A' && c <= 'Z' {
-                                let v = (c as u8 - b'A' + 1) as u32;
-                                Some(v)
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
-                    return InfoVar::new_with(InfoVarType::BaseNSymbol(base_n), data);
-                },
-                _ => {
-                    let data: Vec<u32> = data.to_ascii_uppercase().chars()
-                        .filter(|c| {
-                            let c = c.to_ascii_uppercase();
-                            (c >= 'A') && (c < (('A' as u8 + base_n as u8) as char))
-                        })
-                        .map(|c| (c as u8 - b'A') as u32)
-                        .collect();
-                    InfoVar::new_with(InfoVarType::BaseNSymbol(base_n), data)
-                },
-            }
-        } else {
-            InfoVar::new_with(InfoVarType::String, s)
-        }
+/// Parse lock text: `"bN:TEXT"` is TEXT as symbols in base N (see
+/// `base_n_symbols`); anything else is a plain `String` value.
+pub fn parse_info_var(text: &str) -> Result<InfoVar, String> {
+    let Some(rest) = text.strip_prefix('b') else {
+        return Ok(InfoVar::new_with(InfoVarType::String, text.to_string()));
+    };
+    let Some((base, symbols)) = rest.split_once(':') else {
+        return Ok(InfoVar::new_with(InfoVarType::String, text.to_string()));
+    };
+    if base.is_empty() || !base.chars().all(|c| c.is_ascii_digit()) {
+        return Ok(InfoVar::new_with(InfoVarType::String, text.to_string()));
+    }
+    let base: u32 = base.parse().map_err(|_| format!("base '{}' in '{}' is too large", base, text))?;
+    Ok(InfoVar::new_with(InfoVarType::BaseNSymbol(base), base_n_symbols(base, symbols)?))
+}
+
+/// TEXT as symbols in `base`, rejecting characters outside the base rather
+/// than dropping them. Base 10 takes digits 0-9; base 27 takes space (0)
+/// and letters A-Z (1-26); other bases from 2 to 26 take the first `base`
+/// letters, A = 0. Letters are case-insensitive.
+pub fn base_n_symbols(base: u32, text: &str) -> Result<Vec<u32>, String> {
+    if !(2..=27).contains(&base) {
+        return Err(format!("base must be between 2 and 27, got {}", base));
+    }
+    text.chars().map(|c| {
+        let upper = c.to_ascii_uppercase();
+        let symbol = match base {
+            10 => c.to_digit(10),
+            27 if c == ' ' => Some(0),
+            27 if upper.is_ascii_uppercase() => Some(upper as u32 - 'A' as u32 + 1),
+            27 => None,
+            _ if upper.is_ascii_uppercase() && (upper as u32 - 'A' as u32) < base => Some(upper as u32 - 'A' as u32),
+            _ => None,
+        };
+        symbol.ok_or_else(|| format!("'{}' isn't a base-{} symbol ({})", c, base, symbol_help(base)))
+    }).collect()
+}
+
+fn symbol_help(base: u32) -> String {
+    match base {
+        10 => "digits 0-9".to_string(),
+        27 => "letters and spaces".to_string(),
+        _ => format!("letters A-{}", (b'A' + base as u8 - 1) as char),
     }
 }
 
@@ -573,7 +571,7 @@ impl LockConfig {
         let mut static_inputs = HashMap::new();
         for (input_name, input_value) in self.static_inputs {
             let required_input_type = remaining_inputs.get(&input_name).ok_or(format!("Input {} not found in remaining inputs", input_name))?;
-            let input_var: InfoVar = input_value.into();
+            let input_var = parse_info_var(&input_value).map_err(|e| format!("static input '{}': {}", input_name, e))?;
             if input_var.var_type != *required_input_type && *required_input_type != InfoVarType::MatchAll {
                 return Err(format!("Static input {} has the wrong type", input_name).into());
             }
@@ -606,4 +604,61 @@ pub fn string_infovar_set(lock_output: &InfoVarSet) -> HashMap<String, String> {
         }
     }
     output_set
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn symbols(text: &str) -> (InfoVarType, Vec<u32>) {
+        let var = parse_info_var(text).expect("should parse");
+        let data = var.borrow_data::<Vec<u32>>().expect("symbol data").clone();
+        (var.var_type, data)
+    }
+
+    #[test]
+    fn parses_base_n_text() {
+        assert_eq!(symbols("b27:Hi z"), (InfoVarType::BaseNSymbol(27), vec![8, 9, 0, 26]));
+        assert_eq!(symbols("b10:1084"), (InfoVarType::BaseNSymbol(10), vec![1, 0, 8, 4]));
+        assert_eq!(symbols("b26:baz"), (InfoVarType::BaseNSymbol(26), vec![1, 0, 25]));
+        assert_eq!(symbols("b3:CAB"), (InfoVarType::BaseNSymbol(3), vec![2, 0, 1]));
+    }
+
+    #[test]
+    fn other_text_is_a_string() {
+        for text in ["hello", "b:", "bx:1", "b27", ""] {
+            let var = parse_info_var(text).expect("should parse");
+            assert_eq!(var.var_type, InfoVarType::String, "{:?}", text);
+            assert_eq!(var.borrow_data::<String>().unwrap(), text);
+        }
+    }
+
+    #[test]
+    fn rejects_characters_outside_the_base() {
+        let cases = [
+            ("b27:HELLO, WORLD", "',' isn't a base-27 symbol"),
+            ("b10:12a", "'a' isn't a base-10 symbol"),
+            ("b26:hello world", "' ' isn't a base-26 symbol"),
+            ("b3:ABD", "'D' isn't a base-3 symbol (letters A-C)"),
+            ("b40:A", "between 2 and 27"),
+            ("b99999999999:A", "too large"),
+        ];
+        for (text, expected) in cases {
+            let err = parse_info_var(text).err().unwrap_or_else(|| panic!("{} should fail", text));
+            assert!(err.contains(expected), "{}: {}", text, err);
+        }
+    }
+
+    #[test]
+    fn invalid_static_input_fails_the_lock() {
+        let config: LockConfig = serde_json::from_value(serde_json::json!({
+            "name": "x",
+            "locks": { "s": { "type_name": "substitution_cipher", "options": { "base_n": 27 } } },
+            "connections": [],
+            "static_inputs": { "s.ordering": "b27:IKBNAZ-XYF" },
+        })).unwrap();
+        let err = CompositeLock::from_lockconfig(config, |c| registry::build_lock(&c.type_name, &c.options))
+            .err().expect("invalid static input should fail").to_string();
+        assert!(err.contains("static input 's.ordering'") && err.contains("'-'"), "{}", err);
+    }
 }
