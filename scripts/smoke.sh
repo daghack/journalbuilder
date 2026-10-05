@@ -70,12 +70,14 @@ render() {
 		fi
 	done
 	printf "ok   %-28s %3ss\n" "$name" "$((SECONDS - start))"
+	# Surface warnings (e.g. characters drawn with the fallback glyph).
+	grep "^warning:" "$OUT/$name.log" | sed 's/^/     /' || true
 }
 
 echo "== renders"
 render fixture darkly_page_0_0.png darkly_page_1_0.png darkly_page_1_1.png darkly_page_2_0.png \
 	page_0.png page_1.png page_2.png \
-	-- smoke --journals-dir tests/smoke_journals
+	-- smoke --journals-dir tests/smoke_journals --strict-glyphs
 render fixture-supersampled darkly_page_0_0.png \
 	-- smoke --journals-dir tests/smoke_journals --page 0 --no-plain --supersample 2
 

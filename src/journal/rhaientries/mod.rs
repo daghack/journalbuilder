@@ -483,6 +483,18 @@ impl JournalEngine {
                 StrokePath::arc(center.into(), radius as f32, start_rad as f32, end_rad as f32)
             });
 
+        // Characters drawn with the fallback glyph so far:
+        // #{ "q": #{ count: 2, tried: ["copper_lower_q", ...] }, ... }
+        let missing_symdict = symdict.clone();
+        engine.register_fn("missing_glyphs", move || -> rhai::Map {
+            missing_symdict.missing_glyphs().into_iter().map(|(c, glyph)| {
+                let mut info = rhai::Map::new();
+                info.insert("count".into(), Dynamic::from(glyph.count as i64));
+                info.insert("tried".into(), Dynamic::from_array(glyph.tried.into_iter().map(Dynamic::from).collect()));
+                (c.to_string().into(), Dynamic::from_map(info))
+            }).collect()
+        });
+
         let load_symdict = symdict.clone();
         engine.register_fn("load_symbol", move |symname: &str| -> Result<StrokePath, Box<EvalAltResult>> {
             load_symdict.get_strokepath(symname)
@@ -637,6 +649,20 @@ mod tests {
         );
         // A circle is four cubic quarter-arcs.
         assert_eq!(path_string("new_circle(new_vec(0.0, 0.0), 1.0)").matches('C').count(), 4);
+    }
+
+    #[test]
+    fn missing_glyphs_are_drawn_and_reported() {
+        let script = r#"
+            let style = new_strokestyle(1.5, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
+            let font = new_fontset(["copper_upper"], ["copper_lower"]);
+            let canvas = new_line(new_vec(0.0, 0.0), new_vec(400.0, 0.0)).fit_msg_to(style, font, "a~b~");
+            let missing = missing_glyphs();
+            if missing["~"].count != 2 { throw "expected ~ twice, got " + missing; }
+            // Non-lowercase characters (punctuation included) use the upper fonts.
+            if missing["~"].tried != ["copper_upper_~"] { throw "unexpected tried list: " + missing["~"].tried; }
+        "#;
+        engine().build_entry_str(script).expect("script should run");
     }
 
     #[test]

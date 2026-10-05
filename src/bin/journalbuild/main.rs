@@ -167,7 +167,7 @@ fn first_codex<'j>(journal: &'j mut Journal<'j>, symd: &'j symboldict::SymbolPat
 
 const LEGACY_DARKLY_SIZE: f32 = 1080.0;
 
-fn legacy_journalbuild(symd: &symboldict::SymbolPathDict, engine: &mut DarklyEngine, journal_dir: &str, journal_name: &str, dir_name: &str, plain: bool, scale: f32, supersample: u32) {
+fn legacy_journalbuild(symd: &symboldict::SymbolPathDict, engine: &mut DarklyEngine, journal_dir: &str, journal_name: &str, dir_name: &str, plain: bool, scale: f32, supersample: u32, strict_glyphs: bool) {
     let journal_funcs: HashMap<&str, JournalEntryFunc> = HashMap::from([
         ("journal_entry_17", journal_entry_17 as JournalEntryFunc),
         ("journal_entry_18", journal_entry_18 as JournalEntryFunc),
@@ -187,6 +187,7 @@ fn legacy_journalbuild(symd: &symboldict::SymbolPathDict, engine: &mut DarklyEng
     let journal_entry_func = journal_funcs.get(journal_name)
         .expect("Journal entry function not found for given journal name");
     let manifest = journal_entry_func(&mut journal, &symd);
+    check_missing_glyphs(symd, strict_glyphs);
     if plain {
         manifest.render_all(dir_name, 2.0 * scale);
     } else {
@@ -233,13 +234,28 @@ fn create_dir(dir: &str) {
     }
 }
 
+/// Report characters drawn with the fallback glyph; with `strict`, stop
+/// before rendering instead.
+fn check_missing_glyphs(symd: &symboldict::SymbolPathDict, strict: bool) {
+    if let Some(report) = symd.missing_glyph_report() {
+        if strict {
+            eprintln!("error: {} (failing because of --strict-glyphs)", report);
+            std::process::exit(1);
+        }
+        eprintln!("warning: {}", report);
+    }
+}
+
 const USAGE: &str = "Usage: journalbuild <journal_name> [--legacy] [--page N[,N...]] [--no-plain]
-                    [--scale S] [--supersample K] [--journals-dir DIR] [--output-dir DIR]
+                    [--scale S] [--supersample K] [--strict-glyphs]
+                    [--journals-dir DIR] [--output-dir DIR]
 
   --legacy            Build a legacy JSON journal instead of a rhai one.
   --page N,...        Render only these rhai pages (0-based). Other pages'
                       existing output is kept.
   --no-plain          Skip the plain PNG/SVG output; only render with Darkly.
+  --strict-glyphs     Fail before rendering if any character had no glyph
+                      (by default they're drawn as X and listed as a warning).
   --scale S           Scale output images (default 1.0), brushes included.
                       Darkly work scales with output size, so e.g. 0.25
                       renders much faster.
@@ -250,6 +266,7 @@ const USAGE: &str = "Usage: journalbuild <journal_name> [--legacy] [--page N[,N.
   --output-dir DIR    Where to write renders (default: <journal>/output).";
 
 struct Args {
+    strict_glyphs: bool,
     journal_name: String,
     journals_dir: String,
     legacy: bool,
@@ -265,6 +282,7 @@ fn parse_args() -> Result<Args, String> {
     let mut legacy = false;
     let mut pages: Option<Vec<usize>> = None;
     let mut plain = true;
+    let mut strict_glyphs = false;
     let mut scale = 1.0;
     let mut supersample = 1;
     let mut journals_dir = "journals".to_string();
@@ -274,6 +292,7 @@ fn parse_args() -> Result<Args, String> {
         match arg.as_str() {
             "--legacy" => legacy = true,
             "--no-plain" => plain = false,
+            "--strict-glyphs" => strict_glyphs = true,
             "--scale" => {
                 let value = args.next().ok_or("--scale needs a value, e.g. --scale 0.25")?;
                 scale = value.parse::<f32>().ok().filter(|s| *s > 0.0)
@@ -306,7 +325,7 @@ fn parse_args() -> Result<Args, String> {
     if legacy && pages.is_some() {
         return Err("--page is only supported for rhai journals".to_string());
     }
-    Ok(Args { journal_name, journals_dir, legacy, pages, plain, scale, supersample, output_dir })
+    Ok(Args { strict_glyphs, journal_name, journals_dir, legacy, pages, plain, scale, supersample, output_dir })
 }
 
 fn main() {
@@ -325,11 +344,11 @@ fn main() {
     let mut darkly_engine = darkly::new_engine(1, 1);
     if args.legacy {
         // TODO: eventually I intend to build out the legacy journals into rhai.
-        legacy_journalbuild(&symd, &mut darkly_engine, journal_dir, journal_name, &output_dir, args.plain, args.scale, args.supersample);
+        legacy_journalbuild(&symd, &mut darkly_engine, journal_dir, journal_name, &output_dir, args.plain, args.scale, args.supersample, args.strict_glyphs);
         return;
     }
     let symdarc = Arc::new(symd);
-    let mut engine = JournalEngine::new(symdarc);
+    let mut engine = JournalEngine::new(symdarc.clone());
     let entry_path = format!("{}/{}", journal_dir, journal_name);
     println!("EntryPath: {}", entry_path);
     let journal_path = format!("{}/journal_entry.rhai", entry_path);
@@ -337,6 +356,7 @@ fn main() {
     let entry = engine
         .build_entry_file(&journal_path)
         .expect("Failed to execute result.");
+    check_missing_glyphs(&symdarc, args.strict_glyphs);
     if let Some(pages) = &args.pages {
         if let Some(bad) = pages.iter().find(|&&p| p >= entry.page_count()) {
             eprintln!("error: page {} doesn't exist; {} has {} page(s) (0-{})",

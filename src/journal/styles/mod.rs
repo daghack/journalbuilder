@@ -60,27 +60,24 @@ pub fn ternary_builder<'sd>(symdict: &'sd SymbolPathDict, prefix: &str) -> Symbo
     let prefix = prefix.to_string();
     SymbolStringBuilder::<'sd>::new(symdict, move |symd, c| {
         let key = format!("{}_{}", prefix, balanced_base27_symbol(c));
-        if let Some(sym_base) = symd.get_symbol_base(&key) {
-            Symbol::new_default_from_base_rc(sym_base)
-        } else {
-            //print to stderr that the symbol was not found
-            eprintln!("Symbol '{}' not found in symbol dictionary, using 'X' instead.", key);
-            Symbol::new_default_from_base_rc(symd.get_symbol_base("X").unwrap())
+        match symd.get_symbol_base(&key) {
+            Some(sym_base) => Symbol::new_default_from_base_rc(sym_base),
+            None => symd.fallback_symbol(c, &[key]),
         }
     })
 }
 
 pub fn lowercase_builder<'sd>(symdict: &'sd SymbolPathDict, prefix: &str) -> SymbolStringBuilder<'sd> {
     let prefix = prefix.to_string();
-    SymbolStringBuilder::<'sd>::new(symdict, move |symd, c| {
-        let c = c.to_lowercase().next().unwrap_or(' ');
+    SymbolStringBuilder::<'sd>::new(symdict, move |symd, original| {
+        let c = original.to_lowercase().next().unwrap_or(' ');
         if c.is_whitespace() {
             if c == ' ' || c == '\n' {
                 return Symbol::new_default_from_base_rc(Rc::new(SymbolBase::new(SymbolType::Blank(1.0, 1.0))));
             } else if c == '\t' {
                 return Symbol::new_default_from_base_rc(Rc::new(SymbolBase::new(SymbolType::Blank(4.0, 1.0))));
             } else {
-                return Symbol::new_default_from_base_rc(symd.get_symbol_base("X").unwrap());
+                return symd.fallback_symbol(original, &[]);
             }
         } else {
             let mut key = format!("{}_{}", prefix, c);
@@ -90,12 +87,9 @@ pub fn lowercase_builder<'sd>(symdict: &'sd SymbolPathDict, prefix: &str) -> Sym
                 let selection = rand::random::<u32>() % possible_keys.len() as u32;
                 key = possible_keys[selection as usize].clone();
             }
-            if let Some(sym_base) = symd.get_symbol_base(&key) {
-                return Symbol::new_default_from_base_rc(sym_base);
-            } else {
-                //print to stderr that the symbol was not found
-                eprintln!("Symbol '{}' not found in symbol dictionary, using 'X' instead.", key);
-                return Symbol::new_default_from_base_rc(symd.get_symbol_base("X").unwrap());
+            match symd.get_symbol_base(&key) {
+                Some(sym_base) => Symbol::new_default_from_base_rc(sym_base),
+                None => symd.fallback_symbol(original, &[key]),
             }
         }
     })
@@ -123,9 +117,7 @@ impl FontSet {
                     '\t' => {
                         Rc::new(SymbolBase::new(SymbolType::Blank(4.0, 1.0)))
                     }
-                    _ => {
-                        symd.get_symbol_base("X").unwrap()
-                    }
+                    _ => return symd.fallback_symbol(c, &[]),
                 };
                 return Symbol::new_default_from_base_rc(symbase);
             } else {
@@ -135,8 +127,10 @@ impl FontSet {
                 } else {
                     upper_fonts
                 };
+                let mut tried = Vec::new();
                 for prefix in fontset {
                     let key = format!("{}_{}", prefix, prefix_c);
+                    tried.push(key.clone());
                     let poss_keys = symd.symbols_with_prefix(key.as_str());
                     if !poss_keys.is_empty() {
                         chosen_keys = Some(poss_keys);
@@ -147,19 +141,12 @@ impl FontSet {
                     Some(keys) => {
                         let selection = rand::random::<u32>() % keys.len() as u32;
                         let key = keys[selection as usize].clone();
-                        if let Some(sym_base) = symd.get_symbol_base(&key) {
-                            return Symbol::new_default_from_base_rc(sym_base);
-                        } else {
-                            //print to stderr that the symbol was not found
-                            eprintln!("Symbol '{}' not found in symbol dictionary, using 'X' instead.", key);
-                            return Symbol::new_default_from_base_rc(symd.get_symbol_base("X").unwrap());
+                        match symd.get_symbol_base(&key) {
+                            Some(sym_base) => Symbol::new_default_from_base_rc(sym_base),
+                            None => symd.fallback_symbol(c, &[key]),
                         }
                     }
-                    None => {
-                        //print to stderr that the symbol was not found
-                        eprintln!("Symbol '{}' not found in symbol set, using 'X' instead.", prefix_c);
-                        Symbol::new_default_from_base_rc(symd.get_symbol_base("X").unwrap())
-                    }
+                    None => symd.fallback_symbol(c, &tried),
                 }
             }
         })
