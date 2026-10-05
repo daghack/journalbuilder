@@ -47,9 +47,13 @@ impl MazeLock {
         let edge_count = maze_text.len() / 2;
         let node_count = edge_count + 1;
 
+        // Intentional: mazes are always square rather than sized to fit the
+        // text tightly. The side is the ceiling of the square root of the
+        // node count (e.g. 6 nodes become 3x3, not 3x2). The extra cells are
+        // padded with zero symbols, which unlocking strips again via
+        // `text_length`.
         let maze_width = (node_count as f64).sqrt().ceil() as u32;
-        let to_add = maze_width - (node_count as u32 % maze_width);
-        let maze_height = (node_count as u32 + to_add) / maze_width;
+        let maze_height = maze_width;
         let node_count = maze_width * maze_height;
         let edge_count = node_count - 1;
         let to_add = (node_count + edge_count) - maze_text.len() as u32;
@@ -176,3 +180,26 @@ impl Lock for MazeLock {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Maze side length for a text of `len` symbols, read back from the
+    /// padded text: a w x w maze holds w*w nodes and w*w - 1 passages.
+    fn side_for(len: usize) -> usize {
+        let mut text = vec![1; len];
+        MazeLock::generate_maze(&mut text, 1);
+        let side = (((text.len() + 1) / 2) as f64).sqrt() as usize;
+        assert_eq!(text.len(), 2 * side * side - 1, "padded length isn't a square maze");
+        side
+    }
+
+    #[test]
+    fn mazes_are_always_square() {
+        // 7 symbols -> 4 nodes, 11 -> 6, 17 -> 9, 19 -> 10.
+        assert_eq!(side_for(7), 2);
+        assert_eq!(side_for(11), 3);
+        assert_eq!(side_for(17), 3);
+        assert_eq!(side_for(19), 4);
+    }
+}
