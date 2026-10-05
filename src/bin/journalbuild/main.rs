@@ -198,7 +198,10 @@ fn legacy_journalbuild(symd: &symboldict::SymbolPathDict, engine: &mut DarklyEng
     // Legacy journals don't set per-stroke brushes, so everything uses this.
     let default_brush = Brush {
         name: "Calligraphy".to_string(),
-        size: 0.7,
+        // Darkly's dev Calligraphy treats size as the nib's long axis (it
+        // was 2.5x that under v0.7.0's area-preserving aspect), so 1.75 here
+        // matches the old 0.7 (measured: same ink coverage within 0.1%).
+        size: 1.75,
         min_pressure: 0.15,
         max_pressure: 0.25,
     };
