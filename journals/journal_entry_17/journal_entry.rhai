@@ -57,7 +57,7 @@ let around = new_textbox(#{
 });
 let filled = around.fill(ternary_font("balanced_ternary").glyphs(key));
 if filled.unplaced.len() > 0 {
-	print("warning: " + filled.unplaced.len() + " key symbols didn't fit around the maze");
+	warn(filled.unplaced.len() + " key symbols didn't fit around the maze");
 }
 let key_style = new_strokestyle(1.5, "darkred", calligraphy(extent));
 for g in filled.placed {

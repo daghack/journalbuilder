@@ -46,7 +46,7 @@ journals' look or behaviour, so it waits for a call).
 | 30 | A glyph that is a single straight line panics when loaded | Bug | Fixed {{commit: Give straight-line glyphs a hull instead of panicking}} |
 | 31 | The Darkly dependency follows a branch instead of a pinned revision | Anti-pattern | Fixed {{commit: Pin the Darkly fork to a commit}} |
 | 32 | The copper letters' brush sizes predate the fork's Calligraphy change | Quirk | Needs decision |
-| 33 | Rhai scripts can't emit warnings; `print` goes to stdout | Gap | Open |
+| 33 | Rhai scripts can't emit warnings; `print` goes to stdout | Gap | Fixed {{commit: Add warn() for scripts}} |
 | 34 | Rhai `fn`s can't read script globals | Quirk | Won't fix |
 | 35 | Brush sizes are in output pixels, so each port repeats a 1080 px fit | Anti-pattern | Open |
 | 36 | `LockConfig`'s string static inputs only served the JSON journals | Dead code | Open |
@@ -199,8 +199,10 @@ journals' look or behaviour, so it waits for a call).
 - **Problem:** the fork treats Calligraphy's size as the nib's long axis (2.5× the old meaning); the legacy default was rescaled for it, the copper letters weren't.
 
 ### 33. Rhai scripts can't emit warnings; `print` goes to stdout
-- **Status:** Open.
-- **Problem:** a script can only `print` (stdout) or `throw`; warnings don't reach stderr, where smoke.sh and the user look.
+- **Status:** Fixed in {{commit: Add warn() for scripts}}.
+- **Problem:** a script could only `print` (stdout, mixed into progress output) or `throw` (stopping the render); there was no way to flag a problem and carry on.
+- **Change:** `warn(message)` writes `warning: message (line N)` to stderr, like journalbuild's own warnings (so smoke.sh shows it), and records it for `JournalEngine::warnings()`. Journal 17 uses it for key symbols that don't fit around its maze.
+- **Why:** the journals already wanted it (17 was printing a fake "warning:" to stdout).
 
 ### 34. Rhai `fn`s can't read script globals
 - **Status:** Won't fix: rhai functions are pure by design; pass values in, or use `this` for the method target.

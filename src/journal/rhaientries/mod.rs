@@ -17,6 +17,7 @@ use super::darkly;
 use ::darkly::engine::DarklyEngine;
 use parry2d::math::Vec2 as PVec;
 
+use std::cell::RefCell;
 use std::rc::Rc;
 
 #[derive(Debug, Default, Clone, CustomType)]
@@ -471,6 +472,7 @@ fn update_path(path: &mut StrokePath, f: impl FnOnce(StrokePath) -> StrokePath) 
 
 pub struct JournalEngine {
     engine: Engine,
+    warnings: Rc<RefCell<Vec<String>>>,
 }
 
 impl JournalEngine {
@@ -584,6 +586,20 @@ impl JournalEngine {
                 StrokePath::arc(center.into(), radius as f32, start_rad as f32, end_rad as f32)
             });
 
+        // warn("...") reports a problem without stopping the script: it goes
+        // to stderr, marked with the script line, like journalbuild's own
+        // warnings.
+        let warnings: Rc<RefCell<Vec<String>>> = Rc::default();
+        let script_warnings = warnings.clone();
+        engine.register_fn("warn", move |ctx: rhai::NativeCallContext, message: &str| {
+            let warning = match ctx.call_position().line() {
+                Some(line) => format!("{} (line {})", message, line),
+                None => message.to_string(),
+            };
+            eprintln!("warning: {}", warning);
+            script_warnings.borrow_mut().push(warning);
+        });
+
         // Characters drawn with the fallback glyph so far:
         // #{ "q": #{ count: 2, tried: ["copper_lower_q", ...] }, ... }
         let missing_symdict = symdict.clone();
@@ -630,7 +646,12 @@ impl JournalEngine {
 
         JournalEngine {
             engine,
+            warnings,
         }
+    }
+    /// Everything scripts have passed to `warn` so far.
+    pub fn warnings(&self) -> Vec<String> {
+        self.warnings.borrow().clone()
     }
     pub fn build_entry_str(&mut self, script_str: &str) -> Result<Entry, Error> {
         let mut scope = Scope::new();
@@ -817,6 +838,14 @@ mod tests {
         entry.publish_pngs(dir.to_str().unwrap(), 0.1, Some(&[1]));
         assert!(dir.join("maze_ring.png").is_file() && dir.join("maze_1.png").is_file());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn warn_reports_with_the_line_and_keeps_going() {
+        let mut engine = engine();
+        engine.build_entry_str("let x = 1;\nwarn(\"too many \" + 3);\njournal_entry.add_page(new_page());")
+            .expect("warn shouldn't stop the script");
+        assert_eq!(engine.warnings(), vec!["too many 3 (line 2)".to_string()]);
     }
 
     #[test]

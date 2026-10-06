@@ -119,6 +119,7 @@ let around = new_textbox(#{
 	symbol_scale: 12.0, avoid: maze_canvas,
 });
 let key = around.fill(ternary_font("balanced_ternary").glyphs("key key key key key key key key key key"));
+if key.unplaced.len() > 0 { warn(key.unplaced.len() + " key glyphs didn't fit"); }
 maze_canvas.add_glyphs(key.placed, text);
 
 // Words wrapped into two small boxes, side by side.
