@@ -70,6 +70,29 @@ The standard rhai library (arrays, maps, strings, math), plus:
 There's nothing random and nothing to draw with: a lock is a function of its
 options and values alone.
 
+## Shared helpers
+
+Functions several lock files need live in `lib/`, which isn't a lock type
+itself. Import one at the top of a lock file:
+
+```rhai
+import "lib/permutations" as perm;
+
+fn lock(o, i) {
+	perm::check(i.ordering, o.base_n, "the ordering");
+	#{ cipher_text: perm::apply(i.plain_text, i.ordering), ordering: i.ordering }
+}
+```
+
+Import paths are relative to this directory, in lib files too. An error in
+a helper is reported at its own file and line, e.g. `lib/permutations.rhai,
+line 15`.
+
+- `lib/permutations.rhai`: `check(ring, base, what)` throws unless `ring`
+  holds each symbol once; `apply(symbols, table)` maps symbols through a
+  table; `inverse(table)` undoes one; `pairs(ring)` swaps the ring's first
+  half with its second.
+
 ## Examples
 
 `examples()` returns an array of maps:

@@ -2,6 +2,8 @@
 // rather than an option, in any even base: the ordering's first half over
 // its second, each symbol swapping with the one across from it.
 
+import "lib/permutations" as perm;
+
 fn options() {
 	#{ base: integer() }
 }
@@ -22,44 +24,17 @@ fn outputs(o) {
 }
 
 fn lock(o, i) {
-	let ordering = i.base_ordering;
-	#{ cipher_text: swapped(i.plain_text, partners(ordering, o.base)), base_ordering: ordering }
+	#{ cipher_text: perm::apply(i.plain_text, partners(i.base_ordering, o.base)), base_ordering: i.base_ordering }
 }
 
 fn unlock(o, out) {
-	#{ plain_text: swapped(out.cipher_text, partners(out.base_ordering, o.base)) }
+	#{ plain_text: perm::apply(out.cipher_text, partners(out.base_ordering, o.base)) }
 }
 
-// Each symbol's partner across the rings, indexed by symbol.
+// Each symbol's partner across the rings, as a table.
 fn partners(ring, base) {
-	check_permutation(ring, base, "base_ordering");
-	let half = base / 2;
-	let partner = [];
-	partner.pad(base, 0);
-	for n in 0..half {
-		partner[ring[n]] = ring[n + half];
-		partner[ring[n + half]] = ring[n];
-	}
-	partner
-}
-
-fn swapped(symbols, partner) {
-	symbols.map(|s| partner[s])
-}
-
-// Throws unless `ring` holds each of the base's symbols exactly once.
-fn check_permutation(ring, base, what) {
-	if ring.len() != base {
-		throw `${what} must hold each of the ${base} symbols once; it has ${ring.len()}`;
-	}
-	let seen = [];
-	seen.pad(base, false);
-	for s in ring {
-		if seen[s] {
-			throw `${what} repeats '${symbol_text(base, [s])}'`;
-		}
-		seen[s] = true;
-	}
+	perm::check(ring, base, "base_ordering");
+	perm::pairs(ring)
 }
 
 fn examples() {

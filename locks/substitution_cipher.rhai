@@ -5,6 +5,8 @@
 // The ordering must hold every symbol of the base exactly once, or the
 // cipher couldn't be undone.
 
+import "lib/permutations" as perm;
+
 fn options() {
 	#{ base_n: integer() }
 }
@@ -19,33 +21,13 @@ fn outputs(o) {
 }
 
 fn lock(o, i) {
-	let ordering = i.ordering;
-	check_permutation(ordering, o.base_n);
-	#{ cipher_text: i.plain_text.map(|s| ordering[s]), ordering: ordering }
+	perm::check(i.ordering, o.base_n, "the ordering");
+	#{ cipher_text: perm::apply(i.plain_text, i.ordering), ordering: i.ordering }
 }
 
 fn unlock(o, out) {
-	check_permutation(out.ordering, o.base_n);
-	let inverse = [];
-	inverse.pad(o.base_n, 0);
-	for (s, n) in out.ordering {
-		inverse[s] = n;
-	}
-	#{ plain_text: out.cipher_text.map(|s| inverse[s]) }
-}
-
-fn check_permutation(ordering, base) {
-	if ordering.len() != base {
-		throw `the ordering must hold each of the ${base} symbols once; it has ${ordering.len()}`;
-	}
-	let seen = [];
-	seen.pad(base, false);
-	for s in ordering {
-		if seen[s] {
-			throw `the ordering repeats '${symbol_text(base, [s])}'`;
-		}
-		seen[s] = true;
-	}
+	perm::check(out.ordering, o.base_n, "the ordering");
+	#{ plain_text: perm::apply(out.cipher_text, perm::inverse(out.ordering)) }
 }
 
 fn examples() {

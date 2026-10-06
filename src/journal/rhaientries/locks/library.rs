@@ -1,14 +1,16 @@
 //! Lock types written in rhai, one file per type: `<locks dir>/<type>.rhai`.
 //! Lock files run in an engine of their own and work with plain rhai
-//! values; locks/README.md describes what a lock file defines.
+//! values; locks/README.md describes what a lock file defines. Helpers
+//! they share live in `<locks dir>/lib/`, for `import "lib/<name>"`.
 
 use super::{parse_type, register_maze, Maze};
 use crate::lockbuilder::{base_n_symbols, symbols_to_string, InfoVar, InfoVarSet, InfoVarType, InfoVarTypeSet, Lock};
+use rhai::module_resolvers::FileModuleResolver;
 use rhai::{Array, Dynamic, Engine, EvalAltResult, FuncArgs, Map, Scope, AST};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 type RhaiResult<T> = Result<T, Box<EvalAltResult>>;
@@ -118,15 +120,35 @@ impl LockType {
     }
 }
 
-/// An error from a lock file's function.
+/// An error from a lock file's function, with where it happened: in the
+/// lock file, or in a helper it imported.
 struct ScriptError {
     message: String,
+    file: Option<String>,
     line: Option<usize>,
+}
+
+impl ScriptError {
+    /// "file, line N", the file being `lock_file` unless the error happened
+    /// elsewhere.
+    fn place(&self, lock_file: &str) -> String {
+        let file = self.file.as_deref().unwrap_or(lock_file);
+        match self.line {
+            Some(line) => format!("{}, line {}", file, line),
+            None => file.to_string(),
+        }
+    }
+
+    /// "file, line N: message".
+    fn located(&self, lock_file: &str) -> String {
+        format!("{}: {}", self.place(lock_file), self.message)
+    }
 }
 
 impl LockLibrary {
     pub fn new(dir: impl Into<PathBuf>) -> Self {
-        LockLibrary { dir: dir.into(), engine: lock_engine(), types: RefCell::default() }
+        let dir = dir.into();
+        LockLibrary { engine: lock_engine(&dir), dir, types: RefCell::default() }
     }
 
     /// The lock types in the directory, sorted.
@@ -188,7 +210,7 @@ impl LockLibrary {
             return Ok(0);
         }
         let examples = self.call(&lock_type, "examples", ())
-            .map_err(|e| format!("{}: {}", at(&lock_type.file, e.line), e.message))?
+            .map_err(|e| e.located(&lock_type.file))?
             .try_cast::<Array>()
             .ok_or_else(|| format!("{}: examples() must return an array of examples", lock_type.file))?;
         for (n, example) in examples.iter().enumerate() {
@@ -286,7 +308,7 @@ impl LockLibrary {
             return Err(format!("{} doesn't define {}", lock_type.file, missing.join(", ")));
         }
         let declared = self.call(&lock_type, "options", ())
-            .map_err(|e| format!("{}: {}", at(&lock_type.file, e.line), e.message))?
+            .map_err(|e| e.located(&lock_type.file))?
             .try_cast::<Map>()
             .ok_or_else(|| format!("{}: options() must return a map of option names to types, e.g. #{{ base: integer() }}", lock_type.file))?;
         for (name, spec) in declared {
@@ -301,20 +323,43 @@ impl LockLibrary {
     }
 
     fn call(&self, lock_type: &LockType, function: &str, args: impl FuncArgs) -> Result<Dynamic, ScriptError> {
-        self.engine.call_fn::<Dynamic>(&mut Scope::new(), &lock_type.ast, function, args).map_err(|err| {
-            // The error itself, not the calls it came through, and its line
-            // in the lock file.
-            let inner = err.unwrap_inner();
-            let position = inner.position();
-            let message = match inner {
-                EvalAltResult::ErrorRuntime(thrown, _) => thrown.to_string(),
-                other => {
-                    let text = other.to_string();
-                    text.strip_suffix(&format!(" ({})", position)).unwrap_or(&text).to_string()
-                }
-            };
-            ScriptError { message, line: position.line() }
-        })
+        self.engine.call_fn::<Dynamic>(&mut Scope::new(), &lock_type.ast, function, args)
+            .map_err(|err| self.script_error(&err))
+    }
+
+    /// The error itself, not the calls it came through, with the file and
+    /// line it happened at.
+    fn script_error(&self, err: &EvalAltResult) -> ScriptError {
+        let mut inner = err;
+        let mut source = None;
+        while let EvalAltResult::ErrorInFunctionCall(_, from, next, _) | EvalAltResult::ErrorInModule(from, next, _) = inner {
+            if !from.is_empty() {
+                source = Some(from.as_str());
+            }
+            inner = next;
+        }
+        let position = inner.position();
+        let message = match inner {
+            EvalAltResult::ErrorRuntime(thrown, _) => thrown.to_string(),
+            other => {
+                let text = other.to_string();
+                text.strip_suffix(&format!(" ({})", position)).unwrap_or(&text).to_string()
+            }
+        };
+        ScriptError { message, file: source.map(|source| self.shown_path(source)), line: position.line() }
+    }
+
+    /// A script's path as errors show it: relative to the lock directory,
+    /// with its extension. Lock files are known by their full path, and
+    /// imported helpers by their import path.
+    fn shown_path(&self, source: &str) -> String {
+        let path = Path::new(source);
+        let relative = path.strip_prefix(&self.dir).unwrap_or(path);
+        let mut shown = relative.to_string_lossy().into_owned();
+        if relative.extension().is_none() {
+            shown.push_str(".rhai");
+        }
+        shown
     }
 }
 
@@ -335,7 +380,7 @@ impl RhaiLock {
 
     fn call(&self, function: &str, args: impl FuncArgs) -> Result<Dynamic, String> {
         self.library.call(&self.lock_type, function, args)
-            .map_err(|e| format!("lock '{}' ({}): {}", self.name, at(&self.lock_type.file, e.line), e.message))
+            .map_err(|e| format!("lock '{}' ({}): {}", self.name, e.place(&self.lock_type.file), e.message))
     }
 
     /// The given options, each declared and of its declared type, with
@@ -458,8 +503,10 @@ impl Lock for RhaiLock {
 /// The engine lock files run in: rhai's standard library, option types,
 /// symbol helpers and mazes. Nothing random and nothing drawn, so a lock is
 /// a pure function of its options and values.
-fn lock_engine() -> Engine {
+fn lock_engine(dir: &Path) -> Engine {
     let mut engine = Engine::new();
+    // `import "lib/permutations" as perm;` loads <dir>/lib/permutations.rhai.
+    engine.set_module_resolver(FileModuleResolver::new_with_path(dir));
     register_maze(&mut engine);
     // Option types for options(): integer() is a required integer,
     // integer(3) one that defaults to 3, and so on.
@@ -604,13 +651,6 @@ fn show(value: &Dynamic, var_type: &InfoVarType) -> String {
     format!("{:?}", value)
 }
 
-fn at(file: &str, line: Option<usize>) -> String {
-    match line {
-        Some(line) => format!("{}, line {}", file, line),
-        None => file.to_string(),
-    }
-}
-
 fn sorted<'a>(names: impl Iterator<Item = &'a String>) -> Vec<&'a String> {
     let mut names: Vec<&String> = names.collect();
     names.sort();
@@ -633,7 +673,9 @@ mod tests {
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(&dir).unwrap();
             for (name, source) in files {
-                std::fs::write(dir.join(format!("{}.rhai", name)), source).unwrap();
+                let path = dir.join(format!("{}.rhai", name));
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(path, source).unwrap();
             }
             TempLocks { dir }
         }
@@ -829,6 +871,39 @@ fn unlock(o, out) {{ #{{ text: out.out }} }}
         assert_eq!(error("partial"), "partial.rhai doesn't define lock(o, inputs), unlock(o, outputs)");
         let broken = error("broken");
         assert!(broken.starts_with("broken.rhai: ") && broken.contains("line 2"), "{}", broken);
+    }
+
+    #[test]
+    fn lock_files_import_shared_helpers() {
+        // A lock file whose lock() runs `body` with `import_line` above it.
+        let importing = |import_line: &str, body: &str| format!(
+            "{}\nfn options() {{ #{{}} }}\nfn inputs(o) {{ #{{ text: symbol_type(27) }} }}\nfn outputs(o) {{ #{{ out: symbol_type(27) }} }}\nfn lock(o, i) {{ {} }}\nfn unlock(o, out) {{ #{{ text: out.out }} }}",
+            import_line, body,
+        );
+        let dir = TempLocks::new("imports", &[
+            ("lib/helpers", "fn doubled(text) { inner(text) + inner(text) }\nfn inner(text) { text }\nfn fail() {\n  throw \"from the helper\";\n}"),
+            ("lib/broken", "fn oops( {"),
+            ("doubler", &importing("import \"lib/helpers\" as h;", "#{ out: h::doubled(i.text) }")),
+            ("failing", &importing("import \"lib/helpers\" as h;", "h::fail()")),
+            ("broken_import", &importing("import \"lib/broken\" as b;", "#{ out: [] }")),
+            ("missing_import", &importing("import \"lib/nope\" as n;", "#{ out: [] }")),
+        ]);
+        let library = dir.library();
+        assert_eq!(library.available().unwrap(), vec!["broken_import", "doubler", "failing", "missing_import"]);
+
+        let lock = library.build("d", "doubler", Map::new()).unwrap();
+        let outputs = lock.lock_info(&values(&[("text", syms(27, "HI"))])).unwrap();
+        assert_eq!(text(&outputs["out"]), "HIHI");
+
+        let lock = library.build("f", "failing", Map::new()).unwrap();
+        let err = lock.lock_info(&values(&[("text", syms(27, "HI"))])).expect_err("should fail").to_string();
+        assert_eq!(err, "lock 'f' (lib/helpers.rhai, line 4): from the helper");
+
+        let error = |type_name: &str| library.build("l", type_name, Map::new()).err().expect("should fail");
+        let broken = error("broken_import");
+        assert!(broken.starts_with("lib/broken.rhai, line 1: ") && broken.contains("Syntax error"), "{}", broken);
+        let missing = error("missing_import");
+        assert!(missing.starts_with("missing_import.rhai, line 1: ") && missing.contains("lib/nope"), "{}", missing);
     }
 
     #[test]

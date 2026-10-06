@@ -3,6 +3,8 @@
 // from it. Swapping twice gives the letter back, so locking and unlocking
 // are the same. Symbols are base 26, A = 0.
 
+import "lib/permutations" as perm;
+
 fn options() {
 	#{ canonical_order: string() }
 }
@@ -20,43 +22,18 @@ fn outputs(o) {
 }
 
 fn lock(o, i) {
-	#{ cipher_text: swapped(i.plain_text, partners(o.canonical_order)) }
+	#{ cipher_text: perm::apply(i.plain_text, partners(o.canonical_order)) }
 }
 
 fn unlock(o, out) {
-	#{ plain_text: swapped(out.cipher_text, partners(o.canonical_order)) }
+	#{ plain_text: perm::apply(out.cipher_text, partners(o.canonical_order)) }
 }
 
-// Each letter's partner across the rings, indexed by letter.
+// Each letter's partner across the rings, as a table.
 fn partners(order) {
 	let ring = symbols(26, order);
-	check_permutation(ring, 26, "canonical_order");
-	let partner = [];
-	partner.pad(26, 0);
-	for n in 0..13 {
-		partner[ring[n]] = ring[n + 13];
-		partner[ring[n + 13]] = ring[n];
-	}
-	partner
-}
-
-fn swapped(symbols, partner) {
-	symbols.map(|s| partner[s])
-}
-
-// Throws unless `ring` holds each of the base's symbols exactly once.
-fn check_permutation(ring, base, what) {
-	if ring.len() != base {
-		throw `${what} must hold each of the ${base} symbols once; it has ${ring.len()}`;
-	}
-	let seen = [];
-	seen.pad(base, false);
-	for s in ring {
-		if seen[s] {
-			throw `${what} repeats '${symbol_text(base, [s])}'`;
-		}
-		seen[s] = true;
-	}
+	perm::check(ring, 26, "canonical_order");
+	perm::pairs(ring)
 }
 
 fn examples() {
