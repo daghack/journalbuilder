@@ -6,7 +6,7 @@ use super::{parse_type, register_maze, Maze};
 use crate::lockbuilder::{base_n_symbols, symbols_to_string, InfoVar, InfoVarSet, InfoVarType, InfoVarTypeSet, Lock};
 use rhai::{Array, Dynamic, Engine, EvalAltResult, FuncArgs, Map, Scope, AST};
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -41,8 +41,75 @@ struct LockType {
     name: String,
     file: String,
     ast: AST,
-    /// Option name -> default, or `()` for a required option.
-    options: Map,
+    /// The options it declares, by name.
+    options: BTreeMap<String, OptionSpec>,
+}
+
+/// An option as options() declares it, with `integer()`, `string("x")`,
+/// `one_of([...])` and so on: its type, and its default if it has one.
+#[derive(Clone, Debug)]
+pub struct OptionSpec {
+    kind: OptionKind,
+    default: Option<Dynamic>,
+}
+
+#[derive(Clone, Debug)]
+enum OptionKind {
+    Int,
+    Number,
+    String,
+    Bool,
+    Array,
+    OneOf(Array),
+}
+
+impl OptionKind {
+    fn describe(&self) -> String {
+        match self {
+            OptionKind::Int => "an integer".to_string(),
+            OptionKind::Number => "a number".to_string(),
+            OptionKind::String => "a string".to_string(),
+            OptionKind::Bool => "a bool".to_string(),
+            OptionKind::Array => "an array".to_string(),
+            OptionKind::OneOf(choices) => {
+                let choices: Vec<String> = choices.iter().map(|choice| format!("{:?}", choice)).collect();
+                format!("one of {}", choices.join(", "))
+            }
+        }
+    }
+
+    /// `value` as an option of this kind (an integer is fine for a number),
+    /// or None if it isn't one.
+    fn accept(&self, value: Dynamic) -> Option<Dynamic> {
+        let ok = match self {
+            OptionKind::Int => value.is_int(),
+            OptionKind::Number if value.is_int() => return Some(Dynamic::from_float(value.as_int().ok()? as rhai::FLOAT)),
+            OptionKind::Number => value.is_float(),
+            OptionKind::String => value.is_string(),
+            OptionKind::Bool => value.is_bool(),
+            OptionKind::Array => value.is_array(),
+            OptionKind::OneOf(choices) => choices.iter().any(|choice| same_value(choice, &value)),
+        };
+        ok.then_some(value)
+    }
+
+    /// What was given instead, for error messages.
+    fn describe_value(&self, value: &Dynamic) -> String {
+        match self {
+            OptionKind::OneOf(_) => format!("{:?}", value),
+            _ => describe(value.type_name()),
+        }
+    }
+}
+
+fn option_spec(function: &str, kind: OptionKind, default: Option<Dynamic>) -> RhaiResult<OptionSpec> {
+    let default = match default {
+        None => None,
+        Some(value) => Some(kind.accept(value.clone()).ok_or_else(|| {
+            format!("{}(): the default should be {}, got {}", function, kind.describe(), kind.describe_value(&value))
+        })?),
+    };
+    Ok(OptionSpec { kind, default })
 }
 
 impl LockType {
@@ -210,7 +277,7 @@ impl LockLibrary {
     fn load(&self, type_name: &str) -> Result<LockType, String> {
         let file = format!("{}.rhai", type_name);
         let ast = self.engine.compile_file(self.path(type_name)).map_err(|e| format!("{}: {}", file, e))?;
-        let mut lock_type = LockType { name: type_name.to_string(), file, ast, options: Map::new() };
+        let mut lock_type = LockType { name: type_name.to_string(), file, ast, options: BTreeMap::new() };
         let missing: Vec<&str> = REQUIRED_FNS.iter()
             .filter(|(function, params, _)| !lock_type.defines(function, *params))
             .map(|(_, _, shown)| *shown)
@@ -218,10 +285,18 @@ impl LockLibrary {
         if !missing.is_empty() {
             return Err(format!("{} doesn't define {}", lock_type.file, missing.join(", ")));
         }
-        lock_type.options = self.call(&lock_type, "options", ())
+        let declared = self.call(&lock_type, "options", ())
             .map_err(|e| format!("{}: {}", at(&lock_type.file, e.line), e.message))?
             .try_cast::<Map>()
-            .ok_or_else(|| format!("{}: options() must return a map of option names to defaults, e.g. #{{ base: () }}", lock_type.file))?;
+            .ok_or_else(|| format!("{}: options() must return a map of option names to types, e.g. #{{ base: integer() }}", lock_type.file))?;
+        for (name, spec) in declared {
+            let got = describe(spec.type_name());
+            let spec = spec.try_cast::<OptionSpec>().ok_or_else(|| format!(
+                "{}: options() should declare '{}' with its type, e.g. integer(), string(\"default\") or one_of([...]), got {}",
+                lock_type.file, name, got,
+            ))?;
+            lock_type.options.insert(name.to_string(), spec);
+        }
         Ok(lock_type)
     }
 
@@ -263,33 +338,32 @@ impl RhaiLock {
             .map_err(|e| format!("lock '{}' ({}): {}", self.name, at(&self.lock_type.file, e.line), e.message))
     }
 
-    /// The given options with defaults filled in: each one declared, every
-    /// required one given, and each the same type as its default.
+    /// The given options, each declared and of its declared type, with
+    /// defaults for those not given.
     fn checked_options(&self, given: Map) -> Result<Map, String> {
         let declared = &self.lock_type.options;
-        if let Some(unknown) = given.keys().find(|name| !declared.contains_key(*name)) {
-            let names: Vec<&str> = declared.keys().map(|name| name.as_str()).collect();
-            let known = match names.len() {
+        if let Some(unknown) = given.keys().find(|name| !declared.contains_key(name.as_str())) {
+            let known = match declared.len() {
                 0 => "it takes no options".to_string(),
-                _ => format!("options are {}", names.join(", ")),
+                _ => {
+                    let options: Vec<String> = declared.iter()
+                        .map(|(name, spec)| format!("{} ({})", name, spec.kind.describe()))
+                        .collect();
+                    format!("options are {}", options.join(", "))
+                }
             };
             return Err(self.error(format!("unknown option '{}'; {}", unknown, known)));
         }
         let mut options = Map::new();
-        for (name, default) in declared {
-            let value = match given.get(name) {
-                None if default.is_unit() => return Err(self.error(format!("missing option '{}'", name))),
-                None => default.clone(),
-                Some(value) if default.is_unit() || value.type_id() == default.type_id() => value.clone(),
-                // An integer where the default is a number.
-                Some(value) if default.is_float() && value.is_int() => Dynamic::from_float(value.as_int().unwrap_or(0) as rhai::FLOAT),
-                Some(value) => {
-                    return Err(self.error(format!(
-                        "option '{}' should be {}, got {}", name, describe(default.type_name()), describe(value.type_name()),
-                    )));
-                }
+        for (name, spec) in declared {
+            let value = match given.get(name.as_str()) {
+                None => spec.default.clone()
+                    .ok_or_else(|| self.error(format!("missing option '{}' ({})", name, spec.kind.describe())))?,
+                Some(value) => spec.kind.accept(value.clone()).ok_or_else(|| self.error(format!(
+                    "option '{}' should be {}, got {}", name, spec.kind.describe(), spec.kind.describe_value(value),
+                )))?,
             };
-            options.insert(name.clone(), value);
+            options.insert(name.into(), value);
         }
         Ok(options)
     }
@@ -381,12 +455,38 @@ impl Lock for RhaiLock {
     }
 }
 
-/// The engine lock files run in: rhai's standard library, symbol helpers
-/// and mazes. Nothing random and nothing drawn, so a lock is a pure
-/// function of its options and values.
+/// The engine lock files run in: rhai's standard library, option types,
+/// symbol helpers and mazes. Nothing random and nothing drawn, so a lock is
+/// a pure function of its options and values.
 fn lock_engine() -> Engine {
     let mut engine = Engine::new();
     register_maze(&mut engine);
+    // Option types for options(): integer() is a required integer,
+    // integer(3) one that defaults to 3, and so on.
+    engine.register_type_with_name::<OptionSpec>("OptionSpec");
+    let kinds = [
+        // Not int(): rhai's int(x) is the integral part of a float.
+        ("integer", OptionKind::Int),
+        ("number", OptionKind::Number),
+        ("string", OptionKind::String),
+        ("bool", OptionKind::Bool),
+        ("array", OptionKind::Array),
+    ];
+    for (function, kind) in kinds {
+        let required = kind.clone();
+        engine
+            .register_fn(function, move || option_spec(function, required.clone(), None))
+            .register_fn(function, move |default: Dynamic| option_spec(function, kind.clone(), Some(default)));
+    }
+    let one_of = |choices: Array, default: Option<Dynamic>| -> RhaiResult<OptionSpec> {
+        if choices.is_empty() {
+            return Err("one_of(): there must be at least one choice".into());
+        }
+        option_spec("one_of", OptionKind::OneOf(choices), default)
+    };
+    engine
+        .register_fn("one_of", move |choices: Array| one_of(choices, None))
+        .register_fn("one_of", move |choices: Array, default: Dynamic| one_of(choices, Some(default)));
     engine
         // symbol_type(27) is "Base27Symbol".
         .register_fn("symbol_type", |base: Dynamic| -> RhaiResult<String> {
@@ -550,7 +650,7 @@ mod tests {
 
     /// Passes `text` through as `out`, and `key` through as itself.
     const ECHO: &str = r#"
-        fn options() { #{ base: (), label: "x", scale: 1.0 } }
+        fn options() { #{ base: integer(), label: string("x"), scale: number(1.0) } }
         fn inputs(o) { #{ text: symbol_type(o.base), key: symbol_type(o.base) } }
         fn outputs(o) { #{ out: symbol_type(o.base), key: symbol_type(o.base) } }
         fn lock(o, i) { #{ out: i.text, key: i.key } }
@@ -601,15 +701,19 @@ fn unlock(o, out) {{ #{{ text: out.out }} }}
         let error = |o: Map| library.build("e", "echo", o).err().expect("should fail");
         assert_eq!(
             error(options(&[("bse", Dynamic::from_int(3))])),
-            "lock 'e' (echo.rhai): unknown option 'bse'; options are base, label, scale",
+            "lock 'e' (echo.rhai): unknown option 'bse'; options are base (an integer), label (a string), scale (a number)",
         );
-        assert_eq!(error(Map::new()), "lock 'e' (echo.rhai): missing option 'base'");
+        assert_eq!(error(Map::new()), "lock 'e' (echo.rhai): missing option 'base' (an integer)");
         let mut bad = base(27);
         bad.insert("label".into(), Dynamic::from_int(3));
         assert_eq!(error(bad), "lock 'e' (echo.rhai): option 'label' should be a string, got an integer");
-        let mut not_a_base = base(27);
-        not_a_base.insert("base".into(), "lots".into());
-        assert!(error(not_a_base).contains("symbol_type: base must be an integer from 2 to 27, got \"lots\""));
+        assert_eq!(
+            error(options(&[("base", "lots".into())])),
+            "lock 'e' (echo.rhai): option 'base' should be an integer, got a string",
+        );
+        let mut out_of_range = base(40);
+        out_of_range.insert("label".into(), "y".into());
+        assert!(error(out_of_range).contains("symbol_type: base must be an integer from 2 to 27, got 40"));
 
         let mut whole = base(27);
         whole.insert("scale".into(), Dynamic::from_int(2));
@@ -617,6 +721,43 @@ fn unlock(o, out) {{ #{{ text: out.out }} }}
         assert_eq!(lock.options["label"].clone().into_string().unwrap(), "x");
         assert_eq!(lock.options["scale"].as_float().unwrap(), 2.0);
         assert_eq!(lock.inputs["text"], InfoVarType::BaseNSymbol(27));
+    }
+
+    #[test]
+    fn options_declare_their_types() {
+        let declaring = |options: &str| format!(
+            "fn options() {{ {} }}\nfn inputs(o) {{ #{{}} }}\nfn outputs(o) {{ #{{}} }}\nfn lock(o, i) {{ #{{}} }}\nfn unlock(o, out) {{ #{{}} }}",
+            options,
+        );
+        let dir = TempLocks::new("option_types", &[
+            ("kinds", &declaring(r#"#{ n: integer(3), x: number(), flag: bool(false), list: array([1]), way: one_of(["up", "down"], "up") }"#)),
+            ("untyped", &declaring("#{ base: () }")),
+            ("bad_default", &declaring("#{ n: integer(3.5) }")),
+            ("bad_choice", &declaring(r#"#{ way: one_of(["up", "down"], "sideways") }"#)),
+            ("no_choices", &declaring("#{ way: one_of([]) }")),
+        ]);
+        let library = dir.library();
+        let build = |type_name: &str, options: Map| library.build("l", type_name, options);
+
+        let lock = build("kinds", options(&[("x", Dynamic::from_int(2))])).unwrap();
+        assert_eq!(lock.options["n"].as_int().unwrap(), 3);
+        assert_eq!(lock.options["x"].as_float().unwrap(), 2.0);
+        assert_eq!(lock.options["way"].clone().into_string().unwrap(), "up");
+        let way = |way: &str| build("kinds", options(&[("x", Dynamic::from_float(1.0)), ("way", way.into())]));
+        assert!(way("down").is_ok());
+        assert_eq!(
+            way("left").err().unwrap(),
+            "lock 'l' (kinds.rhai): option 'way' should be one of \"up\", \"down\", got \"left\"",
+        );
+        let error = |type_name: &str| build(type_name, Map::new()).err().expect("should fail");
+        assert_eq!(
+            error("untyped"),
+            "untyped.rhai: options() should declare 'base' with its type, e.g. integer(), string(\"default\") or one_of([...]), got ()",
+        );
+        let bad_default = error("bad_default");
+        assert!(bad_default.contains("integer(): the default should be an integer, got a number"), "{}", bad_default);
+        assert!(error("bad_choice").contains("one_of(): the default should be one of \"up\", \"down\", got \"sideways\""));
+        assert!(error("no_choices").contains("one_of(): there must be at least one choice"));
     }
 
     #[test]

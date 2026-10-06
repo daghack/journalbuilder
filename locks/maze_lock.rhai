@@ -7,13 +7,7 @@
 // text_length lets unlocking drop them again.
 
 fn options() {
-	#{ input_base: (), strategy: "LeftHanded" }
-}
-
-fn check(o) {
-	if o.strategy != "LeftHanded" && o.strategy != "RightHanded" {
-		throw `strategy must be "LeftHanded" or "RightHanded", got "${o.strategy}"`;
-	}
+	#{ input_base: integer(), strategy: one_of(["LeftHanded", "RightHanded"], "LeftHanded") }
 }
 
 fn inputs(o) {
@@ -79,7 +73,7 @@ fn examples() {
 		},
 		#{
 			options: #{ input_base: 27, strategy: "Sideways" },
-			error: "strategy must be \"LeftHanded\" or \"RightHanded\"",
+			error: "option 'strategy' should be one of \"LeftHanded\", \"RightHanded\", got \"Sideways\"",
 		},
 		#{
 			options: #{ input_base: 27 },

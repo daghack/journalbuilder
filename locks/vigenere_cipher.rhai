@@ -2,7 +2,7 @@
 // repeating as often as it takes, mod cipher_base.
 
 fn options() {
-	#{ plain_base: (), key_base: (), cipher_base: () }
+	#{ plain_base: integer(), key_base: integer(), cipher_base: integer() }
 }
 
 fn check(o) {

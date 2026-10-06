@@ -3,12 +3,12 @@
 // its second, each symbol swapping with the one across from it.
 
 fn options() {
-	#{ base: () }
+	#{ base: integer() }
 }
 
 fn check(o) {
-	if type_of(o.base) != "i64" || o.base % 2 != 0 {
-		throw `base must be an even integer, got ${o.base}`;
+	if o.base % 2 != 0 {
+		throw `base must be even, got ${o.base}`;
 	}
 }
 
@@ -87,7 +87,7 @@ fn examples() {
 		},
 		#{
 			options: #{ base: 27 },
-			error: "base must be an even integer, got 27",
+			error: "base must be even, got 27",
 		},
 	]
 }

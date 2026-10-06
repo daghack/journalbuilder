@@ -3,13 +3,13 @@
 // empty, when the length doesn't divide evenly. Unlocking joins them again.
 
 fn options() {
-	#{ base_n: (), output_count: () }
+	#{ base_n: integer(), output_count: integer() }
 }
 
 fn check(o) {
 	// With no outputs, the lock would never run.
-	if type_of(o.output_count) != "i64" || o.output_count < 1 {
-		throw `output_count must be a positive integer, got ${o.output_count}`;
+	if o.output_count < 1 {
+		throw `output_count must be at least 1, got ${o.output_count}`;
 	}
 }
 
@@ -63,7 +63,7 @@ fn examples() {
 		},
 		#{
 			options: #{ base_n: 27, output_count: 0 },
-			error: "output_count must be a positive integer, got 0",
+			error: "output_count must be at least 1, got 0",
 		},
 	]
 }

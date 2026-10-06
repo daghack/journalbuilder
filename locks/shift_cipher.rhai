@@ -2,13 +2,7 @@
 // around (a Caesar cipher). A negative shift moves the other way.
 
 fn options() {
-	#{ base: (), shift: () }
-}
-
-fn check(o) {
-	if type_of(o.shift) != "i64" {
-		throw `shift must be an integer, got ${o.shift}`;
-	}
+	#{ base: integer(), shift: integer() }
 }
 
 fn inputs(o) {
@@ -52,7 +46,7 @@ fn examples() {
 		#{
 			options: #{ base: 27, shift: 1.5 },
 			inputs: #{ plain_text: symbols(27, "HI") },
-			error: "shift must be an integer",
+			error: "option 'shift' should be an integer, got a number",
 		},
 	]
 }

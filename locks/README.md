@@ -9,19 +9,34 @@ directory.
 
 | function | runs at | returns |
 |---|---|---|
-| `options()` | first use | option name → default; `()` marks a required option |
+| `options()` | first use | option name → type, e.g. `#{ base: integer() }` (see below) |
 | `check(o)` *(optional)* | `.add` | nothing; `throw` to reject the options |
 | `inputs(o)`, `outputs(o)` | `.add` | value name → type, e.g. `#{ plain_text: symbol_type(27) }` |
 | `lock(o, inputs)` | `run` | every declared output |
 | `unlock(o, outputs)` | `unlock` | the inputs it recovers |
 | `examples()` *(optional)* | `--check-locks`, `cargo test` | test cases, see below |
 
-`o` is the options, checked first: unknown names, missing required ones and
-values of a different type from their default are errors (an integer is fine
-where the default is a number).
+`o` is the options, checked against their declared types first.
 
 An input that is also an output, such as a cipher's `key`, is passed
 through: `lock` returns it unchanged, and `unlock` needn't return it.
+
+## Options
+
+`options()` declares each option with its type:
+
+- `integer()`, `number()`, `string()`, `bool()`, `array()`: a required
+  option of that type. Given a default, e.g. `integer(0)` or
+  `string("LeftHanded")`, the option is optional.
+- `one_of(["LeftHanded", "RightHanded"])`: one of those values, also with an
+  optional default: `one_of([...], "LeftHanded")`.
+
+Unknown options, missing required ones and values of the wrong type are
+errors (an integer is fine for a number). Anything beyond the type, such as
+a base that must be even, goes in `check(o)`.
+
+It's `integer()` rather than `int()` because rhai's own `int(x)` is the
+integral part of a float.
 
 ## Values and types
 

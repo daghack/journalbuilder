@@ -3,12 +3,12 @@
 // apart again.
 
 fn options() {
-	#{ base_n: (), input_count: () }
+	#{ base_n: integer(), input_count: integer() }
 }
 
 fn check(o) {
-	if type_of(o.input_count) != "i64" || o.input_count < 1 {
-		throw `input_count must be a positive integer, got ${o.input_count}`;
+	if o.input_count < 1 {
+		throw `input_count must be at least 1, got ${o.input_count}`;
 	}
 }
 
@@ -78,7 +78,7 @@ fn examples() {
 		},
 		#{
 			options: #{ base_n: 27, input_count: 0 },
-			error: "input_count must be a positive integer, got 0",
+			error: "input_count must be at least 1, got 0",
 		},
 	]
 }

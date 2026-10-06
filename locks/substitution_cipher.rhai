@@ -6,7 +6,7 @@
 // cipher couldn't be undone.
 
 fn options() {
-	#{ base_n: () }
+	#{ base_n: integer() }
 }
 
 fn inputs(o) {

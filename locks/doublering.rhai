@@ -4,7 +4,7 @@
 // are the same. Symbols are base 26, A = 0.
 
 fn options() {
-	#{ canonical_order: () }
+	#{ canonical_order: string() }
 }
 
 fn check(o) {
@@ -29,9 +29,6 @@ fn unlock(o, out) {
 
 // Each letter's partner across the rings, indexed by letter.
 fn partners(order) {
-	if type_of(order) != "string" {
-		throw `canonical_order must be a string of the 26 letters, got ${order}`;
-	}
 	let ring = symbols(26, order);
 	check_permutation(ring, 26, "canonical_order");
 	let partner = [];

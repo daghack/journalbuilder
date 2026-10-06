@@ -560,8 +560,8 @@ mod tests {
 
     #[test]
     fn lock_file_errors_point_at_the_file_and_the_script() {
-        let err = error("let ok = 1;\nnew_lock(\"x\").add(\"s\", \"shift_cipher\", #{ base: 27, shift: \"3\" });");
-        assert!(err.contains("add: lock 's' (shift_cipher.rhai, line 10): shift must be an integer, got 3"), "{}", err);
+        let err = error("let ok = 1;\nnew_lock(\"x\").add(\"v\", \"vigenere_cipher\", #{ plain_base: 27, key_base: 27, cipher_base: 10 });");
+        assert!(err.contains("add: lock 'v' (vigenere_cipher.rhai, line 11): cipher_base (10) must be at least plain_base (27)"), "{}", err);
         assert!(err.contains("line 2"), "{}", err);
     }
 
@@ -596,7 +596,7 @@ mod tests {
     fn mistakes_fail_at_their_line() {
         let cases = [
             ("let l = new_lock(\"x\");\nl.add(\"a\", \"rot13\", #{});", "unknown lock type 'rot13'"),
-            ("let l = new_lock(\"x\");\nl.add(\"a\", \"substitution_cipher\", #{ base_n: \"lots\" });", "base must be an integer from 2 to 27"),
+            ("let l = new_lock(\"x\");\nl.add(\"a\", \"substitution_cipher\", #{ base_n: \"lots\" });", "option 'base_n' should be an integer, got a string"),
             ("let l = new_lock(\"x\").add(\"a\", \"substitution_cipher\", #{ base_n: 27 });\nl.add(\"a\", \"substitution_cipher\", #{ base_n: 27 });", "already added"),
             ("let l = new_lock(\"x\").add(\"a\", \"substitution_cipher\", #{ base_n: 27 });\nl.connect(\"a.nope\", \"a.plain_text\");", "a.nope"),
             ("let l = new_lock(\"x\").add(\"a\", \"substitution_cipher\", #{ base_n: 27 });\nl.set_input(\"a.ordering\", symbols(10, \"123\"));", "expects Base27Symbol, got Base10Symbol"),
