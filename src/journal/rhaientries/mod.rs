@@ -56,10 +56,9 @@ impl Entry {
                 let canvas : JournalCanvas = canvas.into();
                 let canvas_dim = canvas.bounds().extents();
                 // Canvas units are pixels at scale 1, so brushes scale with
-                // the render. Every rhai stroke style carries a brush, so no
-                // default is needed.
+                // the render.
                 let buff = darkly::render_canvas_scaled(
-                    &canvas, engine, None,
+                    &canvas, engine,
                     (canvas_dim.x * scale) as u32, (canvas_dim.y * scale) as u32,
                     scale, supersample,
                 );

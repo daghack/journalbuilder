@@ -4,8 +4,8 @@
 #   1. Runs `cargo test`, which evaluates every rhai journal script.
 #   2. Renders the small fixture in tests/smoke_journals at full scale, and
 #      one page of it supersampled.
-#   3. Renders every journal in journals/ at reduced scale: rhai journals
-#      page 0 only, legacy journals whole, Darkly output only.
+#   3. Renders page 0 of every journal in journals/ at reduced scale, Darkly
+#      output only.
 #
 # Renders go to a temporary directory, so journals/*/output is untouched.
 # It is deleted afterwards unless something fails or --keep is passed.
@@ -86,13 +86,6 @@ for journal in journals/*/; do
 	if [[ -f "$journal/journal_entry.rhai" ]]; then
 		# Named pages name their files, so just require some Darkly output.
 		render "$name" -- "$name" --page 0 --no-plain --scale 0.25
-		if [[ -z "$(ls "$OUT/$name"/darkly_*.png 2>/dev/null)" ]]; then
-			echo "FAIL $name: no Darkly output"
-			FAILURES=$((FAILURES + 1))
-		fi
-	elif [[ -f "$journal/journal_entry.json" ]]; then
-		# Legacy page names vary; just require some Darkly output.
-		render "$name" -- "$name" --legacy --no-plain --scale 0.1
 		if [[ -z "$(ls "$OUT/$name"/darkly_*.png 2>/dev/null)" ]]; then
 			echo "FAIL $name: no Darkly output"
 			FAILURES=$((FAILURES + 1))

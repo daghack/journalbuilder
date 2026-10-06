@@ -494,24 +494,6 @@ pub struct LockTypeConfig {
     pub options: serde_json::Value,
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct NamelessLockConfig {
-    pub locks: HashMap<String, LockTypeConfig>,
-    pub connections: Vec<(String, String)>,
-    pub static_inputs: HashMap<String, String>,
-}
-
-impl NamelessLockConfig {
-    pub fn add_name(self, name: String) -> LockConfig {
-        LockConfig {
-            name,
-            locks: self.locks,
-            connections: self.connections,
-            static_inputs: self.static_inputs,
-        }
-    }
-}
-
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct LockConfig {
     pub name: String,

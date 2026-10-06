@@ -4,7 +4,7 @@ use darkly::coord::CanvasRect;
 use darkly::config::ConfigValue;
 use image::{ImageBuffer, Rgba, imageops::FilterType};
 use crate::journal::paths::{CurveSample};
-use crate::journal::canvas::{Brush, Canvas, ColoredStroke};
+use crate::journal::canvas::{Canvas, ColoredStroke};
 use std::collections::HashSet;
 
 pub fn new_engine(width: u32, height: u32) -> DarklyEngine {
@@ -56,12 +56,10 @@ const FRAME_EVERY_STROKES: u32 = 25;
 /// size (brushes included) and filtered back down, which smooths the
 /// aliasing Darkly produces for brush marks thinner than about a pixel.
 ///
-/// Each stroke is drawn with its own brush, or `default_brush` if it has
-/// none; panics if a stroke has neither.
+/// Each stroke is drawn with its own brush; panics if a stroke has none.
 pub fn render_canvas_scaled(
     canvas: &Canvas,
     engine: &mut DarklyEngine,
-    default_brush: Option<&Brush>,
     width: u32,
     height: u32,
     brush_scale: f32,
@@ -73,7 +71,7 @@ pub fn render_canvas_scaled(
     let render_width = (width as f32 * k).round() as u32;
     let render_height = (height as f32 * k).round() as u32;
     resize_canvas(engine, render_width, render_height);
-    let rendered = render_canvas(canvas, engine, default_brush, brush_scale * k);
+    let rendered = render_canvas(canvas, engine, brush_scale * k);
     if (render_width, render_height) == (width, height) {
         rendered
     } else {
@@ -99,7 +97,7 @@ fn downsample(image: &ImageBuffer<Rgba<u8>, Vec<u8>>, width: u32, height: u32) -
 }
 
 /// Render a canvas into the engine's current canvas size.
-fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, default_brush: Option<&Brush>, brush_scale: f32) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, brush_scale: f32) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
     let layer = engine.add_raster_layer(None);
     let (engine_canvas_width, engine_canvas_height) = engine.canvas_dimensions();
     let bounds = canvas.bounds();
@@ -115,8 +113,8 @@ fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, default_brush: Opti
     let mut loaded_size: Option<f32> = None;
     let mut stroke_index: u32 = 0;
     for ColoredStroke { path, style } in strokes {
-        let brush = style.brush.as_ref().or(default_brush)
-            .expect("Stroke has no brush and no default brush was given");
+        let brush = style.brush.as_ref()
+            .expect("Darkly strokes need a brush (rhai stroke styles always have one)");
         if loaded_name != Some(brush.name.as_str()) {
             engine.brush_load(&brush.name)
                 .unwrap_or_else(|e| panic!("Failed to load brush '{}': {}", brush.name, e));

@@ -1,68 +1,8 @@
-use scribe::journal::{Journal, JournalManifest};
 use scribe::journal::rhaientries::{JournalEngine};
 use scribe::journal::{symboldict, darkly};
-use scribe::journal::canvas::Brush;
-use std::collections::HashMap;
 
 use std::sync::Arc;
-use ::darkly::engine::DarklyEngine;
 
-type JournalEntryFunc = for<'j> fn(&'j mut Journal<'j>, &'j symboldict::SymbolPathDict) -> JournalManifest<'j>;
-
-const LEGACY_DARKLY_SIZE: f32 = 1080.0;
-
-fn legacy_journalbuild(symd: &symboldict::SymbolPathDict, engine: &mut DarklyEngine, journal_dir: &str, journal_name: &str, dir_name: &str, plain: bool, scale: f32, supersample: f32, strict_glyphs: bool) {
-    let journal_funcs: HashMap<&str, JournalEntryFunc> = HashMap::from([
-    ]);
-
-    let journal_path = format!("{}/{}/journal_entry.json", journal_dir, journal_name);
-    let journal_data = std::fs::read_to_string(&journal_path)
-        .expect(&format!("Failed to read {}", journal_path));
-    let mut journal : Journal = serde_json::from_str(&journal_data)
-        .expect("Failed to parse journal JSON");
-
-    // everything before here is pretty generic, and so something that is
-    // fine to stay in here. The behavior that I want to be able to customize
-    // from a file is here on out.
-
-    let journal_entry_func = journal_funcs.get(journal_name)
-        .expect("Journal entry function not found for given journal name");
-    let manifest = journal_entry_func(&mut journal, &symd);
-    check_missing_glyphs(symd, strict_glyphs);
-    if plain {
-        manifest.render_all(dir_name, 2.0 * scale);
-    } else {
-        create_dir(dir_name);
-    }
-
-    let pages = manifest.pages();
-    // Legacy journals don't set per-stroke brushes, so everything uses this.
-    let default_brush = Brush {
-        name: "Calligraphy".to_string(),
-        // Darkly's dev Calligraphy treats size as the nib's long axis (it
-        // was 2.5x that under v0.7.0's area-preserving aspect), so 1.75 here
-        // matches the old 0.7 (measured: same ink coverage within 0.1%).
-        size: 1.75,
-        min_pressure: 0.15,
-        max_pressure: 0.25,
-    };
-    for (page_name, (page_canvas, _))  in pages {
-        println!("Rendering with Darkly.");
-        // Fit the longest side to LEGACY_DARKLY_SIZE, preserving aspect ratio.
-        let dims = page_canvas.bounds().extents();
-        let fit = LEGACY_DARKLY_SIZE * scale / dims.x.max(dims.y);
-        // Brush sizes are relative to the LEGACY_DARKLY_SIZE render, so
-        // they scale with --scale.
-        let buff = darkly::render_canvas_scaled(
-            page_canvas, engine, Some(&default_brush),
-            (dims.x * fit) as u32, (dims.y * fit) as u32,
-            scale, supersample,
-        );
-        let filename = format!("{}/darkly_{}.png", dir_name, page_name);
-        println!("\t - {}", filename);
-        buff.save(filename).expect("Failed to save png");
-    }
-}
 fn create_dir(dir: &str) {
     if !std::path::Path::new(dir).exists() {
         std::fs::create_dir_all(dir).expect("Failed to create output directory");
@@ -92,12 +32,11 @@ fn check_missing_glyphs(symd: &symboldict::SymbolPathDict, strict: bool) {
 
 const DEFAULT_SUPERSAMPLE: f32 = 1.2;
 
-const USAGE: &str = "Usage: journalbuild <journal_name> [--legacy] [--page N[,N...]] [--no-plain]
+const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--no-plain]
                     [--scale S] [--supersample K] [--strict-glyphs]
                     [--journals-dir DIR] [--output-dir DIR]
 
-  --legacy            Build a legacy JSON journal instead of a rhai one.
-  --page N,...        Render only these rhai pages (0-based). Other pages'
+  --page N,...        Render only these pages (0-based). Other pages'
                       existing output is kept.
   --no-plain          Skip the plain PNG/SVG output; only render with Darkly.
   --strict-glyphs     Fail before rendering if any character had no glyph
@@ -116,7 +55,6 @@ struct Args {
     strict_glyphs: bool,
     journal_name: String,
     journals_dir: String,
-    legacy: bool,
     pages: Option<Vec<usize>>,
     plain: bool,
     scale: f32,
@@ -126,7 +64,6 @@ struct Args {
 
 fn parse_args() -> Result<Args, String> {
     let mut journal_name = None;
-    let mut legacy = false;
     let mut pages: Option<Vec<usize>> = None;
     let mut plain = true;
     let mut strict_glyphs = false;
@@ -141,7 +78,6 @@ fn parse_args() -> Result<Args, String> {
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--legacy" => legacy = true,
             "--no-plain" => plain = false,
             "--strict-glyphs" => strict_glyphs = true,
             "--scale" => {
@@ -173,10 +109,7 @@ fn parse_args() -> Result<Args, String> {
         }
     }
     let journal_name = journal_name.ok_or("missing journal name")?;
-    if legacy && pages.is_some() {
-        return Err("--page is only supported for rhai journals".to_string());
-    }
-    Ok(Args { strict_glyphs, journal_name, journals_dir, legacy, pages, plain, scale, supersample, output_dir })
+    Ok(Args { strict_glyphs, journal_name, journals_dir, pages, plain, scale, supersample, output_dir })
 }
 
 fn main() {
@@ -193,11 +126,6 @@ fn main() {
         .unwrap_or_else(|| format!("{}/{}/output", journal_dir, journal_name));
     // One Darkly engine for the whole run; canvases resize it as needed.
     let mut darkly_engine = darkly::new_engine(1, 1);
-    if args.legacy {
-        // TODO: eventually I intend to build out the legacy journals into rhai.
-        legacy_journalbuild(&symd, &mut darkly_engine, journal_dir, journal_name, &output_dir, args.plain, args.scale, args.supersample, args.strict_glyphs);
-        return;
-    }
     let symdarc = Arc::new(symd);
     let mut engine = JournalEngine::new(symdarc.clone());
     let entry_path = format!("{}/{}", journal_dir, journal_name);

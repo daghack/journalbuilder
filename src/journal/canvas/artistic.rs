@@ -1,10 +1,8 @@
 use parry2d::math::{Vec2};
 
 use crate::journal::canvas::{Canvas, StrokeStyle, textbox::{TextBox, TextBoxOptions, TextBoxLineMode}};
-use crate::journal::symboldict;
 use crate::journal::symbol::Symbol;
 use crate::journal::paths::StrokePath;
-use crate::journal::styles;
 
 use std::collections::{HashMap, HashSet};
 use serde::{Serialize, Deserialize};
@@ -106,31 +104,6 @@ pub fn splat_msgs(canvas: &Canvas, msgs: &[Vec<Symbol>], opts: &SplatOptions, st
         }
     }
     Ok(placed)
-}
-
-pub fn draw_msgs_overtop(canvas: &mut Canvas, symd: &symboldict::SymbolPathDict, msgs: &Vec<String>, width_bounds: (f32, f32), height_bounds: (f32, f32), symbol_scale: f32, width: f32, color: &str, rng: &mut dyn RngCore) {
-    let builder = styles::lowercase_builder(&symd, "loche_upper");
-    let msgs: Vec<Vec<Symbol>> = msgs.iter().map(|msg| {
-        let mut symbols = builder.build(msg, rng);
-        jitter_symbols(&mut symbols, std::f32::consts::PI / 16.0, 0.15, rng);
-        symbols
-    }).collect();
-    let opts = SplatOptions {
-        symbol_scale,
-        width_range: width_bounds,
-        height_range: height_bounds,
-        jagged_edge: 0.1,
-        max_attempts: 101,
-    };
-    let style = StrokeStyle { color: color.to_string(), width, brush: None };
-    match splat_msgs(canvas, &msgs, &opts, &style, rng) {
-        Ok(placed) => for symbols in placed {
-            for symbol in symbols {
-                canvas.add_strokes(symbol, style.clone());
-            }
-        },
-        Err(err) => eprintln!("Warning: couldn't splat messages: {}", err),
-    }
 }
 
 pub type MazePosition = (i32, i32);

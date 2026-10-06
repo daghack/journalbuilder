@@ -1,5 +1,4 @@
-//! The single list of lock types that can be built by name, shared by the
-//! legacy JSON journals and the rhai API.
+//! The single list of lock types that can be built by name.
 
 use super::Lock;
 use super::locks::doublering::{DoubleRingLock, KeyedDoubleRingLock};
