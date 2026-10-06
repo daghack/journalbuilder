@@ -41,8 +41,8 @@ journals' look or behaviour, so it waits for a call).
 | 20 | Glyph hulls used an unseeded jitter | Bug | Fixed `92d9eeb` |
 | 21 | Darkly seeded each stroke from the wall clock | Quirk | Fixed `92d9eeb` |
 | 22 | Legacy splat: lost jitter, a possible infinite loop, silent drops | Bug | Fixed `d1ff166` |
-| 23 | Chained calls on a variable only apply the first call to it | Quirk | Fixed {{commit: Share paths, glyphs and canvases between copies}} |
-| 24 | A rhai `for` loop variable is a copy | Quirk | Fixed {{commit: Share paths, glyphs and canvases between copies}} |
+| 23 | Chained calls on a variable only apply the first call to it | Quirk | Fixed `c1da02d` |
+| 24 | A rhai `for` loop variable is a copy | Quirk | Fixed `c1da02d` |
 | 25 | Darkly renders each canvas separately; plain output merges them | Anti-pattern | Fixed `3cd2cb2` |
 | 26 | Plain-output roughening and noise are unseeded | Quirk | Fixed `35b0435` |
 | 27 | `left_handed_maze_path` duplicates `new_maze(..).path()` | Redundancy | Fixed `234187a` |
@@ -50,7 +50,7 @@ journals' look or behaviour, so it waits for a call).
 | 29 | Font sets send digits and punctuation to the upper fonts | Quirk | Fixed `5219415` |
 | 30 | A glyph that is a single straight line panics when loaded | Bug | Fixed `9c79679` |
 | 31 | The Darkly dependency follows a branch instead of a pinned revision | Anti-pattern | Fixed `6e14f59` |
-| 32 | The copper letters' brush sizes predate the fork's Calligraphy change | Quirk | Resolved {{commit: Delete copper_letter_1_sharp}} |
+| 32 | The copper letters' brush sizes predate the fork's Calligraphy change | Quirk | Resolved `bb38e0c` |
 | 33 | Rhai scripts can't emit warnings; `print` goes to stdout | Gap | Fixed `8a177dc` |
 | 34 | Rhai `fn`s can't read script globals | Quirk | Won't fix |
 | 35 | Each ported journal repeated a 1080 px brush-size fit | Anti-pattern | Fixed `99d38c1` |
@@ -176,13 +176,13 @@ journals' look or behaviour, so it waits for a call).
 
 ### 23. Chained calls on a variable only apply the first call to it
 - **Where:** `src/journal/rhaientries/` (paths, glyphs, canvases)
-- **Status:** Fixed in {{commit: Share paths, glyphs and canvases between copies}} (option 1). Earlier documented in `03eddbb`.
+- **Status:** Fixed in `c1da02d` (option 1). Earlier documented in `03eddbb`.
 - **Problem:** path, glyph and canvas functions modified their target and returned a copy, so `g.translate_by(v).scale_by(2.0);` changed `g` only by the translation: rhai passes the variable by reference to the first call of a chain only, and later calls acted on the returned copy.
 - **Change:** in scripts these three types are now shared handles (`Shared<T>`, an `Rc<RefCell<T>>`): every copy of one (assignment, argument, array element, `for` variable) is the same value, and mutators return that same handle, so chains on variables apply every call. `.copy()` makes an independent value. Adding to something takes a snapshot: `add_strokepath`, `add_glyph(s)`, `new_stroke` copy the path, and `page.add_canvas` copies the canvas, so changing a path or canvas afterwards doesn't reach what it was added to. Paths also got a real `to_string` (rhai had printed the type name, which made one glyph test vacuous).
 - **Why:** chained calls behave the way they read, with no "assign the chain back" rule. The cost is that `let b = a;` aliases; the only script code that copied-then-modified was one test, now `ring.copy()`. All renders are byte-identical.
 
 ### 24. A rhai `for` loop variable is a copy
-- **Status:** Fixed in {{commit: Share paths, glyphs and canvases between copies}} (with 23). Earlier documented in `76d8d84`.
+- **Status:** Fixed in `c1da02d` (with 23). Earlier documented in `76d8d84`.
 - **Problem:** a rhai `for` loop variable was a copy, so `for g in glyphs { g.scale = 7.0; }` changed nothing.
 - **Change:** glyphs, paths and canvases are shared handles (see 23), so a loop variable is the array element and changes reach it. (Plain values like numbers and maps still copy, as rhai does.)
 - **Why:** the natural loop now works for the types scripts loop over.
@@ -236,7 +236,7 @@ journals' look or behaviour, so it waits for a call).
 
 ### 32. The copper letters' brush sizes predate the fork's Calligraphy change
 - **Where:** `journals/copper_letter_1*/journal_entry.rhai`
-- **Status:** Resolved in {{commit: Delete copper_letter_1_sharp}}: the journal was deleted.
+- **Status:** Resolved in `bb38e0c`: the journal was deleted.
 - **Problem:** the fork treats Calligraphy's size as the nib's long axis, 2.5× its old meaning, and `copper_letter_1_sharp`'s brush (size 0.8) wasn't rescaled, so it rendered as striped hairlines.
 - **Change:** the journal was only a quick Darkly test, so it's gone rather than retuned. (`copper_letter_1` uses Rough Ink, which the fork didn't change.)
 
