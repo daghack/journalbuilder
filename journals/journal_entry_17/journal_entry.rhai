@@ -6,10 +6,8 @@
 //   balanced_ternary  a dial of the 27 balanced-ternary glyphs and their
 //                     digits, with short notes scattered over it.
 
-// Nib sizes are in canvas units, like everything else. These keep the look
-// of the legacy renders, which fit each page to 1080 px with a 1.75 nib.
-let maze_brush = new_brush("Calligraphy", 0.15, 0.25, 1.65);
-let dial_brush = new_brush("Calligraphy", 0.15, 0.25, 2.05);
+let maze_brush = new_brush("Calligraphy", 0.15, 0.25, 1.5);
+let dial_brush = new_brush("Calligraphy", 0.15, 0.25, 1.5);
 let svg_look = #{ roughness: 2.0, noise_amplitude: 1.5 };
 
 // ---- page one: the maze ----
