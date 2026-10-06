@@ -19,7 +19,7 @@ use crate::lockbuilder::{
 use crate::lockbuilder::locks::maze::LockedMaze;
 use crate::lockbuilder::registry::build_lock;
 use crate::journal::canvas::artistic::{BuiltMaze, MazeTraversalStrategy};
-use crate::journal::paths::StrokePath;
+use super::Path;
 use std::collections::HashMap;
 
 type RhaiResult<T> = Result<T, Box<EvalAltResult>>;
@@ -293,8 +293,8 @@ impl Maze {
 
     /// A path along the corridors, in grid units, following the same
     /// traversal the text was written in.
-    fn path(&mut self) -> StrokePath {
-        self.locked.maze.corridor_path(self.locked.strategy)
+    fn path(&mut self) -> Path {
+        Path::new(self.locked.maze.corridor_path(self.locked.strategy))
     }
 }
 
@@ -555,7 +555,8 @@ mod tests {
 
     #[test]
     fn maze_path_follows_the_corridors() {
-        let path: StrokePath = eval(&format!("{} maze.path()", MAZE));
+        let path: Path = eval(&format!("{} maze.path()", MAZE));
+        let path = path.get();
         let path = path.to_string();
         assert!(path.starts_with("M 0 0 "), "{}", path);
         // Every coordinate is a grid cell inside the maze.

@@ -15,24 +15,22 @@
 //! }
 //! canvas.add_glyph(glyph("basic_eye").scale_by(50.0), style);
 //!
-//! // Transforms change the glyph and return it, but a chain on a variable
-//! // only changes the variable by its first call. Assign the chain back:
-//! g = g.translate_by(new_vec(1.0, 0.0)).scale_by(2.0);
-//!
-//! // A for loop's variable is a copy: to change an array's glyphs, index it.
+//! // Glyphs, like paths and canvases, are shared: every copy of one (a
+//! // variable, an array element, a loop variable) is the same glyph, so
+//! // chains and loops change it. `.copy()` makes an independent one.
+//! g.translate_by(new_vec(1.0, 0.0)).scale_by(2.0);
 //! let word = copper.glyphs("ink");
-//! for i in 0..word.len() { word[i].position = new_vec(i * 20.0, 0.0); }
-//! canvas.add_glyphs(word, style);
+//! for (g, i) in word { g.position = new_vec(i * 20.0, 0.0); }
+//! canvas.add_glyphs(word, style);   // adds copies of the glyphs' strokes
 //! ```
 //!
 //! Variant picks come from the engine's seeded generator.
 
-use rhai::{Array, CustomType, Dynamic, Engine, EvalAltResult, TypeBuilder};
+use rhai::{Array, Dynamic, Engine, EvalAltResult};
 use std::rc::Rc;
 
 use super::random::SharedRng;
-use super::{Canvas, StrokeStyle, Vec2};
-use crate::journal::paths::StrokePath;
+use super::{Canvas, CanvasData, Path, Shared, StrokeStyle, Vec2};
 use crate::journal::styles::{Font, FontSet};
 use crate::journal::symbol::Symbol;
 use crate::journal::symboldict::SymbolPathDict;
@@ -40,73 +38,36 @@ use crate::journal::symboldict::SymbolPathDict;
 type RhaiResult<T> = Result<T, Box<EvalAltResult>>;
 
 /// One placed glyph: a symbol with a position, scale and rotation (radians,
-/// around its own centre).
-#[derive(Clone, Debug)]
-pub struct Glyph(pub Symbol);
+/// around its own centre). Shared like paths and canvases (see `Shared`).
+pub type Glyph = Shared<Symbol>;
 
-impl Glyph {
-    fn position(&mut self) -> Vec2 {
-        let p = self.0.position();
-        Vec2::new(p.x as f64, p.y as f64)
-    }
-    fn set_position(&mut self, position: Vec2) {
-        self.0.set_position(position.into());
-    }
-    fn scale(&mut self) -> f64 {
-        self.0.scale() as f64
-    }
-    fn set_scale(&mut self, scale: f64) {
-        self.0.set_scale(scale as f32);
-    }
-    fn rotation(&mut self) -> f64 {
-        self.0.rotation_rad() as f64
-    }
-    fn set_rotation(&mut self, rotation: f64) {
-        self.0.set_rotation_rad(rotation as f32);
-    }
-    fn is_blank(&mut self) -> bool {
-        self.0.is_blank()
-    }
-    // Like the path functions, these modify the glyph in place and return
-    // it, so they can be chained (a chain on a variable changes it only by
-    // its first call; see the module docs).
-    fn translate_by(&mut self, delta: Vec2) -> Glyph {
-        self.0.translate_by(delta.into());
-        self.clone()
-    }
-    fn scale_by(&mut self, factor: f64) -> Glyph {
-        self.0.scale_by(factor as f32);
-        self.clone()
-    }
-    fn rotate_by(&mut self, rad: f64) -> Glyph {
-        self.0.rotate_rad_by(rad as f32);
-        self.clone()
-    }
-    /// The glyph's strokes, placed. Empty for blanks (spaces).
-    fn path(&mut self) -> StrokePath {
-        self.0.placed_strokepath()
-    }
+fn register_glyph(engine: &mut Engine) {
+    engine.register_type_with_name::<Glyph>("Glyph")
+        .register_fn("copy", Glyph::copy)
+        .register_get_set("position",
+            |g: &mut Glyph| { let p = g.borrow().position(); Vec2::new(p.x as f64, p.y as f64) },
+            |g: &mut Glyph, position: Vec2| g.borrow_mut().set_position(position.into()))
+        .register_get_set("scale",
+            |g: &mut Glyph| g.borrow().scale() as f64,
+            |g: &mut Glyph, scale: f64| g.borrow_mut().set_scale(scale as f32))
+        .register_get_set("rotation",
+            |g: &mut Glyph| g.borrow().rotation_rad() as f64,
+            |g: &mut Glyph, rotation: f64| g.borrow_mut().set_rotation_rad(rotation as f32))
+        .register_get("is_blank", |g: &mut Glyph| g.borrow().is_blank())
+        // Like the path functions, these change the glyph and return it, so
+        // they chain.
+        .register_fn("translate_by", |g: &mut Glyph, delta: Vec2| g.update(|s| s.translate_by(delta.into())))
+        .register_fn("scale_by", |g: &mut Glyph, factor: f64| g.update(|s| s.scale_by(factor as f32)))
+        .register_fn("rotate_by", |g: &mut Glyph, rad: f64| g.update(|s| s.rotate_rad_by(rad as f32)))
+        // The glyph's strokes, placed, as a new path. Empty for blanks.
+        .register_fn("path", |g: &mut Glyph| Path::new(g.borrow().placed_strokepath()));
 }
 
-impl CustomType for Glyph {
-    fn build(mut builder: TypeBuilder<Self>) {
-        builder
-            .with_name("Glyph")
-            .with_get_set("position", Self::position, Self::set_position)
-            .with_get_set("scale", Self::scale, Self::set_scale)
-            .with_get_set("rotation", Self::rotation, Self::set_rotation)
-            .with_get("is_blank", Self::is_blank)
-            .with_fn("translate_by", Self::translate_by)
-            .with_fn("scale_by", Self::scale_by)
-            .with_fn("rotate_by", Self::rotate_by)
-            .with_fn("path", Self::path);
-    }
-}
-
-/// Add a glyph's strokes to a canvas; blanks add nothing.
-pub(super) fn add_glyph(canvas: &mut Canvas, glyph: &Glyph, style: &StrokeStyle) -> RhaiResult<()> {
-    if !glyph.0.is_blank() {
-        let path = glyph.0.placed_strokepath();
+/// Add (a copy of) a glyph's strokes to a canvas; blanks add nothing.
+pub(super) fn add_glyph(canvas: &mut CanvasData, glyph: &Glyph, style: &StrokeStyle) -> RhaiResult<()> {
+    let glyph = glyph.borrow();
+    if !glyph.is_blank() {
+        let path = glyph.placed_strokepath();
         super::check_finite("add_glyph", &path)?;
         canvas.add_strokepath(path, style.clone());
     }
@@ -142,7 +103,7 @@ fn checked(symdict: &SymbolPathDict, caller: &str, font: Font) -> RhaiResult<Fon
 
 pub fn register(engine: &mut Engine, symdict: Rc<SymbolPathDict>, rng: SharedRng) {
     engine.register_type_with_name::<Font>("Font");
-    engine.build_type::<Glyph>();
+    register_glyph(engine);
 
     let sd = symdict.clone();
     engine.register_fn("new_fontset", move |upper: Array, lower: Array| -> RhaiResult<Font> {
@@ -163,22 +124,23 @@ pub fn register(engine: &mut Engine, symdict: Rc<SymbolPathDict>, rng: SharedRng
         font.builder(&sd)
             .build(text, &mut *rng.borrow_mut())
             .into_iter()
-            .map(|symbol| Dynamic::from(Glyph(symbol)))
+            .map(|symbol| Dynamic::from(Glyph::new(symbol)))
             .collect()
     });
     let sd = symdict;
     engine.register_fn("glyph", move |name: &str| -> RhaiResult<Glyph> {
         sd.get_symbol_base(name)
-            .map(|base| Glyph(Symbol::new_default_from_base_rc(base)))
+            .map(|base| Glyph::new(Symbol::new_default_from_base_rc(base)))
             .ok_or_else(|| format!("glyph: unknown symbol '{}'", name).into())
     });
 
     engine.register_fn("add_glyph", |canvas: &mut Canvas, glyph: Glyph, style: StrokeStyle| -> RhaiResult<()> {
-        add_glyph(canvas, &glyph, &style)
+        add_glyph(&mut canvas.borrow_mut(), &glyph, &style)
     });
     engine.register_fn("add_glyphs", |canvas: &mut Canvas, glyphs: Array, style: StrokeStyle| -> RhaiResult<()> {
+        let mut canvas = canvas.borrow_mut();
         for glyph in glyph_array("add_glyphs", glyphs)? {
-            add_glyph(canvas, &glyph, &style)?;
+            add_glyph(&mut canvas, &glyph, &style)?;
         }
         Ok(())
     });

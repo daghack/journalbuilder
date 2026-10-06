@@ -208,7 +208,7 @@ const PLAIN_STYLE_KEYS: [&str; 4] = ["roughness", "point_sample_distance", "trai
 #[derive(Debug, Clone, CustomType)]
 #[rhai_type(extra = Self::build_extra)]
 pub struct Page {
-    canvases: Vec<Canvas>,
+    canvases: Vec<CanvasData>,
     /// Output files are named after this, or `page_{index}` without one.
     #[rhai_type(skip)]
     name: Option<String>,
@@ -228,7 +228,9 @@ impl Default for Page {
 }
 
 impl Page {
+    /// `page.add_canvas(canvas)` adds a copy of the canvas as it is now.
     pub fn add_canvas(&mut self, canvas: Canvas) -> Result<(), Box<EvalAltResult>> {
+        let canvas = canvas.get();
         let label = canvas.label(self.canvases.len());
         if self.canvases.iter().enumerate().any(|(i, c)| c.label(i) == label) {
             return Err(format!("add_canvas: the page already has a canvas named '{}'", label).into());
@@ -236,7 +238,7 @@ impl Page {
         self.canvases.push(canvas);
         Ok(())
     }
-    pub fn canvases(&self) -> &Vec<Canvas> {
+    pub fn canvases(&self) -> &Vec<CanvasData> {
         &self.canvases
     }
     /// The page's name in output files, given its index in the entry.
@@ -340,39 +342,63 @@ impl From<Vec2> for PVec {
     }
 }
 
+/// A shared, mutable value, as rhai scripts see paths, glyphs and canvases:
+/// copying one (assigning it, passing it, a `for` loop's variable) shares
+/// the value, so changes through any copy, including chained calls like
+/// `p.move_to(a).line_to(b)`, all reach it. `.copy()` makes an independent
+/// one.
+pub struct Shared<T>(Rc<RefCell<T>>);
+
+impl<T> Clone for Shared<T> {
+    fn clone(&self) -> Self {
+        Shared(self.0.clone())
+    }
+}
+
+impl<T: Clone> Shared<T> {
+    pub fn new(value: T) -> Self {
+        Shared(Rc::new(RefCell::new(value)))
+    }
+    pub fn borrow(&self) -> std::cell::Ref<'_, T> {
+        self.0.borrow()
+    }
+    pub fn borrow_mut(&self) -> std::cell::RefMut<'_, T> {
+        self.0.borrow_mut()
+    }
+    /// The value as it is now.
+    pub fn get(&self) -> T {
+        self.0.borrow().clone()
+    }
+    /// An independent copy, for `.copy()`.
+    pub fn copy(&mut self) -> Self {
+        Shared::new(self.get())
+    }
+    /// Change the value in place and return this same handle, so the change
+    /// reaches the variable even partway through a chain.
+    pub fn update(&mut self, f: impl FnOnce(&mut T)) -> Self {
+        f(&mut self.0.borrow_mut());
+        self.clone()
+    }
+}
+
+/// A path as scripts see it (see `Shared`).
+pub type Path = Shared<StrokePath>;
+
+/// A canvas as scripts see it (see `Shared`). Pages keep copies of the
+/// canvases added to them.
+pub type Canvas = Shared<CanvasData>;
+
 #[derive(Debug, Default, Clone)]
-#[derive(CustomType)]
-#[rhai_type(extra = Self::build_extra)]
-pub struct Canvas {
+pub struct CanvasData {
     pub strokes: Vec<Stroke>,
-    /// Its Darkly output is named after this, or its index on the page.
-    #[rhai_type(skip)]
+    /// Its output files are named after this, or its index on the page.
     name: Option<String>,
 }
 
-impl Canvas {
+impl CanvasData {
     /// The canvas's name in output files, given its index on its page.
     pub fn label(&self, index: usize) -> String {
         self.name.clone().unwrap_or_else(|| index.to_string())
-    }
-    fn get_name(&mut self) -> Dynamic {
-        self.name.clone().map_or(Dynamic::UNIT, Dynamic::from)
-    }
-    fn set_name(&mut self, name: Dynamic) -> Result<(), Box<EvalAltResult>> {
-        self.name = Some(check_name("canvas.name", name)?);
-        Ok(())
-    }
-    /// Script-facing `add_stroke`, refusing paths with non-finite points
-    /// (see `check_finite`).
-    fn add_stroke_checked(&mut self, stroke: Stroke) -> Result<(), Box<EvalAltResult>> {
-        check_finite("add_stroke", &stroke.path)?;
-        self.add_stroke(stroke);
-        Ok(())
-    }
-    fn add_strokepath_checked(&mut self, path: StrokePath, style: StrokeStyle) -> Result<(), Box<EvalAltResult>> {
-        check_finite("add_strokepath", &path)?;
-        self.add_strokepath(path, style);
-        Ok(())
     }
     pub fn add_stroke(&mut self, stroke: Stroke) {
         self.strokes.push(stroke)
@@ -380,57 +406,72 @@ impl Canvas {
     pub fn add_strokepath(&mut self, path: StrokePath, style: StrokeStyle) {
         self.strokes.push(Stroke{path, style});
     }
-    pub fn add_canvas(&mut self, lhs: Canvas) {
-        for stroke in lhs.strokes {
-            self.strokes.push(stroke);
-        }
-    }
-    // Transforms modify the canvas in place and also return it, matching
-    // the StrokePath functions, so they can be chained (with the same
-    // caveat: a chain on a variable changes it only by its first call).
-    pub fn translate(&mut self, v: Vec2) -> Canvas {
-        let v = v.into();
+    fn transform(&mut self, f: impl Fn(&mut StrokePath)) {
         for stroke in &mut self.strokes {
-            stroke.path.translate_by(v);
+            f(&mut stroke.path);
         }
-        self.clone()
-    }
-    pub fn scale(&mut self, scale: f64) -> Canvas {
-        for stroke in &mut self.strokes {
-            stroke.path.scale_by(scale as f32);
-        }
-        self.clone()
-    }
-    pub fn rotate_around(&mut self, point: Vec2, rad: f64) -> Canvas {
-        let point = point.into();
-        for stroke in &mut self.strokes {
-            stroke.path.rotate_around(point, rad as f32);
-        }
-        self.clone()
-    }
-    fn build_extra(builder: &mut TypeBuilder<Self>) {
-        builder
-            .with_fn("add_stroke", Self::add_stroke_checked)
-            .with_fn("add_strokepath", Self::add_strokepath_checked)
-            .with_fn("rotate_around", Self::rotate_around)
-            .with_fn("translate", Self::translate)
-            .with_fn("scale", Self::scale)
-            .with_fn("add_canvas", Self::add_canvas)
-            .with_fn("new_canvas", Self::default)
-            .with_get_set("name", Self::get_name, Self::set_name)
-        ;
     }
 }
 
-impl From<Canvas> for JournalCanvas {
-    fn from(val: Canvas) -> Self {
+/// The canvas functions scripts call. Like the path functions, transforms
+/// change the canvas and return it, so they chain.
+fn register_canvas(engine: &mut Engine) {
+    engine.register_type_with_name::<Canvas>("Canvas")
+        .register_fn("new_canvas", || Canvas::new(CanvasData::default()))
+        .register_fn("copy", Canvas::copy)
+        .register_get_set("name",
+            |c: &mut Canvas| c.borrow().name.clone().map_or(Dynamic::UNIT, Dynamic::from),
+            |c: &mut Canvas, name: Dynamic| -> Result<(), Box<EvalAltResult>> {
+                c.borrow_mut().name = Some(check_name("canvas.name", name)?);
+                Ok(())
+            })
+        // Adding copies the stroke, so later changes to the path don't reach
+        // the canvas. Paths with non-finite points are refused (see
+        // `check_finite`).
+        .register_fn("add_stroke", |c: &mut Canvas, stroke: Stroke| -> Result<(), Box<EvalAltResult>> {
+            check_finite("add_stroke", &stroke.path)?;
+            c.borrow_mut().add_stroke(stroke);
+            Ok(())
+        })
+        .register_fn("add_strokepath", |c: &mut Canvas, path: Path, style: StrokeStyle| -> Result<(), Box<EvalAltResult>> {
+            let path = path.get();
+            check_finite("add_strokepath", &path)?;
+            c.borrow_mut().add_strokepath(path, style);
+            Ok(())
+        })
+        .register_fn("add_canvas", |c: &mut Canvas, other: Canvas| {
+            // Copy first: `c.add_canvas(c)` shares one value.
+            let strokes = other.borrow().strokes.clone();
+            c.borrow_mut().strokes.extend(strokes);
+        })
+        .register_fn("translate", |c: &mut Canvas, v: Vec2| -> Canvas {
+            let v = v.into();
+            c.update(|data| data.transform(|p| p.translate_by(v)))
+        })
+        .register_fn("scale", |c: &mut Canvas, scale: f64| -> Canvas {
+            c.update(|data| data.transform(|p| p.scale_by(scale as f32)))
+        })
+        .register_fn("rotate_around", |c: &mut Canvas, point: Vec2, rad: f64| -> Canvas {
+            let point = point.into();
+            c.update(|data| data.transform(|p| p.rotate_around(point, rad as f32)))
+        });
+}
+
+impl From<CanvasData> for JournalCanvas {
+    fn from(val: CanvasData) -> Self {
         let mut canvas = JournalCanvas::new();
-        for stroke in val.strokes {
-            let Stroke {
-                path,
-                style,
-            } = stroke;
+        for Stroke { path, style } in val.strokes {
             canvas.add_strokes(path, style.into());
+        }
+        canvas
+    }
+}
+
+impl From<&CanvasData> for JournalCanvas {
+    fn from(val: &CanvasData) -> Self {
+        let mut canvas = JournalCanvas::new();
+        for Stroke { path, style } in val.strokes.iter() {
+            canvas.add_strokes(path.clone(), style.clone().into());
         }
         canvas
     }
@@ -438,29 +479,23 @@ impl From<Canvas> for JournalCanvas {
 
 impl From<&Canvas> for JournalCanvas {
     fn from(val: &Canvas) -> Self {
-        let mut canvas = JournalCanvas::new();
-        for stroke in val.strokes.iter() {
-            let Stroke {
-                path,
-                style,
-            } = stroke;
-            canvas.add_strokes(path.clone(), style.clone().into());
-        }
-        canvas
+        (&*val.borrow()).into()
     }
 }
 
 #[derive(Debug, Clone, CustomType)]
 #[rhai_type(extra = Self::build_extra)]
 pub struct Stroke {
+    #[rhai_type(skip)]
     path: StrokePath,
     style: StrokeStyle,
 }
 
 impl Stroke {
-    pub fn new(path: StrokePath, style: StrokeStyle) -> Self {
+    /// `new_stroke(path, style)`, with a copy of the path.
+    pub fn new(path: Path, style: StrokeStyle) -> Self {
         Self {
-            path,
+            path: path.get(),
             style,
         }
     }
@@ -511,10 +546,9 @@ impl StrokeStyle {
 }
 
 /// Apply a by-value StrokePath builder method to a path in place, returning
-/// the updated path.
-fn update_path(path: &mut StrokePath, f: impl FnOnce(StrokePath) -> StrokePath) -> StrokePath {
-    *path = f(std::mem::take(path));
-    path.clone()
+/// the same path.
+fn update_path(path: &mut Path, f: impl FnOnce(StrokePath) -> StrokePath) -> Path {
+    path.update(|p| *p = f(std::mem::take(p)))
 }
 
 pub struct JournalEngine {
@@ -531,22 +565,23 @@ impl JournalEngine {
         let fill_msg_rng = rng.clone();
         let fit_msg_rng = rng.clone();
 
-        engine.register_type::<StrokePath>()
-            // Every path function both modifies the path in place and returns
-            // it, so `p.line_to(v);`, `p = p.line_to(v);` and chained calls on
-            // temporaries all behave the same. A chain on a variable is the
-            // exception: `p.line_to(a).line_to(b);` changes `p` only by the
-            // first call (rhai passes the variable by reference to the first
-            // call only), so write `p = p.line_to(a).line_to(b);` instead.
-            .register_fn("move_to", |path: &mut StrokePath, pos: Vec2| -> StrokePath {
+        register_canvas(&mut engine);
+        engine.register_type_with_name::<Path>("StrokePath")
+            // Every path function changes the path and returns that same
+            // (shared) path, so statements, assignments and chains all work:
+            // `p.move_to(a).line_to(b);` draws both segments into `p`.
+            .register_fn("copy", Path::copy)
+            .register_fn("to_string", |p: &mut Path| p.borrow().to_string())
+            .register_fn("to_debug", |p: &mut Path| p.borrow().to_string())
+            .register_fn("move_to", |path: &mut Path, pos: Vec2| -> Path {
                 update_path(path, |p| p.move_to(pos.x as f32, pos.y as f32))
             })
-            .register_fn("line_to", |path: &mut StrokePath, pos: Vec2| -> StrokePath {
+            .register_fn("line_to", |path: &mut Path, pos: Vec2| -> Path {
                 update_path(path, |p| p.line_to(pos.x as f32, pos.y as f32))
             })
             // The message along as many copies of the path as it takes, one
             // canvas per copy.
-            .register_fn("fill_with_msg", move |path: &mut StrokePath, style: StrokeStyle, font: Font, fontsize: f64, msg: &str| -> Result<Vec<Dynamic>, Box<EvalAltResult>> {
+            .register_fn("fill_with_msg", move |path: &mut Path, style: StrokeStyle, font: Font, fontsize: f64, msg: &str| -> Result<Vec<Dynamic>, Box<EvalAltResult>> {
                 if !(fontsize > 0.0) {
                     return Err(format!("fill_with_msg: font size must be positive, got {}", fontsize).into());
                 }
@@ -558,9 +593,10 @@ impl JournalEngine {
 
                 let mut all_canvases = Vec::new();
                 let mut symbols = builder.build(msg, &mut *fill_msg_rng.borrow_mut());
+                let path = path.get();
                 let total = symbols.len();
                 while !symbols.is_empty() {
-                    let (placed, unplaced) = place_along_path(std::mem::take(&mut symbols), path, &args);
+                    let (placed, unplaced) = place_along_path(std::mem::take(&mut symbols), &path, &args);
                     if placed.is_empty() {
                         // Another copy of the path wouldn't fit it either.
                         return Err(format!(
@@ -568,18 +604,19 @@ impl JournalEngine {
                             total - unplaced.len() + 1, total, fontsize,
                         ).into());
                     }
-                    let mut canvas = Canvas::default();
+                    let mut canvas = CanvasData::default();
                     for symbol in placed {
                         canvas.add_strokepath(symbol.placed_strokepath(), style.clone());
                     }
-                    all_canvases.push(Dynamic::from(canvas));
+                    all_canvases.push(Dynamic::from(Canvas::new(canvas)));
                     symbols = unplaced;
                 }
                 Ok(all_canvases)
             })
             .register_fn("fit_msg_to",
-                move |path: &mut StrokePath, style: StrokeStyle, font: Font, msg: &str| -> Result<Canvas, Box<EvalAltResult>> {
-                let mut canvas = Canvas::default();
+                move |path: &mut Path, style: StrokeStyle, font: Font, msg: &str| -> Result<Canvas, Box<EvalAltResult>> {
+                let path = &path.get();
+                let mut canvas = CanvasData::default();
                 let builder = font.builder(&fit_msg_symdict);
                 let symbols = builder.build(msg, &mut *fit_msg_rng.borrow_mut());
                 let mut args = SymbolPlacementArgs{
@@ -609,47 +646,42 @@ impl JournalEngine {
                 for symbol in placed {
                     canvas.add_strokepath(symbol.placed_strokepath(), style.clone());
                 }
-                Ok(canvas)
+                Ok(Canvas::new(canvas))
             })
-            .register_fn("scale_by", |stroke: &mut StrokePath, scale: f64| -> StrokePath {
-                stroke.scale_by(scale as f32);
-                stroke.clone()
+            .register_fn("scale_by", |path: &mut Path, scale: f64| -> Path {
+                path.update(|p| p.scale_by(scale as f32))
             })
-            .register_fn("translate_by", |stroke: &mut StrokePath, translate: Vec2| -> StrokePath {
-                stroke.translate_by(translate.into());
-                stroke.clone()
+            .register_fn("translate_by", |path: &mut Path, translate: Vec2| -> Path {
+                path.update(|p| p.translate_by(translate.into()))
             })
-            .register_fn("rotate_around",
-                |stroke: &mut StrokePath, rot_point: Vec2, rot: f64| -> StrokePath {
-                    stroke.rotate_around(rot_point.into(), rot as f32);
-                    stroke.clone()
-                },
-            )
-            .register_fn("new_strokepath", StrokePath::new)
-            .register_fn("cubic_to", |path: &mut StrokePath, c1: Vec2, c2: Vec2, end: Vec2| -> StrokePath {
+            .register_fn("rotate_around", |path: &mut Path, rot_point: Vec2, rot: f64| -> Path {
+                path.update(|p| p.rotate_around(rot_point.into(), rot as f32))
+            })
+            .register_fn("new_strokepath", || Path::new(StrokePath::new()))
+            .register_fn("cubic_to", |path: &mut Path, c1: Vec2, c2: Vec2, end: Vec2| -> Path {
                 update_path(path, |p| p.cubic_curve_to(
                     c1.x as f32, c1.y as f32, c2.x as f32, c2.y as f32, end.x as f32, end.y as f32,
                 ))
             })
-            .register_fn("quad_to", |path: &mut StrokePath, control: Vec2, end: Vec2| -> StrokePath {
+            .register_fn("quad_to", |path: &mut Path, control: Vec2, end: Vec2| -> Path {
                 update_path(path, |p| p.quadratic_curve_to(
                     control.x as f32, control.y as f32, end.x as f32, end.y as f32,
                 ))
             })
-            .register_fn("close", |path: &mut StrokePath| -> StrokePath {
+            .register_fn("close", |path: &mut Path| -> Path {
                 update_path(path, |p| p.close_path())
             })
-            .register_fn("new_circle", |center: Vec2, radius: f64| -> StrokePath {
-                StrokePath::circle(center.into(), radius as f32)
+            .register_fn("new_circle", |center: Vec2, radius: f64| -> Path {
+                Path::new(StrokePath::circle(center.into(), radius as f32))
             })
-            .register_fn("new_rectangle", |center: Vec2, width: f64, height: f64| -> StrokePath {
-                StrokePath::rectangle(center.into(), width as f32, height as f32)
+            .register_fn("new_rectangle", |center: Vec2, width: f64, height: f64| -> Path {
+                Path::new(StrokePath::rectangle(center.into(), width as f32, height as f32))
             })
-            .register_fn("new_line", |start: Vec2, end: Vec2| -> StrokePath {
-                StrokePath::line(start.into(), end.into())
+            .register_fn("new_line", |start: Vec2, end: Vec2| -> Path {
+                Path::new(StrokePath::line(start.into(), end.into()))
             })
-            .register_fn("new_arc", |center: Vec2, radius: f64, start_rad: f64, end_rad: f64| -> StrokePath {
-                StrokePath::arc(center.into(), radius as f32, start_rad as f32, end_rad as f32)
+            .register_fn("new_arc", |center: Vec2, radius: f64, start_rad: f64, end_rad: f64| -> Path {
+                Path::new(StrokePath::arc(center.into(), radius as f32, start_rad as f32, end_rad as f32))
             });
 
         // warn("...") reports a problem without stopping the script: it goes
@@ -679,8 +711,8 @@ impl JournalEngine {
         });
 
         let load_symdict = symdict.clone();
-        engine.register_fn("load_symbol", move |symname: &str| -> Result<StrokePath, Box<EvalAltResult>> {
-            load_symdict.get_strokepath(symname)
+        engine.register_fn("load_symbol", move |symname: &str| -> Result<Path, Box<EvalAltResult>> {
+            load_symdict.get_strokepath(symname).map(Path::new)
                 .ok_or_else(|| format!("load_symbol: unknown symbol '{}'", symname).into())
         });
 
@@ -716,7 +748,6 @@ impl JournalEngine {
             .build_type::<Vec2>()
             .build_type::<Entry>()
             .build_type::<Page>()
-            .build_type::<Canvas>()
             .build_type::<BrushSettings>()
             .build_type::<StrokeStyle>()
             .build_type::<Stroke>();
@@ -817,8 +848,8 @@ mod tests {
 
     fn path_string(entry_script: &str) -> String {
         let engine = engine();
-        let path: StrokePath = engine.engine.eval(entry_script).expect("script should evaluate");
-        path.to_string()
+        let path: Path = engine.engine.eval(entry_script).expect("script should evaluate");
+        path.get().to_string()
     }
 
     #[test]
@@ -845,9 +876,49 @@ mod tests {
             p = p.translate_by(new_vec(1.0, 1.0));
             p
         "#);
+        // Chains on a variable change the variable by every call.
+        let chained_variable = path_string(r#"
+            let p = new_strokepath();
+            p.move_to(new_vec(0.0, 0.0)).line_to(new_vec(1.0, 0.0)).scale_by(2.0).translate_by(new_vec(1.0, 1.0));
+            p
+        "#);
         assert_eq!(statements, "M 1 1 L 3 1 ");
         assert_eq!(chained, statements);
         assert_eq!(reassigned, statements);
+        assert_eq!(chained_variable, statements);
+    }
+
+    #[test]
+    fn copies_share_until_copied_and_adding_takes_a_snapshot() {
+        let script = r#"
+            let a = new_line(new_vec(0.0, 0.0), new_vec(1.0, 0.0));
+            let b = a;
+            b.translate_by(new_vec(5.0, 0.0));
+            if a.to_string() != b.to_string() { throw "assignment should share"; }
+            let c = a.copy();
+            c.translate_by(new_vec(5.0, 0.0));
+            if a.to_string() == c.to_string() { throw "copy() should be independent"; }
+
+            let style = new_strokestyle(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
+            let canvas = new_canvas();
+            canvas.add_strokepath(a, style);
+            a.translate_by(new_vec(100.0, 0.0));   // after adding: the canvas keeps its copy
+            let page = new_page();
+            page.add_canvas(canvas);
+            canvas.add_strokepath(a, style);        // after adding: the page keeps its copy
+            journal_entry.add_page(page);
+
+            // Loop variables share too, so loops can change array elements.
+            let gs = lowercase_font("loche_upper").glyphs("ab");
+            for g in gs { g.scale = 7.0; }
+            if gs[0].scale != 7.0 || gs[1].scale != 7.0 { throw "loop should change the glyphs"; }
+            // A canvas can add itself.
+            canvas.add_canvas(canvas);
+        "#;
+        let entry = engine().build_entry_str(script).expect("script should run");
+        let strokes = &entry.pages[0].canvases()[0].strokes;
+        assert_eq!(strokes.len(), 1);
+        assert_eq!(strokes[0].path.to_string(), "M 5 0 L 6 0 ");
     }
 
     #[test]
@@ -907,7 +978,7 @@ mod tests {
         let style = new_strokestyle(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
         let ring = new_canvas();
         ring.add_strokepath(new_circle(new_vec(0.0, 0.0), 10.0), style);
-        let named = ring;
+        let named = ring.copy();
         named.name = "ring";
         let maze = new_page();
         maze.name = "maze";

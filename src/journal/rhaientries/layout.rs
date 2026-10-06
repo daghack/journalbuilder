@@ -41,7 +41,7 @@ use std::rc::Rc;
 
 use super::glyphs::{add_glyph, glyph_array, Glyph};
 use super::random::SharedRng;
-use super::{Canvas, StrokeStyle, Vec2};
+use super::{Canvas, CanvasData, Path, StrokeStyle, Vec2};
 use crate::journal::canvas::artistic::{jitter_symbols, splat_msgs, SplatOptions};
 use crate::journal::canvas::StrokeStyle as JournalStrokeStyle;
 use crate::journal::styles::Font;
@@ -153,7 +153,7 @@ impl TextBox {
                     Some(r) => return Err(format!("new_textbox: 'avoid_radius' must be positive, got {}", r).into()),
                     None => symbol_scale / 2.0,
                 };
-                let jc: JournalCanvas = canvas.into();
+                let jc: JournalCanvas = (&canvas).into();
                 Some(Rc::new(jc.get_avoid_tree(radius)))
             }
         };
@@ -180,11 +180,11 @@ impl TextBox {
 }
 
 fn symbols(caller: &str, glyphs: Array) -> RhaiResult<Vec<Symbol>> {
-    Ok(glyph_array(caller, glyphs)?.into_iter().map(|g| g.0).collect())
+    Ok(glyph_array(caller, glyphs)?.into_iter().map(|g| g.get()).collect())
 }
 
 fn glyphs(symbols: Vec<Symbol>) -> Array {
-    symbols.into_iter().map(|s| Dynamic::from(Glyph(s))).collect()
+    symbols.into_iter().map(|s| Dynamic::from(Glyph::new(s))).collect()
 }
 
 /// Hatch the inside of each subpath with lines `spacing` apart at `angle`
@@ -213,7 +213,7 @@ const SPLAT_KEYS: [&str; 7] = ["symbol_scale", "width_range", "height_range", "r
 fn splat(canvas: &Canvas, msgs: Array, font: &Font, style: StrokeStyle, options: Map, symdict: &SymbolPathDict, rng: &SharedRng) -> RhaiResult<Canvas> {
     const CALLER: &str = "splat_msgs";
     check_keys(CALLER, &options, &SPLAT_KEYS)?;
-    if canvas.strokes.is_empty() {
+    if canvas.borrow().strokes.is_empty() {
         // Messages are placed in boxes within the canvas's bounds.
         return Err(format!("{}: the canvas is empty, so there's nowhere to place messages; draw on it first", CALLER).into());
     }
@@ -253,11 +253,11 @@ fn splat(canvas: &Canvas, msgs: Array, font: &Font, style: StrokeStyle, options:
     let placed = splat_msgs(&journal_canvas, &symbol_msgs, &opts, &journal_style, &mut *rng)
         .map_err(|err| format!("{}: {}", CALLER, err))?;
 
-    let mut splatted = Canvas::default();
+    let mut splatted = CanvasData::default();
     for symbol in placed.into_iter().flatten() {
-        add_glyph(&mut splatted, &Glyph(symbol), &style)?;
+        add_glyph(&mut splatted, &Glyph::new(symbol), &style)?;
     }
-    Ok(splatted)
+    Ok(Canvas::new(splatted))
 }
 
 pub fn register(engine: &mut Engine, symdict: Rc<SymbolPathDict>, rng: SharedRng) {
@@ -298,8 +298,8 @@ pub fn register(engine: &mut Engine, symdict: Rc<SymbolPathDict>, rng: SharedRng
         splat(canvas, msgs, &font, style, options, &symdict, &r)
     });
 
-    engine.register_fn("hatch", move |path: &mut StrokePath, spacing: f64, angle: f64, roughness: f64| -> RhaiResult<StrokePath> {
-        hatch(path, spacing, angle, roughness, &rng)
+    engine.register_fn("hatch", move |path: &mut Path, spacing: f64, angle: f64, roughness: f64| -> RhaiResult<Path> {
+        hatch(&path.borrow(), spacing, angle, roughness, &rng).map(Path::new)
     });
 }
 
@@ -398,8 +398,9 @@ mod tests {
     #[test]
     fn hatch_fills_inside_the_path_and_follows_the_seed() {
         let hatching = |seed: i64| -> String {
-            let path: crate::journal::paths::StrokePath = eval(&format!(
+            let path: super::Path = eval(&format!(
                 "seed({}); new_circle(new_vec(0.0, 0.0), 20.0).hatch(3.0, 0.7, 1.0)", seed));
+            let path = path.get();
             for p in path.points_within() {
                 assert!(p.length() < 22.0, "hatch point {:?} outside the circle", p);
             }
