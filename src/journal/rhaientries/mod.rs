@@ -497,7 +497,12 @@ impl JournalEngine {
             .register_fn("line_to", |path: &mut StrokePath, pos: Vec2| -> StrokePath {
                 update_path(path, |p| p.line_to(pos.x as f32, pos.y as f32))
             })
-            .register_fn("fill_with_msg", move |path: &mut StrokePath, style: StrokeStyle, font: Font, fontsize: f64, msg: &str| -> Vec<Dynamic> {
+            // The message along as many copies of the path as it takes, one
+            // canvas per copy.
+            .register_fn("fill_with_msg", move |path: &mut StrokePath, style: StrokeStyle, font: Font, fontsize: f64, msg: &str| -> Result<Vec<Dynamic>, Box<EvalAltResult>> {
+                if !(fontsize > 0.0) {
+                    return Err(format!("fill_with_msg: font size must be positive, got {}", fontsize).into());
+                }
                 let builder = font.builder(&fill_msg_symdict);
                 let args = SymbolPlacementArgs{
                     avoid_kdtree: None, 
@@ -506,8 +511,16 @@ impl JournalEngine {
 
                 let mut all_canvases = Vec::new();
                 let mut symbols = builder.build(msg, &mut *fill_msg_rng.borrow_mut());
+                let total = symbols.len();
                 while !symbols.is_empty() {
                     let (placed, unplaced) = place_along_path(std::mem::take(&mut symbols), path, &args);
+                    if placed.is_empty() {
+                        // Another copy of the path wouldn't fit it either.
+                        return Err(format!(
+                            "fill_with_msg: glyph {} of {} doesn't fit on the path at font size {}; use a longer path or a smaller font",
+                            total - unplaced.len() + 1, total, fontsize,
+                        ).into());
+                    }
                     let mut canvas = Canvas::default();
                     for symbol in placed {
                         canvas.add_strokepath(symbol.placed_strokepath(), style.clone());
@@ -515,10 +528,10 @@ impl JournalEngine {
                     all_canvases.push(Dynamic::from(canvas));
                     symbols = unplaced;
                 }
-                all_canvases
+                Ok(all_canvases)
             })
             .register_fn("fit_msg_to",
-                move |path: &mut StrokePath, style: StrokeStyle, font: Font, msg: &str| -> Canvas {
+                move |path: &mut StrokePath, style: StrokeStyle, font: Font, msg: &str| -> Result<Canvas, Box<EvalAltResult>> {
                 let mut canvas = Canvas::default();
                 let builder = font.builder(&fit_msg_symdict);
                 let symbols = builder.build(msg, &mut *fit_msg_rng.borrow_mut());
@@ -539,11 +552,17 @@ impl JournalEngine {
                     }
                 }
                 args.symbol_scale = window_min;
-                let (placed, _) = place_along_path(symbols, path, &args);
+                let (placed, unplaced) = place_along_path(symbols, path, &args);
+                if !unplaced.is_empty() {
+                    return Err(format!(
+                        "fit_msg_to: the message doesn't fit on the path even at font size {}: {} of {} glyphs left over",
+                        window_min, unplaced.len(), placed.len() + unplaced.len(),
+                    ).into());
+                }
                 for symbol in placed {
                     canvas.add_strokepath(symbol.placed_strokepath(), style.clone());
                 }
-                canvas
+                Ok(canvas)
             })
             .register_fn("scale_by", |stroke: &mut StrokePath, scale: f64| -> StrokePath {
                 stroke.scale_by(scale as f32);
@@ -838,6 +857,26 @@ mod tests {
         entry.publish_pngs(dir.to_str().unwrap(), 0.1, Some(&[1]));
         assert!(dir.join("maze_ring.png").is_file() && dir.join("maze_1.png").is_file());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn text_that_cannot_fit_its_path_is_an_error() {
+        let setup = r#"
+            let s = new_strokestyle(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
+            let font = new_fontset(["copper_upper"], ["copper_lower"]);
+            let short = new_line(new_vec(0.0, 0.0), new_vec(10.0, 0.0));
+        "#;
+        for (script, want) in [
+            ("short.fill_with_msg(s, font, 50.0, \"abc\");", "fill_with_msg: glyph 1 of 3 doesn't fit"),
+            ("short.fill_with_msg(s, font, 0.0, \"abc\");", "font size must be positive"),
+            ("new_line(new_vec(0.0, 0.0), new_vec(0.01, 0.0)).fit_msg_to(s, font, \"a long message\");", "fit_msg_to: the message doesn't fit"),
+        ] {
+            let err = engine().build_entry_str(&format!("{}\n{}", setup, script)).expect_err(script).to_string();
+            assert!(err.contains(want), "{}: {}", want, err);
+        }
+        // A path that fits a few glyphs at a time still gets the whole message.
+        let parts: rhai::Array = engine().engine.eval(&format!("{}\nnew_line(new_vec(0.0, 0.0), new_vec(60.0, 0.0)).fill_with_msg(s, font, 10.0, \"abcdefghij\")", setup)).unwrap();
+        assert!(parts.len() > 1);
     }
 
     #[test]

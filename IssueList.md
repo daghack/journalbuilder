@@ -51,7 +51,7 @@ journals' look or behaviour, so it waits for a call).
 | 35 | Brush sizes are in output pixels, so each port repeats a 1080 px fit | Anti-pattern | Fixed {{commit: Give the ported journals plain nib sizes}} |
 | 36 | `LockConfig`'s string static inputs only served the JSON journals | Dead code | Fixed {{commit: Remove LockConfig's string static inputs}} |
 | 37 | Public library code left unused by the legacy removal | Dead code | Fixed {{commit: Remove library code nothing uses}} |
-| 38 | `fill_with_msg` loops forever when a glyph can't fit on the path | Bug | Open |
+| 38 | `fill_with_msg` loops forever when a glyph can't fit on the path | Bug | Fixed {{commit: Fail instead of hanging when text can't fit its path}} |
 | 39 | Script errors surface as a panic with debug formatting | Bug | Open |
 | 40 | An empty or zero-width canvas panics the Darkly render | Bug | Open |
 | 41 | `new_brush` accepts nonsense pressures and sizes | Gap | Open |
@@ -257,7 +257,7 @@ journals' look or behaviour, so it waits for a call).
 
 ### 44. Non-finite numbers from scripts can panic layout and hatching
 - **Where:** `src/journal/paths.rs`, `src/journal/symbol.rs`, `src/journal/rhaientries/`
-- **Status:** Fixed in {{commit: Remove LockConfig's string static inputs}}.
-- **Problem:** `LockConfig.static_inputs` held `"bN:..."` strings, parsed by `parse_info_var` when the lock was built. Only the JSON journals wrote them; rhai passes typed values with `set_input` instead.
-- **Change:** the field, its parsing and `parse_info_var` are gone. Fixed inputs are only `CompositeLock::add_static_input` with an `InfoVar`. The validation tests moved onto `base_n_symbols`, which rhai's `symbols()` uses.
-- **Why:** one way to fix a lock input, and no stringly-typed parsing step left over from the JSON format.
+- **Status:** Fixed in {{commit: Fail instead of hanging when text can't fit its path}}.
+- **Problem:** `fill_with_msg` lays the message along fresh copies of the path until every glyph is placed; when a glyph didn't fit at all (a short path, a big font) no copy placed anything and it looped forever. `fit_msg_to` had the quiet version of the same bug: if the message didn't fit even at its smallest font size it returned whatever fitted.
+- **Change:** `fill_with_msg` stops with an error naming the glyph that can't fit (and rejects a font size that isn't positive); `fit_msg_to` errors when glyphs are left over at its smallest size.
+- **Why:** a hung render is the worst way to learn a path is too short. Every journal still renders as before.
