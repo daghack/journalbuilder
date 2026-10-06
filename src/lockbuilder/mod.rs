@@ -1,26 +1,14 @@
-pub mod locks;
+//! Lock chains: named locks wired output to input, run forward to lock
+//! values and backward to unlock them. Lock types are rhai lock files (see
+//! `journal::rhaientries::LockLibrary`); values are rhai values.
+
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::{DfsPostOrder, Walker};
-use serde::{Serialize, Deserialize};
+use rhai::Dynamic;
 
-use std::any::Any;
 use std::collections::HashMap;
 use std::error::Error;
 use std::rc::Rc;
-
-#[macro_export]
-macro_rules! base_n_input_set {
-    ($base:expr, $($key:expr => $value:expr),* $(,)?) => {
-        {
-            let mut input_set = InfoVarSet::new();
-            $(
-                let var = string_to_base_n_symbols($value, $base);
-                input_set.insert($key.to_string(), var);
-            )*
-            input_set
-        }
-    };
-}
 
 pub fn symbols_to_string(symbols: &[u32], base: u32) -> String {
     if base == 10 {
@@ -39,54 +27,27 @@ pub fn symbols_to_string(symbols: &[u32], base: u32) -> String {
     symbols.iter().map(|&s| (s + b'A' as u32) as u8 as char).collect()
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
-pub enum InfoVarGraphType {
-    MazeLock,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+/// The type of a value in a lock chain.
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum InfoVarType {
-    String,
+    /// Symbols in a base: an array of integers from 0 to base - 1.
     BaseNSymbol(u32),
-    Graph(InfoVarGraphType),
-    LockProcessInfo,
+    /// Matches every type.
     MatchAll,
-    /// A type a rhai lock file declared by name; its values are rhai values.
+    /// Any other type, by the name lock files give it, e.g. "Maze".
     Named(String),
 }
 
-pub trait InfoVarData: Any {
-    fn as_any(&self) -> &dyn Any;
-}
-
-impl<T: Any> InfoVarData for T {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
-#[derive(Clone)]
+/// A value in a lock chain: its type, and the rhai value itself.
+#[derive(Clone, Debug)]
 pub struct InfoVar {
     pub var_type: InfoVarType,
-    pub data: Option<Rc<dyn InfoVarData>>,
+    pub data: Dynamic,
 }
 
-impl std::fmt::Debug for InfoVar {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Display the type and whether data is initialized
-        // If data is initialized, we can also display the data type
-        // If the data is a BaseNSymbol, we can display the data as a vector of u32
-        if let InfoVarType::BaseNSymbol(base) = self.var_type
-            && let Ok(data) = self.borrow_data::<Vec<u32>>() {
-                return f.debug_struct("InfoVar")
-                    .field("Type", &self.var_type)
-                    .field("Data", &symbols_to_string(data, base))
-                    .finish();
-            }
-        f.debug_struct("InfoVar")
-            .field("Type", &self.var_type)
-            .field("Data Initialized", &self.data.is_some())
-            .finish()
+impl InfoVar {
+    pub fn new(var_type: InfoVarType, data: Dynamic) -> InfoVar {
+        InfoVar { var_type, data }
     }
 }
 
@@ -120,35 +81,6 @@ fn symbol_help(base: u32) -> String {
     }
 }
 
-impl InfoVar {
-    pub fn new(var_type: InfoVarType) -> InfoVar {
-        InfoVar {
-            var_type,
-            data: None,
-        }
-    }
-    pub fn new_with<T: InfoVarData>(var_type: InfoVarType, data: T) -> InfoVar {
-        let any_data: Rc<dyn InfoVarData> = Rc::new(data);
-        InfoVar {
-            var_type,
-            data: Some(any_data),
-        }
-    }
-    pub fn borrow_data<'a, T: InfoVarData + 'a>(&'a self) -> Result<&'a T, Box<dyn Error>> {
-        if let Some(data) = &self.data {
-            let data = data
-                .as_ref().as_any().downcast_ref::<T>()
-                .ok_or(format!("Data Type Mismatch: expected {}, found {:?}", std::any::type_name::<T>(), data.as_ref().as_any().type_id()))?;
-            Ok(data)
-        } else {
-            Err("Data is not initialized".into())
-        }
-    }
-    pub fn is(&self, var_type: InfoVarType) -> bool {
-        self.var_type == var_type
-    }
-}
-
 pub type InfoVarSet = HashMap<String, InfoVar>;
 pub type InfoVarTypeSet = HashMap<String, InfoVarType>;
 
@@ -166,8 +98,8 @@ type LockOutputMapping = (String, String);
 pub enum LockNodeType {
     Lock(Rc<dyn Lock>, bool),
     Remap(LockOutputMapping),
-    Input((String, InfoVar)),
-    Output((String, InfoVar)),
+    Input((String, InfoVarType)),
+    Output((String, InfoVarType)),
 }
 
 impl std::fmt::Debug for LockNodeType {
@@ -218,10 +150,10 @@ impl LockExecutionGraph {
             for node_id in nodewalker.iter(&self.graph) {
                 let node = self.graph.node_weight(node_id).ok_or("Node not found while executiong lock.")?;
                 match &node.node_type {
-                    LockNodeType::Input((input_name, input_var)) => {
+                    LockNodeType::Input((input_name, input_type)) => {
                         if !current_variable_values.contains_key(input_name) {
                             if let Some(input) = inputs.get(input_name) {
-                                if input.var_type != input_var.var_type && input_var.var_type != InfoVarType::MatchAll {
+                                if input.var_type != *input_type && *input_type != InfoVarType::MatchAll {
                                     return Err(format!("Input {} has the wrong type", input_name).into());
                                 }
                                 current_variable_values.insert(input_name.clone(), input.clone());
@@ -231,10 +163,10 @@ impl LockExecutionGraph {
                             }
                         }
                     },
-                    LockNodeType::Output((output_name, output_var)) => {
+                    LockNodeType::Output((output_name, output_type)) => {
                         if !current_variable_values.contains_key(output_name) {
                             if let Some(output) = computed_variable_values.get(output_name) {
-                                if output.var_type != output_var.var_type && output_var.var_type != InfoVarType::MatchAll {
+                                if output.var_type != *output_type && *output_type != InfoVarType::MatchAll {
                                     return Err(format!("Output {} has the wrong type", output_name).into());
                                 }
                                 current_variable_values.insert(output_name.clone(), output.clone());
@@ -350,7 +282,7 @@ impl CompositeLock {
             // add the inputs as produce nodes
             for (input_name, input_type) in lock.inputs() {
                 let input_name = format!("{}.{}", lock_name, input_name);
-                let input_node = LockNode{name: input_name.clone(), node_type: LockNodeType::Input((input_name.to_string(), InfoVar::new(input_type)))};
+                let input_node = LockNode{name: input_name.clone(), node_type: LockNodeType::Input((input_name.to_string(), input_type))};
                 let input_node_index = graph.add_node(input_node);
                 input_indices.insert(input_name, input_node_index);
                 graph.add_edge(lock_node_index, input_node_index, ());
@@ -358,7 +290,7 @@ impl CompositeLock {
             // add the outputs as produce nodes
             for (output_name, output_type) in lock.outputs() {
                 let output_name = format!("{}.{}", lock_name, output_name);
-                let output_node = LockNode{name: output_name.clone(), node_type: LockNodeType::Output((output_name.to_string(), InfoVar::new(output_type)))};
+                let output_node = LockNode{name: output_name.clone(), node_type: LockNodeType::Output((output_name.to_string(), output_type))};
                 let output_node_index = graph.add_node(output_node);
                 output_indices.insert(output_name, output_node_index);
                 graph.add_edge(output_node_index, lock_node_index, ());

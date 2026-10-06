@@ -30,7 +30,8 @@ Lock functions get and return plain rhai values. A value's type is a string:
 - `symbol_type(base)`, e.g. `"Base27Symbol"`: an array of integers from 0
   to base - 1. Base 27 is space (0) and A-Z (1-26); base 10 is digits; other
   bases up to 26 are letters from A (0).
-- `"Maze"`: a maze.
+- `"Maze"`: a maze, from `new_maze`.
+- `"String"`: a string.
 - `"Any"`: matches every type.
 - Any other name, e.g. `"KeySchedule"`: a value of the lock file's own
   making, which only connects to inputs of the same type.
@@ -45,6 +46,11 @@ The standard rhai library (arrays, maps, strings, math), plus:
 - `symbol_type(base)`: the type name above.
 - `symbols(base, text)`: text as symbols, `symbols(27, "HI")` is `[8, 9]`.
 - `symbol_text(base, symbols)`: the reverse.
+- `new_maze(seed, width, height[, strategy])`: a maze of width x height
+  nodes, walked "LeftHanded" (the default) or "RightHanded". Its `cells()`
+  are `#{ x, y, step, symbol }` in walking order, and `fill(symbols)` writes
+  symbols into them in that order, 0 into any left over. `width()` and
+  `height()` are its size in cells.
 
 There's nothing random and nothing to draw with: a lock is a function of its
 options and values alone.

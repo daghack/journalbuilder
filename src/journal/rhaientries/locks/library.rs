@@ -2,11 +2,8 @@
 //! Lock files run in an engine of their own and work with plain rhai
 //! values; locks/README.md describes what a lock file defines.
 
-use super::{parse_type, register_maze, type_name, Maze};
-use crate::lockbuilder::{
-    base_n_symbols, symbols_to_string, InfoVar, InfoVarGraphType, InfoVarSet, InfoVarType, InfoVarTypeSet, Lock,
-};
-use crate::lockbuilder::locks::maze::LockedMaze;
+use super::{parse_type, register_maze, Maze};
+use crate::lockbuilder::{base_n_symbols, symbols_to_string, InfoVar, InfoVarSet, InfoVarType, InfoVarTypeSet, Lock};
 use rhai::{Array, Dynamic, Engine, EvalAltResult, FuncArgs, Map, Scope, AST};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -178,19 +175,17 @@ impl LockLibrary {
         for (name, expected) in map("outputs")? {
             let var = outputs.get(name.as_str())
                 .ok_or_else(|| format!("outputs has '{}', which isn't an output of {}", name, type_name))?;
-            let got = to_script(var)?;
-            if !same_value(&got, &expected) {
-                return Err(format!("output '{}' is {}, not {}", name, show(&got, &var.var_type), show(&expected, &var.var_type)));
+            if !same_value(&var.data, &expected) {
+                return Err(format!("output '{}' is {}, not {}", name, show(&var.data, &var.var_type), show(&expected, &var.var_type)));
             }
         }
 
         let recovered = lock.unlock_info(&outputs).map_err(|e| e.to_string())?;
         for name in sorted(inputs.keys()) {
-            let given = to_script(&inputs[name])?;
-            let back = to_script(&recovered[name])?;
-            if !same_value(&back, &given) {
-                let var_type = &inputs[name].var_type;
-                return Err(format!("unlocking gave back '{}' as {}, not {}", name, show(&back, var_type), show(&given, var_type)));
+            let (given, back) = (&inputs[name], &recovered[name]);
+            if !same_value(&back.data, &given.data) {
+                let var_type = &given.var_type;
+                return Err(format!("unlocking gave back '{}' as {}, not {}", name, show(&back.data, var_type), show(&given.data, var_type)));
             }
         }
         Ok(())
@@ -317,13 +312,12 @@ impl RhaiLock {
             .collect()
     }
 
-    /// `values` as plain rhai values, for a lock file's function.
+    /// The named values, for a lock file's function.
     fn script_values(&self, values: &InfoVarSet, names: &InfoVarTypeSet) -> Result<Map, String> {
         names.keys()
             .map(|name| {
                 let var = values.get(name).ok_or_else(|| self.error(format!("no value for '{}'", name)))?;
-                let value = to_script(var).map_err(|e| self.error(format!("'{}': {}", name, e)))?;
-                Ok((name.into(), value))
+                Ok((name.into(), var.data.clone()))
             })
             .collect()
     }
@@ -426,41 +420,21 @@ fn valid_type_name(name: &str) -> bool {
     !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
-/// A lock value as the plain rhai value lock files see: symbols as an array
-/// of integers, a maze as a `Maze`.
-fn to_script(var: &InfoVar) -> Result<Dynamic, String> {
-    // Rust locks store symbols and mazes as Rust data.
-    let data_error = |e: Box<dyn Error>| e.to_string();
-    match &var.var_type {
-        InfoVarType::BaseNSymbol(_) => {
-            let symbols = var.borrow_data::<Vec<u32>>().map_err(data_error)?;
-            Ok(symbols.iter().map(|&s| Dynamic::from_int(s as rhai::INT)).collect::<Array>().into())
-        }
-        InfoVarType::Graph(InfoVarGraphType::MazeLock) => {
-            let locked = var.borrow_data::<LockedMaze>().map_err(data_error)?;
-            Ok(Dynamic::from(Maze { locked: locked.clone() }))
-        }
-        InfoVarType::String => Ok(var.borrow_data::<String>().map_err(data_error)?.clone().into()),
-        other => var.borrow_data::<Dynamic>().cloned()
-            .map_err(|_| format!("a {} value from a Rust lock can't go to a lock file", type_name(other))),
-    }
-}
-
 /// A value a lock file returned, checked against its declared type.
 fn from_script(value: Dynamic, var_type: &InfoVarType) -> Result<InfoVar, String> {
-    match var_type {
-        InfoVarType::BaseNSymbol(base) => Ok(InfoVar::new_with(var_type.clone(), check_symbols(value, *base)?)),
-        InfoVarType::Graph(InfoVarGraphType::MazeLock) => {
-            let got = describe(value.type_name());
-            let maze = value.try_cast::<Maze>().ok_or_else(|| format!("expected a Maze, got {}", got))?;
-            Ok(InfoVar::new_with(var_type.clone(), maze.locked))
+    let expected = match var_type {
+        InfoVarType::BaseNSymbol(base) => {
+            check_symbols(value.clone(), *base)?;
+            None
         }
-        InfoVarType::String => {
-            let text = value.into_string().map_err(|got| format!("expected a string, got {}", describe(got)))?;
-            Ok(InfoVar::new_with(var_type.clone(), text))
-        }
-        _ => Ok(InfoVar::new_with(var_type.clone(), value)),
+        InfoVarType::Named(name) if name == "Maze" => Some((value.is::<Maze>(), "a Maze")),
+        InfoVarType::Named(name) if name == "String" => Some((value.is_string(), "a string")),
+        _ => None,
+    };
+    if let Some((false, expected)) = expected {
+        return Err(format!("expected {}, got {}", expected, describe(value.type_name())));
     }
+    Ok(InfoVar::new(var_type.clone(), value))
 }
 
 /// `value` as symbols in `base`: an array of integers from 0 to base - 1.
@@ -592,12 +566,13 @@ mod tests {
     }
 
     fn syms(base: u32, text: &str) -> InfoVar {
-        InfoVar::new_with(InfoVarType::BaseNSymbol(base), base_n_symbols(base, text).unwrap())
+        let symbols: Array = base_n_symbols(base, text).unwrap().into_iter().map(|s| Dynamic::from_int(s as i64)).collect();
+        InfoVar::new(InfoVarType::BaseNSymbol(base), symbols.into())
     }
 
     fn text(var: &InfoVar) -> String {
         match var.var_type {
-            InfoVarType::BaseNSymbol(base) => symbols_to_string(var.borrow_data::<Vec<u32>>().unwrap(), base),
+            InfoVarType::BaseNSymbol(base) => symbols_to_string(&check_symbols(var.data.clone(), base).unwrap(), base),
             _ => panic!("not symbols: {:?}", var),
         }
     }
@@ -680,6 +655,7 @@ fn unlock(o, out) {{ #{{ text: out.out }} }}
             ("missing", &lock_file("#{ out: [] }")),
             ("unknown", &lock_file("#{ out: [], extra: [], bogus: [] }")),
             ("no_map", &lock_file("[]")),
+            ("not_a_maze", "fn options() { #{} }\nfn inputs(o) { #{} }\nfn outputs(o) { #{ maze: \"Maze\" } }\nfn lock(o, i) { #{ maze: 3 } }\nfn unlock(o, out) { #{} }"),
             ("missing_input", "fn options() { #{} }\nfn inputs(o) { #{ text: symbol_type(27) } }\nfn outputs(o) { #{ out: symbol_type(27) } }\nfn lock(o, i) { #{ out: i.text } }\nfn unlock(o, out) { #{} }"),
         ]);
         let library = dir.library();
@@ -694,6 +670,7 @@ fn unlock(o, out) {{ #{{ text: out.out }} }}
         assert_eq!(run("missing"), "lock 'l' (missing.rhai): lock() didn't return 'extra'");
         assert_eq!(run("unknown"), "lock 'l' (unknown.rhai): lock() returned 'bogus', which isn't one of its outputs (extra, out)");
         assert_eq!(run("no_map"), "lock 'l' (no_map.rhai): lock() must return a map of its outputs");
+        assert_eq!(run("not_a_maze"), "lock 'l' (not_a_maze.rhai): lock() returned a bad 'maze': expected a Maze, got an integer");
         assert_eq!(run("missing_input"), "lock 'l' (missing_input.rhai): unlock() didn't return 'text'");
     }
 

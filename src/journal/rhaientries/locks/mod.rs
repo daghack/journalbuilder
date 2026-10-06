@@ -19,10 +19,10 @@ pub use library::{LockLibrary, DEFAULT_LOCKS_DIR};
 
 use rhai::{Array, CustomType, Dynamic, Engine, EvalAltResult, Map, TypeBuilder};
 use crate::lockbuilder::{
-    base_n_symbols, symbols_to_string, CompositeLock, InfoVar, InfoVarGraphType, InfoVarSet, InfoVarType, Lock,
+    base_n_symbols, symbols_to_string, CompositeLock, InfoVar, InfoVarSet, InfoVarType, Lock,
 };
-use crate::lockbuilder::locks::maze::LockedMaze;
 use crate::journal::canvas::artistic::{BuiltMaze, MazeTraversalStrategy};
+use rand::Fill;
 use super::Path;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -186,20 +186,20 @@ impl CustomType for LockBuilder {
     }
 }
 
-/// A value flowing through a lock: symbols in some base, plain text, or a
-/// graph (a maze, a Huffman tree).
+/// A value flowing through a lock: symbols in some base, a maze, or a
+/// value of a type a lock file named.
 #[derive(Clone)]
 pub struct LockValue {
     pub var: InfoVar,
 }
 
 impl LockValue {
-    /// The value as text, for symbol and string values.
+    /// The value as text, for symbols and strings.
     fn text(&mut self) -> RhaiResult<String> {
         match &self.var.var_type {
-            InfoVarType::BaseNSymbol(base) => Ok(symbols_to_string(self.symbol_data()?, *base)),
-            InfoVarType::String => self.var.borrow_data::<String>().cloned().map_err(|e| e.to_string().into()),
-            other => Err(format!("text: a {} value has no text form", type_name(other)).into()),
+            InfoVarType::BaseNSymbol(base) => Ok(symbols_to_string(&self.symbol_data()?, *base)),
+            other => self.var.data.clone().into_string()
+                .map_err(|_| format!("text: a {} value has no text form", type_name(other)).into()),
         }
     }
 
@@ -211,7 +211,14 @@ impl LockValue {
     }
 
     fn symbols(&mut self) -> RhaiResult<Array> {
-        Ok(self.symbol_data()?.iter().map(|&s| Dynamic::from(s as i64)).collect())
+        self.symbol_data()?;
+        Ok(self.var.data.clone().cast::<Array>())
+    }
+
+    /// The value as lock files see it: symbols as an array of integers, a
+    /// maze as a `Maze`, and so on.
+    fn value(&mut self) -> Dynamic {
+        self.var.data.clone()
     }
 
     fn type_name(&mut self) -> String {
@@ -224,13 +231,17 @@ impl LockValue {
 
     /// A maze output as a `Maze`, for drawing.
     fn maze(&mut self) -> RhaiResult<Maze> {
-        self.var.borrow_data::<LockedMaze>()
-            .map(|locked| Maze { locked: locked.clone() })
-            .map_err(|_| format!("maze: a {} value isn't a maze", type_name(&self.var.var_type)).into())
+        self.var.data.clone().try_cast::<Maze>()
+            .ok_or_else(|| format!("maze: a {} value isn't a maze", type_name(&self.var.var_type)).into())
     }
 
-    fn symbol_data(&self) -> RhaiResult<&Vec<u32>> {
-        self.var.borrow_data::<Vec<u32>>().map_err(|_| format!("a {} value has no symbols", type_name(&self.var.var_type)).into())
+    fn symbol_data(&self) -> RhaiResult<Vec<u32>> {
+        let no_symbols = || -> Box<EvalAltResult> { format!("a {} value has no symbols", type_name(&self.var.var_type)).into() };
+        if !matches!(self.var.var_type, InfoVarType::BaseNSymbol(_)) {
+            return Err(no_symbols());
+        }
+        let symbols = self.var.data.read_lock::<Array>().ok_or_else(no_symbols)?;
+        symbols.iter().map(|s| s.as_int().ok().and_then(|s| u32::try_from(s).ok()).ok_or_else(no_symbols)).collect()
     }
 }
 
@@ -243,6 +254,7 @@ impl CustomType for LockValue {
             .with_fn("symbols", Self::symbols)
             .with_fn("type_name", Self::type_name)
             .with_fn("maze", Self::maze)
+            .with_fn("value", Self::value)
             .with_fn("to_string", Self::display)
             .with_fn("to_debug", Self::display);
     }
@@ -294,25 +306,40 @@ impl CustomType for LockResult {
 /// nodes. In a lock's maze each cell holds one symbol of the locked text.
 #[derive(Clone)]
 pub struct Maze {
-    locked: LockedMaze,
+    maze: BuiltMaze<SymbolInfo>,
+    /// The order cells are walked in: for a lock's maze, the order the text
+    /// was written in.
+    strategy: MazeTraversalStrategy,
+}
+
+/// What a maze cell holds: a symbol, random in a new maze.
+#[derive(Clone, Debug, Default)]
+struct SymbolInfo {
+    symbol: u32,
+}
+
+impl Fill for SymbolInfo {
+    fn fill<R: rand::Rng + ?Sized>(&mut self, rng: &mut R) {
+        self.symbol = rng.random_range(0..27);
+    }
 }
 
 impl Maze {
     /// Grid width in cells (passages included).
     fn width(&mut self) -> i64 {
-        self.locked.maze.all_cells().iter().map(|c| c.position.0).max().map_or(0, |x| x as i64 + 1)
+        self.maze.all_cells().iter().map(|c| c.position.0).max().map_or(0, |x| x as i64 + 1)
     }
 
     /// Grid height in cells (passages included).
     fn height(&mut self) -> i64 {
-        self.locked.maze.all_cells().iter().map(|c| c.position.1).max().map_or(0, |y| y as i64 + 1)
+        self.maze.all_cells().iter().map(|c| c.position.1).max().map_or(0, |y| y as i64 + 1)
     }
 
     /// Every cell, in traversal order (the order a lock writes its text):
     /// `#{ x, y, step, symbol }`. `symbol` is 0-26: the text's symbol in a
     /// lock's maze, random in `new_maze`'s.
     fn cells(&mut self) -> Array {
-        self.locked.maze.iter_inners(self.locked.strategy)
+        self.maze.iter_inners(self.strategy)
             .enumerate()
             .map(|(step, ((x, y), inner))| {
                 let mut cell = Map::new();
@@ -328,7 +355,7 @@ impl Maze {
     /// Write `symbols` into the cells in traversal order, and 0 into any
     /// cells left over.
     fn fill(&mut self, symbols: Array) -> RhaiResult<()> {
-        let cells = self.locked.maze.all_cells().len();
+        let cells = self.maze.all_cells().len();
         if symbols.len() > cells {
             return Err(format!("fill: {} symbols don't fit in the maze's {} cells", symbols.len(), cells).into());
         }
@@ -337,14 +364,14 @@ impl Maze {
                 .ok_or_else(|| -> Box<EvalAltResult> { format!("fill: item {} ({:?}) isn't a symbol", i, item).into() }))
             .collect::<RhaiResult<Vec<u32>>>()?;
         let mut symbols = symbols.into_iter();
-        self.locked.maze.map_inners(self.locked.strategy, |inner| inner.symbol = symbols.next().unwrap_or(0));
+        self.maze.map_inners(self.strategy, |inner| inner.symbol = symbols.next().unwrap_or(0));
         Ok(())
     }
 
     /// A path along the corridors, in grid units, following the same
     /// traversal the text was written in.
     fn path(&mut self) -> Path {
-        Path::new(self.locked.maze.corridor_path(self.locked.strategy))
+        Path::new(self.maze.corridor_path(self.strategy))
     }
 }
 
@@ -371,7 +398,7 @@ fn new_maze(seed: i64, width: i64, height: i64, strategy: &str) -> RhaiResult<Ma
     let size = |n: i64, what: &str| u32::try_from(n).ok().filter(|&n| n >= 1)
         .ok_or_else(|| -> Box<EvalAltResult> { format!("new_maze: {} must be at least 1, got {}", what, n).into() });
     let (width, height) = (size(width, "width")?, size(height, "height")?);
-    Ok(Maze { locked: LockedMaze { maze: BuiltMaze::new(seed as u64, width, height), strategy } })
+    Ok(Maze { maze: BuiltMaze::new(seed as u64, width, height), strategy })
 }
 
 /// `symbols(base, text)`: text as symbols in `base`. Base 10 takes digits,
@@ -379,23 +406,21 @@ fn new_maze(seed: i64, width: i64, height: i64, strategy: &str) -> RhaiResult<Ma
 /// `base` letters (case-insensitive). Anything else is an error.
 fn symbols(base: i64, text: &str) -> RhaiResult<LockValue> {
     let base = u32::try_from(base).map_err(|_| format!("symbols: base must be between 2 and 27, got {}", base))?;
-    let data = base_n_symbols(base, text).map_err(|e| format!("symbols: {}", e))?;
-    Ok(LockValue { var: InfoVar::new_with(InfoVarType::BaseNSymbol(base), data) })
+    let data: Array = base_n_symbols(base, text).map_err(|e| format!("symbols: {}", e))?
+        .into_iter().map(|s| Dynamic::from_int(s as i64)).collect();
+    Ok(LockValue { var: InfoVar::new(InfoVarType::BaseNSymbol(base), data.into()) })
 }
 
 fn type_name(var_type: &InfoVarType) -> String {
     match var_type {
-        InfoVarType::String => "String".to_string(),
         InfoVarType::BaseNSymbol(base) => format!("Base{}Symbol", base),
-        InfoVarType::Graph(InfoVarGraphType::MazeLock) => "Maze".to_string(),
-        InfoVarType::LockProcessInfo => "LockProcessInfo".to_string(),
         InfoVarType::MatchAll => "Any".to_string(),
         InfoVarType::Named(name) => name.clone(),
     }
 }
 
 /// The type a lock file names, the reverse of `type_name`: "Base27Symbol",
-/// "Maze", "String", "LockProcessInfo", "Any", or a name of its own.
+/// "Any", or any other name, such as "Maze".
 fn parse_type(name: &str) -> InfoVarType {
     let base = name.strip_prefix("Base")
         .and_then(|rest| rest.strip_suffix("Symbol"))
@@ -403,9 +428,6 @@ fn parse_type(name: &str) -> InfoVarType {
         .filter(|&base| base >= 2);
     match (name, base) {
         (_, Some(base)) => InfoVarType::BaseNSymbol(base),
-        ("Maze", _) => InfoVarType::Graph(InfoVarGraphType::MazeLock),
-        ("String", _) => InfoVarType::String,
-        ("LockProcessInfo", _) => InfoVarType::LockProcessInfo,
         ("Any", _) => InfoVarType::MatchAll,
         _ => InfoVarType::Named(name.to_string()),
     }
@@ -643,6 +665,18 @@ mod tests {
             "#, "A".repeat(len)));
             assert_eq!(width, 2 * side - 1, "{} symbols", len);
         }
+    }
+
+    #[test]
+    fn values_of_any_type_are_reachable() {
+        let parts: Array = eval(&format!(r#"{}
+            let length = lock.run(#{{ "m.maze_text": symbols(27, "HELLO WORLD") }}).get("m.text_length");
+            [length.type_name(), length.value(), symbols(27, "AB").value()]
+        "#, MAZE));
+        assert_eq!(parts[0].clone().cast::<String>(), "LockProcessInfo");
+        assert_eq!(parts[1].clone().cast::<i64>(), 11);
+        let symbols: Vec<i64> = parts[2].clone().cast::<Array>().into_iter().map(|v| v.cast::<i64>()).collect();
+        assert_eq!(symbols, vec![1, 2]);
     }
 
     #[test]
