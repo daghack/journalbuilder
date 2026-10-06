@@ -23,7 +23,7 @@ let style = new_strokestyle(1.5, "darkred", brush_style);
 let copper_font = new_fontset(["loche_upper"], ["sharp_lower", "loche_lower"]);
 
 for (paragraph, index) in paragraphs {
-	let maze_path = left_handed_maze_path(index, 10, 10);
+	let maze_path = new_maze(index, 10, 10).path();
 	maze_path.scale_by(100.0);
 	let maze_canvas = maze_path.fit_msg_to(style, copper_font, paragraph);
 	let page = new_page();

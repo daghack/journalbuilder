@@ -13,7 +13,6 @@ use super::canvas::CanvasStyleOptions;
 use super::canvas::{Brush, PressureProfile};
 use super::symbol::{place_along_path, SymbolPlacementArgs};
 use super::styles::Font;
-use super::canvas::artistic::{BuiltMaze, MazeTraversalStrategy};
 use super::darkly;
 use ::darkly::engine::DarklyEngine;
 use parry2d::math::Vec2 as PVec;
@@ -546,13 +545,6 @@ impl JournalEngine {
                     stroke.clone()
                 },
             )
-            .register_fn("left_handed_maze_path", |seed: i64, width: i64, height: i64| -> StrokePath {
-                let seed = seed as u64;
-                let width = width as u64;
-                let height = height as u64;
-                let maze = BuiltMaze::<[i64; 1]>::new(seed, width as u32, height as u32);
-                maze.corridor_path(MazeTraversalStrategy::LeftHanded)
-            })
             .register_fn("new_strokepath", StrokePath::new)
             .register_fn("cubic_to", |path: &mut StrokePath, c1: Vec2, c2: Vec2, end: Vec2| -> StrokePath {
                 update_path(path, |p| p.cubic_curve_to(

@@ -40,7 +40,7 @@ journals' look or behaviour, so it waits for a call).
 | 24 | A rhai `for` loop variable is a copy | Quirk | Won't fix (documented `76d8d84`) |
 | 25 | Darkly renders each canvas separately; plain output merges them | Anti-pattern | Fixed {{commit: Render the plain output per canvas, like Darkly}} |
 | 26 | Plain-output roughening and noise are unseeded | Quirk | Fixed {{commit: Seed the plain output's roughening and noise}} |
-| 27 | `left_handed_maze_path` duplicates `new_maze(..).path()` | Redundancy | Open |
+| 27 | `left_handed_maze_path` duplicates `new_maze(..).path()` | Redundancy | Fixed {{commit: Replace left_handed_maze_path with new_maze}} |
 | 28 | `--page` takes only indices, not page names | Gap | Open |
 | 29 | Font sets send digits and punctuation to the upper fonts | Quirk | Open |
 | 30 | A glyph that is a single straight line panics when loaded | Bug | Open |
@@ -168,7 +168,10 @@ journals' look or behaviour, so it waits for a call).
 - **Problem:** the plain PNG/SVG differ on every run even with a seeded script.
 
 ### 27. `left_handed_maze_path` duplicates `new_maze(..).path()`
-- **Status:** Open.
+- **Status:** Fixed in {{commit: Replace left_handed_maze_path with new_maze}}.
+- **Problem:** `left_handed_maze_path(seed, w, h)` built the same maze as `new_maze(seed, w, h)` and returned its `path()`, so there were two spellings for one thing.
+- **Change:** the copper letters use `new_maze(index, 10, 10).path()` and the old function is gone.
+- **Why:** one maze API. The copper letters' renders are byte-identical (all 24 files).
 
 ### 28. `--page` takes only indices, not page names
 - **Status:** Open.
