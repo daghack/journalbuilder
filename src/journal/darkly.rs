@@ -108,6 +108,7 @@ fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, brush_scale: f32) -
 
     let strokes = canvas.strokes();
     let mut warned_colors = HashSet::new();
+    let mut warned_saturation = HashSet::new();
     // Only reload the brush / reset its size when they change between strokes.
     let mut loaded_name: Option<&str> = None;
     let mut loaded_size: Option<f32> = None;
@@ -128,6 +129,16 @@ fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, brush_scale: f32) -
         }
         let pressure_min = brush.min_pressure;
         let pressure_range = brush.max_pressure - brush.min_pressure;
+        // A style's width scales its brush's pressure here (in the plain
+        // output it's a geometric width). Darkly caps pressure at 1, so
+        // past that, wider strokes stop getting heavier.
+        let peak_pressure = style.width * brush.max_pressure;
+        if peak_pressure > 1.0 && warned_saturation.insert((style.width.to_bits(), brush.name.as_str(), brush.max_pressure.to_bits())) {
+            eprintln!(
+                "warning: width {} strokes with brush '{}' (pressure {}-{}) reach pressure {:.2}; Darkly caps pressure at 1, so their heaviest parts look the same",
+                style.width, brush.name, brush.min_pressure, brush.max_pressure, peak_pressure,
+            );
+        }
         let [cr, cg, cb, ca] = style.rgba().unwrap_or_else(|err| {
             if warned_colors.insert(style.color.clone()) {
                 eprintln!("{}; drawing in black.", err);

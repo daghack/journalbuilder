@@ -456,6 +456,10 @@ impl Into<JournalStrokeStyle> for StrokeStyle {
 }
 
 impl StrokeStyle {
+    /// `new_strokestyle(width, color, brush)`. In the plain output `width` is
+    /// the stroke's width in canvas units; in Darkly it multiplies the
+    /// brush's pressure (which Darkly caps at 1), and the brush's size sets
+    /// the mark's width.
     pub fn new(width: f64, color: ImmutableString, brush: BrushSettings) -> Result<Self, Box<EvalAltResult>> {
         super::canvas::parse_color(&color)?;
         Ok(Self {
