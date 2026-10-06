@@ -894,6 +894,28 @@ mod tests {
     }
 
     #[test]
+    fn degenerate_canvases_render_or_are_skipped() {
+        let script = r#"
+            let s = new_strokestyle(0.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
+            let line = new_canvas();
+            line.add_strokepath(new_line(new_vec(0.0, 0.0), new_vec(0.0, 100.0)), s);
+            let p = new_page();
+            p.add_canvas(line);
+            p.add_canvas(new_canvas());
+            journal_entry.add_page(p);
+        "#;
+        let entry = engine().build_entry_str(script).expect("script should run");
+        assert_eq!(entry.empty_canvases(), vec!["page_0/1".to_string()]);
+        let line: JournalCanvas = entry.pages[0].canvases()[0].clone().into();
+        assert_eq!((line.render_extents().x, line.render_extents().y), (1.0, 100.0));
+        let dir = std::env::temp_dir().join(format!("journal_degenerate_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        entry.publish_pngs(dir.to_str().unwrap(), 1.0, None).expect("publish should succeed");
+        assert!(dir.join("page_0_0.png").is_file() && !dir.join("page_0_1.png").exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn warn_reports_with_the_line_and_keeps_going() {
         let mut engine = engine();
         engine.build_entry_str("let x = 1;\nwarn(\"too many \" + 3);\njournal_entry.add_page(new_page());")
