@@ -10,7 +10,7 @@
 // of the legacy renders, which fit each page to 1080 px with a 1.75 nib.
 let maze_brush = new_brush("Calligraphy", 0.15, 0.25, 1.65);
 let dial_brush = new_brush("Calligraphy", 0.15, 0.25, 2.05);
-let plain = #{ roughness: 2.0, noise_amplitude: 1.5 };
+let svg_look = #{ roughness: 2.0, noise_amplitude: 1.5 };
 
 // ---- page one: the maze ----
 
@@ -68,7 +68,7 @@ for g in filled.placed {
 
 let maze_page = new_page();
 maze_page.name = "maze";
-maze_page.plain_style = plain;
+maze_page.svg_style = svg_look;
 maze_page.add_canvas(page_canvas);
 journal_entry.add_page(maze_page);
 
@@ -154,6 +154,6 @@ dial.add_canvas(dial.splat_msgs(shorts, lowercase_font("loche_upper"), new_strok
 
 let dial_page = new_page();
 dial_page.name = "balanced_ternary";
-dial_page.plain_style = plain;
+dial_page.svg_style = svg_look;
 dial_page.add_canvas(dial);
 journal_entry.add_page(dial_page);

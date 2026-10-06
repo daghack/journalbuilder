@@ -38,13 +38,16 @@ fn check_missing_glyphs(symd: &symboldict::SymbolPathDict, strict: bool) -> Resu
 
 const DEFAULT_SUPERSAMPLE: f32 = 1.2;
 
-const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--no-plain]
+const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--svg]
                     [--scale S] [--supersample K] [--strict-glyphs]
                     [--journals-dir DIR] [--output-dir DIR] [--symbols FILE]
 
   --page P,...        Render only these pages, by index (0-based) or by
                       name. Other pages' existing output is kept.
-  --no-plain          Skip the plain PNG/SVG output; only render with Darkly.
+  --svg               Also render each canvas as an SVG ({page}_{canvas}.svg)
+                      and that SVG as a PNG; by default only Darkly renders.
+                      Stroke widths are geometric widths there, while in
+                      Darkly they scale brush pressure.
   --strict-glyphs     Fail before rendering if any character had no glyph
                       (by default they're drawn as X and listed as a warning).
   --scale S           Scale output images (default 1.0), brushes included.
@@ -67,7 +70,7 @@ struct Args {
     journal_name: String,
     journals_dir: String,
     pages: Option<Vec<String>>,
-    plain: bool,
+    svg: bool,
     scale: f32,
     supersample: f32,
     output_dir: Option<String>,
@@ -77,7 +80,7 @@ struct Args {
 fn parse_args() -> Result<Args, String> {
     let mut journal_name = None;
     let mut pages: Option<Vec<String>> = None;
-    let mut plain = true;
+    let mut svg = false;
     let mut strict_glyphs = false;
     let mut scale = 1.0;
     // Supersample by default: Darkly aliases brush marks thinner than about
@@ -92,7 +95,7 @@ fn parse_args() -> Result<Args, String> {
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--no-plain" => plain = false,
+            "--svg" => svg = true,
             "--strict-glyphs" => strict_glyphs = true,
             "--scale" => {
                 let value = args.next().ok_or("--scale needs a value, e.g. --scale 0.25")?;
@@ -126,7 +129,7 @@ fn parse_args() -> Result<Args, String> {
         }
     }
     let journal_name = journal_name.ok_or("missing journal name")?;
-    Ok(Args { strict_glyphs, journal_name, journals_dir, pages, plain, scale, supersample, output_dir, symbols })
+    Ok(Args { strict_glyphs, journal_name, journals_dir, pages, svg, scale, supersample, output_dir, symbols })
 }
 
 fn main() {
@@ -171,8 +174,8 @@ fn run(args: &Args) -> Result<(), String> {
         prepare_output_dir(&output_dir)?;
     }
     let only = pages.as_deref();
-    if args.plain {
-        entry.publish_pngs(&output_dir, args.scale, only)?;
+    if args.svg {
+        entry.publish_svgs(&output_dir, args.scale, only)?;
     }
     // One Darkly engine for the whole run; canvases resize it as needed.
     let mut darkly_engine = darkly::new_engine(1, 1);

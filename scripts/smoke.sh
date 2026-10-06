@@ -77,15 +77,16 @@ render() {
 echo "== renders"
 render fixture darkly_page_0_0.png darkly_page_1_0.png darkly_page_1_1.png darkly_lock_maze.png \
 	page_0_0.png page_1_0.png page_1_1.png lock_maze.png \
-	-- smoke --journals-dir tests/smoke_journals --strict-glyphs
+	page_0_0.svg page_1_0.svg page_1_1.svg lock_maze.svg \
+	-- smoke --journals-dir tests/smoke_journals --strict-glyphs --svg
 render fixture-supersampled darkly_page_0_0.png \
-	-- smoke --journals-dir tests/smoke_journals --page 0 --no-plain --supersample 2
+	-- smoke --journals-dir tests/smoke_journals --page 0 --supersample 2
 
 for journal in journals/*/; do
 	name=$(basename "$journal")
 	if [[ -f "$journal/journal_entry.rhai" ]]; then
 		# Named pages name their files, so just require some Darkly output.
-		render "$name" -- "$name" --page 0 --no-plain --scale 0.25
+		render "$name" -- "$name" --page 0 --scale 0.25
 		if [[ -z "$(ls "$OUT/$name"/darkly_*.png 2>/dev/null)" ]]; then
 			echo "FAIL $name: no Darkly output"
 			FAILURES=$((FAILURES + 1))

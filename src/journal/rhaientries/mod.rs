@@ -89,13 +89,16 @@ impl Entry {
         }
         Ok(())
     }
-    /// Plain renders, one per canvas like the Darkly ones:
-    /// `{page}_{canvas}.png`.
-    pub fn publish_pngs(&self, dirname: &str, scale: f32, only: Option<&[usize]>) -> Result<(), String> {
-        println!("Publishing PNGs:");
+    /// SVG renders, one per canvas like the Darkly ones, each written as
+    /// `{page}_{canvas}.svg` and rasterised to `{page}_{canvas}.png`. Here a
+    /// style's width is the stroke's geometric width; in Darkly it scales
+    /// the brush's pressure instead (see `new_strokestyle`).
+    pub fn publish_svgs(&self, dirname: &str, scale: f32, only: Option<&[usize]>) -> Result<(), String> {
+        println!("Publishing SVGs:");
         for (i, page) in self.selected_pages(only) {
             for (canvas_i, canvas) in page.canvases().iter().enumerate() {
                 let name = format!("{}_{}", page.label(i), canvas.label(canvas_i));
+                let svg_file = format!("{}/{}.svg", dirname, name);
                 let filename = format!("{}/{}.png", dirname, name);
                 let canvas: JournalCanvas = canvas.into();
                 if !canvas.has_strokes() {
@@ -103,8 +106,9 @@ impl Entry {
                 }
                 // Seeded by the file's name: the same every run, but each
                 // canvas roughened differently.
-                let png = canvas.to_png(2.0 * scale, page.plain_style.as_ref(), stable_hash(&name));
-                println!("\t - {}", filename);
+                let (svg, png) = canvas.to_svg_and_png(2.0 * scale, page.svg_style.as_ref(), stable_hash(&name));
+                println!("\t - {}", svg_file);
+                std::fs::write(&svg_file, svg).map_err(|e| format!("couldn't write {}: {}", svg_file, e))?;
                 std::fs::write(&filename, png).map_err(|e| format!("couldn't write {}: {}", filename, e))?;
             }
         }
@@ -194,16 +198,16 @@ fn check_name(caller: &str, name: Dynamic) -> Result<String, Box<EvalAltResult>>
     }
 }
 
-/// How a page's plain (non-Darkly) output is drawn, unless the script sets
-/// `page.plain_style`.
-const DEFAULT_PLAIN_STYLE: CanvasStyleOptions = CanvasStyleOptions {
+/// How a page's SVG output (`--svg`) is drawn, unless the script sets
+/// `page.svg_style`.
+const DEFAULT_SVG_STYLE: CanvasStyleOptions = CanvasStyleOptions {
     roughness: 1.0,
     point_sample_distance: 1.0,
     trail_off_percent: 0.15,
     noise_amplitude: 0.3,
 };
 
-const PLAIN_STYLE_KEYS: [&str; 4] = ["roughness", "point_sample_distance", "trail_off_percent", "noise_amplitude"];
+const SVG_STYLE_KEYS: [&str; 4] = ["roughness", "point_sample_distance", "trail_off_percent", "noise_amplitude"];
 
 #[derive(Debug, Clone, CustomType)]
 #[rhai_type(extra = Self::build_extra)]
@@ -212,9 +216,9 @@ pub struct Page {
     /// Output files are named after this, or `page_{index}` without one.
     #[rhai_type(skip)]
     name: Option<String>,
-    /// `None` draws the plain output as simple strokes.
+    /// `None` draws the SVG output as simple strokes.
     #[rhai_type(skip)]
-    plain_style: Option<CanvasStyleOptions>,
+    svg_style: Option<CanvasStyleOptions>,
 }
 
 impl Default for Page {
@@ -222,7 +226,7 @@ impl Default for Page {
         Page {
             canvases: Vec::new(),
             name: None,
-            plain_style: Some(DEFAULT_PLAIN_STYLE),
+            svg_style: Some(DEFAULT_SVG_STYLE),
         }
     }
 }
@@ -252,12 +256,12 @@ impl Page {
         self.name = Some(check_name("page.name", name)?);
         Ok(())
     }
-    fn get_plain_style(&mut self) -> Dynamic {
-        match &self.plain_style {
+    fn get_svg_style(&mut self) -> Dynamic {
+        match &self.svg_style {
             None => Dynamic::UNIT,
             Some(style) => {
                 let mut map = rhai::Map::new();
-                for (key, value) in PLAIN_STYLE_KEYS.iter().zip([style.roughness, style.point_sample_distance, style.trail_off_percent, style.noise_amplitude]) {
+                for (key, value) in SVG_STYLE_KEYS.iter().zip([style.roughness, style.point_sample_distance, style.trail_off_percent, style.noise_amplitude]) {
                     // Via the shortest decimal form, so 0.3 reads back as 0.3
                     // rather than 0.30000001192092896.
                     let value: f64 = value.to_string().parse().expect("a float's string form parses");
@@ -267,18 +271,18 @@ impl Page {
             }
         }
     }
-    /// `()` for plain strokes, or a map of options; any left out keep their
+    /// `()` for simple strokes, or a map of options; any left out keep their
     /// defaults.
-    fn set_plain_style(&mut self, style: Dynamic) -> Result<(), Box<EvalAltResult>> {
-        const CALLER: &str = "page.plain_style";
+    fn set_svg_style(&mut self, style: Dynamic) -> Result<(), Box<EvalAltResult>> {
+        const CALLER: &str = "page.svg_style";
         if style.is_unit() {
-            self.plain_style = None;
+            self.svg_style = None;
             return Ok(());
         }
         let type_name = style.type_name();
         let options = style.try_cast::<rhai::Map>()
             .ok_or_else(|| -> Box<EvalAltResult> { format!("{}: expected a map of options or (), got {}", CALLER, type_name).into() })?;
-        layout::check_keys(CALLER, &options, &PLAIN_STYLE_KEYS)?;
+        layout::check_keys(CALLER, &options, &SVG_STYLE_KEYS)?;
         let get = |key: &str, default: f32| -> Result<f32, Box<EvalAltResult>> {
             match layout::number(CALLER, &options, key)? {
                 Some(n) if n >= 0.0 => Ok(n),
@@ -286,12 +290,12 @@ impl Page {
                 None => Ok(default),
             }
         };
-        let d = DEFAULT_PLAIN_STYLE;
+        let d = DEFAULT_SVG_STYLE;
         let point_sample_distance = get("point_sample_distance", d.point_sample_distance)?;
         if point_sample_distance == 0.0 {
             return Err(format!("{}: 'point_sample_distance' must be positive", CALLER).into());
         }
-        self.plain_style = Some(CanvasStyleOptions {
+        self.svg_style = Some(CanvasStyleOptions {
             roughness: get("roughness", d.roughness)?,
             point_sample_distance,
             trail_off_percent: get("trail_off_percent", d.trail_off_percent)?,
@@ -304,7 +308,7 @@ impl Page {
             .with_fn("add_canvas", Self::add_canvas)
             .with_fn("new_page", Self::default)
             .with_get_set("name", Self::get_name, Self::set_name)
-            .with_get_set("plain_style", Self::get_plain_style, Self::set_plain_style)
+            .with_get_set("svg_style", Self::get_svg_style, Self::set_svg_style)
         ;
     }
 }
@@ -526,10 +530,16 @@ impl From<StrokeStyle> for JournalStrokeStyle {
 }
 
 impl StrokeStyle {
-    /// `new_strokestyle(width, color, brush)`. In the plain output `width` is
-    /// the stroke's width in canvas units; in Darkly it multiplies the
-    /// brush's pressure (which Darkly caps at 1), and the brush's size sets
-    /// the mark's width.
+    /// `new_strokestyle(width, color, brush)`.
+    ///
+    /// `width` means different things in the two outputs:
+    /// - Darkly (the default render): it multiplies the brush's pressure,
+    ///   so pressure runs from `width * min_pressure` to
+    ///   `width * max_pressure`. The brush's `size` sets how wide its marks
+    ///   are; pressure makes them heavier (how much depends on the brush).
+    ///   Darkly caps pressure at 1, so past `width = 1 / max_pressure` a
+    ///   wider stroke looks no heavier, and the render warns.
+    /// - SVG (`--svg`): it's the stroke's width in canvas units.
     pub fn new(width: f64, color: ImmutableString, brush: BrushSettings) -> Result<Self, Box<EvalAltResult>> {
         super::canvas::parse_color(&color)?;
         Ok(Self {
@@ -998,7 +1008,7 @@ mod tests {
 
         let dir = std::env::temp_dir().join(format!("journal_names_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        entry.publish_pngs(dir.to_str().unwrap(), 0.1, Some(&[1])).expect("publish should succeed");
+        entry.publish_svgs(dir.to_str().unwrap(), 0.1, Some(&[1])).expect("publish should succeed");
         assert!(dir.join("maze_ring.png").is_file() && dir.join("maze_1.png").is_file());
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -1040,7 +1050,7 @@ mod tests {
         assert_eq!((line.render_extents().x, line.render_extents().y), (1.0, 100.0));
         let dir = std::env::temp_dir().join(format!("journal_degenerate_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        entry.publish_pngs(dir.to_str().unwrap(), 1.0, None).expect("publish should succeed");
+        entry.publish_svgs(dir.to_str().unwrap(), 1.0, None).expect("publish should succeed");
         assert!(dir.join("page_0_0.png").is_file() && !dir.join("page_0_1.png").exists());
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -1097,26 +1107,26 @@ mod tests {
     }
 
     #[test]
-    fn plain_style_defaults_merges_and_turns_off() {
+    fn svg_style_defaults_merges_and_turns_off() {
         let script = r#"
             let p = new_page();
             if p.name != () { throw "unnamed pages have no name"; }
-            if p.plain_style.roughness != 1.0 || p.plain_style.noise_amplitude != 0.3 { throw "unexpected default: " + p.plain_style; }
-            p.plain_style = #{ roughness: 2, noise_amplitude: 1.5 };
-            if p.plain_style.roughness != 2.0 || p.plain_style.trail_off_percent != 0.15 { throw "not merged: " + p.plain_style; }
+            if p.svg_style.roughness != 1.0 || p.svg_style.noise_amplitude != 0.3 { throw "unexpected default: " + p.svg_style; }
+            p.svg_style = #{ roughness: 2, noise_amplitude: 1.5 };
+            if p.svg_style.roughness != 2.0 || p.svg_style.trail_off_percent != 0.15 { throw "not merged: " + p.svg_style; }
             journal_entry.add_page(p);
             let plain = new_page();
-            plain.plain_style = ();
+            plain.svg_style = ();
             journal_entry.add_page(plain);
         "#;
         let entry = engine().build_entry_str(script).expect("script should run");
-        let style = entry.pages[0].plain_style.as_ref().expect("styled");
+        let style = entry.pages[0].svg_style.as_ref().expect("styled");
         assert_eq!((style.roughness, style.point_sample_distance, style.noise_amplitude), (2.0, 1.0, 1.5));
-        assert!(entry.pages[1].plain_style.is_none());
+        assert!(entry.pages[1].svg_style.is_none());
         for (script, want) in [
-            ("let p = new_page();\np.plain_style = #{ roughnes: 1 };", "unknown option 'roughnes'"),
-            ("let p = new_page();\np.plain_style = #{ roughness: -1 };", "'roughness' can't be negative"),
-            ("let p = new_page();\np.plain_style = 2;", "expected a map of options or ()"),
+            ("let p = new_page();\np.svg_style = #{ roughnes: 1 };", "unknown option 'roughnes'"),
+            ("let p = new_page();\np.svg_style = #{ roughness: -1 };", "'roughness' can't be negative"),
+            ("let p = new_page();\np.svg_style = 2;", "expected a map of options or ()"),
         ] {
             let err = engine().build_entry_str(script).expect_err("script should fail").to_string();
             assert!(err.contains(want) && err.contains("line 2"), "{}: {}", want, err);

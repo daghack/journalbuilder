@@ -217,7 +217,7 @@ impl StrokePath {
         }
     }
     /// The same path with every line and quadratic segment written as a
-    /// cubic, which the plain output's roughening works on.
+    /// cubic, which the SVG output's roughening works on.
     pub fn to_cubics(&self) -> StrokePath {
         let mut current = Vec2::ZERO;
         let mut subpath_start = Vec2::ZERO;

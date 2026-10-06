@@ -266,6 +266,11 @@ impl Canvas {
     }
     /// The canvas as a PNG; see `to_svg` for `seed`.
     pub fn to_png(&self, scale: f32, stylized: Option<&CanvasStyleOptions>, seed: u64) -> Vec<u8> {
+        self.to_svg_and_png(scale, stylized, seed).1
+    }
+    /// The canvas as SVG and that SVG rasterised (with the style's noise
+    /// added); see `to_svg` for `seed`.
+    pub fn to_svg_and_png(&self, scale: f32, stylized: Option<&CanvasStyleOptions>, seed: u64) -> (String, Vec<u8>) {
         let rng = &mut StdRng::seed_from_u64(seed);
         let svg_data = self.to_svg_with(stylized, rng);
         let svg_tree = usvg::Tree::from_str(&svg_data, &usvg::Options::default()).expect("Failed to parse SVG");
@@ -273,7 +278,7 @@ impl Canvas {
         if let Some(opts) = stylized {
             Self::stylize_pixmap(&mut pixmap, opts, rng);
         }
-        pixmap.encode_png().expect("Failed to encode PNG")
+        (svg_data, pixmap.encode_png().expect("Failed to encode PNG"))
     }
     pub fn stylized_path(&self, stroke: &ColoredStroke, opts: &CanvasStyleOptions, rng: &mut dyn RngCore) -> String {
         let pos_roughen = opts.roughness;
@@ -361,7 +366,7 @@ mod tests {
 }
 
 #[cfg(test)]
-mod plain_output_tests {
+mod svg_output_tests {
     use super::*;
 
     #[test]

@@ -72,6 +72,6 @@ canvas.add_canvas(canvas.splat_msgs(shorts, font, new_strokestyle(2.0, "hsl(200,
 
 let page = new_page();
 page.name = "maze_textbox";
-page.plain_style = #{ noise_amplitude: 1.5 };
+page.svg_style = #{ noise_amplitude: 1.5 };
 page.add_canvas(canvas);
 journal_entry.add_page(page);

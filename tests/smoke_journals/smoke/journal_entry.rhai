@@ -80,7 +80,7 @@ maze_canvas.add_strokepath(maze_path, faint);
 let filled = new_line(new_vec(0.0, 0.0), new_vec(200.0, 0.0)).fill_with_msg(accent, font, 14.0, "a line of text");
 
 let page_two = new_page();
-page_two.plain_style = ();   // plain strokes, unstyled
+page_two.svg_style = ();   // plain strokes, unstyled
 page_two.add_canvas(maze_canvas);
 page_two.add_canvas(filled[0].translate(new_vec(0.0, 160.0)));
 journal_entry.add_page(page_two);
@@ -136,6 +136,6 @@ for (block, i) in boxes {
 maze_canvas.name = "maze";
 let page_three = new_page();
 page_three.name = "lock";
-page_three.plain_style = #{ roughness: 2.0, noise_amplitude: 1.5 };
+page_three.svg_style = #{ roughness: 2.0, noise_amplitude: 1.5 };
 page_three.add_canvas(maze_canvas);
 journal_entry.add_page(page_three);

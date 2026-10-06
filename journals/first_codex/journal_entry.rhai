@@ -53,7 +53,7 @@ for (ring_size, ring) in ring_sizes {
 
 let page = new_page();
 page.name = "first_codex";
-// The legacy page had no plain styling.
-page.plain_style = ();
+// The legacy page had no SVG styling.
+page.svg_style = ();
 page.add_canvas(codex);
 journal_entry.add_page(page);
