@@ -536,7 +536,7 @@ checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 [[package]]
 name = "darkly"
 version = "0.1.0"
-source = "git+https://github.com/daghack/darkly.git?branch=offline-stroke-path#3f99aea54a106217d9c65ceadd0671bbae70b3e4"
+source = "git+https://github.com/daghack/darkly.git?rev=3f99aea54a106217d9c65ceadd0671bbae70b3e4#3f99aea54a106217d9c65ceadd0671bbae70b3e4"
 dependencies = [
  "base64 0.23.1",
  "bytemuck",
@@ -565,7 +565,7 @@ dependencies = [
 [[package]]
 name = "darkly-macros"
 version = "0.1.0"
-source = "git+https://github.com/daghack/darkly.git?branch=offline-stroke-path#3f99aea54a106217d9c65ceadd0671bbae70b3e4"
+source = "git+https://github.com/daghack/darkly.git?rev=3f99aea54a106217d9c65ceadd0671bbae70b3e4#3f99aea54a106217d9c65ceadd0671bbae70b3e4"
 dependencies = [
  "proc-macro2",
  "quote",

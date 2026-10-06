@@ -44,7 +44,7 @@ journals' look or behaviour, so it waits for a call).
 | 28 | `--page` takes only indices, not page names | Gap | Fixed {{commit: Let --page take page names}} |
 | 29 | Font sets send digits and punctuation to the upper fonts | Quirk | Fixed {{commit: Fall back to the other case's fonts before the X glyph}} |
 | 30 | A glyph that is a single straight line panics when loaded | Bug | Fixed {{commit: Give straight-line glyphs a hull instead of panicking}} |
-| 31 | The Darkly dependency follows a branch instead of a pinned revision | Anti-pattern | Open |
+| 31 | The Darkly dependency follows a branch instead of a pinned revision | Anti-pattern | Fixed {{commit: Pin the Darkly fork to a commit}} |
 | 32 | The copper letters' brush sizes predate the fork's Calligraphy change | Quirk | Open |
 | 33 | Rhai scripts can't emit warnings; `print` goes to stdout | Gap | Open |
 | 34 | Rhai `fn`s can't read script globals | Quirk | Won't fix |
@@ -253,7 +253,7 @@ journals' look or behaviour, so it waits for a call).
 
 ### 44. Non-finite numbers from scripts can panic layout and hatching
 - **Where:** `src/journal/paths.rs`, `src/journal/symbol.rs`, `src/journal/rhaientries/`
-- **Status:** Fixed in {{commit: Give straight-line glyphs a hull instead of panicking}}.
-- **Problem:** a glyph whose points are collinear (a single straight stroke like `-` or `/`), a single point, or empty, has no convex hull, and loading the dictionary panicked with "Failed to generate convex hull".
-- **Change:** when the points don't wrap into a hull, the glyph's hull is its bounding box padded by 0.02 (1% of a glyph's span), so layout still sees a sliver of width and height.
-- **Why:** such glyphs are legitimate (dashes, slashes, `I`). Glyphs that already had a hull are untouched.
+- **Status:** Fixed in {{commit: Pin the Darkly fork to a commit}}.
+- **Problem:** `Cargo.toml` followed the fork's `offline-stroke-path` branch, so a `cargo update` would pull whatever the branch held next, silently changing how journals render.
+- **Change:** pinned with `rev = "3f99aea…"` (the commit already in `Cargo.lock`), with a comment naming the branch.
+- **Why:** renders are now byte-reproducible, and the renderer version should only change deliberately. Moving to a newer fork commit, or back to upstream once `stroke_path` lands, is a one-line edit.

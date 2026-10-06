@@ -6,7 +6,9 @@ edition = "2024"
 [dependencies]
 # Fork with DarklyEngine::stroke_path (batched offline strokes); switch back
 # to darkly-art/darkly once it lands upstream.
-darkly = { git = "https://github.com/daghack/darkly.git", branch = "offline-stroke-path" }
+# Pinned to a commit on the fork's offline-stroke-path branch, so a
+# `cargo update` can't change how journals render.
+darkly = { git = "https://github.com/daghack/darkly.git", rev = "3f99aea54a106217d9c65ceadd0671bbae70b3e4" }
 image = "0.25.10"
 kdtree = "0.7.0"
 noise = "0.9.0"
