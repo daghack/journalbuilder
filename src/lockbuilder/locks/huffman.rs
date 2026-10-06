@@ -42,7 +42,7 @@ fn make_encoding(frequency_counts: &HashMap<u32, u32>, original_base: u32, encod
 
     for symbol in 0 .. original_base {
         let default = 0;
-        let symbol_count = frequency_counts.get(&symbol).or(Some(&default)).unwrap();
+        let symbol_count = frequency_counts.get(&symbol).unwrap_or(&default);
         let symbol_index = huff_tree.add_node(Some(symbol));
         heap.push(Node::new(Some(symbol_index), Some(symbol), *symbol_count).unwrap());
         index_map.insert(symbol, symbol_index);
@@ -117,11 +117,10 @@ impl HuffmanEncodingLock {
                     let edge_weight = huffman_tree[edge_index];
                     current_path.push(edge_weight);
                 }
-                petgraph::visit::DfsEvent::Finish(_, _) => {
-                    if current_path.len() > 0 {
+                petgraph::visit::DfsEvent::Finish(_, _)
+                    if !current_path.is_empty() => {
                         current_path.pop();
                     }
-                }
                 _ => {}
             }
         });

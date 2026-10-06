@@ -23,8 +23,11 @@ pub fn balanced_base27_symbol(c: char) -> i32 {
 pub struct SymbolStringBuilder<'symdict> {
     symdict: &'symdict SymbolPathDict,
     transformer: StrToSymTransformer<'symdict>,
-    filters: Vec<Box<dyn Fn(&mut Symbol, &mut dyn RngCore)>>,
+    filters: Vec<SymbolFilter>,
 }
+
+/// Adjusts a symbol after it's built (e.g. random jitter).
+pub type SymbolFilter = Box<dyn Fn(&mut Symbol, &mut dyn RngCore)>;
 
 /// Turns one character into a symbol. Any random choice (such as which
 /// variant of a glyph to draw) comes from the `rng` passed to `build`, so
@@ -72,11 +75,11 @@ pub fn lowercase_builder<'sd>(symdict: &'sd SymbolPathDict, prefix: &str) -> Sym
         let c = original.to_lowercase().next().unwrap_or(' ');
         if c.is_whitespace() {
             if c == ' ' || c == '\n' {
-                return Symbol::new_default_from_base_rc(Rc::new(SymbolBase::new(SymbolType::Blank(1.0, 1.0))));
+                Symbol::new_default_from_base_rc(Rc::new(SymbolBase::new(SymbolType::Blank(1.0, 1.0))))
             } else if c == '\t' {
-                return Symbol::new_default_from_base_rc(Rc::new(SymbolBase::new(SymbolType::Blank(4.0, 1.0))));
+                Symbol::new_default_from_base_rc(Rc::new(SymbolBase::new(SymbolType::Blank(4.0, 1.0))))
             } else {
-                return symd.fallback_symbol(original, &[]);
+                symd.fallback_symbol(original, &[])
             }
         } else {
             let mut key = format!("{}_{}", prefix, c);
@@ -121,7 +124,7 @@ impl FontSet {
                     }
                     _ => return symd.fallback_symbol(c, &[]),
                 };
-                return Symbol::new_default_from_base_rc(symbase);
+                Symbol::new_default_from_base_rc(symbase)
             } else {
                 let mut chosen_keys = None;
                 let fontset = if c.is_lowercase() {

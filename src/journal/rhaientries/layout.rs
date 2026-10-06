@@ -38,7 +38,6 @@ use parry2d::bounding_volume::Aabb;
 use parry2d::math::Vec2 as PVec;
 use rhai::{Array, Dynamic, Engine, EvalAltResult, Map};
 use std::rc::Rc;
-use std::sync::Arc;
 
 use super::glyphs::{add_glyph, glyph_array, Glyph};
 use super::random::SharedRng;
@@ -257,7 +256,7 @@ fn splat(canvas: &Canvas, msgs: Array, font: &Font, style: StrokeStyle, options:
     Ok(splatted)
 }
 
-pub fn register(engine: &mut Engine, symdict: Arc<SymbolPathDict>, rng: SharedRng) {
+pub fn register(engine: &mut Engine, symdict: Rc<SymbolPathDict>, rng: SharedRng) {
     engine.register_type_with_name::<TextBox>("TextBox");
     engine.register_fn("bounds", bounds);
     engine.register_fn("new_textbox", TextBox::new);
@@ -304,11 +303,11 @@ pub fn register(engine: &mut Engine, symdict: Arc<SymbolPathDict>, rng: SharedRn
 mod tests {
     use super::super::JournalEngine;
     use crate::journal::symboldict::SymbolPathDict;
-    use std::sync::Arc;
+    use std::rc::Rc;
 
     fn engine() -> JournalEngine {
         let symd = SymbolPathDict::from_file(crate::journal::symboldict::DEFAULT_SYMBOLS).expect("Failed to load symbols.json");
-        JournalEngine::new(Arc::new(symd))
+        JournalEngine::new(Rc::new(symd))
     }
 
     /// Run `script` after some shared setup, returning its value.
@@ -323,7 +322,7 @@ mod tests {
     }
 
     fn fails(script: &str) -> String {
-        engine().engine.run(script).err().expect("script should fail").to_string()
+        engine().engine.run(script).expect_err("script should fail").to_string()
     }
 
     #[test]

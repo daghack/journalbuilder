@@ -4,7 +4,7 @@ mod locks;
 mod random;
 
 use rhai::{Engine, EvalAltResult, ImmutableString, Dynamic, CustomType, TypeBuilder, Scope};
-use std::io::{Error, ErrorKind};
+use std::io::Error;
 use super::paths::StrokePath;
 use super::symboldict::SymbolPathDict;
 use super::canvas::Canvas as JournalCanvas;
@@ -18,7 +18,7 @@ use super::darkly;
 use ::darkly::engine::DarklyEngine;
 use parry2d::math::Vec2 as PVec;
 
-use std::sync::Arc;
+use std::rc::Rc;
 
 #[derive(Debug, Default, Clone, CustomType)]
 #[rhai_type(extra = Self::build_extra)]
@@ -45,12 +45,12 @@ impl Entry {
     /// those listed in `only`.
     fn selected_pages<'a>(&'a self, only: Option<&'a [usize]>) -> impl Iterator<Item = (usize, &'a Page)> + 'a {
         self.pages.iter().enumerate()
-            .filter(move |(i, _)| only.map_or(true, |pages| pages.contains(i)))
+            .filter(move |(i, _)| only.is_none_or(|pages| pages.contains(i)))
     }
     pub fn darkly_publish_pngs(&self, engine: &mut DarklyEngine, dirname: &str, scale: f32, supersample: f32, only: Option<&[usize]>) {
         for (i, page) in self.selected_pages(only) {
             let canvases = page.canvases();
-            for (canvas_i, canvas) in canvases.into_iter().enumerate() {
+            for (canvas_i, canvas) in canvases.iter().enumerate() {
                 let filename = format!("{}/darkly_{}_{}.png", dirname, page.label(i), canvas.label(canvas_i));
                 let canvas : JournalCanvas = canvas.into();
                 let canvas_dim = canvas.bounds().extents();
@@ -257,10 +257,10 @@ impl Page {
 }
 
 /// A page's canvases layered into one, as the plain output draws it.
-impl Into<JournalCanvas> for Page {
-    fn into(self) -> JournalCanvas {
+impl From<Page> for JournalCanvas {
+    fn from(val: Page) -> Self {
         let mut combined = JournalCanvas::new();
-        for canvas in self.canvases {
+        for canvas in val.canvases {
             combined.merge_canvas(canvas.into());
         }
         combined
@@ -286,9 +286,9 @@ impl Vec2 {
     }
 }
 
-impl Into<PVec> for Vec2 {
-    fn into(self) -> PVec {
-        PVec::new(self.x as f32, self.y as f32)
+impl From<Vec2> for PVec {
+    fn from(val: Vec2) -> Self {
+        PVec::new(val.x as f32, val.y as f32)
     }
 }
 
@@ -361,10 +361,10 @@ impl Canvas {
     }
 }
 
-impl Into<JournalCanvas> for Canvas {
-    fn into(self) -> JournalCanvas {
+impl From<Canvas> for JournalCanvas {
+    fn from(val: Canvas) -> Self {
         let mut canvas = JournalCanvas::new();
-        for stroke in self.strokes {
+        for stroke in val.strokes {
             let Stroke {
                 path,
                 style,
@@ -375,10 +375,10 @@ impl Into<JournalCanvas> for Canvas {
     }
 }
 
-impl Into<JournalCanvas> for &Canvas {
-    fn into(self) -> JournalCanvas {
+impl From<&Canvas> for JournalCanvas {
+    fn from(val: &Canvas) -> Self {
         let mut canvas = JournalCanvas::new();
-        for stroke in self.strokes.iter() {
+        for stroke in val.strokes.iter() {
             let Stroke {
                 path,
                 style,
@@ -419,12 +419,12 @@ pub struct StrokeStyle {
     brush: BrushSettings,
 }
 
-impl Into<JournalStrokeStyle> for StrokeStyle {
-    fn into(self) -> JournalStrokeStyle {
+impl From<StrokeStyle> for JournalStrokeStyle {
+    fn from(val: StrokeStyle) -> Self {
         JournalStrokeStyle {
-            width: self.width as f32,
-            color: self.color.to_string(),
-            brush: Some(self.brush.into()),
+            width: val.width as f32,
+            color: val.color.to_string(),
+            brush: Some(val.brush.into()),
         }
     }
 }
@@ -452,7 +452,7 @@ impl StrokeStyle {
 /// Apply a by-value StrokePath builder method to a path in place, returning
 /// the updated path.
 fn update_path(path: &mut StrokePath, f: impl FnOnce(StrokePath) -> StrokePath) -> StrokePath {
-    *path = f(std::mem::replace(path, StrokePath::new()));
+    *path = f(std::mem::take(path));
     path.clone()
 }
 
@@ -461,7 +461,7 @@ pub struct JournalEngine {
 }
 
 impl JournalEngine {
-    pub fn new(symdict: Arc<SymbolPathDict>) -> Self {
+    pub fn new(symdict: Rc<SymbolPathDict>) -> Self {
         let mut engine = Engine::new();
         let rng = random::register(&mut engine);
         let fit_msg_symdict = symdict.clone();
@@ -488,8 +488,8 @@ impl JournalEngine {
 
                 let mut all_canvases = Vec::new();
                 let mut symbols = builder.build(msg, &mut *fill_msg_rng.borrow_mut());
-                while symbols.len() > 0 {
-                    let (placed, unplaced) = place_along_path(symbols.drain(..).collect(), path, &args);
+                while !symbols.is_empty() {
+                    let (placed, unplaced) = place_along_path(std::mem::take(&mut symbols), path, &args);
                     let mut canvas = Canvas::default();
                     for symbol in placed {
                         canvas.add_strokepath(symbol.placed_strokepath(), style.clone());
@@ -514,7 +514,7 @@ impl JournalEngine {
                     let current_scale = (window_max + window_min) / 2.0;
                     args.symbol_scale = current_scale;
                     let (_, unplaced) = place_along_path(symbols.clone(), path, &args);
-                    if unplaced.len() > 0 {
+                    if !unplaced.is_empty() {
                         window_max = current_scale;
                     } else {
                         window_min = current_scale;
@@ -629,10 +629,10 @@ impl JournalEngine {
         self.engine.run_with_scope(&mut scope, script_str)
             .map_err(|err| {
                 let msg = format!("Failed to Evaluate Rhai: {}", err);
-                Error::new(ErrorKind::Other, msg)
+                Error::other(msg)
             })?;
         scope.get_value("journal_entry")
-            .ok_or(Error::new(ErrorKind::Other, "journal_entry value not found"))
+            .ok_or(Error::other("journal_entry value not found"))
 
     }
     pub fn build_entry_file(&mut self, rhai_filename: &str) -> Result<Entry, Error> {
@@ -647,7 +647,7 @@ mod tests {
 
     fn engine() -> JournalEngine {
         let symd = SymbolPathDict::from_file(crate::journal::symboldict::DEFAULT_SYMBOLS).expect("Failed to load symbols.json");
-        JournalEngine::new(Arc::new(symd))
+        JournalEngine::new(Rc::new(symd))
     }
 
     const BRUSH: &str = r#"let brush = new_brush("Calligraphy", 0.25, 0.5, 1.0);"#;
@@ -664,7 +664,7 @@ mod tests {
     #[test]
     fn new_strokestyle_rejects_bad_color_with_line() {
         let script = format!("{}\nlet bad = new_strokestyle(1.5, \"darkredd\", brush);", BRUSH);
-        let err = engine().build_entry_str(&script).err().expect("bad color should fail").to_string();
+        let err = engine().build_entry_str(&script).expect_err("bad color should fail").to_string();
         assert!(err.contains("darkredd"), "{}", err);
         assert!(err.contains("line 2"), "{}", err);
     }
@@ -672,7 +672,7 @@ mod tests {
     #[test]
     fn load_symbol_rejects_unknown_name_with_line() {
         let err = engine().build_entry_str("let ok = load_symbol(\"basic_eye\");\nlet bad = load_symbol(\"no_such_glyph\");")
-            .err().expect("unknown symbol should fail").to_string();
+            .expect_err("unknown symbol should fail").to_string();
         assert!(err.contains("unknown symbol 'no_such_glyph'"), "{}", err);
         assert!(err.contains("line 2"), "{}", err);
     }
@@ -680,7 +680,7 @@ mod tests {
     #[test]
     fn new_brush_rejects_unknown_name_with_line() {
         let err = engine().build_entry_str("let ok = new_brush(\"Ink Pen\", 0.2, 0.5, 1.0);\nlet bad = new_brush(\"Crayon\", 0.2, 0.5, 1.0);")
-            .err().expect("unknown brush should fail").to_string();
+            .expect_err("unknown brush should fail").to_string();
         assert!(err.contains("unknown brush 'Crayon'"), "{}", err);
         assert!(err.contains("Calligraphy"), "error should list available brushes: {}", err);
         assert!(err.contains("line 2"), "{}", err);
@@ -689,7 +689,7 @@ mod tests {
     #[test]
     fn new_strokestyle_requires_brush() {
         let err = engine().build_entry_str(r#"let s = new_strokestyle(1.5, "black");"#)
-            .err().expect("brushless style should fail").to_string();
+            .expect_err("brushless style should fail").to_string();
         assert!(err.contains("new_strokestyle"), "{}", err);
     }
 
@@ -846,7 +846,7 @@ mod tests {
             ("let p = new_page();\np.plain_style = #{ roughness: -1 };", "'roughness' can't be negative"),
             ("let p = new_page();\np.plain_style = 2;", "expected a map of options or ()"),
         ] {
-            let err = engine().build_entry_str(script).err().expect("script should fail").to_string();
+            let err = engine().build_entry_str(script).expect_err("script should fail").to_string();
             assert!(err.contains(want) && err.contains("line 2"), "{}: {}", want, err);
         }
     }
@@ -867,7 +867,7 @@ mod tests {
         let jc: JournalCanvas = entry.pages[0].canvases()[0].clone().into();
         assert_eq!(jc.strokes()[0].style.brush.as_ref().unwrap().pressure_profile, PressureProfile::Taper);
         let err = engine().build_entry_str("let b = new_brush(\"Ink Pen\", 0.2, 0.8, 1.0);\nb.pressure_profile = \"wobbly\";")
-            .err().expect("unknown profile should fail").to_string();
+            .expect_err("unknown profile should fail").to_string();
         assert!(err.contains("unknown profile 'wobbly'") && err.contains("ramp, taper, constant") && err.contains("line 2"), "{}", err);
     }
 

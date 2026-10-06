@@ -203,7 +203,7 @@ impl AvoidanceKdTree {
         let scale = self.scale;
         self.kdtree
             .nearest(&query_point, 1, &squared_euclidean)
-            .map_or(false, |results| {
+            .is_ok_and(|results| {
                 if let Some((dist, _)) = results.first() {
                     *dist < scale * scale
                 } else {
@@ -213,22 +213,22 @@ impl AvoidanceKdTree {
     }
 }
 
-impl Into<StrokePath> for Symbol {
-    fn into(self) -> StrokePath {
-        self.placed_strokepath()
+impl From<Symbol> for StrokePath {
+    fn from(val: Symbol) -> Self {
+        val.placed_strokepath()
     }
 }
 
-impl Into<StrokePath> for &Symbol {
-    fn into(self) -> StrokePath {
-        self.placed_strokepath()
+impl From<&Symbol> for StrokePath {
+    fn from(val: &Symbol) -> Self {
+        val.placed_strokepath()
     }
 }
 
-impl Into<StrokePath> for Vec<Symbol> {
-    fn into(self) -> StrokePath {
+impl From<Vec<Symbol>> for StrokePath {
+    fn from(val: Vec<Symbol>) -> Self {
         let mut combined_path = StrokePath::new();
-        for symbol in self {
+        for symbol in val {
             let placed_path = symbol.placed_strokepath();
             combined_path = combined_path.merge_path(&placed_path);
         }
@@ -326,7 +326,7 @@ pub fn place_along_path<'kd>(mut symbols: Vec<Symbol>, path: &StrokePath, args: 
     let mut placed_symbols = 0;
     let mut sym_iter = symbols.iter_mut().peekable();
     for substroke in &substrokes {
-        placed_symbols += place_symbols_along(&substroke, &mut sym_iter, &mut symbol_avoidtree, *external_avoidtree);
+        placed_symbols += place_symbols_along(substroke, &mut sym_iter, &mut symbol_avoidtree, *external_avoidtree);
     }
     // copy the last n placed symbols into a new vec,
     // then return the original vector, now truncated, and the new vec
@@ -348,12 +348,11 @@ pub fn place_words_along_path<'kd>(symbols: Vec<Symbol>, path: &StrokePath, args
     for symbol in sym_iter {
         let symbol_blank = symbol.is_blank();
         current_word.push_back(symbol);
-        if symbol_blank {
-            if !current_word.is_empty() {
+        if symbol_blank
+            && !current_word.is_empty() {
                 words.push(current_word);
                 current_word = VecDeque::new();
             }
-        }
     }
     if !current_word.is_empty() {
         words.push(current_word);
@@ -398,7 +397,7 @@ pub fn place_words_along_path<'kd>(symbols: Vec<Symbol>, path: &StrokePath, args
                 // from the word vector.
                 let mut current = current_word.take().unwrap();
                 let next = current.split_off(placed);
-                if next.len() > 0 && !next[0].is_blank() {
+                if !next.is_empty() && !next[0].is_blank() {
                     current_word = Some(next);
                 }
                 let mut word_sym_iter = current.iter_mut().peekable();

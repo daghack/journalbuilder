@@ -160,7 +160,7 @@ mod tests {
     #[test]
     fn bad_path_data_names_the_symbol() {
         let json = r#"[{"name": "broken", "path": "M 0 0 L 1", "adj": null}]"#;
-        let err = SymbolPathDict::from_bytes(json.as_bytes()).err().expect("bad path should fail").to_string();
+        let err = SymbolPathDict::from_bytes(json.as_bytes()).expect_err("bad path should fail").to_string();
         assert!(err.contains("symbol 'broken'") && err.contains("'L' expects more numbers"), "{}", err);
     }
 

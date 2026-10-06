@@ -30,7 +30,7 @@ journals' look or behaviour, so it waits for a call).
 | 14 | Two parallel pipelines, legacy JSON and rhai | Anti-pattern | Resolved `3c547e8` |
 | 15 | Placeholder types with no content | Dead code | Fixed {{commit: Remove the empty placeholder types}} |
 | 16 | `get_convex_hull()` clones a polygon to read its bounding box | Performance | Fixed {{commit: Cache glyph hull bounds instead of cloning hulls}} |
-| 17 | `unwrap`/`expect`/`panic` everywhere, clippy warnings, deprecations | Code health | Open |
+| 17 | `unwrap`/`expect`/`panic` everywhere, clippy warnings, deprecations | Code health | Fixed {{commit: Fix every clippy warning and the deprecations}} (panics: see 30, 38–41, 44) |
 | 18 | Offline Darkly renders piled up GPU readbacks (14 GB on journal 18) | Bug | Fixed `ece9149` |
 | 19 | Glyph variant picks depended on hash-map order | Bug | Fixed `92d9eeb` |
 | 20 | Glyph hulls used an unseeded jitter | Bug | Fixed `92d9eeb` |
@@ -57,6 +57,7 @@ journals' look or behaviour, so it waits for a call).
 | 41 | `new_brush` accepts nonsense pressures and sizes | Gap | Open |
 | 42 | `splat_msgs` on an empty canvas gives a misleading error | Quirk | Open |
 | 43 | Quadratic curves convert to cubics incorrectly, moving their end point | Bug | Open |
+| 44 | Non-finite numbers from scripts can panic layout and hatching | Bug | Open |
 
 ## Details
 
@@ -128,8 +129,10 @@ journals' look or behaviour, so it waits for a call).
 - **Problem:** text layout clones each glyph's hull, in its inner loop, just to read its extents.
 
 ### 17. `unwrap`/`expect`/`panic` everywhere, clippy warnings, deprecations
-- **Status:** Open.
-- **Problem:** around 120 panicking calls and 120 clippy warnings, plus `std::f32::MAX`/`MIN` deprecation warnings in `paths.rs`.
+- **Status:** Fixed in {{commit: Fix every clippy warning and the deprecations}}, for clippy and the deprecations; the panics that scripts can reach are tracked individually (30, 38–41, 44).
+- **Problem:** about 120 clippy warnings, `std::f32::MAX`/`MIN` deprecation warnings in `paths.rs`, and around 120 `unwrap`/`expect`/`panic` calls.
+- **Change:** `cargo clippy --all-targets` is clean. Clippy's machine fixes were reviewed and kept (`From` instead of `Into` impls, slices instead of `&Vec`, `Default` impls, collapsed `if let`s, redundant clones and conversions); by hand: the deprecated constants, `Display` instead of inherent `to_string`s, a `SymbolFilter` alias, and `Rc` instead of `Arc` for the symbol dictionary (it holds `Rc`s and a `RefCell`, so `Arc` gave no thread safety). The NaN-rejecting `!(x > 0.0)` argument checks are kept deliberately, with a crate-level `allow` explaining why. The panicking calls dropped from about 120 to 52 outside tests, most of the rest being internal invariants (lookups the code just populated).
+- **Why:** a quiet build makes new warnings visible. All 20 Darkly renders across the journals and the fixture are byte-identical before and after.
 
 ### 18. Offline Darkly renders piled up GPU readbacks
 - **Status:** Fixed in `ece9149`: a frame is ticked every 25 strokes, so stroke bookkeeping completes; journal 18 went from a 14 GB peak (killed by the OS) to under 1 GB.
@@ -241,3 +244,8 @@ journals' look or behaviour, so it waits for a call).
 - **Problem:** text layout cloned each glyph's convex hull, in its inner loop, just to read its extents.
 - **Change:** each glyph base caches its hull's bounding box, read through `Symbol::hull_aabb()`. `get_convex_hull` is gone, along with the unused `intersects`, `placed_bounds` and `placed_convex_hull`; `intersects` was also wrong, scaling the other glyph's hull by this glyph's scale.
 - **Why:** cheap and allocation-free. Evaluating every journal script got about 9% faster (0.69 s to 0.63 s, mostly journal 18's layout), with identical output.
+
+### 44. Non-finite numbers from scripts can panic layout and hatching
+- **Where:** `src/journal/paths.rs`, `src/journal/symbol.rs`, `src/journal/rhaientries/`
+- **Status:** Open.
+- **Problem:** a coordinate or size that's infinite or NaN (say, from a division by zero in a script) reaches the k-d tree (which rejects non-finite points with a panic) and the hatch's intersection sort (`partial_cmp(..).unwrap()`).

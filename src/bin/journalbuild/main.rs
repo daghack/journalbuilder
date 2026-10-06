@@ -1,7 +1,7 @@
 use scribe::journal::rhaientries::{JournalEngine};
 use scribe::journal::{symboldict, darkly};
 
-use std::sync::Arc;
+use std::rc::Rc;
 
 /// Create the output directory, or clear out the renders (`.png` and `.svg`
 /// files) of earlier runs, so renamed or removed pages don't linger. Other
@@ -143,7 +143,7 @@ fn main() {
         .unwrap_or_else(|| format!("{}/{}/output", journal_dir, journal_name));
     // One Darkly engine for the whole run; canvases resize it as needed.
     let mut darkly_engine = darkly::new_engine(1, 1);
-    let symdarc = Arc::new(symd);
+    let symdarc = Rc::new(symd);
     let mut engine = JournalEngine::new(symdarc.clone());
     let entry_path = format!("{}/{}", journal_dir, journal_name);
     println!("EntryPath: {}", entry_path);
@@ -153,13 +153,12 @@ fn main() {
         .build_entry_file(&journal_path)
         .expect("Failed to execute result.");
     check_missing_glyphs(&symdarc, args.strict_glyphs);
-    if let Some(pages) = &args.pages {
-        if let Some(bad) = pages.iter().find(|&&p| p >= entry.page_count()) {
+    if let Some(pages) = &args.pages
+        && let Some(bad) = pages.iter().find(|&&p| p >= entry.page_count()) {
             eprintln!("error: page {} doesn't exist; {} has {} page(s) (0-{})",
                 bad, journal_name, entry.page_count(), entry.page_count().saturating_sub(1));
             std::process::exit(1);
         }
-    }
     if args.pages.is_some() {
         // Rendering a subset: keep the other pages' existing output.
         std::fs::create_dir_all(&output_dir).expect("Failed to create output directory");

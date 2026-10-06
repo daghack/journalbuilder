@@ -5,6 +5,6 @@
         let mut pixmap = tiny_skia::Pixmap::new(width, height).expect("Failed to create Pixmap");
         let transform = resvg::tiny_skia::Transform::identity();
         let transform = transform.pre_scale(scale_width, scale_height);
-        resvg::render(&svg_tree, transform, &mut pixmap.as_mut());
+        resvg::render(svg_tree, transform, &mut pixmap.as_mut());
         pixmap
     }

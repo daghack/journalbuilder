@@ -24,7 +24,7 @@
 //! Variant picks come from the engine's seeded generator.
 
 use rhai::{Array, CustomType, Dynamic, Engine, EvalAltResult, TypeBuilder};
-use std::sync::Arc;
+use std::rc::Rc;
 
 use super::random::SharedRng;
 use super::{Canvas, StrokeStyle, Vec2};
@@ -132,7 +132,7 @@ fn checked(symdict: &SymbolPathDict, caller: &str, font: Font) -> RhaiResult<Fon
     Ok(font)
 }
 
-pub fn register(engine: &mut Engine, symdict: Arc<SymbolPathDict>, rng: SharedRng) {
+pub fn register(engine: &mut Engine, symdict: Rc<SymbolPathDict>, rng: SharedRng) {
     engine.register_type_with_name::<Font>("Font");
     engine.build_type::<Glyph>();
 
@@ -183,7 +183,7 @@ mod tests {
 
     fn engine() -> JournalEngine {
         let symd = SymbolPathDict::from_file(crate::journal::symboldict::DEFAULT_SYMBOLS).expect("Failed to load symbols.json");
-        JournalEngine::new(Arc::new(symd))
+        JournalEngine::new(Rc::new(symd))
     }
 
     fn eval<T: Clone + 'static>(script: &str) -> T {
@@ -191,7 +191,7 @@ mod tests {
     }
 
     fn fails(script: &str) -> String {
-        engine().engine.run(script).err().expect("script should fail").to_string()
+        engine().engine.run(script).expect_err("script should fail").to_string()
     }
 
     #[test]

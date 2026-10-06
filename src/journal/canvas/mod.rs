@@ -103,9 +103,9 @@ pub enum CanvasShape {
     LineSegment { start: Vec2, end: Vec2 },
 }
 
-impl Into<StrokePath> for CanvasShape {
-    fn into(self) -> StrokePath {
-        match self {
+impl From<CanvasShape> for StrokePath {
+    fn from(val: CanvasShape) -> Self {
+        match val {
             CanvasShape::Circle { radius, center } => {
                 StrokePath::circle(center, radius)
             }
@@ -146,20 +146,20 @@ pub struct Canvas {
     bounds: bounding_volume::Aabb,
 }
 
-impl Into<StrokePath> for Canvas {
-    fn into(self) -> StrokePath {
+impl From<Canvas> for StrokePath {
+    fn from(val: Canvas) -> Self {
         let mut combined_path = StrokePath::new();
-        for stroke in self.strokes {
+        for stroke in val.strokes {
             combined_path = combined_path + stroke.path;
         }
         combined_path
     }
 }
 
-impl Into<StrokePath> for &Canvas {
-    fn into(self) -> StrokePath {
+impl From<&Canvas> for StrokePath {
+    fn from(val: &Canvas) -> Self {
         let mut combined_path = StrokePath::new();
-        for stroke in &self.strokes {
+        for stroke in &val.strokes {
             combined_path = combined_path + stroke.path.clone();
         }
         combined_path
@@ -245,7 +245,7 @@ impl Canvas {
                 let ColoredStroke{path, style} = stroke;
                 svg.push_str(&format!(
                     "<path d=\"{}\" style=\"fill:none;stroke:{};stroke-width:{};\" />",
-                    path.to_string(),
+                    path,
                     style.color,
                     style.width,
                 ));
@@ -291,8 +291,8 @@ impl Canvas {
                 let octaves = 4;
                 let noise_num = 15.0;
                 let noise_value = (0..octaves).fold(0.0, |acc, octave| {
-                    let noise_scale = noise_num / (10.0_f64).powi(octave as i32);
-                    acc + perlin.get([x * noise_scale, y * noise_scale]) / (2.0_f64).powi(octave as i32)
+                    let noise_scale = noise_num / (10.0_f64).powi(octave);
+                    acc + perlin.get([x * noise_scale, y * noise_scale]) / (2.0_f64).powi(octave)
                 });
 
                 let base_opacity = 0.95;
@@ -317,7 +317,7 @@ impl Canvas {
         std::fs::write(path, png_data).expect("Failed to write PNG file");
     }
     pub fn to_png(&self, scale: f32, stylized: Option<&CanvasStyleOptions>) -> Vec<u8> {
-        let svg_data = self.to_svg(stylized.clone());
+        let svg_data = self.to_svg(stylized);
         let svg_tree = usvg::Tree::from_str(&svg_data, &usvg::Options::default()).expect("Failed to parse SVG");
         let mut pixmap = pixmap_from_svg_tree(&svg_tree, scale, scale);
         if let Some(opts) = stylized {
@@ -379,7 +379,7 @@ impl Canvas {
             }
             path = path.close_path();
         }
-        format!("<path d=\"{}\" fill=\"{}\" stroke=\"{}\" />", path.to_string(), color, color)
+        format!("<path d=\"{}\" fill=\"{}\" stroke=\"{}\" />", path, color, color)
     }
     pub fn roughen_by(&mut self, roughness: f32) {
         for stroke in &mut self.strokes {
@@ -475,6 +475,12 @@ impl Canvas {
             bounds.mins.y - new_bounds.mins.y,
         );
         self.translate_by(translation);
+    }
+}
+
+impl Default for Canvas {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

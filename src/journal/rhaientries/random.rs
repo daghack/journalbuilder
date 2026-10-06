@@ -113,7 +113,7 @@ mod tests {
     #[test]
     fn empty_ranges_fail_at_their_line() {
         for script in ["let ok = 1;\nrandom_range(3, 3);", "let ok = 1;\nrandom_range(1.0, 0.5);"] {
-            let err = engine().run(script).err().expect("empty range should fail").to_string();
+            let err = engine().run(script).expect_err("empty range should fail").to_string();
             assert!(err.contains("empty range") && err.contains("line 2"), "{}", err);
         }
     }

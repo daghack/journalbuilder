@@ -29,12 +29,12 @@ pub fn symbols_to_string(symbols: &[u32], base: u32) -> String {
     }
     if base == 27 {
         return symbols.iter().map(|&s| {
-            let m = if s == 0 {
+            
+            if s == 0 {
                 ' '
             } else {
                 (s - 1 + b'A' as u32) as u8 as char
-            };
-            m
+            }
         }).collect();
     }
     symbols.iter().map(|&s| (s + b'A' as u32) as u8 as char).collect()
@@ -76,14 +76,13 @@ impl std::fmt::Debug for InfoVar {
         // Display the type and whether data is initialized
         // If data is initialized, we can also display the data type
         // If the data is a BaseNSymbol, we can display the data as a vector of u32
-        if let InfoVarType::BaseNSymbol(base) = self.var_type {
-            if let Ok(data) = self.borrow_data::<Vec<u32>>() {
+        if let InfoVarType::BaseNSymbol(base) = self.var_type
+            && let Ok(data) = self.borrow_data::<Vec<u32>>() {
                 return f.debug_struct("InfoVar")
                     .field("Type", &self.var_type)
                     .field("Data", &symbols_to_string(data, base))
                     .finish();
-            } 
-        }
+            }
         f.debug_struct("InfoVar")
             .field("Type", &self.var_type)
             .field("Data Initialized", &self.data.is_some())
@@ -287,6 +286,12 @@ impl LockExecutionGraph {
             }
         }
         Ok((current_variable_values, hashmap_trace))
+    }
+}
+
+impl Default for LockExecutionGraph {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -575,12 +580,11 @@ pub fn string_infovar_set(lock_output: &InfoVarSet) -> HashMap<String, String> {
     let mut output_set = HashMap::new();
     for (key, var) in lock_output.iter() {
         if let InfoVarType::BaseNSymbol(base_n) = var.var_type {
-            if let Some(data) = var.data.as_ref() {
-                if let Some(symbols) = data.as_ref().as_any().downcast_ref::<Vec<u32>>() {
+            if let Some(data) = var.data.as_ref()
+                && let Some(symbols) = data.as_ref().as_any().downcast_ref::<Vec<u32>>() {
                     let output_string = symbols_to_string(symbols, base_n);
                     output_set.insert(key.clone(), output_string);
                 }
-            }
         } else {
             output_set.insert(key.clone(), format!("<non-BaseNSymbol var type: {:?}>", var.var_type));
         }
@@ -640,7 +644,7 @@ mod tests {
             "static_inputs": { "s.ordering": "b27:IKBNAZ-XYF" },
         })).unwrap();
         let err = CompositeLock::from_lockconfig(config, |c| registry::build_lock(&c.type_name, &c.options))
-            .err().expect("invalid static input should fail").to_string();
+            .expect_err("invalid static input should fail").to_string();
         assert!(err.contains("static input 's.ordering'") && err.contains("'-'"), "{}", err);
     }
 }

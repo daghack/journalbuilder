@@ -162,14 +162,13 @@ impl<T> BuiltMaze<T> where
         for elem in mst {
             let position = match elem {
                 petgraph::data::Element::Node{weight} => {
-                    weight.clone()
+                    weight
                 },
                 petgraph::data::Element::Edge{weight, ..} => {
                     weight.position
                 }
             };
-            let mut cell = MazeLockCell::<T>::default();
-            cell.position = position;
+            let mut cell = MazeLockCell::<T> { position, ..Default::default() };
             cell.inner.fill(&mut rng);
             cells.push(cell);
         }
@@ -179,12 +178,10 @@ impl<T> BuiltMaze<T> where
 
         for cell in cells.iter() {
             let mut neighbors = Vec::new();
-            let directions = vec![
-                (0, 1),
+            let directions = [(0, 1),
                 (1, 0),
                 (0, -1),
-                (-1, 0),
-            ];
+                (-1, 0)];
             for (dx, dy) in directions.iter() {
                 let neighbor = (cell.position.0 + dx, cell.position.1 + dy);
                 if pos_cells.contains_key(&neighbor) {
@@ -242,7 +239,7 @@ impl<T> BuiltMaze<T> where
     }
     pub fn map_inners(&mut self, traversal: MazeTraversalStrategy, mut fn_update: impl FnMut(&mut T)) {
         let mut traversal = MazeTraversal::new((0, 0), traversal);
-        while let Some((pos, _)) = traversal.next(&self) {
+        while let Some((pos, _)) = traversal.next(self) {
             if let Some(cell) = self.cell_at_mut(&pos) {
                 fn_update(&mut cell.inner);
             }
@@ -356,7 +353,7 @@ fn dir_between(from: &MazePosition, to: &MazePosition) -> Option<MazeDirection> 
     }
 }
 
-fn sort_neighbors_by_dir_lh(current_dir: &MazeDirection, neighbors: &Vec<MazePosition>, current_pos: &MazePosition) -> Vec<MazePosition> {
+fn sort_neighbors_by_dir_lh(current_dir: &MazeDirection, neighbors: &[MazePosition], current_pos: &MazePosition) -> Vec<MazePosition> {
     let mut dir_map: HashMap<MazeDirection, MazePosition> = HashMap::new();
     for neighbor in neighbors.iter() {
         if let Some(dir) = dir_between(current_pos, neighbor) {
@@ -397,7 +394,7 @@ impl MazeTraversal {
         let current_pos = self.fringe.pop()?;
         let cell = maze.cell_at(&current_pos)?;
         self.visited.insert(current_pos);
-        let neighbors = maze.neighbors_of(&current_pos).unwrap_or(Vec::new());
+        let neighbors = maze.neighbors_of(&current_pos).unwrap_or_default();
         let unvisited_neighbors: Vec<MazePosition> = neighbors.into_iter()
             .filter(|pos| !self.visited.contains(pos))
             .collect();

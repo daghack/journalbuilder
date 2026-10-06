@@ -96,15 +96,6 @@ impl PathCmd {
         pts.append(&mut ctrls);
         pts
     }
-    pub fn to_string(&self) -> String {
-        match self {
-            PathCmd::MoveTo(x, y) => format!("M {} {}", x, y),
-            PathCmd::LineTo(x, y) => format!("L {} {}", x, y),
-            PathCmd::CubicCurveTo(x1, y1, x2, y2, x, y) => format!("C {} {} {} {} {} {}", x1, y1, x2, y2, x, y),
-            PathCmd::QuadraticCurveTo(x1, y1, x, y) => format!("Q {} {} {} {}", x1, y1, x, y),
-            PathCmd::ClosePath => "Z".to_string(),
-        }
-    }
     pub fn to_cubic_curve(&self) -> Self {
         match self {
             PathCmd::MoveTo(x, y) => PathCmd::MoveTo(*x, *y),
@@ -168,24 +159,24 @@ impl PathCmd {
         // angle is expressed in radians from the y-axis, with positive angles being clockwise
         match self {
             PathCmd::MoveTo(x, y) => {
-                let rotated_point = rotate_around_point((Vec2::new(*x, *y) - point).into(), angle);
+                let rotated_point = rotate_around_point(Vec2::new(*x, *y) - point, angle);
                 PathCmd::MoveTo(rotated_point.x + point.x, rotated_point.y + point.y)
             }
             PathCmd::LineTo(x, y) => {
-                let rotated_point = rotate_around_point((Vec2::new(*x, *y) - point).into(), angle);
+                let rotated_point = rotate_around_point(Vec2::new(*x, *y) - point, angle);
                 PathCmd::LineTo(rotated_point.x + point.x, rotated_point.y + point.y)
             }
             PathCmd::CubicCurveTo(x1, y1, x2, y2, x, y) => {
-                let rotated_point1 = rotate_around_point((Vec2::new(*x1, *y1) - point).into(), angle);
-                let rotated_point2 = rotate_around_point((Vec2::new(*x2, *y2) - point).into(), angle);
-                let rotated_point3 = rotate_around_point((Vec2::new(*x, *y) - point).into(), angle);
+                let rotated_point1 = rotate_around_point(Vec2::new(*x1, *y1) - point, angle);
+                let rotated_point2 = rotate_around_point(Vec2::new(*x2, *y2) - point, angle);
+                let rotated_point3 = rotate_around_point(Vec2::new(*x, *y) - point, angle);
                 PathCmd::CubicCurveTo(rotated_point1.x + point.x, rotated_point1.y + point.y,
                                       rotated_point2.x + point.x, rotated_point2.y + point.y,
                                       rotated_point3.x + point.x, rotated_point3.y + point.y)
             }
             PathCmd::QuadraticCurveTo(x1, y1, x, y) => {
-                let rotated_point1 = rotate_around_point((Vec2::new(*x1, *y1) - point).into(), angle);
-                let rotated_point2 = rotate_around_point((Vec2::new(*x, *y) - point).into(), angle);
+                let rotated_point1 = rotate_around_point(Vec2::new(*x1, *y1) - point, angle);
+                let rotated_point2 = rotate_around_point(Vec2::new(*x, *y) - point, angle);
                 PathCmd::QuadraticCurveTo(rotated_point1.x + point.x, rotated_point1.y + point.y,
                                           rotated_point2.x + point.x, rotated_point2.y + point.y)
             }
@@ -211,7 +202,7 @@ pub struct StrokePath {
 impl StrokePath {
     pub fn build_kdtree(&self, avoid_scale: f32, expected_stroke_width: Option<f32>) -> kdtree::KdTree<f32, (f32, f32), [f32; 2]> {
         let mut min_vec = Vec2::new(0.0, 0.0);
-        min_vec.y = min_vec.y + avoid_scale / 2.0;
+        min_vec.y += avoid_scale / 2.0;
         let sw_vec = match expected_stroke_width {
             Some(sw) => Vec2::new(sw, sw),
             None => Vec2::new(0.0, 0.0),
@@ -227,14 +218,6 @@ impl StrokePath {
             avoid_tree.add([rhpoint.x, rhpoint.y], (rhpoint.x, rhpoint.y)).unwrap();
         }
         avoid_tree
-    }
-    pub fn to_string(&self) -> String {
-        let mut result = String::new();
-        for cmd in &self.commands {
-            result.push_str(&cmd.to_string());
-            result.push(' ');
-        }
-        result
     }
     pub fn points_within(&self) -> Vec<Vec2> {
         let mut points = Vec::new();
@@ -310,15 +293,11 @@ impl StrokePath {
         let mut substrokes = Vec::new();
         let mut current_substroke = SubstrokePath::new(Vec::new());
         for cmd in &self.commands {
-            match cmd {
-                PathCmd::MoveTo(_, _) => {
-                    if !current_substroke.commands.is_empty() {
-                        substrokes.push(current_substroke.clone());
-                        current_substroke.commands.clear();
-                    }
+            if let PathCmd::MoveTo(_, _) = cmd
+                && !current_substroke.commands.is_empty() {
+                    substrokes.push(current_substroke.clone());
+                    current_substroke.commands.clear();
                 }
-                _ => {}
-            }
             current_substroke.commands.push(*cmd);
         }
         if !current_substroke.commands.is_empty() {
@@ -339,7 +318,7 @@ impl StrokePath {
     }
     pub fn circle(center: Vec2, radius: f32) -> Self {
         let mut path = StrokePath::new();
-        let kappa = 0.552284749831; // Approximation constant
+        let kappa = 0.552_284_8; // Approximation constant
         path = path.move_to(center.x + radius, center.y);
         path = path.cubic_curve_to(
             center.x + radius, center.y + kappa * radius,
@@ -472,6 +451,12 @@ impl StrokePath {
     }
 }
 
+impl Default for StrokePath {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Parses SVG path data: every command except arcs, absolute or relative,
 /// with numbers separated by whitespace, commas, or nothing where that's
 /// unambiguous (`1-2`, `.5.5`), and repeated argument groups after a
@@ -592,7 +577,7 @@ impl PathParser<'_> {
                     path = path.line_to(current.x, current.y);
                 }
                 b'C' | b'S' => {
-                    let c1 = if c.to_ascii_uppercase() == b'C' {
+                    let c1 = if c.eq_ignore_ascii_case(&b'C') {
                         self.point(c, origin)?
                     } else {
                         last_cubic_control.map_or(current, |p| 2.0 * current - p)
@@ -603,7 +588,7 @@ impl PathParser<'_> {
                     cubic_control = Some(c2);
                 }
                 b'Q' | b'T' => {
-                    let control = if c.to_ascii_uppercase() == b'Q' {
+                    let control = if c.eq_ignore_ascii_case(&b'Q') {
                         self.point(c, origin)?
                     } else {
                         last_quad_control.map_or(current, |p| 2.0 * current - p)
@@ -620,6 +605,29 @@ impl PathParser<'_> {
             last_quad_control = quad_control;
         }
         Ok(path)
+    }
+}
+
+/// SVG path data, one command at a time.
+impl std::fmt::Display for PathCmd {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PathCmd::MoveTo(x, y) => write!(f, "M {} {}", x, y),
+            PathCmd::LineTo(x, y) => write!(f, "L {} {}", x, y),
+            PathCmd::CubicCurveTo(x1, y1, x2, y2, x, y) => write!(f, "C {} {} {} {} {} {}", x1, y1, x2, y2, x, y),
+            PathCmd::QuadraticCurveTo(x1, y1, x, y) => write!(f, "Q {} {} {} {}", x1, y1, x, y),
+            PathCmd::ClosePath => write!(f, "Z"),
+        }
+    }
+}
+
+/// SVG path data, with a space after each command.
+impl std::fmt::Display for StrokePath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for cmd in &self.commands {
+            write!(f, "{} ", cmd)?;
+        }
+        Ok(())
     }
 }
 
@@ -779,7 +787,7 @@ impl SubstrokeStepper {
         samples
     }
 
-    fn forward_seek(starting_indices: Option<(CurveIndex, SampleIndex)>, target_distance: f32, curves: &Vec<AugCurveSampleInfo>) -> Option<(CurveIndex, SampleIndex, CurveSample)> {
+    fn forward_seek(starting_indices: Option<(CurveIndex, SampleIndex)>, target_distance: f32, curves: &[AugCurveSampleInfo]) -> Option<(CurveIndex, SampleIndex, CurveSample)> {
 
         let starting_curve_index = starting_indices.map(|(c, _)| c).unwrap_or(0);
         let mut selected_curve_info = None;
@@ -840,9 +848,8 @@ pub struct ChildStepper<'parent>{
 
 impl<'parent> CurveStepper for ChildStepper<'parent> {
     fn step(&mut self, distance: f32) -> Option<CurveSample> {
-        self.prospective_step(distance).map(|sample| {
+        self.prospective_step(distance).inspect(|_sample| {
             self.current_along += distance;
-            sample
         })
     }
     fn prospective_step(&self, distance: f32) -> Option<CurveSample> {
@@ -872,7 +879,7 @@ impl SubstrokePath {
         let mut points = Vec::new();
         let mut first = None;
         for cmd in &self.commands {
-            first = first.or(Some(cmd.clone()));
+            first = first.or(Some(*cmd));
             match cmd {
                 PathCmd::MoveTo(x, y) => {
                     points.push(Vec2::new(*x, *y));
@@ -904,14 +911,14 @@ impl SubstrokePath {
         let ray_direction = Vec2::new(stroke_angle.cos(), stroke_angle.sin());
         let ray_normal = Vec2::new(-ray_direction.y, ray_direction.x).normalize();
         // find the point farthest along the ray normal in one direction
-        let mut min_projection = std::f32::MAX;
+        let mut min_projection = f32::MAX;
         let mut min_point = Vec2::new(0.0, 0.0);
-        let mut max_projection = std::f32::MIN;
+        let mut max_projection = f32::MIN;
         for point in &samples {
             // project point onto ray normal
             let projection = point.dot(ray_normal);
             if projection < min_projection {
-                min_point = point.clone();
+                min_point = *point;
                 min_projection = projection;
             }
             if projection > max_projection {
@@ -919,9 +926,9 @@ impl SubstrokePath {
             }
         }
         let mut line_segments : Vec<parry2d::shape::Segment> = samples.windows(2).map(|w| {
-            parry2d::shape::Segment::new(w[0].into(), w[1].into())
+            parry2d::shape::Segment::new(w[0], w[1])
         }).collect();
-        line_segments.push(parry2d::shape::Segment::new(samples[samples.len() - 1].into(), samples[0].into()));
+        line_segments.push(parry2d::shape::Segment::new(samples[samples.len() - 1], samples[0]));
         let distance_to_walk = max_projection - min_projection;
         let mut current_distance_along_norm = 0.0;
         let mut fill_path = StrokePath::new().move_to(min_point.x, min_point.y);
@@ -934,7 +941,7 @@ impl SubstrokePath {
             let mut intersections: Vec<(Vec2, f32)> = Vec::new();
             for segment in &line_segments {
                 let intersection = segment.cast_ray(
-                    &transform, &ray, std::f32::MAX, true,
+                    &transform, &ray, f32::MAX, true,
                 );
                 if let Some(intersection) = intersection {
                     let int_point = ray.origin + ray.dir * intersection;
@@ -945,7 +952,7 @@ impl SubstrokePath {
             }
             intersections.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
             let mut kept_intersections = Vec::new();
-            let mut last_dist = std::f32::MIN;
+            let mut last_dist = f32::MIN;
             for inter in intersections {
                 if inter.1 - last_dist > step_distance {
                     kept_intersections.push(inter);

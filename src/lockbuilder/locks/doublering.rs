@@ -14,12 +14,12 @@
     impl KeyedDoubleRingLock {
         pub fn new(options: KeyedDoubleRingOptions) -> Result<Self, Box<dyn Error>> {
             // base_n must be even and at least 2
-            if options.base < 2 || options.base % 2 != 0 {
+            if options.base < 2 || !options.base.is_multiple_of(2) {
                 return Err("base_n must be an even number greater than or equal to 2".into());
             }
             Ok(Self { base_n: options.base })
         }
-        pub fn encode_msg(&self, input: &Vec<u32>, ordering: &Vec<u32>) -> Vec<u32> {
+        pub fn encode_msg(&self, input: &[u32], ordering: &[u32]) -> Vec<u32> {
             let mut mapping = HashMap::new();
             for i in 0..(self.base_n / 2) {
                 let a = ordering[i as usize];
@@ -107,7 +107,7 @@
                 return Err("canonical_order must be 26 characters".into());
             }
             for i in options.canonical_order.chars() {
-                if !('A'..='Z').contains(&i) && !('a'..='z').contains(&i) {
+                if !i.is_ascii_uppercase() && !i.is_ascii_lowercase() {
                     return Err("canonical_order must be A-Z or a-z".into());
                 }
             }

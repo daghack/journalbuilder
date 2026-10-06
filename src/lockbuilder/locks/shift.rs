@@ -167,7 +167,7 @@ impl Lock for ShiftCipherLock {
             output.insert("cipher_text".to_string(), ciphered_text);
             Ok(output)
         } else {
-            return Err("plain_text data not found".into());
+            Err("plain_text data not found".into())
         }
     }
     fn unlock_info(&self, outputs: &InfoVarSet) -> Result<InfoVarSet, Box<dyn Error>> {
@@ -191,7 +191,7 @@ impl Lock for ShiftCipherLock {
             output.insert("plain_text".to_string(), plain_text);
             Ok(output)
         } else {
-            return Err("cipher_text data not found".into());
+            Err("cipher_text data not found".into())
         }
     }
 }

@@ -67,7 +67,7 @@ mod tests {
         for type_name in LOCK_TYPES {
             let err = build_lock(type_name, &serde_json::json!({})).err().map(|e| e.to_string());
             assert!(
-                err.as_deref().map_or(true, |e| !e.contains("unknown lock type")),
+                err.as_deref().is_none_or(|e| !e.contains("unknown lock type")),
                 "{} is listed but not handled: {:?}", type_name, err,
             );
         }

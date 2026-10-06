@@ -5,7 +5,7 @@
 use scribe::journal::rhaientries::JournalEngine;
 use scribe::journal::symboldict::SymbolPathDict;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::rc::Rc;
 
 fn rhai_journals(dir: &str) -> Vec<PathBuf> {
     let mut scripts: Vec<PathBuf> = std::fs::read_dir(dir)
@@ -18,7 +18,7 @@ fn rhai_journals(dir: &str) -> Vec<PathBuf> {
 }
 
 fn check_scripts(scripts: &[PathBuf]) {
-    let symd = Arc::new(SymbolPathDict::from_file(scribe::journal::symboldict::DEFAULT_SYMBOLS).expect("Failed to load symbols.json"));
+    let symd = Rc::new(SymbolPathDict::from_file(scribe::journal::symboldict::DEFAULT_SYMBOLS).expect("Failed to load symbols.json"));
     let failures: Vec<String> = scripts.iter()
         .filter_map(|script| {
             let mut engine = JournalEngine::new(symd.clone());

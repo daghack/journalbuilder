@@ -139,7 +139,7 @@ pub mod splitsymbols {
                 return Err(format!("plain_text is not a BaseNSymbol({})", self.base_n).into());
             }
             let input_data : &Vec<u32> = input_var.borrow_data()?;
-            let chunk_size = (input_data.len() + self.output_count - 1) / self.output_count; // ceiling division
+            let chunk_size = input_data.len().div_ceil(self.output_count); // ceiling division
             let mut output_set = InfoVarSet::new();
             for i in 0..self.output_count {
                 let start_index = i * chunk_size;

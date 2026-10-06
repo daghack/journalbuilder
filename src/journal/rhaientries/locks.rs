@@ -165,7 +165,7 @@ impl LockValue {
     fn text(&mut self) -> RhaiResult<String> {
         match &self.var.var_type {
             InfoVarType::BaseNSymbol(base) => Ok(symbols_to_string(self.symbol_data()?, *base)),
-            InfoVarType::String => self.var.borrow_data::<String>().map(String::clone).map_err(|e| e.to_string().into()),
+            InfoVarType::String => self.var.borrow_data::<String>().cloned().map_err(|e| e.to_string().into()),
             other => Err(format!("text: a {} value has no text form", type_name(other)).into()),
         }
     }
@@ -185,7 +185,7 @@ impl LockValue {
         type_name(&self.var.var_type)
     }
 
-    fn to_string(&mut self) -> String {
+    fn display(&mut self) -> String {
         self.text().unwrap_or_else(|_| format!("<{}>", self.type_name()))
     }
 
@@ -210,8 +210,8 @@ impl CustomType for LockValue {
             .with_fn("symbols", Self::symbols)
             .with_fn("type_name", Self::type_name)
             .with_fn("maze", Self::maze)
-            .with_fn("to_string", Self::to_string)
-            .with_fn("to_debug", Self::to_string);
+            .with_fn("to_string", Self::display)
+            .with_fn("to_debug", Self::display);
     }
 }
 
@@ -424,7 +424,7 @@ mod tests {
     }
 
     fn error(script: &str) -> String {
-        engine().run(script).err().expect("script should fail").to_string()
+        engine().run(script).expect_err("script should fail").to_string()
     }
 
     #[test]
@@ -561,7 +561,7 @@ mod tests {
         assert!(path.starts_with("M 0 0 "), "{}", path);
         // Every coordinate is a grid cell inside the maze.
         let numbers: Vec<f32> = path.split_whitespace().filter_map(|t| t.parse().ok()).collect();
-        assert!(numbers.iter().all(|&n| n >= 0.0 && n <= 4.0 && n.fract() == 0.0), "{}", path);
+        assert!(numbers.iter().all(|&n| (0.0..=4.0).contains(&n) && n.fract() == 0.0), "{}", path);
     }
 
     #[test]

@@ -9,7 +9,7 @@ pub struct SymbolInfo {
 }
 
 impl Fill for SymbolInfo {
-    fn fill<R: rand::Rng + ?Sized>(&mut self, rng: &mut R) -> () {
+    fn fill<R: rand::Rng + ?Sized>(&mut self, rng: &mut R) {
         self.symbol = rng.random_range(0..27);
     }
 }
@@ -37,7 +37,7 @@ impl MazeLock {
         })
     }
     pub fn generate_maze(maze_text: &mut Vec<u32>, random_seed: u64) -> BuiltMaze<SymbolInfo> {
-        if maze_text.len() % 2 == 0 {
+        if maze_text.len().is_multiple_of(2) {
             maze_text.push(0);
         }
         let edge_count = maze_text.len() / 2;
@@ -53,7 +53,7 @@ impl MazeLock {
         let node_count = maze_width * maze_height;
         let edge_count = node_count - 1;
         let to_add = (node_count + edge_count) - maze_text.len() as u32;
-        maze_text.extend(std::iter::repeat(0).take(to_add as usize));
+        maze_text.extend(std::iter::repeat_n(0, to_add as usize));
         BuiltMaze::new(random_seed, maze_width, maze_height)
     }
 }
@@ -183,7 +183,7 @@ mod tests {
     fn side_for(len: usize) -> usize {
         let mut text = vec![1; len];
         MazeLock::generate_maze(&mut text, 1);
-        let side = (((text.len() + 1) / 2) as f64).sqrt() as usize;
+        let side = (text.len().div_ceil(2) as f64).sqrt() as usize;
         assert_eq!(text.len(), 2 * side * side - 1, "padded length isn't a square maze");
         side
     }
