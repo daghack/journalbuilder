@@ -6,15 +6,11 @@ use std::error::Error;
 #[derive(Clone, Debug, Default)]
 pub struct SymbolInfo {
     pub symbol: u32,
-    pub orientation: u32,
-    pub color: u32,
 }
 
 impl Fill for SymbolInfo {
     fn fill<R: rand::Rng + ?Sized>(&mut self, rng: &mut R) -> () {
         self.symbol = rng.random_range(0..27);
-        self.orientation = rng.random_range(0..4);
-        self.color = rng.random_range(0..4);
     }
 }
 
@@ -121,8 +117,6 @@ impl Lock for MazeLock {
             } else {
                 inner.symbol = maze_text_vec.remove(0);
             }
-            inner.orientation = 0;
-            inner.color = 0;
         });
 
         let mut output_set = InfoVarSet::new();
