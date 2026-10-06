@@ -279,12 +279,12 @@ impl Canvas {
         let pos_roughen = opts.roughness;
         let distance = opts.point_sample_distance;
         let trail_off_percent = opts.trail_off_percent;
-        let mut path = stroke.path.clone();
+        let mut path = stroke.path.to_cubics();
         let color = stroke.style.color.clone();
         let width = stroke.style.width;
         let halfwidth = width / 2.0;
         path.adjust_by(|&cmd| {
-            cmd.to_cubic_curve().pos_roughen_by(pos_roughen, rng)
+            cmd.pos_roughen_by(pos_roughen, rng)
         });
         let substrokes = path.to_substrokes();
         let mut path = StrokePath::new();

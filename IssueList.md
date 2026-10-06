@@ -56,7 +56,7 @@ journals' look or behaviour, so it waits for a call).
 | 40 | An empty or zero-width canvas panics the Darkly render | Bug | Fixed {{commit: Render degenerate canvases instead of panicking}} |
 | 41 | `new_brush` accepts nonsense pressures and sizes | Gap | Fixed {{commit: Validate new_brush's pressures and size}} |
 | 42 | `splat_msgs` on an empty canvas gives a misleading error | Quirk | Fixed {{commit: Explain why splat_msgs can't use an empty canvas}} |
-| 43 | Quadratic curves convert to cubics incorrectly, moving their end point | Bug | Open |
+| 43 | Quadratic curves convert to cubics incorrectly, moving their end point | Bug | Fixed {{commit: Convert quadratic curves to cubics exactly}} |
 | 44 | Non-finite numbers from scripts can panic layout and hatching | Bug | Open |
 
 ## Details
@@ -259,7 +259,7 @@ journals' look or behaviour, so it waits for a call).
 
 ### 44. Non-finite numbers from scripts can panic layout and hatching
 - **Where:** `src/journal/paths.rs`, `src/journal/symbol.rs`, `src/journal/rhaientries/`
-- **Status:** Fixed in {{commit: Render degenerate canvases instead of panicking}}.
-- **Problem:** an empty canvas, or one with no width or height (a vertical hairline with width 0) or under a pixel at the render scale, rounded to a 0-pixel render and failed Darkly's resize assertion; the plain output failed to parse its zero-size SVG.
-- **Change:** canvases render at `Canvas::render_extents()`, their bounds' extents but at least one unit a side (the bounds centred in it), for both outputs, and Darkly renders are at least 1×1 px. Canvases with no strokes are skipped, with one warning listing them (`page/canvas`).
-- **Why:** an empty or degenerate canvas is a script-level mistake at worst, worth a warning, not a crash mid-render. Every existing render is byte-identical.
+- **Status:** Fixed in {{commit: Convert quadratic curves to cubics exactly}}.
+- **Problem:** the plain output's roughening converts every segment to a cubic first, one command at a time, so a quadratic's conversion didn't know its start point: it placed the control points wrongly and moved the end point a third of the way past the control point. Quadratic strokes (the fixture's `quad_to`, and the 50 quadratic segments in the glyph dictionary) were distorted in the plain PNGs.
+- **Change:** `StrokePath::to_cubics()` converts a whole path, tracking the current point, with the exact cubic for each quadratic (control points 2/3 of the way from each end to the quadratic's control point). `PathCmd::to_cubic_curve` is gone.
+- **Why:** the plain output now draws the shapes the script describes, matching Darkly. Only plain renders containing quadratics changed; no Darkly render did.

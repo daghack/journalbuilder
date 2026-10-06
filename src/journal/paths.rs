@@ -72,18 +72,6 @@ impl PathCmd {
             PathCmd::ClosePath => vec![],
         }
     }
-    pub fn to_cubic_curve(&self) -> Self {
-        match self {
-            PathCmd::MoveTo(x, y) => PathCmd::MoveTo(*x, *y),
-            PathCmd::LineTo(x, y) => PathCmd::CubicCurveTo(*x, *y, *x, *y, *x, *y),
-            PathCmd::CubicCurveTo(x1, y1, x2, y2, x, y) => PathCmd::CubicCurveTo(*x1, *y1, *x2, *y2, *x, *y),
-            PathCmd::QuadraticCurveTo(x1, y1, x, y) => PathCmd::CubicCurveTo(*x1, *y1, *x1 + (*x - x1) / 3.0,
-                *y1 + (*y - y1) / 3.0,
-                *x + (*x - x1) / 3.0,
-                *y + (*y - y1) / 3.0),
-            PathCmd::ClosePath => PathCmd::ClosePath,
-        }
-    }
     /// Nudge the end point and control points by random offsets of up to
     /// `max_magnitude`.
     pub fn pos_roughen_by(&self, max_magnitude: f32, rng: &mut dyn RngCore) -> Self {
@@ -226,6 +214,35 @@ impl StrokePath {
         for cmd in &mut self.commands {
             *cmd = cmd.rotate_around(point, angle);
         }
+    }
+    /// The same path with every line and quadratic segment written as a
+    /// cubic, which the plain output's roughening works on.
+    pub fn to_cubics(&self) -> StrokePath {
+        let mut current = Vec2::ZERO;
+        let mut subpath_start = Vec2::ZERO;
+        let commands = self.commands.iter().map(|cmd| {
+            let cubic = match *cmd {
+                PathCmd::MoveTo(x, y) => {
+                    subpath_start = Vec2::new(x, y);
+                    PathCmd::MoveTo(x, y)
+                }
+                // Control points on the end point keep it straight.
+                PathCmd::LineTo(x, y) => PathCmd::CubicCurveTo(x, y, x, y, x, y),
+                PathCmd::CubicCurveTo(..) => *cmd,
+                PathCmd::QuadraticCurveTo(qx, qy, x, y) => {
+                    // The exact cubic: each control point is 2/3 of the way
+                    // from an end point to the quadratic's control point.
+                    let (q, end) = (Vec2::new(qx, qy), Vec2::new(x, y));
+                    let c1 = current + (q - current) * (2.0 / 3.0);
+                    let c2 = end + (q - end) * (2.0 / 3.0);
+                    PathCmd::CubicCurveTo(c1.x, c1.y, c2.x, c2.y, x, y)
+                }
+                PathCmd::ClosePath => PathCmd::ClosePath,
+            };
+            current = cmd.ending_point().unwrap_or(subpath_start);
+            cubic
+        }).collect();
+        StrokePath { commands }
     }
     pub fn adjust_by(&mut self, mut f: impl FnMut(&PathCmd) -> PathCmd) {
         for cmd in &mut self.commands {
@@ -946,6 +963,27 @@ mod tests {
         assert_eq!(parsed("M0 0 Q 1 1 2 0 T 4 0"), "M 0 0 Q 1 1 2 0 Q 3 -1 4 0");
         // Without a curve before them, the control point is the current point.
         assert_eq!(parsed("M0 0 L 1 0 S 2 1 3 0"), "M 0 0 L 1 0 C 1 0 2 1 3 0");
+    }
+
+    #[test]
+    fn quadratics_convert_to_the_same_curve() {
+        let quad = StrokePath::new().move_to(0.0, 0.0).quadratic_curve_to(1.0, 2.0, 2.0, 0.0)
+            .move_to(5.0, 5.0).line_to(6.0, 5.0).quadratic_curve_to(7.0, 7.0, 8.0, 5.0);
+        let cubic = quad.to_cubics();
+        let PathCmd::CubicCurveTo(x1, y1, x2, y2, x, y) = cubic.commands[1] else { panic!("{}", cubic) };
+        for (got, want) in [(x1, 2.0 / 3.0), (y1, 4.0 / 3.0), (x2, 4.0 / 3.0), (y2, 4.0 / 3.0), (x, 2.0), (y, 0.0)] {
+            assert!((got - want).abs() < 1e-5, "{}", cubic);
+        }
+        assert!(cubic.commands.iter().all(|c| matches!(c, PathCmd::MoveTo(..) | PathCmd::CubicCurveTo(..))), "{}", cubic);
+        // Same points along the way, not just the same ends. (Only the
+        // quadratic: a line written as a cubic has the same shape but is
+        // sampled slightly differently.)
+        let quad = StrokePath::new().move_to(0.0, 0.0).quadratic_curve_to(1.0, 2.0, 2.0, 0.0);
+        let (a, b) = (quad.sample_points_along(0.05), quad.to_cubics().sample_points_along(0.05));
+        assert_eq!(a.len(), b.len());
+        for (p, q) in a.iter().zip(&b) {
+            assert!((p.point - q.point).length() < 1e-3, "{:?} vs {:?}", p.point, q.point);
+        }
     }
 
     #[test]
