@@ -3,6 +3,8 @@ mod layout;
 mod locks;
 mod random;
 
+pub use locks::{LockLibrary, DEFAULT_LOCKS_DIR};
+
 use rhai::{Engine, EvalAltResult, ImmutableString, Dynamic, CustomType, TypeBuilder, Scope};
 use super::paths::StrokePath;
 use super::symboldict::SymbolPathDict;
@@ -605,7 +607,12 @@ pub struct JournalEngine {
 }
 
 impl JournalEngine {
+    /// An engine with the repository's lock types (DEFAULT_LOCKS_DIR).
     pub fn new(symdict: Rc<SymbolPathDict>) -> Self {
+        Self::with_locks_dir(symdict, DEFAULT_LOCKS_DIR)
+    }
+    /// An engine whose lock types are the lock files in `locks_dir`.
+    pub fn with_locks_dir(symdict: Rc<SymbolPathDict>, locks_dir: impl Into<std::path::PathBuf>) -> Self {
         let mut engine = Engine::new();
         let rng = random::register(&mut engine);
         let fit_msg_symdict = symdict.clone();
@@ -790,7 +797,7 @@ impl JournalEngine {
 
         glyphs::register(&mut engine, symdict.clone(), rng.clone());
         layout::register(&mut engine, symdict.clone(), rng.clone());
-        locks::register(&mut engine);
+        locks::register(&mut engine, Rc::new(LockLibrary::new(locks_dir)));
 
         engine
             .build_type::<Vec2>()

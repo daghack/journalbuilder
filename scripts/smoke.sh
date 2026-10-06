@@ -2,9 +2,10 @@
 # Quick end-to-end smoke test for journalbuild.
 #
 #   1. Runs `cargo test`, which evaluates every rhai journal script.
-#   2. Renders the small fixture in tests/smoke_journals at full scale, and
+#   2. Runs every lock file's examples with `journalbuild --check-locks`.
+#   3. Renders the small fixture in tests/smoke_journals at full scale, and
 #      one page of it supersampled.
-#   3. Renders page 0 of every journal in journals/ at reduced scale, Darkly
+#   4. Renders page 0 of every journal in journals/ at reduced scale, Darkly
 #      output only.
 #
 # Renders go to a temporary directory, so journals/*/output is untouched.
@@ -42,6 +43,15 @@ if test_output=$(cargo test --release --quiet 2>&1); then
 else
 	echo "FAIL cargo test"
 	grep -E "FAILED|panicked|failed:" <<<"$test_output" | sed 's/^/     /' || true
+	FAILURES=$((FAILURES + 1))
+fi
+
+echo "== lock checks"
+if lock_output=$("$BIN" --check-locks 2>&1); then
+	echo "ok   $(grep -c '^ok ' <<<"$lock_output") lock type(s) passed their examples"
+else
+	echo "FAIL lock checks"
+	grep -vE '^ok ' <<<"$lock_output" | sed 's/^/     /' || true
 	FAILURES=$((FAILURES + 1))
 fi
 

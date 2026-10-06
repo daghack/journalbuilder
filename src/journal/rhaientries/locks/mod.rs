@@ -1,4 +1,6 @@
 //! Rhai API for building and running lock chains (see `crate::lockbuilder`).
+//! Each lock type is a lock file, `locks/<type>.rhai` (see `library` and
+//! locks/README.md), apart from the ones still written in Rust.
 //!
 //! ```rhai
 //! let lock = new_lock("page_one_lock")
@@ -11,26 +13,31 @@
 //! lock.unlock(result).text("vig.plain_text");   // "SECRET"
 //! ```
 
+mod library;
+
+pub use library::{LockLibrary, DEFAULT_LOCKS_DIR};
+
 use rhai::{Array, CustomType, Dynamic, Engine, EvalAltResult, Map, TypeBuilder};
 use crate::lockbuilder::{
     base_n_symbols, symbols_to_string, CompositeLock, InfoVar, InfoVarGraphType, InfoVarSet, InfoVarType, Lock,
-    LockConfig, LockTypeConfig,
 };
 use crate::lockbuilder::locks::maze::LockedMaze;
-use crate::lockbuilder::registry::build_lock;
+use crate::lockbuilder::registry::{self, LOCK_TYPES};
 use crate::journal::canvas::artistic::{BuiltMaze, MazeTraversalStrategy};
 use super::Path;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 type RhaiResult<T> = Result<T, Box<EvalAltResult>>;
 
-pub fn register(engine: &mut Engine) {
+/// Register the lock API, with lock types from `library`.
+pub fn register(engine: &mut Engine, library: Rc<LockLibrary>) {
     engine
         .build_type::<LockBuilder>()
         .build_type::<LockValue>()
         .build_type::<LockResult>()
         .build_type::<Maze>()
-        .register_fn("new_lock", LockBuilder::new)
+        .register_fn("new_lock", move |name: &str| LockBuilder::new(library.clone(), name))
         .register_fn("new_maze", |seed: i64, width: i64, height: i64| new_maze(seed, width, height, "LeftHanded"))
         .register_fn("new_maze", new_maze)
         .register_fn("symbols", symbols);
@@ -41,52 +48,72 @@ pub fn register(engine: &mut Engine) {
 /// after every change, so a mistake fails at the line that made it.
 #[derive(Clone)]
 pub struct LockBuilder {
-    config: LockConfig,
+    library: Rc<LockLibrary>,
+    name: String,
+    locks: HashMap<String, Rc<dyn Lock>>,
+    connections: Vec<(String, String)>,
     fixed_inputs: Vec<(String, InfoVar)>,
     lock: CompositeLock,
 }
 
 impl LockBuilder {
-    fn new(name: &str) -> RhaiResult<Self> {
-        let config = LockConfig {
+    fn new(library: Rc<LockLibrary>, name: &str) -> RhaiResult<Self> {
+        let lock = CompositeLock::new(name.to_string(), HashMap::new(), Vec::new())
+            .map_err(|e| format!("new_lock: {}", e))?;
+        Ok(Self {
+            library,
             name: name.to_string(),
             locks: HashMap::new(),
             connections: Vec::new(),
-        };
-        let lock = compile(&config, &[]).map_err(|e| format!("new_lock: {}", e))?;
-        Ok(Self { config, fixed_inputs: Vec::new(), lock })
+            fixed_inputs: Vec::new(),
+            lock,
+        })
     }
 
     /// Apply `change` to a copy, keeping it only if the result still builds.
     fn update(&mut self, what: &str, change: impl FnOnce(&mut Self) -> Result<(), String>) -> RhaiResult<Self> {
         let mut next = self.clone();
         change(&mut next).map_err(|e| format!("{}: {}", what, e))?;
-        next.lock = compile(&next.config, &next.fixed_inputs).map_err(|e| format!("{}: {}", what, e))?;
+        next.lock = next.compile().map_err(|e| format!("{}: {}", what, e))?;
         *self = next;
         Ok(self.clone())
     }
 
+    fn compile(&self) -> Result<CompositeLock, String> {
+        let mut lock = CompositeLock::new(self.name.clone(), self.locks.clone(), self.connections.clone())
+            .map_err(|e| e.to_string())?;
+        let open = lock.inputs();
+        for (name, value) in &self.fixed_inputs {
+            let expected = open.get(name)
+                .ok_or_else(|| format!("'{}' isn't an open input; open inputs: {}", name, sorted_names_of(open.keys())))?;
+            if *expected != InfoVarType::MatchAll && value.var_type != *expected {
+                return Err(format!("'{}' expects {}, got {}", name, type_name(expected), type_name(&value.var_type)));
+            }
+            lock.add_static_input(name.clone(), value.clone());
+        }
+        Ok(lock)
+    }
+
     fn add(&mut self, name: &str, type_name: &str, options: Map) -> RhaiResult<Self> {
-        let options: serde_json::Value = rhai::serde::from_dynamic(&Dynamic::from_map(options))
-            .map_err(|e| format!("add: options for '{}' aren't valid: {}", name, e))?;
         self.update("add", |next| {
             if name.is_empty() || name.contains('.') {
                 return Err(format!("lock name '{}' must be non-empty and contain no '.'", name));
             }
-            if next.config.locks.contains_key(name) {
+            if next.locks.contains_key(name) {
                 return Err(format!("a lock named '{}' was already added", name));
             }
-            next.config.locks.insert(name.to_string(), LockTypeConfig { type_name: type_name.to_string(), options });
+            let lock = build_lock(&next.library, name, type_name, options)?;
+            next.locks.insert(name.to_string(), lock);
             Ok(())
         })
     }
 
     fn connect(&mut self, from: &str, to: &str) -> RhaiResult<Self> {
         self.update("connect", |next| {
-            if next.config.connections.iter().any(|(_, input)| input == to) {
+            if next.connections.iter().any(|(_, input)| input == to) {
                 return Err(format!("input '{}' is already connected", to));
             }
-            next.config.connections.push((from.to_string(), to.to_string()));
+            next.connections.push((from.to_string(), to.to_string()));
             Ok(())
         })
     }
@@ -333,19 +360,21 @@ fn symbols(base: i64, text: &str) -> RhaiResult<LockValue> {
     Ok(LockValue { var: InfoVar::new_with(InfoVarType::BaseNSymbol(base), data) })
 }
 
-fn compile(config: &LockConfig, fixed_inputs: &[(String, InfoVar)]) -> Result<CompositeLock, String> {
-    let mut lock = CompositeLock::from_lockconfig(config.clone(), |c| build_lock(&c.type_name, &c.options))
-        .map_err(|e| e.to_string())?;
-    let open = lock.inputs();
-    for (name, value) in fixed_inputs {
-        let expected = open.get(name)
-            .ok_or_else(|| format!("'{}' isn't an open input; open inputs: {}", name, sorted_names_of(open.keys())))?;
-        if *expected != InfoVarType::MatchAll && value.var_type != *expected {
-            return Err(format!("'{}' expects {}, got {}", name, type_name(expected), type_name(&value.var_type)));
-        }
-        lock.add_static_input(name.clone(), value.clone());
+/// A lock of the named type: from its lock file if there is one, else one
+/// of the lock types still written in Rust.
+fn build_lock(library: &Rc<LockLibrary>, name: &str, type_name: &str, options: Map) -> Result<Rc<dyn Lock>, String> {
+    if library.has(type_name) {
+        return Ok(Rc::new(library.build(name, type_name, options)?));
     }
-    Ok(lock)
+    if !LOCK_TYPES.contains(&type_name) {
+        let mut available = library.available()?;
+        available.extend(LOCK_TYPES.iter().map(|t| t.to_string()));
+        available.sort();
+        return Err(format!("unknown lock type '{}'; available: {}", type_name, available.join(", ")));
+    }
+    let options: serde_json::Value = rhai::serde::from_dynamic(&Dynamic::from_map(options))
+        .map_err(|e| format!("options for '{}' aren't valid: {}", name, e))?;
+    registry::build_lock(type_name, &options).map_err(|e| e.to_string())
 }
 
 fn type_name(var_type: &InfoVarType) -> String {
@@ -356,6 +385,24 @@ fn type_name(var_type: &InfoVarType) -> String {
         InfoVarType::Graph(InfoVarGraphType::HuffmanEncoding) => "HuffmanTree".to_string(),
         InfoVarType::LockProcessInfo => "LockProcessInfo".to_string(),
         InfoVarType::MatchAll => "Any".to_string(),
+        InfoVarType::Named(name) => name.clone(),
+    }
+}
+
+/// The type a lock file names, the reverse of `type_name`: "Base27Symbol",
+/// "Maze", "String", "LockProcessInfo", "Any", or a name of its own.
+fn parse_type(name: &str) -> InfoVarType {
+    let base = name.strip_prefix("Base")
+        .and_then(|rest| rest.strip_suffix("Symbol"))
+        .and_then(|n| n.parse::<u32>().ok())
+        .filter(|&base| base >= 2);
+    match (name, base) {
+        (_, Some(base)) => InfoVarType::BaseNSymbol(base),
+        ("Maze", _) => InfoVarType::Graph(InfoVarGraphType::MazeLock),
+        ("String", _) => InfoVarType::String,
+        ("LockProcessInfo", _) => InfoVarType::LockProcessInfo,
+        ("Any", _) => InfoVarType::MatchAll,
+        _ => InfoVarType::Named(name.to_string()),
     }
 }
 
@@ -402,7 +449,7 @@ mod tests {
 
     fn engine() -> Engine {
         let mut engine = Engine::new();
-        register(&mut engine);
+        register(&mut engine, Rc::new(LockLibrary::new(DEFAULT_LOCKS_DIR)));
         engine
     }
 
@@ -466,6 +513,29 @@ mod tests {
             lock.unlock(result).text("vig.plain_text")
         "#;
         assert_eq!(eval::<String>(script), "ATTACK AT DAWN");
+    }
+
+    #[test]
+    fn lock_file_types_chain_with_the_others() {
+        let script = r#"
+            let lock = new_lock("mixed")
+                .add("shift", "shift_cipher", #{ base: 27, shift: 5 })
+                .add("vig", "vigenere_cipher", #{ key_base: 27, plain_base: 27, cipher_base: 27 })
+                .connect("shift.cipher_text", "vig.key");
+            let result = lock.run(#{ "shift.plain_text": symbols(27, "KEY"), "vig.plain_text": symbols(27, "attack at dawn") });
+            if result.trace()["vig.key"].text() != "PJC" { throw "the shifted key should be PJC"; }
+            let back = lock.unlock(result);
+            [back.text("vig.plain_text"), back.text("shift.plain_text")]
+        "#;
+        let recovered: Vec<String> = eval::<Array>(script).into_iter().map(|v| v.cast::<String>()).collect();
+        assert_eq!(recovered, vec!["ATTACK AT DAWN", "KEY"]);
+    }
+
+    #[test]
+    fn lock_file_errors_point_at_the_file_and_the_script() {
+        let err = error("let ok = 1;\nnew_lock(\"x\").add(\"s\", \"shift_cipher\", #{ base: 27, shift: \"3\" });");
+        assert!(err.contains("add: lock 's' (shift_cipher.rhai, line 10): shift must be an integer, got 3"), "{}", err);
+        assert!(err.contains("line 2"), "{}", err);
     }
 
     #[test]

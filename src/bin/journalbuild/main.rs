@@ -1,4 +1,4 @@
-use scribe::journal::rhaientries::{JournalEngine};
+use scribe::journal::rhaientries::{JournalEngine, LockLibrary, DEFAULT_LOCKS_DIR};
 use scribe::journal::{symboldict, darkly};
 
 use std::rc::Rc;
@@ -41,6 +41,8 @@ const DEFAULT_SUPERSAMPLE: f32 = 1.2;
 const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--svg]
                     [--scale S] [--supersample K] [--strict-glyphs]
                     [--journals-dir DIR] [--output-dir DIR] [--symbols FILE]
+                    [--locks-dir DIR]
+       journalbuild --check-locks [--locks-dir DIR]
 
   --page P,...        Render only these pages, by index (0-based) or by
                       name. Other pages' existing output is kept.
@@ -63,10 +65,15 @@ const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--svg
                       config/symbols.json).
   --output-dir DIR    Where to write renders (default: <journal>/output).
                       Earlier .png/.svg renders there are cleared first
-                      (except with --page); other files are kept.";
+                      (except with --page); other files are kept.
+  --locks-dir DIR     Directory of lock files, one per lock type (default:
+                      the repository's locks/).
+  --check-locks       Run every lock file's examples through lock and
+                      unlock, instead of building a journal.";
 
 struct Args {
     strict_glyphs: bool,
+    check_locks: bool,
     journal_name: String,
     journals_dir: String,
     pages: Option<Vec<String>>,
@@ -75,6 +82,7 @@ struct Args {
     supersample: f32,
     output_dir: Option<String>,
     symbols: String,
+    locks_dir: String,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -82,6 +90,7 @@ fn parse_args() -> Result<Args, String> {
     let mut pages: Option<Vec<String>> = None;
     let mut svg = false;
     let mut strict_glyphs = false;
+    let mut check_locks = false;
     let mut scale = 1.0;
     // Supersample by default: Darkly aliases brush marks thinner than about
     // a pixel into ragged edges. Measured on journal_entry_17, 1.2x costs
@@ -91,12 +100,14 @@ fn parse_args() -> Result<Args, String> {
     // Defaults are found from the repository, not the working directory.
     let mut journals_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/journals").to_string();
     let mut symbols = symboldict::DEFAULT_SYMBOLS.to_string();
+    let mut locks_dir = DEFAULT_LOCKS_DIR.to_string();
     let mut output_dir = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--svg" => svg = true,
             "--strict-glyphs" => strict_glyphs = true,
+            "--check-locks" => check_locks = true,
             "--scale" => {
                 let value = args.next().ok_or("--scale needs a value, e.g. --scale 0.25")?;
                 scale = value.parse::<f32>().ok().filter(|s| *s > 0.0)
@@ -113,6 +124,9 @@ fn parse_args() -> Result<Args, String> {
             "--symbols" => {
                 symbols = args.next().ok_or("--symbols needs a file")?;
             }
+            "--locks-dir" => {
+                locks_dir = args.next().ok_or("--locks-dir needs a directory")?;
+            }
             "--output-dir" => {
                 output_dir = Some(args.next().ok_or("--output-dir needs a directory")?);
             }
@@ -128,8 +142,13 @@ fn parse_args() -> Result<Args, String> {
             extra => return Err(format!("unexpected argument '{}'", extra)),
         }
     }
-    let journal_name = journal_name.ok_or("missing journal name")?;
-    Ok(Args { strict_glyphs, journal_name, journals_dir, pages, svg, scale, supersample, output_dir, symbols })
+    let journal_name = match (journal_name, check_locks) {
+        (Some(name), false) => name,
+        (None, true) => String::new(),
+        (Some(_), true) => return Err("--check-locks checks lock files, so it takes no journal name".to_string()),
+        (None, false) => return Err("missing journal name".to_string()),
+    };
+    Ok(Args { strict_glyphs, check_locks, journal_name, journals_dir, pages, svg, scale, supersample, output_dir, symbols, locks_dir })
 }
 
 fn main() {
@@ -137,7 +156,8 @@ fn main() {
         eprintln!("error: {}\n\n{}", err, USAGE);
         std::process::exit(1);
     });
-    if let Err(err) = run(&args) {
+    let result = if args.check_locks { check_locks(&args.locks_dir) } else { run(&args) };
+    if let Err(err) = result {
         eprintln!("error: {}", err);
         std::process::exit(1);
     }
@@ -152,7 +172,7 @@ fn run(args: &Args) -> Result<(), String> {
     let journal_path = format!("{}/{}/journal_entry.rhai", args.journals_dir, journal_name);
     let output_dir = args.output_dir.clone()
         .unwrap_or_else(|| format!("{}/{}/output", args.journals_dir, journal_name));
-    let entry = JournalEngine::new(symd.clone()).build_entry_file(&journal_path)?;
+    let entry = JournalEngine::with_locks_dir(symd.clone(), &args.locks_dir).build_entry_file(&journal_path)?;
     check_missing_glyphs(&symd, args.strict_glyphs)?;
     if entry.page_count() == 0 {
         return Err(format!("{} produced no pages; add them with journal_entry.add_page(page)", journal_path));
@@ -180,4 +200,27 @@ fn run(args: &Args) -> Result<(), String> {
     // One Darkly engine for the whole run; canvases resize it as needed.
     let mut darkly_engine = darkly::new_engine(1, 1);
     entry.darkly_publish_pngs(&mut darkly_engine, &output_dir, args.scale, args.supersample, only)
+}
+
+/// Run every lock file's examples, listing each lock type's result.
+fn check_locks(locks_dir: &str) -> Result<(), String> {
+    let results = Rc::new(LockLibrary::new(locks_dir)).check_all()?;
+    if results.is_empty() {
+        return Err(format!("no lock files (*.rhai) in {}", locks_dir));
+    }
+    let mut failures = 0;
+    for (name, result) in &results {
+        match result {
+            Ok(0) => println!("--   {:<24} no examples", name),
+            Ok(n) => println!("ok   {:<24} {} example(s)", name, n),
+            Err(err) => {
+                failures += 1;
+                println!("FAIL {:<24} {}", name, err);
+            }
+        }
+    }
+    if failures > 0 {
+        return Err(format!("{} of {} lock type(s) failed their examples", failures, results.len()));
+    }
+    Ok(())
 }

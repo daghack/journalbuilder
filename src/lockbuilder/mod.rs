@@ -53,6 +53,8 @@ pub enum InfoVarType {
     Graph(InfoVarGraphType),
     LockProcessInfo,
     MatchAll,
+    /// A type a rhai lock file declared by name; its values are rhai values.
+    Named(String),
 }
 
 pub trait InfoVarData: Any {
@@ -297,8 +299,41 @@ impl CompositeLock {
     pub fn add_static_input(&mut self, input_name: String, input_value: InfoVar) {
         self.static_inputs.insert(input_name, input_value);
     }
-    pub fn from_lockconfig(lock_config: LockConfig, f: impl Fn(&LockTypeConfig) -> Result<Rc<dyn Lock>, Box<dyn Error>>) -> Result<CompositeLock, Box<dyn Error>> {
-        let mut cl = lock_config.into_composite_lock(f)?;
+    /// A chain of named locks. Each connection feeds one lock's output to
+    /// another's input, both written "lock.name"; the chain's inputs and
+    /// outputs are those left unconnected.
+    pub fn new(name: String, locks: HashMap<String, Rc<dyn Lock>>, connections: Vec<(String, String)>) -> Result<CompositeLock, Box<dyn Error>> {
+        let mut input_set = HashMap::new();
+        let mut output_set = HashMap::new();
+        for (lock_name, lock) in &locks {
+            for (input_name, input_type) in lock.inputs() {
+                input_set.insert(format!("{}.{}", lock_name, input_name), input_type);
+            }
+            for (output_name, output_type) in lock.outputs() {
+                output_set.insert(format!("{}.{}", lock_name, output_name), output_type);
+            }
+        }
+        let mut remaining_inputs = input_set.clone();
+        let mut remaining_outputs = output_set.clone();
+        for (output, input) in &connections {
+            if !output_set.contains_key(output) {
+                return Err(format!("Output {} does not exist", output).into());
+            }
+            if !input_set.contains_key(input) {
+                return Err(format!("Input {} does not exist", input).into());
+            }
+            remaining_inputs.remove(input);
+            remaining_outputs.remove(output);
+        }
+        let mut cl = CompositeLock {
+            name,
+            locks,
+            connections,
+            cached_inputs: remaining_inputs,
+            cached_outputs: remaining_outputs,
+            exec_graph: None,
+            static_inputs: HashMap::new(),
+        };
         cl.build_execution_graph();
         Ok(cl)
     }
@@ -474,78 +509,6 @@ impl Lock for CompositeLock {
     }
     fn unlock_info(&self, outputs: &InfoVarSet) -> Result<InfoVarSet, Box<dyn Error>> {
         self.trace_unlock_info(outputs).map(|(resulting_vars, _)| resulting_vars)
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct LockTypeConfig {
-    pub type_name: String,
-    pub options: serde_json::Value,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct LockConfig {
-    pub name: String,
-    pub locks: HashMap<String, LockTypeConfig>,
-    pub connections: Vec<(String, String)>,
-}
-
-impl LockConfig {
-    pub fn into_composite_lock(self, f: impl Fn(&LockTypeConfig) -> Result<Rc<dyn Lock>, Box<dyn Error>>) -> Result<CompositeLock, Box<dyn Error>> {
-        let mut locks = HashMap::new();
-        let mut input_set = HashMap::new();
-        let mut output_set = HashMap::new();
-        for (lock_name, lock_type_config) in self.locks {
-            let new_lock = f(&lock_type_config)?;
-
-            let inputs = new_lock.inputs();
-            let mut lock_inputs = HashMap::new();
-            for (input_name, input_type) in inputs {
-                let input_name = format!("{}.{}", lock_name, input_name);
-                input_set.insert(input_name.clone(), input_type.clone());
-                lock_inputs.insert(input_name, input_type);
-            }
-
-            let outputs = new_lock.outputs();
-            let mut lock_outputs = HashMap::new();
-            for (output_name, output_type) in outputs {
-                let output_name = format!("{}.{}", lock_name, output_name);
-                output_set.insert(output_name.clone(), output_type.clone());
-                lock_outputs.insert(output_name, output_type);
-            }
-            locks.insert(lock_name.clone(), new_lock);
-        }
-        let mut remaining_inputs = input_set.clone();
-        let mut remaining_outputs = output_set.clone();
-        for (output, input) in &self.connections {
-            // check for existence of output and input
-            if !output_set.contains_key(output) {
-                return Err(format!("Output {} does not exist", output).into());
-            }
-            if !input_set.contains_key(input) {
-                return Err(format!("Input {} does not exist", input).into());
-            }
-            // add edge to graph
-            let output_lock = output.split('.').next().unwrap().to_string();
-            let input_lock = input.split('.').next().unwrap().to_string();
-            if !locks.contains_key(&output_lock) {
-                return Err(format!("Lock Output {} does not exist", output).into());
-            }
-            if !locks.contains_key(&input_lock) {
-                return Err(format!("Lock Input {} does not exist", input).into());
-            }
-            remaining_inputs.remove(input);
-            remaining_outputs.remove(output);
-        }
-        Ok(CompositeLock {
-            name: self.name,
-            locks,
-            connections: self.connections,
-            cached_inputs: remaining_inputs,
-            cached_outputs: remaining_outputs,
-            exec_graph: None,
-            static_inputs: HashMap::new(),
-        })
     }
 }
 

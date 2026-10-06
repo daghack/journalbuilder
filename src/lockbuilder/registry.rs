@@ -1,10 +1,11 @@
-//! The single list of lock types that can be built by name.
+//! The lock types still written in Rust, built by name. Lock files in
+//! locks/ (see `journal::rhaientries::LockLibrary`) take precedence.
 
 use super::Lock;
 use super::locks::doublering::{DoubleRingLock, KeyedDoubleRingLock};
 use super::locks::huffman::HuffmanEncodingLock;
 use super::locks::maze::MazeLock;
-use super::locks::shift::{ShiftCipherLock, VignCipherLock};
+use super::locks::shift::VignCipherLock;
 use super::locks::substitution::SubstitutionCipherLock;
 use super::locks::util::mergealpha::MergeAlphaInputs;
 use super::locks::util::splitsymbols::SplitSymbolsLock;
@@ -14,7 +15,6 @@ use std::rc::Rc;
 
 /// Every lock type name `build_lock` accepts.
 pub const LOCK_TYPES: &[&str] = &[
-    "shift_cipher",
     "vigenere_cipher",
     "huffman_encoding",
     "doublering",
@@ -28,7 +28,6 @@ pub const LOCK_TYPES: &[&str] = &[
 /// Build a lock of the named type from its JSON options.
 pub fn build_lock(type_name: &str, options: &serde_json::Value) -> Result<Rc<dyn Lock>, Box<dyn Error>> {
     match type_name {
-        "shift_cipher" => make(type_name, options, ShiftCipherLock::new),
         "vigenere_cipher" => make(type_name, options, VignCipherLock::new),
         "huffman_encoding" => make(type_name, options, HuffmanEncodingLock::new),
         "doublering" => make(type_name, options, DoubleRingLock::new),
