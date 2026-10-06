@@ -23,7 +23,6 @@ use std::sync::Arc;
 #[derive(Debug, Default, Clone, CustomType)]
 #[rhai_type(extra = Self::build_extra)]
 pub struct Entry {
-    pub metadata: EntryMetadata,
     pages: Vec<Page>,
 }
 
@@ -77,16 +76,6 @@ impl Entry {
             std::fs::write(filename, png).expect(&failmsg);
         }
     }
-}
-
-#[derive(Debug, Default, Clone, CustomType)]
-pub struct EntryMetadata {
-}
-
-#[derive(Debug, Default, Clone)]
-pub enum LayoutStyle {
-    #[default]
-    Layer
 }
 
 #[derive(Debug, Default, Clone, CustomType)]
@@ -168,9 +157,7 @@ const PLAIN_STYLE_KEYS: [&str; 4] = ["roughness", "point_sample_distance", "trai
 #[derive(Debug, Clone, CustomType)]
 #[rhai_type(extra = Self::build_extra)]
 pub struct Page {
-    pub metadata: PageMetadata,
     canvases: Vec<Canvas>,
-    layout: LayoutStyle,
     /// Output files are named after this, or `page_{index}` without one.
     #[rhai_type(skip)]
     name: Option<String>,
@@ -182,9 +169,7 @@ pub struct Page {
 impl Default for Page {
     fn default() -> Self {
         Page {
-            metadata: PageMetadata::default(),
             canvases: Vec::new(),
-            layout: LayoutStyle::default(),
             name: None,
             plain_style: Some(DEFAULT_PLAIN_STYLE),
         }
@@ -271,22 +256,15 @@ impl Page {
     }
 }
 
+/// A page's canvases layered into one, as the plain output draws it.
 impl Into<JournalCanvas> for Page {
     fn into(self) -> JournalCanvas {
-        match self.layout {
-            LayoutStyle::Layer => {
-                let mut combined = JournalCanvas::new();
-                for canvas in self.canvases {
-                    combined.merge_canvas(canvas.into());
-                }
-                combined
-            }
+        let mut combined = JournalCanvas::new();
+        for canvas in self.canvases {
+            combined.merge_canvas(canvas.into());
         }
+        combined
     }
-}
-
-#[derive(Debug, Default, Clone, CustomType)]
-pub struct PageMetadata {
 }
 
 #[derive(Debug, Default, Clone)]
@@ -409,10 +387,6 @@ impl Into<JournalCanvas> for &Canvas {
         }
         canvas
     }
-}
-
-#[derive(Debug, Clone, CustomType)]
-pub struct MarkdownContent {
 }
 
 #[derive(Debug, Clone, CustomType)]
@@ -638,13 +612,10 @@ impl JournalEngine {
 
         engine
             .build_type::<Vec2>()
-            .build_type::<EntryMetadata>()
             .build_type::<Entry>()
-            .build_type::<PageMetadata>()
             .build_type::<Page>()
             .build_type::<Canvas>()
             .build_type::<BrushSettings>()
-            .build_type::<MarkdownContent>()
             .build_type::<StrokeStyle>()
             .build_type::<Stroke>();
 

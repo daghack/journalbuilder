@@ -28,7 +28,7 @@ journals' look or behaviour, so it waits for a call).
 | 12 | `config/symbols.json` is opened relative to the working directory | Anti-pattern | Fixed {{commit: Find the symbol dictionary and journals from the repository}} |
 | 13 | `&'j mut Journal<'j>` lifetime tangle | Anti-pattern | Resolved `3c547e8` |
 | 14 | Two parallel pipelines, legacy JSON and rhai | Anti-pattern | Resolved `3c547e8` |
-| 15 | Placeholder types with no content | Dead code | Open |
+| 15 | Placeholder types with no content | Dead code | Fixed {{commit: Remove the empty placeholder types}} |
 | 16 | `get_convex_hull()` clones a polygon to read its bounding box | Performance | Open |
 | 17 | `unwrap`/`expect`/`panic` everywhere, clippy warnings, deprecations | Code health | Open |
 | 18 | Offline Darkly renders piled up GPU readbacks (14 GB on journal 18) | Bug | Fixed `ece9149` |
@@ -237,7 +237,7 @@ journals' look or behaviour, so it waits for a call).
 
 ### 43. Quadratic curves convert to cubics incorrectly, moving their end point
 - **Where:** `src/journal/paths.rs` (`PathCmd::to_cubic_curve`)
-- **Status:** Fixed in {{commit: Find the symbol dictionary and journals from the repository}}.
-- **Problem:** running journalbuild (or the tests) from anywhere but the repository root failed to find `config/symbols.json` and `journals/`, with a bare panic.
-- **Change:** the defaults are resolved from the crate directory at build time (`symboldict::DEFAULT_SYMBOLS`, and the repository's `journals/`); `--symbols FILE` overrides the dictionary; a dictionary that won't load is a one-line error naming the path. The tests use the same constants.
-- **Why:** journalbuild is run from the repository it's built in, so baking in its location is the simplest correct default; explicit flags cover anything else.
+- **Status:** Fixed in {{commit: Remove the empty placeholder types}}.
+- **Problem:** `EntryMetadata`, `PageMetadata`, `MarkdownContent` and a one-variant `LayoutStyle` carried nothing, and the page-to-canvas conversion matched on the single variant.
+- **Change:** all four are gone; a page's canvases are simply layered for the plain output. Page metadata that does exist now (`name`, `plain_style`) lives on `Page` itself.
+- **Why:** they suggested features that weren't there, and were registered as rhai types nobody could use. They're easy to reintroduce with real content if layouts or metadata are ever needed.
