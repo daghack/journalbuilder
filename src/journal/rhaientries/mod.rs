@@ -326,7 +326,8 @@ impl Canvas {
         }
     }
     // Transforms modify the canvas in place and also return it, matching
-    // the StrokePath functions, so they can be chained.
+    // the StrokePath functions, so they can be chained (with the same
+    // caveat: a chain on a variable changes it only by its first call).
     pub fn translate(&mut self, v: Vec2) -> Canvas {
         let v = v.into();
         for stroke in &mut self.strokes {
@@ -472,7 +473,10 @@ impl JournalEngine {
         engine.register_type::<StrokePath>()
             // Every path function both modifies the path in place and returns
             // it, so `p.line_to(v);`, `p = p.line_to(v);` and chained calls on
-            // temporaries all behave the same.
+            // temporaries all behave the same. A chain on a variable is the
+            // exception: `p.line_to(a).line_to(b);` changes `p` only by the
+            // first call (rhai passes the variable by reference to the first
+            // call only), so write `p = p.line_to(a).line_to(b);` instead.
             .register_fn("move_to", |path: &mut StrokePath, pos: Vec2| -> StrokePath {
                 update_path(path, |p| p.move_to(pos.x as f32, pos.y as f32))
             })

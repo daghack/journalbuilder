@@ -15,6 +15,10 @@
 //! }
 //! canvas.add_glyph(glyph("basic_eye").scale_by(50.0), style);
 //!
+//! // Transforms change the glyph and return it, but a chain on a variable
+//! // only changes the variable by its first call. Assign the chain back:
+//! g = g.translate_by(new_vec(1.0, 0.0)).scale_by(2.0);
+//!
 //! // A for loop's variable is a copy: to change an array's glyphs, index it.
 //! let word = copper.glyphs("ink");
 //! for i in 0..word.len() { word[i].position = new_vec(i * 20.0, 0.0); }
@@ -64,7 +68,8 @@ impl Glyph {
         self.0.is_blank()
     }
     // Like the path functions, these modify the glyph in place and return
-    // it, so they can be chained.
+    // it, so they can be chained (a chain on a variable changes it only by
+    // its first call; see the module docs).
     fn translate_by(&mut self, delta: Vec2) -> Glyph {
         self.0.translate_by(delta.into());
         self.clone()
