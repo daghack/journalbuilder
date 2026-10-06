@@ -9,11 +9,9 @@ let ring_sizes = [2, 3, 5, 7, 11, 13, 27];
 let alphabet = "abcdefghijklmnopqrstuvwxyz";
 let fill_radius = symbol_scale * 0.75;
 
-// The legacy renderer fit this page to 1080 px. It renders at its natural
-// size now, so the nib grows by the same ratio to keep the look.
-let outer_radius = 100.0 + (ring_sizes.len() - 1) * ring_spacing;
-let nib = 1.75 * 2.0 * (outer_radius + fill_radius) / 1080.0;
-let brush = new_brush("Calligraphy", 0.15, 0.25, nib);
+// Nib sizes are in canvas units, like everything else; 2.15 keeps the look
+// of the legacy render (which fit this page to 1080 px with a 1.75 nib).
+let brush = new_brush("Calligraphy", 0.15, 0.25, 2.15);
 
 let guide = new_strokestyle(2.5, "hsla(150, 30%, 50%, 0.1)", brush);
 let ink = new_strokestyle(2.5, "rgba(0, 0, 0, 0.7)", brush);

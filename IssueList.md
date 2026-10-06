@@ -48,7 +48,7 @@ journals' look or behaviour, so it waits for a call).
 | 32 | The copper letters' brush sizes predate the fork's Calligraphy change | Quirk | Needs decision |
 | 33 | Rhai scripts can't emit warnings; `print` goes to stdout | Gap | Fixed {{commit: Add warn() for scripts}} |
 | 34 | Rhai `fn`s can't read script globals | Quirk | Won't fix |
-| 35 | Brush sizes are in output pixels, so each port repeats a 1080 px fit | Anti-pattern | Open |
+| 35 | Brush sizes are in output pixels, so each port repeats a 1080 px fit | Anti-pattern | Fixed {{commit: Give the ported journals plain nib sizes}} |
 | 36 | `LockConfig`'s string static inputs only served the JSON journals | Dead code | Open |
 | 37 | Public library code left unused by the legacy removal | Dead code | Open |
 | 38 | `fill_with_msg` loops forever when a glyph can't fit on the path | Bug | Open |
@@ -255,7 +255,8 @@ journals' look or behaviour, so it waits for a call).
 
 ### 44. Non-finite numbers from scripts can panic layout and hatching
 - **Where:** `src/journal/paths.rs`, `src/journal/symbol.rs`, `src/journal/rhaientries/`
-- **Status:** Needs decision.
-- **Problem:** the fork treats Calligraphy's size as the nib's long axis, 2.5× its old meaning. The legacy default brush was rescaled for it (0.7 to 1.75), but `copper_letter_1_sharp`'s Calligraphy brush (size 0.8) wasn't. (`copper_letter_1` uses Rough Ink, which the fork didn't change.)
-- **Finding:** at 0.8 the letter's strokes render as broken, striped hairlines; at 2.0 (0.8 × 2.5, the fork's equivalent of the old size) they're solid calligraphy again.
-- **Recommendation:** change the brush to `new_brush("Calligraphy", 1.0, 1.0, 2.0)`. It's a one-line edit, left undone because it changes a finished journal's look.
+- **Status:** Fixed in {{commit: Give the ported journals plain nib sizes}}.
+- **Problem:** each ported journal computed its Calligraphy nib as `1.75 * extent / 1080`, journal 17 through two helper functions, which looked like brush sizes were in output pixels and had to be fitted to each page.
+- **Finding:** they aren't. A canvas unit is a pixel at `--scale 1` and Darkly multiplies brush sizes by the scale, so brush sizes are already in canvas units like everything else. The formula only reproduced the legacy renderer, which fit every page to 1080 px.
+- **Change:** the journals use plain nib sizes with a one-line note on where they came from: 2.15 (first_codex), 1.65 and 2.05 (journal 17's maze and dial), 2.43 (journal 18), the formula's values to two decimals.
+- **Why:** the scripts get simpler and say what they mean; the look is unchanged.

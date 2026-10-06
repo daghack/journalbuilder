@@ -6,10 +6,10 @@
 //   balanced_ternary  a dial of the 27 balanced-ternary glyphs and their
 //                     digits, with short notes scattered over it.
 
-// The legacy renderer fit each page to 1080 px. Pages render at their
-// natural size now, so the Calligraphy nib grows by the same ratio.
-fn nib_for(extent) { 1.75 * extent / 1080.0 }
-fn calligraphy(extent) { new_brush("Calligraphy", 0.15, 0.25, nib_for(extent)) }
+// Nib sizes are in canvas units, like everything else. These keep the look
+// of the legacy renders, which fit each page to 1080 px with a 1.75 nib.
+let maze_brush = new_brush("Calligraphy", 0.15, 0.25, 1.65);
+let dial_brush = new_brush("Calligraphy", 0.15, 0.25, 2.05);
 let plain = #{ roughness: 2.0, noise_amplitude: 1.5 };
 
 // ---- page one: the maze ----
@@ -41,13 +41,12 @@ for cell in maze.cells() {
 	g.scale = cell_size;
 	g.position = new_vec(cell.x * cell_size, cell.y * cell_size);
 	cells.push(g);
-	avoid.add_glyph(g, new_strokestyle(2.0, "black", calligraphy(1.0)));
+	avoid.add_glyph(g, new_strokestyle(2.0, "black", maze_brush));
 }
 let b = avoid.bounds();
-let extent = 1.2 * max(b.width, b.height);
 
 let page_canvas = new_canvas();
-page_canvas.add_glyphs(cells, new_strokestyle(5.0, "black", calligraphy(extent)));
+page_canvas.add_glyphs(cells, new_strokestyle(5.0, "black", maze_brush));
 
 // The key, flowed through a box a little larger than the maze, each glyph
 // nudged a little off true.
@@ -59,7 +58,7 @@ let filled = around.fill(ternary_font("balanced_ternary").glyphs(key));
 if filled.unplaced.len() > 0 {
 	warn(filled.unplaced.len() + " key symbols didn't fit around the maze");
 }
-let key_style = new_strokestyle(1.5, "darkred", calligraphy(extent));
+let key_style = new_strokestyle(1.5, "darkred", maze_brush);
 for g in filled.placed {
 	g.scale_by(1.0 + random_range(-0.025, 0.025));
 	g.translate_by(new_vec(random_range(-2.5, 2.5), random_range(-2.5, 2.5)));
@@ -82,7 +81,7 @@ let symbol_radius = 50.0;
 let circle_radius = symbol_radius / 1.5;
 let ring_step = symbol_radius * 4.0;
 let outer_ring = 600.0;
-let brush = calligraphy(2.0 * (outer_ring + circle_radius));
+let brush = dial_brush;
 
 fn ring_point(count, step, radius) {
 	let angle = step * 2.0 * PI() / count - PI() / 2.0;

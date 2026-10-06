@@ -36,10 +36,9 @@ let spider = boxes.place_all(font.glyphs(spider_web));
 let nodes = ((fateful.len() + spider.len()) / 2.0).sqrt().ceiling().to_int();
 let spacing = box_size + symbol_scale;
 
-// The legacy renderer fit this page to 1080 px. It renders at its natural
-// size now, so the Calligraphy nib grows by the same ratio.
-let extent = (2 * nodes - 2) * spacing + box_size;
-let brush = new_brush("Calligraphy", 0.15, 0.25, 1.75 * extent / 1080.0);
+// Nib sizes are in canvas units, like everything else; 2.43 keeps the look
+// of the legacy render (which fit this page to 1080 px with a 1.75 nib).
+let brush = new_brush("Calligraphy", 0.15, 0.25, 2.43);
 let fateful_style = new_strokestyle(2.0, "black", brush);
 let spider_style = new_strokestyle(2.0, "hsl(160, 50%, 40%, 0.8)", brush);
 
