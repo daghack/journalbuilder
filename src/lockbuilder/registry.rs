@@ -2,10 +2,7 @@
 //! locks/ (see `journal::rhaientries::LockLibrary`) take precedence.
 
 use super::Lock;
-use super::locks::doublering::{DoubleRingLock, KeyedDoubleRingLock};
 use super::locks::huffman::HuffmanEncodingLock;
-use super::locks::util::mergealpha::MergeAlphaInputs;
-use super::locks::util::splitsymbols::SplitSymbolsLock;
 use serde::de::DeserializeOwned;
 use std::error::Error;
 use std::rc::Rc;
@@ -13,20 +10,12 @@ use std::rc::Rc;
 /// Every lock type name `build_lock` accepts.
 pub const LOCK_TYPES: &[&str] = &[
     "huffman_encoding",
-    "doublering",
-    "keyed_doublering",
-    "merge_alpha",
-    "split_symbols",
 ];
 
 /// Build a lock of the named type from its JSON options.
 pub fn build_lock(type_name: &str, options: &serde_json::Value) -> Result<Rc<dyn Lock>, Box<dyn Error>> {
     match type_name {
         "huffman_encoding" => make(type_name, options, HuffmanEncodingLock::new),
-        "doublering" => make(type_name, options, DoubleRingLock::new),
-        "keyed_doublering" => make(type_name, options, KeyedDoubleRingLock::new),
-        "merge_alpha" => make(type_name, options, MergeAlphaInputs::new),
-        "split_symbols" => make(type_name, options, SplitSymbolsLock::new),
         _ => Err(format!("unknown lock type '{}'; available: {}", type_name, LOCK_TYPES.join(", ")).into()),
     }
 }
@@ -65,15 +54,16 @@ mod tests {
 
     #[test]
     fn builds_a_lock_from_options() {
-        let lock = build_lock("keyed_doublering", &serde_json::json!({ "base": 26 })).expect("should build");
+        let options = serde_json::json!({ "incoming_base": 4, "outgoing_base": 2, "frequency_counts": {} });
+        let lock = build_lock("huffman_encoding", &options).expect("should build");
         assert!(lock.inputs().contains_key("plain_text"), "{:?}", lock.inputs());
     }
 
     #[test]
     fn reports_unknown_type_and_bad_options() {
         let unknown = build_lock("rot13", &serde_json::json!({})).err().unwrap().to_string();
-        assert!(unknown.contains("unknown lock type 'rot13'") && unknown.contains("keyed_doublering"), "{}", unknown);
-        let bad = build_lock("keyed_doublering", &serde_json::json!({ "base": "lots" })).err().unwrap().to_string();
-        assert!(bad.contains("invalid options for lock type 'keyed_doublering'"), "{}", bad);
+        assert!(unknown.contains("unknown lock type 'rot13'") && unknown.contains("huffman_encoding"), "{}", unknown);
+        let bad = build_lock("huffman_encoding", &serde_json::json!({ "incoming_base": "lots" })).err().unwrap().to_string();
+        assert!(bad.contains("invalid options for lock type 'huffman_encoding'"), "{}", bad);
     }
 }
