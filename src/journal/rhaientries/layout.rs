@@ -86,7 +86,7 @@ pub struct TextBox {
 
 const TEXTBOX_KEYS: [&str; 8] = ["center", "width", "height", "symbol_scale", "layout", "jagged_edge", "avoid", "avoid_radius"];
 
-fn check_keys(caller: &str, options: &Map, known: &[&str]) -> RhaiResult<()> {
+pub(super) fn check_keys(caller: &str, options: &Map, known: &[&str]) -> RhaiResult<()> {
     match options.keys().find(|k| !known.contains(&k.as_str())) {
         Some(key) => Err(format!("{}: unknown option '{}'; options: {}", caller, key, known.join(", ")).into()),
         None => Ok(()),
@@ -100,7 +100,7 @@ fn as_number(caller: &str, what: &str, v: &Dynamic) -> RhaiResult<f32> {
 }
 
 /// A number option, accepting ints as well as floats.
-fn number(caller: &str, options: &Map, key: &str) -> RhaiResult<Option<f32>> {
+pub(super) fn number(caller: &str, options: &Map, key: &str) -> RhaiResult<Option<f32>> {
     options.get(key).map(|v| as_number(caller, &format!("'{}'", key), v)).transpose()
 }
 

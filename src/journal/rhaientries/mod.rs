@@ -28,8 +28,13 @@ pub struct Entry {
 }
 
 impl Entry {
-    fn add_page(&mut self, page: Page) {
+    fn add_page(&mut self, page: Page) -> Result<(), Box<EvalAltResult>> {
+        let label = page.label(self.pages.len());
+        if self.pages.iter().enumerate().any(|(i, p)| p.label(i) == label) {
+            return Err(format!("add_page: the entry already has a page named '{}'", label).into());
+        }
         self.pages.push(page);
+        Ok(())
     }
     fn build_extra(builder: &mut TypeBuilder<Self>) {
         builder.with_fn("add_page", Self::add_page);
@@ -47,6 +52,7 @@ impl Entry {
         for (i, page) in self.selected_pages(only) {
             let canvases = page.canvases();
             for (canvas_i, canvas) in canvases.into_iter().enumerate() {
+                let filename = format!("{}/darkly_{}_{}.png", dirname, page.label(i), canvas.label(canvas_i));
                 let canvas : JournalCanvas = canvas.into();
                 let canvas_dim = canvas.bounds().extents();
                 // Canvas units are pixels at scale 1, so brushes scale with
@@ -57,7 +63,6 @@ impl Entry {
                     (canvas_dim.x * scale) as u32, (canvas_dim.y * scale) as u32,
                     scale, supersample,
                 );
-                let filename = format!("{}/darkly_page_{}_{}.png", dirname, i, canvas_i);
                 buff.save(filename).expect("Failed to save png");
             }
         }
@@ -66,14 +71,8 @@ impl Entry {
         println!("Publishing PNGs:");
         for (i, page) in self.selected_pages(only) {
             let page_canvas: JournalCanvas = page.clone().into();
-            let canvas_style = CanvasStyleOptions {
-                roughness: 1.0,
-                point_sample_distance: 1.0,
-                trail_off_percent: 0.15,
-                noise_amplitude: 0.3,
-            };
-            let png = page_canvas.to_png(2.0 * scale, Some(&canvas_style));
-            let filename = format!("{}/page_{}.png", dirname, i);
+            let png = page_canvas.to_png(2.0 * scale, page.plain_style.as_ref());
+            let filename = format!("{}/{}.png", dirname, page.label(i));
             println!("\t - {}", filename);
             let failmsg = format!("Failed to write page: {}", i);
             std::fs::write(filename, png).expect(&failmsg);
@@ -123,25 +122,133 @@ impl From<BrushSettings> for Brush {
     }
 }
 
-#[derive(Debug, Default, Clone, CustomType)]
+/// Names become file names, so they're limited to letters, digits, `_`,
+/// `-` and `.` (not leading).
+fn check_name(caller: &str, name: Dynamic) -> Result<String, Box<EvalAltResult>> {
+    let name = name.into_immutable_string()
+        .map_err(|type_name| -> Box<EvalAltResult> { format!("{}: a name must be a string, got {}", caller, type_name).into() })?;
+    let ok = !name.is_empty() && !name.starts_with('.')
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || "_-.".contains(c));
+    if ok {
+        Ok(name.to_string())
+    } else {
+        Err(format!("{}: invalid name '{}'; use letters, digits, '_', '-' and '.' (not first)", caller, name).into())
+    }
+}
+
+/// How a page's plain (non-Darkly) output is drawn, unless the script sets
+/// `page.plain_style`.
+const DEFAULT_PLAIN_STYLE: CanvasStyleOptions = CanvasStyleOptions {
+    roughness: 1.0,
+    point_sample_distance: 1.0,
+    trail_off_percent: 0.15,
+    noise_amplitude: 0.3,
+};
+
+const PLAIN_STYLE_KEYS: [&str; 4] = ["roughness", "point_sample_distance", "trail_off_percent", "noise_amplitude"];
+
+#[derive(Debug, Clone, CustomType)]
 #[rhai_type(extra = Self::build_extra)]
 pub struct Page {
     pub metadata: PageMetadata,
     canvases: Vec<Canvas>,
     layout: LayoutStyle,
+    /// Output files are named after this, or `page_{index}` without one.
+    #[rhai_type(skip)]
+    name: Option<String>,
+    /// `None` draws the plain output as simple strokes.
+    #[rhai_type(skip)]
+    plain_style: Option<CanvasStyleOptions>,
+}
+
+impl Default for Page {
+    fn default() -> Self {
+        Page {
+            metadata: PageMetadata::default(),
+            canvases: Vec::new(),
+            layout: LayoutStyle::default(),
+            name: None,
+            plain_style: Some(DEFAULT_PLAIN_STYLE),
+        }
+    }
 }
 
 impl Page {
-    pub fn add_canvas(&mut self, canvas: Canvas) {
-        self.canvases.push(canvas)
+    pub fn add_canvas(&mut self, canvas: Canvas) -> Result<(), Box<EvalAltResult>> {
+        let label = canvas.label(self.canvases.len());
+        if self.canvases.iter().enumerate().any(|(i, c)| c.label(i) == label) {
+            return Err(format!("add_canvas: the page already has a canvas named '{}'", label).into());
+        }
+        self.canvases.push(canvas);
+        Ok(())
     }
     pub fn canvases(&self) -> &Vec<Canvas> {
         &self.canvases
+    }
+    /// The page's name in output files, given its index in the entry.
+    pub fn label(&self, index: usize) -> String {
+        self.name.clone().unwrap_or_else(|| format!("page_{}", index))
+    }
+    fn get_name(&mut self) -> Dynamic {
+        self.name.clone().map_or(Dynamic::UNIT, Dynamic::from)
+    }
+    fn set_name(&mut self, name: Dynamic) -> Result<(), Box<EvalAltResult>> {
+        self.name = Some(check_name("page.name", name)?);
+        Ok(())
+    }
+    fn get_plain_style(&mut self) -> Dynamic {
+        match &self.plain_style {
+            None => Dynamic::UNIT,
+            Some(style) => {
+                let mut map = rhai::Map::new();
+                for (key, value) in PLAIN_STYLE_KEYS.iter().zip([style.roughness, style.point_sample_distance, style.trail_off_percent, style.noise_amplitude]) {
+                    // Via the shortest decimal form, so 0.3 reads back as 0.3
+                    // rather than 0.30000001192092896.
+                    let value: f64 = value.to_string().parse().expect("a float's string form parses");
+                    map.insert((*key).into(), Dynamic::from(value));
+                }
+                Dynamic::from_map(map)
+            }
+        }
+    }
+    /// `()` for plain strokes, or a map of options; any left out keep their
+    /// defaults.
+    fn set_plain_style(&mut self, style: Dynamic) -> Result<(), Box<EvalAltResult>> {
+        const CALLER: &str = "page.plain_style";
+        if style.is_unit() {
+            self.plain_style = None;
+            return Ok(());
+        }
+        let type_name = style.type_name();
+        let options = style.try_cast::<rhai::Map>()
+            .ok_or_else(|| -> Box<EvalAltResult> { format!("{}: expected a map of options or (), got {}", CALLER, type_name).into() })?;
+        layout::check_keys(CALLER, &options, &PLAIN_STYLE_KEYS)?;
+        let get = |key: &str, default: f32| -> Result<f32, Box<EvalAltResult>> {
+            match layout::number(CALLER, &options, key)? {
+                Some(n) if n >= 0.0 => Ok(n),
+                Some(n) => Err(format!("{}: '{}' can't be negative, got {}", CALLER, key, n).into()),
+                None => Ok(default),
+            }
+        };
+        let d = DEFAULT_PLAIN_STYLE;
+        let point_sample_distance = get("point_sample_distance", d.point_sample_distance)?;
+        if point_sample_distance == 0.0 {
+            return Err(format!("{}: 'point_sample_distance' must be positive", CALLER).into());
+        }
+        self.plain_style = Some(CanvasStyleOptions {
+            roughness: get("roughness", d.roughness)?,
+            point_sample_distance,
+            trail_off_percent: get("trail_off_percent", d.trail_off_percent)?,
+            noise_amplitude: get("noise_amplitude", d.noise_amplitude)?,
+        });
+        Ok(())
     }
     fn build_extra(builder: &mut TypeBuilder<Self>) {
         builder
             .with_fn("add_canvas", Self::add_canvas)
             .with_fn("new_page", Self::default)
+            .with_get_set("name", Self::get_name, Self::set_name)
+            .with_get_set("plain_style", Self::get_plain_style, Self::set_plain_style)
         ;
     }
 }
@@ -194,9 +301,23 @@ impl Into<PVec> for Vec2 {
 #[rhai_type(extra = Self::build_extra)]
 pub struct Canvas {
     pub strokes: Vec<Stroke>,
+    /// Its Darkly output is named after this, or its index on the page.
+    #[rhai_type(skip)]
+    name: Option<String>,
 }
 
 impl Canvas {
+    /// The canvas's name in output files, given its index on its page.
+    pub fn label(&self, index: usize) -> String {
+        self.name.clone().unwrap_or_else(|| index.to_string())
+    }
+    fn get_name(&mut self) -> Dynamic {
+        self.name.clone().map_or(Dynamic::UNIT, Dynamic::from)
+    }
+    fn set_name(&mut self, name: Dynamic) -> Result<(), Box<EvalAltResult>> {
+        self.name = Some(check_name("canvas.name", name)?);
+        Ok(())
+    }
     pub fn add_stroke(&mut self, stroke: Stroke) {
         self.strokes.push(stroke)
     }
@@ -239,6 +360,7 @@ impl Canvas {
             .with_fn("scale", Self::scale)
             .with_fn("add_canvas", Self::add_canvas)
             .with_fn("new_canvas", Self::default)
+            .with_get_set("name", Self::get_name, Self::set_name)
         ;
     }
 }
@@ -663,6 +785,77 @@ mod tests {
         // doesn't depend on hash map order.
         assert_eq!(page_svg(&script(3)), page_svg(&script(3)));
         assert_ne!(page_svg(&script(3)), page_svg(&script(4)));
+    }
+
+    const NAMED: &str = r#"
+        let style = new_strokestyle(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
+        let ring = new_canvas();
+        ring.add_strokepath(new_circle(new_vec(0.0, 0.0), 10.0), style);
+        let named = ring;
+        named.name = "ring";
+        let maze = new_page();
+        maze.name = "maze";
+        maze.add_canvas(named);
+        maze.add_canvas(ring);
+        journal_entry.add_page(new_page());
+        journal_entry.add_page(maze);
+    "#;
+
+    #[test]
+    fn pages_and_canvases_are_labelled_by_name_or_index() {
+        let entry = engine().build_entry_str(NAMED).expect("script should run");
+        let labels: Vec<String> = entry.pages.iter().enumerate().map(|(i, p)| p.label(i)).collect();
+        assert_eq!(labels, ["page_0", "maze"]);
+        let canvases: Vec<String> = entry.pages[1].canvases().iter().enumerate().map(|(i, c)| c.label(i)).collect();
+        assert_eq!(canvases, ["ring", "1"]);
+
+        let dir = std::env::temp_dir().join(format!("journal_names_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        entry.publish_pngs(dir.to_str().unwrap(), 0.1, Some(&[1]));
+        assert!(dir.join("maze.png").is_file());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn names_must_be_unique_and_file_safe() {
+        for (script, want) in [
+            ("let p = new_page(); p.name = \"maze\"; journal_entry.add_page(p);\njournal_entry.add_page(p);", "already has a page named 'maze'"),
+            // An unnamed page's label counts too.
+            ("let p = new_page(); p.name = \"page_1\"; journal_entry.add_page(p);\njournal_entry.add_page(new_page());", "already has a page named 'page_1'"),
+            ("let p = new_page(); let c = new_canvas(); c.name = \"a\"; p.add_canvas(c);\np.add_canvas(c);", "already has a canvas named 'a'"),
+            ("let p = new_page();\np.name = \"../escape\";", "page.name: invalid name '../escape'"),
+            ("let c = new_canvas();\nc.name = 3;", "canvas.name: a name must be a string"),
+        ] {
+            let err = engine().build_entry_str(script).err().unwrap_or_else(|| panic!("should fail: {}", want)).to_string();
+            assert!(err.contains(want) && err.contains("line 2"), "{}: {}", want, err);
+        }
+    }
+
+    #[test]
+    fn plain_style_defaults_merges_and_turns_off() {
+        let script = r#"
+            let p = new_page();
+            if p.name != () { throw "unnamed pages have no name"; }
+            if p.plain_style.roughness != 1.0 || p.plain_style.noise_amplitude != 0.3 { throw "unexpected default: " + p.plain_style; }
+            p.plain_style = #{ roughness: 2, noise_amplitude: 1.5 };
+            if p.plain_style.roughness != 2.0 || p.plain_style.trail_off_percent != 0.15 { throw "not merged: " + p.plain_style; }
+            journal_entry.add_page(p);
+            let plain = new_page();
+            plain.plain_style = ();
+            journal_entry.add_page(plain);
+        "#;
+        let entry = engine().build_entry_str(script).expect("script should run");
+        let style = entry.pages[0].plain_style.as_ref().expect("styled");
+        assert_eq!((style.roughness, style.point_sample_distance, style.noise_amplitude), (2.0, 1.0, 1.5));
+        assert!(entry.pages[1].plain_style.is_none());
+        for (script, want) in [
+            ("let p = new_page();\np.plain_style = #{ roughnes: 1 };", "unknown option 'roughnes'"),
+            ("let p = new_page();\np.plain_style = #{ roughness: -1 };", "'roughness' can't be negative"),
+            ("let p = new_page();\np.plain_style = 2;", "expected a map of options or ()"),
+        ] {
+            let err = engine().build_entry_str(script).err().expect("script should fail").to_string();
+            assert!(err.contains(want) && err.contains("line 2"), "{}: {}", want, err);
+        }
     }
 
     #[test]
