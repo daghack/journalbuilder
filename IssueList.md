@@ -29,7 +29,7 @@ journals' look or behaviour, so it waits for a call).
 | 13 | `&'j mut Journal<'j>` lifetime tangle | Anti-pattern | Resolved `3c547e8` |
 | 14 | Two parallel pipelines, legacy JSON and rhai | Anti-pattern | Resolved `3c547e8` |
 | 15 | Placeholder types with no content | Dead code | Fixed {{commit: Remove the empty placeholder types}} |
-| 16 | `get_convex_hull()` clones a polygon to read its bounding box | Performance | Open |
+| 16 | `get_convex_hull()` clones a polygon to read its bounding box | Performance | Fixed {{commit: Cache glyph hull bounds instead of cloning hulls}} |
 | 17 | `unwrap`/`expect`/`panic` everywhere, clippy warnings, deprecations | Code health | Open |
 | 18 | Offline Darkly renders piled up GPU readbacks (14 GB on journal 18) | Bug | Fixed `ece9149` |
 | 19 | Glyph variant picks depended on hash-map order | Bug | Fixed `92d9eeb` |
@@ -237,7 +237,7 @@ journals' look or behaviour, so it waits for a call).
 
 ### 43. Quadratic curves convert to cubics incorrectly, moving their end point
 - **Where:** `src/journal/paths.rs` (`PathCmd::to_cubic_curve`)
-- **Status:** Fixed in {{commit: Remove the empty placeholder types}}.
-- **Problem:** `EntryMetadata`, `PageMetadata`, `MarkdownContent` and a one-variant `LayoutStyle` carried nothing, and the page-to-canvas conversion matched on the single variant.
-- **Change:** all four are gone; a page's canvases are simply layered for the plain output. Page metadata that does exist now (`name`, `plain_style`) lives on `Page` itself.
-- **Why:** they suggested features that weren't there, and were registered as rhai types nobody could use. They're easy to reintroduce with real content if layouts or metadata are ever needed.
+- **Status:** Fixed in {{commit: Cache glyph hull bounds instead of cloning hulls}}.
+- **Problem:** text layout cloned each glyph's convex hull, in its inner loop, just to read its extents.
+- **Change:** each glyph base caches its hull's bounding box, read through `Symbol::hull_aabb()`. `get_convex_hull` is gone, along with the unused `intersects`, `placed_bounds` and `placed_convex_hull`; `intersects` was also wrong, scaling the other glyph's hull by this glyph's scale.
+- **Why:** cheap and allocation-free. Evaluating every journal script got about 9% faster (0.69 s to 0.63 s, mostly journal 18's layout), with identical output.

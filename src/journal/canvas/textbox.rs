@@ -71,7 +71,7 @@ impl<'kd> TextBox<'kd> {
             to_place = not_placed;
             let mut max_height: f32 = 0.0;
             for symbol in &mut placed_line {
-                let height = symbol.get_convex_hull().local_aabb().extents().y * self.symbol_scale / 2.0;
+                let height = symbol.hull_aabb().extents().y * self.symbol_scale / 2.0;
                 max_height =  max_height.max(height);
                 let symbol_center = symbol.position();
                 let new_pos = symbol_center + Vec2::new(0.0, height / 4.0);

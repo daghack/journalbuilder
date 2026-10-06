@@ -2,7 +2,7 @@ use super::paths::{
     CurveSample, CurveStepper,
     StrokePath, SubstrokePath, SubstrokeStepper,
 };
-use parry2d::math::{Vec2, Pose2};
+use parry2d::math::Vec2;
 use kdtree::KdTree;
 use kdtree::distance::squared_euclidean;
 
@@ -20,12 +20,16 @@ pub enum SymbolType {
 pub struct SymbolBase {
     symbol_type: SymbolType,
     hull: parry2d::shape::ConvexPolygon,
+    /// The hull's bounding box, which text layout reads for every glyph.
+    hull_aabb: parry2d::bounding_volume::Aabb,
 }
 
 impl SymbolBase {
     pub fn new(symbol_type: SymbolType) -> SymbolBase {
+        let hull = SymbolBase::generate_hull(&symbol_type);
         SymbolBase {
-            hull: SymbolBase::generate_hull(&symbol_type),
+            hull_aabb: hull.local_aabb(),
+            hull,
             symbol_type,
         }
     }
@@ -112,9 +116,6 @@ impl Symbol {
         let base = Rc::new(SymbolBase::new(SymbolType::Blank(width, height)));
         Symbol::new_from_base_rc(base, scale, position, rotation_rad)
     }
-    pub fn placed_bounds(&self) -> parry2d::bounding_volume::Aabb {
-        self.placed_convex_hull().local_aabb()
-    }
     fn placed_path(&self, path: &StrokePath) -> StrokePath {
         path.clone()
             .rotated_by(self.rotation_rad)
@@ -143,40 +144,15 @@ impl Symbol {
         self.placed_strokepath().to_substrokes()
     }
 
-    pub fn placed_convex_hull(&self) -> parry2d::shape::ConvexPolygon {
-        let hull_points = self.get_convex_hull().points().to_vec();
-        let mut hull_points = parry2d::transformation::utils::scaled(hull_points, Vec2::new(self.scale / 2.0, self.scale / 2.0));
-        let pose = Pose2::new(self.position, self.rotation_rad);
-        parry2d::transformation::utils::transform(&mut hull_points, pose);
-        parry2d::shape::ConvexPolygon::from_convex_hull(&hull_points).unwrap()
-    }
     pub fn sample_points_along(&self, step: f32) -> Vec<CurveSample> {
         let path = self.placed_strokepath();
         path.sample_points_along(step)
     }
     
-    pub fn intersects(&self, other: &Symbol) -> bool {
-        let scale_vec = Vec2::new(self.scale / 2.0, self.scale / 2.0);
-        let self_hull = self.get_convex_hull().scaled(scale_vec).unwrap();
-        let iso_self = Pose2::new(
-            self.position,
-            self.rotation_rad,
-        );
-        let other_hull = other.get_convex_hull().scaled(scale_vec).unwrap();
-        let iso_other = Pose2::new(
-            other.position,
-            other.rotation_rad,
-        );
-        parry2d::query::details::intersection_test(
-            &iso_self,
-            &self_hull,
-            &iso_other,
-            &other_hull,
-        ).unwrap()
-    }
-
-    pub fn get_convex_hull(&self) -> parry2d::shape::ConvexPolygon {
-        self.base.hull.clone()
+    /// The bounding box of the unplaced glyph's hull (its path spans about
+    /// -1..1), without copying the hull.
+    pub fn hull_aabb(&self) -> parry2d::bounding_volume::Aabb {
+        self.base.hull_aabb
     }
 
     pub fn rotation_rad(&self) -> f32 {
@@ -305,7 +281,7 @@ pub fn place_symbols_along_stepper<'a, SymIter, Stepper>(stepper: &mut Stepper, 
     let scale = symbol_avoidtree.scale * 2.0;
     let mut placed_count = 0;
     while let Some(current_symbol) = symbols.peek_mut() {
-        let aabb = current_symbol.get_convex_hull().local_aabb();
+        let aabb = current_symbol.hull_aabb();
         let width = aabb.extents().x * scale / 2.0;
         let step_size = width / 3.0;
         if let (Some(l), Some(r)) = (stepper.prospective_step(0.0), stepper.prospective_step(width)) {
