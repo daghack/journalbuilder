@@ -88,17 +88,4 @@ impl<'kd> TextBox<'kd> {
         }
         (placed_symbols, to_place)
     }
-    pub fn place_all_symbols(&self, mut symbols: Vec<Symbol>, rng: &mut dyn RngCore) -> Vec<Vec<Symbol>> {
-        // This effectively calls fill_bounds_with_ repeatedly until all symbols are placed
-        let mut all_symbols = Vec::new();
-        loop {
-            let (placed_symbols, not_placed) = self.fill_bounds_with(symbols, rng);
-            if placed_symbols.is_empty() {
-                break;
-            }
-            all_symbols.push(placed_symbols);
-            symbols = not_placed;
-        }
-        all_symbols
-    }
 }

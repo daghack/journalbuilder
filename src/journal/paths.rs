@@ -63,15 +63,6 @@ impl PathCmd {
             _ => None
         }
     }
-    pub fn positions(&self) -> Vec<Vec2> {
-        match self {
-            PathCmd::MoveTo(x, y) => vec![Vec2::new(*x, *y)],
-            PathCmd::LineTo(x, y) => vec![Vec2::new(*x, *y)],
-            PathCmd::CubicCurveTo(_, _, _, _, x, y) => vec![Vec2::new(*x, *y)],
-            PathCmd::QuadraticCurveTo(_, _, x, y) => vec![Vec2::new(*x, *y)],
-            PathCmd::ClosePath => vec![],
-        }
-    }
     pub fn points_within(&self) -> Vec<Vec2> {
         match self {
             PathCmd::MoveTo(x, y) => vec![Vec2::new(*x, *y)],
@@ -80,21 +71,6 @@ impl PathCmd {
             PathCmd::QuadraticCurveTo(x1, y1, x, y) => vec![Vec2::new(*x1, *y1), Vec2::new(*x, *y)],
             PathCmd::ClosePath => vec![],
         }
-    }
-    pub fn controls_within(&self) -> Vec<Vec2> {
-        match self {
-            PathCmd::MoveTo(_, _) => vec![],
-            PathCmd::LineTo(_, _) => vec![],
-            PathCmd::CubicCurveTo(x1, y1, x2, y2, _, _) => vec![Vec2::new(*x1, *y1), Vec2::new(*x2, *y2)],
-            PathCmd::QuadraticCurveTo(x1, y1, _, _) => vec![Vec2::new(*x1, *y1)],
-            PathCmd::ClosePath => vec![],
-        }
-    }
-    pub fn positions_within(&self) -> Vec<Vec2> {
-        let mut pts = self.points_within();
-        let mut ctrls = self.controls_within();
-        pts.append(&mut ctrls);
-        pts
     }
     pub fn to_cubic_curve(&self) -> Self {
         match self {
@@ -184,15 +160,6 @@ impl PathCmd {
             PathCmd::ClosePath => PathCmd::ClosePath,
         }
     }
-    pub fn points(&self) -> Vec<Vec2> {
-        match self {
-            PathCmd::MoveTo(x, y) => vec![Vec2::new(*x, *y)],
-            PathCmd::LineTo(x, y) => vec![Vec2::new(*x, *y)],
-            PathCmd::CubicCurveTo(x1, y1, x2, y2, x, y) => vec![Vec2::new(*x1, *y1), Vec2::new(*x2, *y2), Vec2::new(*x, *y)],
-            PathCmd::QuadraticCurveTo(x1, y1, x, y) => vec![Vec2::new(*x1, *y1), Vec2::new(*x, *y)],
-            PathCmd::ClosePath => vec![],
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -227,12 +194,6 @@ impl StrokePath {
         }
         points
     }
-    pub fn transformed_by(mut self, position: Vec2, scale: f32, rotation: f32) -> Self {
-        for cmd in &mut self.commands {
-            *cmd = cmd.scale_by(scale).rotate_around(position, rotation).translate_by(position);
-        }
-        self
-    }
     pub fn scaled_by(mut self, s: f32) -> Self {
         for cmd in &mut self.commands {
             *cmd = cmd.scale_by(s);
@@ -266,12 +227,6 @@ impl StrokePath {
             *cmd = cmd.rotate_around(point, angle);
         }
     }
-    pub fn adjusted_by(mut self, f: impl Fn(&PathCmd) -> PathCmd) -> Self {
-        for cmd in &mut self.commands {
-            *cmd = f(cmd);
-        }
-        self
-    }
     pub fn adjust_by(&mut self, mut f: impl FnMut(&PathCmd) -> PathCmd) {
         for cmd in &mut self.commands {
             *cmd = f(cmd);
@@ -279,16 +234,6 @@ impl StrokePath {
     }
     pub fn rotated_by(self, angle: f32) -> Self {
         self.rotated_around(Vec2::new(0.0, 0.0), angle)
-    }
-    pub fn rotate_by(&mut self, angle: f32) {
-        self.rotate_around(Vec2::new(0.0, 0.0), angle);
-    }
-    pub fn points(&self) -> Vec<Vec2> {
-        let mut points = Vec::new();
-        for cmd in &self.commands {
-            points.extend(cmd.points());
-        }
-        points
     }
     pub fn to_substrokes(&self) -> Vec<SubstrokePath> {
         let mut substrokes = Vec::new();
@@ -411,9 +356,6 @@ impl StrokePath {
     pub fn append(&mut self, other: StrokePath) {
         self.commands.extend(other.commands);
     }
-    pub fn append_clone(&mut self, other: &StrokePath) {
-        self.commands.extend(other.commands.clone());
-    }
     pub fn get_hull_points(&self) -> Vec<Vec2> {
         let substrokes = &self.to_substrokes();
         // The jitter keeps the hull from degenerating on straight runs; a
@@ -428,9 +370,6 @@ impl StrokePath {
             }
         }
         points
-    }
-    pub fn commands(&self) -> &Vec<PathCmd> {
-        &self.commands
     }
     pub fn sample_points_along(&self, step: f32) -> Vec<CurveSample> {
         let substrokes = self.to_substrokes();
@@ -869,29 +808,6 @@ impl SubstrokePath {
         SubstrokePath {
             commands,
         }
-    }
-    pub fn path_points(&self) -> Vec<Vec2> {
-        let mut points = Vec::new();
-        let mut first = None;
-        for cmd in &self.commands {
-            first = first.or(Some(*cmd));
-            match cmd {
-                PathCmd::MoveTo(x, y) => {
-                    points.push(Vec2::new(*x, *y));
-                }
-                PathCmd::LineTo(x, y) => {
-                    points.push(Vec2::new(*x, *y));
-                }
-                PathCmd::CubicCurveTo(_, _, _, _, x, y) => {
-                    points.push(Vec2::new(*x, *y));
-                }
-                PathCmd::QuadraticCurveTo(_, _, x, y) => {
-                    points.push(Vec2::new(*x, *y));
-                }
-                _ => {}
-            }
-        }
-        points
     }
     pub fn get_point_samples(&self, distance_interval: f32) -> Vec<CurveSample> {
         let mut stepper = SubstrokeStepper::new(self, 50);

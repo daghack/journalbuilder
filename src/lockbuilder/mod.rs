@@ -549,22 +549,6 @@ impl LockConfig {
     }
 }
 
-pub fn string_infovar_set(lock_output: &InfoVarSet) -> HashMap<String, String> {
-    let mut output_set = HashMap::new();
-    for (key, var) in lock_output.iter() {
-        if let InfoVarType::BaseNSymbol(base_n) = var.var_type {
-            if let Some(data) = var.data.as_ref()
-                && let Some(symbols) = data.as_ref().as_any().downcast_ref::<Vec<u32>>() {
-                    let output_string = symbols_to_string(symbols, base_n);
-                    output_set.insert(key.clone(), output_string);
-                }
-        } else {
-            output_set.insert(key.clone(), format!("<non-BaseNSymbol var type: {:?}>", var.var_type));
-        }
-    }
-    output_set
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

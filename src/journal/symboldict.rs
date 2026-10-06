@@ -139,12 +139,6 @@ impl SymbolPathDict {
             missing.len(), FALLBACK_GLYPH, details.join("; "),
         ))
     }
-    pub fn new_symbol(&self, name: &str) -> Option<Symbol> {
-        let origin = Vec2::new(0.0, 0.0);
-        self.get_strokepath(name).map(|path| {
-            Symbol::new(path, 1.0, origin, 0.0)
-        })
-    }
 }
 
 #[cfg(test)]

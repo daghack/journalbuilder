@@ -50,7 +50,7 @@ journals' look or behaviour, so it waits for a call).
 | 34 | Rhai `fn`s can't read script globals | Quirk | Won't fix |
 | 35 | Brush sizes are in output pixels, so each port repeats a 1080 px fit | Anti-pattern | Fixed {{commit: Give the ported journals plain nib sizes}} |
 | 36 | `LockConfig`'s string static inputs only served the JSON journals | Dead code | Fixed {{commit: Remove LockConfig's string static inputs}} |
-| 37 | Public library code left unused by the legacy removal | Dead code | Open |
+| 37 | Public library code left unused by the legacy removal | Dead code | Fixed {{commit: Remove library code nothing uses}} |
 | 38 | `fill_with_msg` loops forever when a glyph can't fit on the path | Bug | Open |
 | 39 | Script errors surface as a panic with debug formatting | Bug | Open |
 | 40 | An empty or zero-width canvas panics the Darkly render | Bug | Open |
@@ -218,8 +218,10 @@ journals' look or behaviour, so it waits for a call).
 - **Problem:** static inputs as `"bN:..."` strings are parsed at build time; rhai passes typed values instead, so the string path is now unused.
 
 ### 37. Public library code left unused by the legacy removal
-- **Status:** Open.
-- **Problem:** the library's `pub` items aren't flagged by the compiler, so helpers only the legacy code used may linger.
+- **Status:** Fixed in {{commit: Remove library code nothing uses}}.
+- **Problem:** the library's `pub` items aren't checked by the dead-code lint, so helpers only the legacy code used lingered.
+- **Change:** with the library's modules made private for one build (exporting only what journalbuild calls), the compiler listed everything unreachable, and it's gone: `CanvasShape`; a dozen `Canvas` transforms and fitting helpers; `TextBox::place_all_symbols` (rhai's `place_all` replaced it); unused `Symbol` constructors and accessors, its `color` field, and the stored hull (only its bounding box is read); assorted `PathCmd`/`StrokePath` point and transform helpers; the symbol builder's filter hook; `SymbolPathDict::new_symbol`; `string_infovar_set`. About 320 lines. `Canvas::to_svg` stays for the tests. Earlier items removed more of the same (`intersects`, `roughen_by`, `save_to_png`, `parse_info_var`, ...).
+- **Why:** code nobody calls still has to be read and kept compiling. All 28 renders across the journals and fixture are byte-identical.
 
 ### 38. `fill_with_msg` loops forever when a glyph can't fit on the path
 - **Where:** `src/journal/rhaientries/mod.rs`

@@ -1,5 +1,5 @@
 use super::paths::{
-    CurveSample, CurveStepper,
+    CurveStepper,
     StrokePath, SubstrokePath, SubstrokeStepper,
 };
 use parry2d::math::Vec2;
@@ -19,7 +19,6 @@ pub enum SymbolType {
 #[derive(Debug, Clone)]
 pub struct SymbolBase {
     symbol_type: SymbolType,
-    hull: parry2d::shape::ConvexPolygon,
     /// The hull's bounding box, which text layout reads for every glyph.
     hull_aabb: parry2d::bounding_volume::Aabb,
 }
@@ -29,7 +28,6 @@ impl SymbolBase {
         let hull = SymbolBase::generate_hull(&symbol_type);
         SymbolBase {
             hull_aabb: hull.local_aabb(),
-            hull,
             symbol_type,
         }
     }
@@ -74,9 +72,6 @@ impl SymbolBase {
         parry2d::shape::ConvexPolygon::from_convex_hull(&[min, Vec2::new(max.x, min.y), max, Vec2::new(min.x, max.y)])
             .expect("a padded box has area")
     }
-    pub fn get_hull(&self) -> &parry2d::shape::ConvexPolygon {
-        &self.hull
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -85,14 +80,9 @@ pub struct Symbol {
     scale: f32,
     position: Vec2,
     rotation_rad: f32,
-    color: String,
 }
 
 impl Symbol {
-    pub fn new(path: StrokePath, scale: f32, position: Vec2, rotation_rad: f32) -> Symbol {
-        let base = Rc::new(SymbolBase::new(SymbolType::Pathed(path)));
-        Symbol::new_from_base_rc(base, scale, position, rotation_rad)
-    }
     pub fn new_default_from_base_rc(base: Rc<SymbolBase>) -> Symbol {
         Symbol::new_from_base_rc(base, 1.0, Vec2::new(0.0, 0.0), 0.0)
     }
@@ -102,17 +92,7 @@ impl Symbol {
             scale,
             position,
             rotation_rad,
-            color: "black".to_string(),
         }
-    }
-    pub fn symbol_type(&self) -> &SymbolType {
-        &self.base.symbol_type
-    }
-    pub fn color(&self) -> &str {
-        &self.color
-    }
-    pub fn set_color(&mut self, color: String) {
-        self.color = color;
     }
     pub fn position(&self) -> Vec2 {
         self.position
@@ -129,26 +109,11 @@ impl Symbol {
     pub fn rotate_rad_by(&mut self, delta: f32) {
         self.rotation_rad += delta;
     }
-    pub fn new_blank(width: f32, height: f32, scale: f32, position: Vec2, rotation_rad: f32) -> Symbol {
-        let base = Rc::new(SymbolBase::new(SymbolType::Blank(width, height)));
-        Symbol::new_from_base_rc(base, scale, position, rotation_rad)
-    }
     fn placed_path(&self, path: &StrokePath) -> StrokePath {
         path.clone()
             .rotated_by(self.rotation_rad)
             .scaled_by(self.scale / 2.0)
             .translated_by(self.position)
-    }
-    pub fn get_strokepath(&self) -> StrokePath {
-        let symbol_base = self.base.as_ref();
-        match &symbol_base.symbol_type {
-            SymbolType::Blank(_, _) => StrokePath::new(),
-            SymbolType::Pathed(path) => path.clone(),
-        }
-    }
-    pub fn get_substrokepaths(&self) -> Vec<SubstrokePath> {
-        self.get_strokepath().to_substrokes()
-
     }
     pub fn placed_strokepath(&self) -> StrokePath {
         let symbol_base = self.base.as_ref();
@@ -157,15 +122,7 @@ impl Symbol {
             SymbolType::Pathed(path) => self.placed_path(path),
         }
     }
-    pub fn placed_substrokepaths(&self) -> Vec<SubstrokePath> {
-        self.placed_strokepath().to_substrokes()
-    }
 
-    pub fn sample_points_along(&self, step: f32) -> Vec<CurveSample> {
-        let path = self.placed_strokepath();
-        path.sample_points_along(step)
-    }
-    
     /// The bounding box of the unplaced glyph's hull (its path spans about
     /// -1..1), without copying the hull.
     pub fn hull_aabb(&self) -> parry2d::bounding_volume::Aabb {

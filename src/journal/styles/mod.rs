@@ -23,11 +23,7 @@ pub fn balanced_base27_symbol(c: char) -> i32 {
 pub struct SymbolStringBuilder<'symdict> {
     symdict: &'symdict SymbolPathDict,
     transformer: StrToSymTransformer<'symdict>,
-    filters: Vec<SymbolFilter>,
 }
-
-/// Adjusts a symbol after it's built (e.g. random jitter).
-pub type SymbolFilter = Box<dyn Fn(&mut Symbol, &mut dyn RngCore)>;
 
 /// Turns one character into a symbol. Any random choice (such as which
 /// variant of a glyph to draw) comes from the `rng` passed to `build`, so
@@ -39,22 +35,10 @@ impl <'symdict> SymbolStringBuilder<'symdict> {
         Self {
             symdict,
             transformer: Box::new(transformer),
-            filters: Vec::new(),
         }
-    }
-    pub fn add_filter<F: Fn(&mut Symbol, &mut dyn RngCore) + 'static>(&mut self, filter: F) {
-        self.filters.push(Box::new(filter));
     }
     pub fn build(&self, s: &str, rng: &mut dyn RngCore) -> Vec<Symbol> {
-        let mut symbols = Vec::new();
-        for c in s.chars() {
-            let mut symbol = (self.transformer)(self.symdict, c, rng);
-            for filter in &self.filters {
-                filter(&mut symbol, rng);
-            }
-            symbols.push(symbol);
-        }
-        symbols
+        s.chars().map(|c| (self.transformer)(self.symdict, c, rng)).collect()
     }
 }
 

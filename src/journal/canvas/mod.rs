@@ -98,29 +98,6 @@ pub struct ColoredStroke {
 }
 
 
-#[derive(Clone, Debug)]
-pub enum CanvasShape {
-    Circle { radius: f32, center: Vec2 },
-    Rectangle { width: f32, height: f32, center: Vec2 },
-    LineSegment { start: Vec2, end: Vec2 },
-}
-
-impl From<CanvasShape> for StrokePath {
-    fn from(val: CanvasShape) -> Self {
-        match val {
-            CanvasShape::Circle { radius, center } => {
-                StrokePath::circle(center, radius)
-            }
-            CanvasShape::Rectangle { width, height, center } => {
-                StrokePath::rectangle(center, width, height)
-            }
-            CanvasShape::LineSegment { start, end } => {
-                StrokePath::line(start, end)
-            }
-        }
-    }
-}
-
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct CanvasStyleOptions {
@@ -175,39 +152,11 @@ impl Canvas {
             bounds: bounding_volume::Aabb::new_invalid(),
         }
     }
-    pub fn is_empty(&self) -> bool {
-        self.strokes.is_empty()
-    }
-    pub fn merge_canvas(&mut self, other: Canvas) {
-        for stroke in other.strokes {
-            self.add_strokes(stroke.path, stroke.style);
-        }
-    }
-    pub fn draw_canvas(&mut self, other: &Canvas) {
-        for stroke in &other.strokes {
-            self.add_strokes(stroke.path.clone(), stroke.style.clone());
-        }
-    }
     pub fn bounds(&self) -> bounding_volume::Aabb {
         self.bounds
     }
     fn update_bounds(&mut self, pos: Vec2) {
         self.bounds.take_point(pos);
-    }
-    pub fn calc_tight_bounds(&self) -> bounding_volume::Aabb {
-        let mut tight_bounds = bounding_volume::Aabb::new_invalid();
-        for stroke in &self.strokes {
-            let samples = stroke.path.sample_points_along(1.0);
-            for pos in samples {
-                tight_bounds.take_point(pos.point);
-            }
-        }
-        tight_bounds
-    }
-    pub fn clear(&mut self) {
-        // clear all strokes
-        self.strokes.clear();
-        self.bounds = bounding_volume::Aabb::new_invalid();
     }
     pub fn add_strokes<ISP: Into<StrokePath>>(&mut self, into_path: ISP, style: StrokeStyle) {
         let path: StrokePath = into_path.into();
@@ -225,15 +174,6 @@ impl Canvas {
             path,
             style,
         });
-    }
-    pub fn add_border_strokes(&mut self, style: StrokeStyle) {
-        let bounds = self.bounds();
-        let rectangle = CanvasShape::Rectangle {
-            center: (bounds.mins + bounds.maxs) / 2.0,
-            width: bounds.maxs.x - bounds.mins.x,
-            height: bounds.maxs.y - bounds.mins.y,
-        };
-        self.add_strokes(rectangle, style);
     }
     pub fn strokes(&self) -> &Vec<ColoredStroke> {
         &self.strokes
@@ -380,93 +320,10 @@ impl Canvas {
         }
         format!("<path d=\"{}\" fill=\"{}\" stroke=\"{}\" />", path, color, color)
     }
-    pub fn translate_by(&mut self, translation: Vec2) {
-        for stroke in &mut self.strokes {
-            stroke.path.translate_by(translation);
-        }
-        self.bounds.mins += translation;
-        self.bounds.maxs += translation;
-    }
-    pub fn scale_by(&mut self, scale: f32) {
-        for stroke in &mut self.strokes {
-            stroke.path.scale_by(scale);
-        }
-        self.bounds.mins *= scale;
-        self.bounds.maxs *= scale;
-    }
-    pub fn rotate_by(&mut self, rot_origin: Vec2, rot_rad: f32) {
-        self.bounds = bounding_volume::Aabb::new_invalid();
-        for stroke in self.strokes.iter_mut() {
-            stroke.path.rotate_around(rot_origin, rot_rad);
-        }
-        let points : Vec<(Vec<Vec2>, f32)> = self.strokes
-            .iter()
-            .map(|stroke| (stroke.path.points_within(), stroke.style.width))
-            .collect();
-
-        for (points, width) in points {
-            let width_vec = Vec2::new(
-                width,
-                width,
-            );
-            for point in points {
-                self.update_bounds(point);
-                self.update_bounds(point + width_vec);
-                self.update_bounds(point - width_vec);
-            }
-        }
-    }
     pub fn get_avoid_tree(&self, avoid_radius: f32) -> AvoidanceKdTree {
         let stroke_path: StrokePath = self.into();
         let avoid_tree = stroke_path.build_kdtree(avoid_radius, None);
         AvoidanceKdTree::new(avoid_tree, avoid_radius)
-    }
-    pub fn normalize(&mut self) {
-        // scale and translate canvas to fit within (0,0) to (1,1)
-        let bounds = self.bounds();
-        let width = bounds.maxs.x - bounds.mins.x;
-        let height = bounds.maxs.y - bounds.mins.y;
-        let scale = 1.0 / width.max(height);
-        self.scale_by(scale);
-        let new_bounds = self.bounds();
-        let translation = Vec2::new(
-            -new_bounds.mins.x,
-            -new_bounds.mins.y,
-        );
-        self.translate_by(translation);
-    }
-    pub fn fit_within_width(&mut self, bounds: &bounding_volume::Aabb, ext_scale: f32) {
-        let current_bounds = self.calc_tight_bounds();
-        let current_width = current_bounds.maxs.x - current_bounds.mins.x;
-        let target_width = bounds.maxs.x - bounds.mins.x;
-        let scale = target_width / current_width;
-        self.scale_by(scale*ext_scale);
-        let new_bounds = self.bounds();
-        // center width within target bounds
-        let translation = Vec2::new(
-            bounds.mins.x + (target_width - (new_bounds.maxs.x - new_bounds.mins.x)) / 2.0 - new_bounds.mins.x,
-            bounds.mins.y - new_bounds.mins.y,
-        );
-        self.translate_by(translation);
-    }
-    pub fn fit_within_bounds(&mut self, bounds: &bounding_volume::Aabb) {
-        let current_bounds = self.calc_tight_bounds();
-        let current_width = current_bounds.maxs.x - current_bounds.mins.x;
-        let current_height = current_bounds.maxs.y - current_bounds.mins.y;
-        let target_width = bounds.maxs.x - bounds.mins.x;
-        let target_height = bounds.maxs.y - bounds.mins.y;
-        let scale_x = target_width / current_width;
-        let scale_y = target_height / current_height;
-        let scale = scale_x.min(scale_y);
-        self.scale_by(scale);
-        let new_bounds = self.bounds();
-        // next we need to translate the canvas so that the top-left corner of the new bounds is at
-        // the top-left corner of the target bounds
-        let translation = Vec2::new(
-            bounds.mins.x - new_bounds.mins.x,
-            bounds.mins.y - new_bounds.mins.y,
-        );
-        self.translate_by(translation);
     }
 }
 
