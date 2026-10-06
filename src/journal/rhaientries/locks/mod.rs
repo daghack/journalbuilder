@@ -1,6 +1,6 @@
 //! Rhai API for building and running lock chains (see `crate::lockbuilder`).
 //! Each lock type is a lock file, `locks/<type>.rhai` (see `library` and
-//! locks/README.md), apart from the ones still written in Rust.
+//! locks/README.md).
 //!
 //! ```rhai
 //! let lock = new_lock("page_one_lock")
@@ -22,7 +22,6 @@ use crate::lockbuilder::{
     base_n_symbols, symbols_to_string, CompositeLock, InfoVar, InfoVarGraphType, InfoVarSet, InfoVarType, Lock,
 };
 use crate::lockbuilder::locks::maze::LockedMaze;
-use crate::lockbuilder::registry::{self, LOCK_TYPES};
 use crate::journal::canvas::artistic::{BuiltMaze, MazeTraversalStrategy};
 use super::Path;
 use std::collections::HashMap;
@@ -110,8 +109,8 @@ impl LockBuilder {
             if next.locks.contains_key(name) {
                 return Err(format!("a lock named '{}' was already added", name));
             }
-            let lock = build_lock(&next.library, name, type_name, options)?;
-            next.locks.insert(name.to_string(), lock);
+            let lock = next.library.build(name, type_name, options)?;
+            next.locks.insert(name.to_string(), Rc::new(lock));
             Ok(())
         })
     }
@@ -384,29 +383,11 @@ fn symbols(base: i64, text: &str) -> RhaiResult<LockValue> {
     Ok(LockValue { var: InfoVar::new_with(InfoVarType::BaseNSymbol(base), data) })
 }
 
-/// A lock of the named type: from its lock file if there is one, else one
-/// of the lock types still written in Rust.
-fn build_lock(library: &Rc<LockLibrary>, name: &str, type_name: &str, options: Map) -> Result<Rc<dyn Lock>, String> {
-    if library.has(type_name) {
-        return Ok(Rc::new(library.build(name, type_name, options)?));
-    }
-    if !LOCK_TYPES.contains(&type_name) {
-        let mut available = library.available()?;
-        available.extend(LOCK_TYPES.iter().map(|t| t.to_string()));
-        available.sort();
-        return Err(format!("unknown lock type '{}'; available: {}", type_name, available.join(", ")));
-    }
-    let options: serde_json::Value = rhai::serde::from_dynamic(&Dynamic::from_map(options))
-        .map_err(|e| format!("options for '{}' aren't valid: {}", name, e))?;
-    registry::build_lock(type_name, &options).map_err(|e| e.to_string())
-}
-
 fn type_name(var_type: &InfoVarType) -> String {
     match var_type {
         InfoVarType::String => "String".to_string(),
         InfoVarType::BaseNSymbol(base) => format!("Base{}Symbol", base),
         InfoVarType::Graph(InfoVarGraphType::MazeLock) => "Maze".to_string(),
-        InfoVarType::Graph(InfoVarGraphType::HuffmanEncoding) => "HuffmanTree".to_string(),
         InfoVarType::LockProcessInfo => "LockProcessInfo".to_string(),
         InfoVarType::MatchAll => "Any".to_string(),
         InfoVarType::Named(name) => name.clone(),

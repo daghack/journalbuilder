@@ -1,5 +1,4 @@
 pub mod locks;
-pub mod registry;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::{DfsPostOrder, Walker};
 use serde::{Serialize, Deserialize};
@@ -42,7 +41,6 @@ pub fn symbols_to_string(symbols: &[u32], base: u32) -> String {
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub enum InfoVarGraphType {
-    HuffmanEncoding,
     MazeLock,
 }
 
