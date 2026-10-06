@@ -675,7 +675,7 @@ mod tests {
     use super::*;
 
     fn engine() -> JournalEngine {
-        let symd = SymbolPathDict::from_file("config/symbols.json").expect("Failed to load symbols.json");
+        let symd = SymbolPathDict::from_file(crate::journal::symboldict::DEFAULT_SYMBOLS).expect("Failed to load symbols.json");
         JournalEngine::new(Arc::new(symd))
     }
 

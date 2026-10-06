@@ -25,7 +25,7 @@ journals' look or behaviour, so it waits for a call).
 | 9 | Plain-PNG style was hard-coded | Gap | Fixed `3275800` |
 | 10 | Canvases are sized to loose stroke bounds, with no margin | Quirk | Deferred |
 | 11 | The output folder is silently emptied before every render | Anti-pattern | Fixed {{commit: Clear only earlier renders from the output folder}} |
-| 12 | `config/symbols.json` is opened relative to the working directory | Anti-pattern | Open |
+| 12 | `config/symbols.json` is opened relative to the working directory | Anti-pattern | Fixed {{commit: Find the symbol dictionary and journals from the repository}} |
 | 13 | `&'j mut Journal<'j>` lifetime tangle | Anti-pattern | Resolved `3c547e8` |
 | 14 | Two parallel pipelines, legacy JSON and rhai | Anti-pattern | Resolved `3c547e8` |
 | 15 | Placeholder types with no content | Dead code | Open |
@@ -237,7 +237,7 @@ journals' look or behaviour, so it waits for a call).
 
 ### 43. Quadratic curves convert to cubics incorrectly, moving their end point
 - **Where:** `src/journal/paths.rs` (`PathCmd::to_cubic_curve`)
-- **Status:** Fixed in {{commit: Clear only earlier renders from the output folder}}. (The duplicate copy went with the legacy code in `3c547e8`.)
-- **Problem:** `create_dir` deleted every file in the output directory, including ones journalbuild didn't write, without saying so.
-- **Change:** `prepare_output_dir` removes only `.png` and `.svg` files (the only things journalbuild writes), reports how many it cleared, and leaves everything else. `--page` runs still clear nothing. The usage text says so.
-- **Why:** clearing is still wanted, so renamed or removed pages don't leave stale renders behind, but notes or other files kept next to the renders shouldn't vanish.
+- **Status:** Fixed in {{commit: Find the symbol dictionary and journals from the repository}}.
+- **Problem:** running journalbuild (or the tests) from anywhere but the repository root failed to find `config/symbols.json` and `journals/`, with a bare panic.
+- **Change:** the defaults are resolved from the crate directory at build time (`symboldict::DEFAULT_SYMBOLS`, and the repository's `journals/`); `--symbols FILE` overrides the dictionary; a dictionary that won't load is a one-line error naming the path. The tests use the same constants.
+- **Why:** journalbuild is run from the repository it's built in, so baking in its location is the simplest correct default; explicit flags cover anything else.

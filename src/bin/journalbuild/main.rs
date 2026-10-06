@@ -38,7 +38,7 @@ const DEFAULT_SUPERSAMPLE: f32 = 1.2;
 
 const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--no-plain]
                     [--scale S] [--supersample K] [--strict-glyphs]
-                    [--journals-dir DIR] [--output-dir DIR]
+                    [--journals-dir DIR] [--output-dir DIR] [--symbols FILE]
 
   --page N,...        Render only these pages (0-based). Other pages'
                       existing output is kept.
@@ -52,7 +52,10 @@ const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--no-
                       back down (default 1.2; any number >= 1, and 1 turns
                       it off). Smooths thin, aliased strokes; render time
                       grows with K squared.
-  --journals-dir DIR  Directory containing journals (default: journals).
+  --journals-dir DIR  Directory containing journals (default: the
+                      repository's journals/).
+  --symbols FILE      Symbol dictionary (default: the repository's
+                      config/symbols.json).
   --output-dir DIR    Where to write renders (default: <journal>/output).
                       Earlier .png/.svg renders there are cleared first
                       (except with --page); other files are kept.";
@@ -66,6 +69,7 @@ struct Args {
     scale: f32,
     supersample: f32,
     output_dir: Option<String>,
+    symbols: String,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -79,7 +83,9 @@ fn parse_args() -> Result<Args, String> {
     // about 1.6x the render time (1.5x about 2.6x, 2x about 3.3x: mark area
     // grows with K²).
     let mut supersample = DEFAULT_SUPERSAMPLE;
-    let mut journals_dir = "journals".to_string();
+    // Defaults are found from the repository, not the working directory.
+    let mut journals_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/journals").to_string();
+    let mut symbols = symboldict::DEFAULT_SYMBOLS.to_string();
     let mut output_dir = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -99,6 +105,9 @@ fn parse_args() -> Result<Args, String> {
             "--journals-dir" => {
                 journals_dir = args.next().ok_or("--journals-dir needs a directory")?;
             }
+            "--symbols" => {
+                symbols = args.next().ok_or("--symbols needs a file")?;
+            }
             "--output-dir" => {
                 output_dir = Some(args.next().ok_or("--output-dir needs a directory")?);
             }
@@ -115,7 +124,7 @@ fn parse_args() -> Result<Args, String> {
         }
     }
     let journal_name = journal_name.ok_or("missing journal name")?;
-    Ok(Args { strict_glyphs, journal_name, journals_dir, pages, plain, scale, supersample, output_dir })
+    Ok(Args { strict_glyphs, journal_name, journals_dir, pages, plain, scale, supersample, output_dir, symbols })
 }
 
 fn main() {
@@ -123,8 +132,10 @@ fn main() {
         eprintln!("error: {}\n\n{}", err, USAGE);
         std::process::exit(1);
     });
-    let symd = symboldict::SymbolPathDict::from_file("config/symbols.json")
-        .expect("Failed to load symbols.json");
+    let symd = symboldict::SymbolPathDict::from_file(&args.symbols).unwrap_or_else(|err| {
+        eprintln!("error: couldn't load the symbol dictionary {}: {}", args.symbols, err);
+        std::process::exit(1);
+    });
 
     let journal_name = &args.journal_name;
     let journal_dir = args.journals_dir.as_str();

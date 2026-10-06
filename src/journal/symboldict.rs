@@ -32,6 +32,10 @@ pub struct SymbolPathDict {
     missing: RefCell<BTreeMap<char, MissingGlyph>>,
 }
 
+/// The repository's symbol dictionary. Resolved at build time, so it's found
+/// whatever directory journalbuild (or a test) runs from.
+pub const DEFAULT_SYMBOLS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/config/symbols.json");
+
 /// The glyph drawn for a character a font has no glyph for.
 pub const FALLBACK_GLYPH: &str = "X";
 

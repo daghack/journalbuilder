@@ -18,7 +18,7 @@ fn rhai_journals(dir: &str) -> Vec<PathBuf> {
 }
 
 fn check_scripts(scripts: &[PathBuf]) {
-    let symd = Arc::new(SymbolPathDict::from_file("config/symbols.json").expect("Failed to load symbols.json"));
+    let symd = Arc::new(SymbolPathDict::from_file(scribe::journal::symboldict::DEFAULT_SYMBOLS).expect("Failed to load symbols.json"));
     let failures: Vec<String> = scripts.iter()
         .filter_map(|script| {
             let mut engine = JournalEngine::new(symd.clone());
@@ -38,14 +38,14 @@ fn display(path: &Path) -> String {
 
 #[test]
 fn every_rhai_journal_evaluates() {
-    let scripts = rhai_journals("journals");
+    let scripts = rhai_journals(concat!(env!("CARGO_MANIFEST_DIR"), "/journals"));
     assert!(!scripts.is_empty(), "no rhai journals found in journals/");
     check_scripts(&scripts);
 }
 
 #[test]
 fn smoke_fixture_evaluates() {
-    let scripts = rhai_journals("tests/smoke_journals");
+    let scripts = rhai_journals(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/smoke_journals"));
     assert!(!scripts.is_empty(), "smoke fixture missing from tests/smoke_journals/");
     check_scripts(&scripts);
 }
