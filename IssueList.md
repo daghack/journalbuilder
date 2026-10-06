@@ -24,7 +24,7 @@ journals' look or behaviour, so it waits for a call).
 | 8 | Maze cells' colour and orientation are generated, then zeroed | Dead logic | Fixed {{commit: Drop the maze cells' unused colour and orientation}} |
 | 9 | Plain-PNG style was hard-coded | Gap | Fixed `3275800` |
 | 10 | Canvases are sized to loose stroke bounds, with no margin | Quirk | Deferred |
-| 11 | The output folder is silently emptied before every render | Anti-pattern | Open |
+| 11 | The output folder is silently emptied before every render | Anti-pattern | Fixed {{commit: Clear only earlier renders from the output folder}} |
 | 12 | `config/symbols.json` is opened relative to the working directory | Anti-pattern | Open |
 | 13 | `&'j mut Journal<'j>` lifetime tangle | Anti-pattern | Resolved `3c547e8` |
 | 14 | Two parallel pipelines, legacy JSON and rhai | Anti-pattern | Resolved `3c547e8` |
@@ -237,7 +237,7 @@ journals' look or behaviour, so it waits for a call).
 
 ### 43. Quadratic curves convert to cubics incorrectly, moving their end point
 - **Where:** `src/journal/paths.rs` (`PathCmd::to_cubic_curve`)
-- **Status:** Fixed in {{commit: Drop the maze cells' unused colour and orientation}}.
-- **Problem:** `SymbolInfo` filled `color` and `orientation` randomly and the maze lock immediately zeroed both; the legacy journal 17 code that mapped them to colours and rotations never had any effect.
-- **Change:** both fields are gone; a cell holds only its symbol.
-- **Why:** dead state that suggested a feature that didn't exist. Lock mazes are unaffected (the layout is generated before cells are filled, and the lock overwrites every symbol), so journal 17's maze renders byte-identically; only `new_maze`'s random placeholder symbols differ.
+- **Status:** Fixed in {{commit: Clear only earlier renders from the output folder}}. (The duplicate copy went with the legacy code in `3c547e8`.)
+- **Problem:** `create_dir` deleted every file in the output directory, including ones journalbuild didn't write, without saying so.
+- **Change:** `prepare_output_dir` removes only `.png` and `.svg` files (the only things journalbuild writes), reports how many it cleared, and leaves everything else. `--page` runs still clear nothing. The usage text says so.
+- **Why:** clearing is still wanted, so renamed or removed pages don't leave stale renders behind, but notes or other files kept next to the renders shouldn't vanish.

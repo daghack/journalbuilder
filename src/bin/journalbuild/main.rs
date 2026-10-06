@@ -3,18 +3,22 @@ use scribe::journal::{symboldict, darkly};
 
 use std::sync::Arc;
 
-fn create_dir(dir: &str) {
-    if !std::path::Path::new(dir).exists() {
-        std::fs::create_dir_all(dir).expect("Failed to create output directory");
-    } else {
-        // clear out existing files in the directory
-        for entry in std::fs::read_dir(dir).expect("Failed to read output directory") {
-            let entry = entry.expect("Failed to read directory entry");
-            let path = entry.path();
-            if path.is_file() {
-                std::fs::remove_file(path).expect("Failed to remove existing file in output directory");
-            }
+/// Create the output directory, or clear out the renders (`.png` and `.svg`
+/// files) of earlier runs, so renamed or removed pages don't linger. Other
+/// files are left alone.
+fn prepare_output_dir(dir: &str) {
+    std::fs::create_dir_all(dir).expect("Failed to create output directory");
+    let mut cleared = 0;
+    for entry in std::fs::read_dir(dir).expect("Failed to read output directory") {
+        let path = entry.expect("Failed to read directory entry").path();
+        let is_render = path.extension().is_some_and(|ext| ext == "png" || ext == "svg");
+        if path.is_file() && is_render {
+            std::fs::remove_file(&path).expect("Failed to remove an earlier render");
+            cleared += 1;
         }
+    }
+    if cleared > 0 {
+        println!("Cleared {} earlier render(s) from {}", cleared, dir);
     }
 }
 
@@ -49,7 +53,9 @@ const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--no-
                       it off). Smooths thin, aliased strokes; render time
                       grows with K squared.
   --journals-dir DIR  Directory containing journals (default: journals).
-  --output-dir DIR    Where to write renders (default: <journal>/output).";
+  --output-dir DIR    Where to write renders (default: <journal>/output).
+                      Earlier .png/.svg renders there are cleared first
+                      (except with --page); other files are kept.";
 
 struct Args {
     strict_glyphs: bool,
@@ -147,7 +153,7 @@ fn main() {
         // Rendering a subset: keep the other pages' existing output.
         std::fs::create_dir_all(&output_dir).expect("Failed to create output directory");
     } else {
-        create_dir(&output_dir);
+        prepare_output_dir(&output_dir);
     }
     let only = args.pages.as_deref();
     if args.plain {
