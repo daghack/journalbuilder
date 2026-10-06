@@ -1,4 +1,3 @@
-use regex::Regex;
 use parry2d::math::{Vec2, Rot2};
 use parry2d::query::RayCast;
 use std::ops::Add;
@@ -237,34 +236,6 @@ impl StrokePath {
         }
         result
     }
-    pub fn from_str(stroke_str: &str) -> Self {
-        let mut path = StrokePath::new();
-        let re = Regex::new(r"([MLCQZ])\s*([^MLCQZ]*)").unwrap();
-        for cap in re.captures_iter(stroke_str) {
-            let cmd = &cap[1];
-            let args = &cap[2];
-            let args: Vec<f32> = args.split_whitespace().filter_map(|s| s.parse().ok()).collect();
-            match cmd {
-                "M" => {
-                    path = path.move_to(args[0], args[1]);
-                }
-                "L" => {
-                    path = path.line_to(args[0], args[1]);
-                }
-                "C" => {
-                    path = path.cubic_curve_to(args[0], args[1], args[2], args[3], args[4], args[5]);
-                }
-                "Q" => {
-                    path = path.quadratic_curve_to(args[0], args[1], args[2], args[3]);
-                }
-                "Z" => {
-                    path = path.close_path();
-                }
-                _ => {}
-            }
-        }
-        path
-    }
     pub fn points_within(&self) -> Vec<Vec2> {
         let mut points = Vec::new();
         for cmd in &self.commands {
@@ -498,6 +469,157 @@ impl StrokePath {
     pub fn merge_path(mut self, other: &StrokePath) -> Self {
         self.commands.extend(other.commands.clone());
         self
+    }
+}
+
+/// Parses SVG path data: every command except arcs, absolute or relative,
+/// with numbers separated by whitespace, commas, or nothing where that's
+/// unambiguous (`1-2`, `.5.5`), and repeated argument groups after a
+/// command (extra pairs after a moveto are linetos).
+impl std::str::FromStr for StrokePath {
+    type Err = String;
+    fn from_str(data: &str) -> Result<Self, String> {
+        PathParser { data: data.as_bytes(), pos: 0 }.parse()
+    }
+}
+
+struct PathParser<'a> {
+    data: &'a [u8],
+    pos: usize,
+}
+
+impl PathParser<'_> {
+    fn skip_separators(&mut self) {
+        while self.pos < self.data.len() && (self.data[self.pos].is_ascii_whitespace() || self.data[self.pos] == b',') {
+            self.pos += 1;
+        }
+    }
+
+    fn peek(&mut self) -> Option<u8> {
+        self.skip_separators();
+        self.data.get(self.pos).copied()
+    }
+
+    fn digits(&mut self) -> usize {
+        let start = self.pos;
+        while self.pos < self.data.len() && self.data[self.pos].is_ascii_digit() {
+            self.pos += 1;
+        }
+        self.pos - start
+    }
+
+    fn number(&mut self, cmd: u8) -> Result<f32, String> {
+        self.skip_separators();
+        let start = self.pos;
+        if matches!(self.data.get(self.pos), Some(b'+' | b'-')) {
+            self.pos += 1;
+        }
+        let mut digits = self.digits();
+        if self.data.get(self.pos) == Some(&b'.') {
+            self.pos += 1;
+            digits += self.digits();
+        }
+        if digits == 0 {
+            self.pos = start;
+            return Err(format!("'{}' expects more numbers at byte {}", cmd as char, start));
+        }
+        if matches!(self.data.get(self.pos), Some(b'e' | b'E')) {
+            let mantissa_end = self.pos;
+            self.pos += 1;
+            if matches!(self.data.get(self.pos), Some(b'+' | b'-')) {
+                self.pos += 1;
+            }
+            if self.digits() == 0 {
+                self.pos = mantissa_end;
+            }
+        }
+        let text = std::str::from_utf8(&self.data[start..self.pos]).expect("numbers are ASCII");
+        text.parse().map_err(|_| format!("invalid number '{}' at byte {}", text, start))
+    }
+
+    fn point(&mut self, cmd: u8, origin: Vec2) -> Result<Vec2, String> {
+        let x = self.number(cmd)?;
+        let y = self.number(cmd)?;
+        Ok(origin + Vec2::new(x, y))
+    }
+
+    fn parse(mut self) -> Result<StrokePath, String> {
+        let mut path = StrokePath::new();
+        let mut current = Vec2::ZERO;
+        let mut subpath_start = Vec2::ZERO;
+        // The previous segment's last control point, for S and T to reflect.
+        let mut last_cubic_control: Option<Vec2> = None;
+        let mut last_quad_control: Option<Vec2> = None;
+        let mut cmd: Option<u8> = None;
+        while let Some(next) = self.peek() {
+            if next.is_ascii_alphabetic() {
+                self.pos += 1;
+                if cmd.is_none() && !matches!(next, b'M' | b'm') {
+                    return Err(format!("path data must start with a moveto, not '{}'", next as char));
+                }
+                cmd = Some(next);
+                if matches!(next, b'Z' | b'z') {
+                    path = path.close_path();
+                    current = subpath_start;
+                    last_cubic_control = None;
+                    last_quad_control = None;
+                    continue;
+                }
+            } else if !matches!(next, b'0'..=b'9' | b'.' | b'+' | b'-') {
+                return Err(format!("unexpected '{}' at byte {}", next as char, self.pos));
+            }
+            let c = cmd.ok_or("path data must start with a moveto")?;
+            let origin = if c.is_ascii_lowercase() { current } else { Vec2::ZERO };
+            let (mut cubic_control, mut quad_control) = (None, None);
+            match c.to_ascii_uppercase() {
+                b'M' => {
+                    current = self.point(c, origin)?;
+                    subpath_start = current;
+                    path = path.move_to(current.x, current.y);
+                    // Further pairs are implicit linetos.
+                    cmd = Some(if c == b'm' { b'l' } else { b'L' });
+                }
+                b'L' => {
+                    current = self.point(c, origin)?;
+                    path = path.line_to(current.x, current.y);
+                }
+                b'H' => {
+                    current.x = origin.x + self.number(c)?;
+                    path = path.line_to(current.x, current.y);
+                }
+                b'V' => {
+                    current.y = origin.y + self.number(c)?;
+                    path = path.line_to(current.x, current.y);
+                }
+                b'C' | b'S' => {
+                    let c1 = if c.to_ascii_uppercase() == b'C' {
+                        self.point(c, origin)?
+                    } else {
+                        last_cubic_control.map_or(current, |p| 2.0 * current - p)
+                    };
+                    let c2 = self.point(c, origin)?;
+                    current = self.point(c, origin)?;
+                    path = path.cubic_curve_to(c1.x, c1.y, c2.x, c2.y, current.x, current.y);
+                    cubic_control = Some(c2);
+                }
+                b'Q' | b'T' => {
+                    let control = if c.to_ascii_uppercase() == b'Q' {
+                        self.point(c, origin)?
+                    } else {
+                        last_quad_control.map_or(current, |p| 2.0 * current - p)
+                    };
+                    current = self.point(c, origin)?;
+                    path = path.quadratic_curve_to(control.x, control.y, current.x, current.y);
+                    quad_control = Some(control);
+                }
+                b'Z' => return Err(format!("unexpected number after '{}' at byte {}", c as char, self.pos)),
+                b'A' => return Err("arcs ('A'/'a') aren't supported".to_string()),
+                _ => return Err(format!("unknown path command '{}'", c as char)),
+            }
+            last_cubic_control = cubic_control;
+            last_quad_control = quad_control;
+        }
+        Ok(path)
     }
 }
 
@@ -874,6 +996,54 @@ mod tests {
 
     fn close(a: Vec2, b: Vec2) -> bool {
         (a - b).length() < 1e-4
+    }
+
+    fn parsed(data: &str) -> String {
+        data.parse::<StrokePath>().unwrap_or_else(|e| panic!("{:?}: {}", data, e)).to_string().trim_end().to_string()
+    }
+
+    #[test]
+    fn parses_absolute_commands() {
+        assert_eq!(parsed("M 0 0 L 1 1 C 1 2 3 4 5 6 Q 7 8 9 10 Z"), "M 0 0 L 1 1 C 1 2 3 4 5 6 Q 7 8 9 10 Z");
+    }
+
+    #[test]
+    fn parses_relative_and_axis_commands() {
+        assert_eq!(parsed("m 1 1 l 2 0 h 3 v 4 z l 1 1"), "M 1 1 L 3 1 L 6 1 L 6 5 Z L 2 2");
+        assert_eq!(parsed("M 1 1 H 5 V 7"), "M 1 1 L 5 1 L 5 7");
+    }
+
+    #[test]
+    fn parses_compact_numbers_and_repeated_arguments() {
+        // Extra pairs after a moveto are linetos; commas and signs separate.
+        assert_eq!(parsed("M0,0 1,1 2,2"), "M 0 0 L 1 1 L 2 2");
+        assert_eq!(parsed("M.5.5-1-1"), "M 0.5 0.5 L -1 -1");
+        assert_eq!(parsed("M1e1,2E-1 L+3-4"), "M 10 0.2 L 3 -4");
+        assert_eq!(parsed("M0 0 L1 1 2 2"), "M 0 0 L 1 1 L 2 2");
+    }
+
+    #[test]
+    fn smooth_curves_reflect_the_previous_control_point() {
+        assert_eq!(parsed("M0 0 C 1 1 2 1 3 0 S 5 -1 6 0"), "M 0 0 C 1 1 2 1 3 0 C 4 -1 5 -1 6 0");
+        assert_eq!(parsed("M0 0 Q 1 1 2 0 T 4 0"), "M 0 0 Q 1 1 2 0 Q 3 -1 4 0");
+        // Without a curve before them, the control point is the current point.
+        assert_eq!(parsed("M0 0 L 1 0 S 2 1 3 0"), "M 0 0 L 1 0 C 1 0 2 1 3 0");
+    }
+
+    #[test]
+    fn rejects_bad_path_data() {
+        for (data, want) in [
+            ("L 1 1", "must start with a moveto"),
+            ("M 1", "'M' expects more numbers"),
+            ("M 0 0 C 1 2 3", "'C' expects more numbers"),
+            ("M 0 0 A 1 1 0 0 1 2 2", "arcs"),
+            ("M 0 0 X 1 1", "unknown path command 'X'"),
+            ("M 0 0 # 1", "unexpected '#'"),
+            ("M 0 0 Z 1", "unexpected number after 'Z'"),
+        ] {
+            let err = data.parse::<StrokePath>().err().unwrap_or_else(|| panic!("{:?} should fail", data));
+            assert!(err.contains(want), "{:?}: {}", data, err);
+        }
     }
 
     #[test]

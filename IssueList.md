@@ -15,7 +15,7 @@ journals' look or behaviour, so it waits for a call).
 | # | Item | Kind | Status |
 |---|---|---|---|
 | 1 | Ternary glyphs used only the first balanced-ternary digit | Bug | Fixed `9465169` |
-| 2 | `StrokePath::from_str` handles only a subset of SVG path syntax | Bug | Open |
+| 2 | `StrokePath::from_str` handles only a subset of SVG path syntax | Bug | Fixed {{commit: Parse SVG path data properly}} |
 | 3 | `bN:` text parsing silently dropped invalid characters | Bug | Fixed `1c93e9e` |
 | 4 | Missing glyphs became `X` with only a stray message | Quirk | Fixed `8a1ca2e` |
 | 5 | Darkly pressure ramps from min to max along every substroke | Quirk | Open |
@@ -56,6 +56,7 @@ journals' look or behaviour, so it waits for a call).
 | 40 | An empty or zero-width canvas panics the Darkly render | Bug | Open |
 | 41 | `new_brush` accepts nonsense pressures and sizes | Gap | Open |
 | 42 | `splat_msgs` on an empty canvas gives a misleading error | Quirk | Open |
+| 43 | Quadratic curves convert to cubics incorrectly, moving their end point | Bug | Open |
 
 ## Details
 
@@ -229,5 +230,12 @@ journals' look or behaviour, so it waits for a call).
 - **Problem:** min pressure above max, negative pressures and sizes are accepted.
 
 ### 42. `splat_msgs` on an empty canvas gives a misleading error
+- **Status:** Fixed in {{commit: Parse SVG path data properly}}.
+- **Problem:** only absolute `M L C Q Z` were understood; comma-separated numbers were silently skipped; too few arguments panicked; the regex was recompiled on every call.
+- **Change:** `StrokePath` implements `FromStr` with a small hand-written parser for the SVG path grammar: every command except arcs, absolute and relative (`H`/`V`, smooth `S`/`T` with control-point reflection), commas, compact numbers (`.5.5`, `1-2`, exponents), and repeated argument groups (extra pairs after a moveto are linetos). Bad data is an error naming the byte offset, and the dictionary load reports which symbol it's in. The `regex` dependency is gone.
+- **Why:** the dictionary happened to use only the supported subset, but any symbol exported with relative commands or commas would have loaded wrong or crashed. All 249 existing symbols parse exactly as before (checked against the old parser's output).
+
+### 43. Quadratic curves convert to cubics incorrectly, moving their end point
+- **Where:** `src/journal/paths.rs` (`PathCmd::to_cubic_curve`)
 - **Status:** Open.
-- **Problem:** with no bounds to place boxes in, it reports that "message 0 doesn't fit".
+- **Problem:** the conversion doesn't know the segment's start point, so it computes wrong control points and shifts the end point by a third of the way past the control point. The plain output's roughening uses it, so quadratic strokes are distorted there.

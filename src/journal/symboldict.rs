@@ -58,7 +58,8 @@ impl SymbolPathDict {
         let mut symbol_map = HashMap::new();
         let mut symbol_base = HashMap::new();
         for symbol in symbols {
-            let mut stroke_path = StrokePath::from_str(&symbol.path);
+            let mut stroke_path: StrokePath = symbol.path.parse()
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("symbol '{}': {}", symbol.name, e)))?;
             match symbol.adj {
                 Some(AdjType::ZeroToOneRemap) => {
                     // This is for when the incoming path is in a 0-1 coordinate space.
@@ -151,6 +152,13 @@ mod tests {
     }
 
     const WITH_X: &str = r#"[{"name": "X", "path": "M -1 -1 L 1 1 M -1 1 L 1 -1", "adj": null}]"#;
+
+    #[test]
+    fn bad_path_data_names_the_symbol() {
+        let json = r#"[{"name": "broken", "path": "M 0 0 L 1", "adj": null}]"#;
+        let err = SymbolPathDict::from_bytes(json.as_bytes()).err().expect("bad path should fail").to_string();
+        assert!(err.contains("symbol 'broken'") && err.contains("'L' expects more numbers"), "{}", err);
+    }
 
     #[test]
     fn fallback_records_each_missing_character() {
