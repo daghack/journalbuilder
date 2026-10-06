@@ -72,7 +72,9 @@ impl Entry {
             let canvases = page.canvases();
             for (canvas_i, canvas) in canvases.iter().enumerate() {
                 let filename = format!("{}/darkly_{}_{}.png", dirname, page.label(i), canvas.label(canvas_i));
-                let canvas : JournalCanvas = canvas.into();
+                let margin = page.margin_for(canvas);
+                let mut canvas : JournalCanvas = canvas.into();
+                canvas.pad(margin);
                 if !canvas.has_strokes() {
                     continue; // journalbuild warns about these (see empty_canvases)
                 }
@@ -100,7 +102,9 @@ impl Entry {
                 let name = format!("{}_{}", page.label(i), canvas.label(canvas_i));
                 let svg_file = format!("{}/{}.svg", dirname, name);
                 let filename = format!("{}/{}.png", dirname, name);
-                let canvas: JournalCanvas = canvas.into();
+                let margin = page.margin_for(canvas);
+                let mut canvas: JournalCanvas = canvas.into();
+                canvas.pad(margin);
                 if !canvas.has_strokes() {
                     continue;
                 }
@@ -219,6 +223,10 @@ pub struct Page {
     /// `None` draws the SVG output as simple strokes.
     #[rhai_type(skip)]
     svg_style: Option<CanvasStyleOptions>,
+    /// Space around each canvas's strokes, in canvas units; `None` for the
+    /// default (see `margin_for`).
+    #[rhai_type(skip)]
+    margin: Option<f64>,
 }
 
 impl Default for Page {
@@ -227,6 +235,7 @@ impl Default for Page {
             canvases: Vec::new(),
             name: None,
             svg_style: Some(DEFAULT_SVG_STYLE),
+            margin: None,
         }
     }
 }
@@ -244,6 +253,34 @@ impl Page {
     }
     pub fn canvases(&self) -> &Vec<CanvasData> {
         &self.canvases
+    }
+    /// The margin rendered around `canvas`: the page's `margin`, or by
+    /// default half the largest brush size on the canvas, the least that
+    /// keeps brush marks at the edges from being cut off. (The bounds
+    /// already include the strokes' widths.)
+    pub fn margin_for(&self, canvas: &CanvasData) -> f32 {
+        match self.margin {
+            Some(margin) => margin as f32,
+            None => canvas.strokes.iter().map(|s| s.style.brush.size as f32 / 2.0).fold(0.0, f32::max),
+        }
+    }
+    fn get_margin(&mut self) -> Dynamic {
+        self.margin.map_or(Dynamic::UNIT, Dynamic::from)
+    }
+    /// `page.margin = 20.0` (canvas units, 0 for none), or `()` for the
+    /// default.
+    fn set_margin(&mut self, margin: Dynamic) -> Result<(), Box<EvalAltResult>> {
+        if margin.is_unit() {
+            self.margin = None;
+            return Ok(());
+        }
+        let value = margin.as_float().or_else(|_| margin.as_int().map(|i| i as f64))
+            .map_err(|t| -> Box<EvalAltResult> { format!("page.margin: expected a number or (), got {}", t).into() })?;
+        if !(value >= 0.0) || !value.is_finite() {
+            return Err(format!("page.margin: must be a finite number of at least 0, got {}", value).into());
+        }
+        self.margin = Some(value);
+        Ok(())
     }
     /// The page's name in output files, given its index in the entry.
     pub fn label(&self, index: usize) -> String {
@@ -309,6 +346,7 @@ impl Page {
             .with_fn("new_page", Self::default)
             .with_get_set("name", Self::get_name, Self::set_name)
             .with_get_set("svg_style", Self::get_svg_style, Self::set_svg_style)
+            .with_get_set("margin", Self::get_margin, Self::set_margin)
         ;
     }
 }
@@ -1069,6 +1107,37 @@ mod tests {
         ] {
             let err = engine().build_entry_str(&format!("{}\n{}", setup, script)).expect_err(script).to_string();
             assert!(err.contains(want), "{}: {}", want, err);
+        }
+    }
+
+    #[test]
+    fn margins_default_to_half_the_largest_brush() {
+        let script = r#"
+            let thin = new_strokestyle(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
+            let wide = new_strokestyle(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 6.0));
+            let c = new_canvas();
+            c.add_strokepath(new_line(new_vec(0.0, 0.0), new_vec(10.0, 10.0)), thin);
+            c.add_strokepath(new_line(new_vec(0.0, 0.0), new_vec(10.0, 0.0)), wide);
+            let auto = new_page();
+            if auto.margin != () { throw "default margin should read as ()"; }
+            auto.add_canvas(c);
+            journal_entry.add_page(auto);
+            let set = new_page();
+            set.margin = 20;
+            set.add_canvas(c);
+            journal_entry.add_page(set);
+        "#;
+        let entry = engine().build_entry_str(script).expect("script should run");
+        let canvas = &entry.pages[0].canvases()[0];
+        assert_eq!(entry.pages[0].margin_for(canvas), 3.0);
+        assert_eq!(entry.pages[1].margin_for(canvas), 20.0);
+        let mut padded: JournalCanvas = canvas.into();
+        let before = padded.render_extents();
+        padded.pad(3.0);
+        assert_eq!(padded.render_extents(), before + parry2d::math::Vec2::splat(6.0));
+        for (value, want) in [("-1", "at least 0"), ("\"wide\"", "expected a number or ()")] {
+            let err = engine().build_entry_str(&format!("let p = new_page();\np.margin = {};", value)).expect_err(value).to_string();
+            assert!(err.contains(want) && err.contains("line 2"), "{}: {}", want, err);
         }
     }
 

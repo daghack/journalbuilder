@@ -12,8 +12,7 @@ journals' look or behaviour, so it waits for a call).
 
 ## Waiting on a decision
 
-- **6:** make `width` geometric in Darkly too (recommended), or keep it as a pressure multiplier. Changes every journal's Darkly look.
-- **10** stays deferred (exact ink bounds).
+Nothing. (10's exact ink bounds remain deferred; it has a margin now.)
 
 ## Summary
 
@@ -28,7 +27,7 @@ journals' look or behaviour, so it waits for a call).
 | 7 | Rust-side randomness was unseeded | Quirk | Fixed `92d9eeb` (plain output: see 26) |
 | 8 | Maze cells' colour and orientation are generated, then zeroed | Dead logic | Fixed `245a5a0` |
 | 9 | Plain-PNG style was hard-coded | Gap | Fixed `3275800` |
-| 10 | Canvases are sized to loose stroke bounds, with no margin | Quirk | Deferred |
+| 10 | Canvases are sized to loose stroke bounds, with no margin | Quirk | Fixed {{commit: Add page.margin, defaulting to half the largest brush}} (margin; exact bounds deferred) |
 | 11 | The output folder is silently emptied before every render | Anti-pattern | Fixed `5f2ff6a` |
 | 12 | `config/symbols.json` is opened relative to the working directory | Anti-pattern | Fixed `7ca07bf` |
 | 13 | `&'j mut Journal<'j>` lifetime tangle | Anti-pattern | Resolved `3c547e8` |
@@ -112,8 +111,10 @@ journals' look or behaviour, so it waits for a call).
 
 ### 10. Canvases are sized to loose stroke bounds, with no margin
 - **Where:** `src/journal/canvas/mod.rs`
-- **Status:** Deferred (exact ink bounds were judged too complex for now).
-- **Problem:** outer strokes touch the image edge. The bounds are also loose in the other direction: they include Bézier control points and pad every point by the stroke width.
+- **Status:** Fixed in {{commit: Add page.margin, defaulting to half the largest brush}} with a margin; exact ink bounds remain deferred (judged too complex for now).
+- **Problem:** each render was sized to its canvas's bounds with no margin, so outer strokes touched the image edge and Darkly's brush marks there could be cut off. The bounds are loose in the other direction too: they include Bézier control points and pad every point by the stroke's width.
+- **Change:** `page.margin` (canvas units) adds space around every canvas on the page, in both outputs. It defaults to half the largest brush size on the canvas, the least that keeps edge marks whole (e.g. about 1 unit on `first_codex`, 1329 to 1331 px); set a number (`0` for none) to override, or `()` for the default again.
+- **Why:** a small, predictable fix for clipped edges, without the exact-ink machinery.
 
 ### 11. The output folder is silently emptied before every render
 - **Where:** `src/bin/journalbuild/main.rs`

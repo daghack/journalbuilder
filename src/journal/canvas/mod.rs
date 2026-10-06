@@ -161,6 +161,13 @@ impl Canvas {
     pub fn render_extents(&self) -> Vec2 {
         self.bounds.extents().max(Vec2::ONE)
     }
+    /// Grow the bounds (and so the render) by `margin` on every side.
+    pub fn pad(&mut self, margin: f32) {
+        if margin > 0.0 && self.bounds.mins.x <= self.bounds.maxs.x {
+            self.bounds.mins -= Vec2::splat(margin);
+            self.bounds.maxs += Vec2::splat(margin);
+        }
+    }
     pub fn has_strokes(&self) -> bool {
         !self.strokes.is_empty()
     }
