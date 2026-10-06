@@ -101,7 +101,7 @@ fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, brush_scale: f32) -
     let layer = engine.add_raster_layer(None);
     let (engine_canvas_width, engine_canvas_height) = engine.canvas_dimensions();
     let bounds = canvas.bounds();
-    let canvas_dims = bounds.extents();
+    let canvas_dims = canvas.render_extents();
     let w_ratio =  engine_canvas_width as f32 / canvas_dims.x;
     let h_ratio = engine_canvas_height as f32 / canvas_dims.y;
     let sample_spacing = SAMPLE_SPACING_PX / w_ratio.max(h_ratio);

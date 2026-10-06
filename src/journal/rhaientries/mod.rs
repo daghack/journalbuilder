@@ -40,6 +40,15 @@ impl Entry {
     pub fn page_count(&self) -> usize {
         self.pages.len()
     }
+    /// `page/canvas` labels of the canvases that have nothing on them, which
+    /// publishing skips.
+    pub fn empty_canvases(&self) -> Vec<String> {
+        self.pages.iter().enumerate().flat_map(|(i, page)| {
+            page.canvases.iter().enumerate()
+                .filter(|(_, canvas)| canvas.strokes.is_empty())
+                .map(move |(c, canvas)| format!("{}/{}", page.label(i), canvas.label(c)))
+        }).collect()
+    }
     /// The index of a page given by index or by name (its output label).
     pub fn page_index(&self, page: &str) -> Result<usize, String> {
         let labels: Vec<String> = self.pages.iter().enumerate().map(|(i, p)| p.label(i)).collect();
@@ -64,12 +73,15 @@ impl Entry {
             for (canvas_i, canvas) in canvases.iter().enumerate() {
                 let filename = format!("{}/darkly_{}_{}.png", dirname, page.label(i), canvas.label(canvas_i));
                 let canvas : JournalCanvas = canvas.into();
-                let canvas_dim = canvas.bounds().extents();
+                if !canvas.has_strokes() {
+                    continue; // journalbuild warns about these (see empty_canvases)
+                }
+                let canvas_dim = canvas.render_extents();
                 // Canvas units are pixels at scale 1, so brushes scale with
                 // the render.
                 let buff = darkly::render_canvas_scaled(
                     &canvas, engine,
-                    (canvas_dim.x * scale) as u32, (canvas_dim.y * scale) as u32,
+                    ((canvas_dim.x * scale) as u32).max(1), ((canvas_dim.y * scale) as u32).max(1),
                     scale, supersample,
                 );
                 buff.save(&filename).map_err(|e| format!("couldn't write {}: {}", filename, e))?;
@@ -86,6 +98,9 @@ impl Entry {
                 let name = format!("{}_{}", page.label(i), canvas.label(canvas_i));
                 let filename = format!("{}/{}.png", dirname, name);
                 let canvas: JournalCanvas = canvas.into();
+                if !canvas.has_strokes() {
+                    continue;
+                }
                 // Seeded by the file's name: the same every run, but each
                 // canvas roughened differently.
                 let png = canvas.to_png(2.0 * scale, page.plain_style.as_ref(), stable_hash(&name));

@@ -155,6 +155,15 @@ impl Canvas {
     pub fn bounds(&self) -> bounding_volume::Aabb {
         self.bounds
     }
+    /// The size renders are drawn at: the bounds' extents, but at least one
+    /// unit on each side, so a straight vertical or horizontal hairline
+    /// still makes an image.
+    pub fn render_extents(&self) -> Vec2 {
+        self.bounds.extents().max(Vec2::ONE)
+    }
+    pub fn has_strokes(&self) -> bool {
+        !self.strokes.is_empty()
+    }
     fn update_bounds(&mut self, pos: Vec2) {
         self.bounds.take_point(pos);
     }
@@ -209,14 +218,11 @@ impl Canvas {
         let (min, max) = (self.bounds.mins, self.bounds.maxs);
         let invalid_bounds = min.x > max.x || min.y > max.y;
         let (width, height, viewbox) = if !invalid_bounds {
-            let viewbox = format!(
-                "{} {} {} {}",
-                min.x,
-                min.y,
-                (max.x - min.x).abs(),
-                (max.y - min.y).abs()
-            );
-            ((max.x - min.x).abs(), (max.y - min.y).abs(), viewbox)
+            let size = self.render_extents();
+            // Center the bounds in the (possibly larger) render area.
+            let origin = min - (size - (max - min)) / 2.0;
+            let viewbox = format!("{} {} {} {}", origin.x, origin.y, size.x, size.y);
+            (size.x, size.y, viewbox)
         } else {
             (100.0, 100.0, "0 0 100 100".to_string())
         };

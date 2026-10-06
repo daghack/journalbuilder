@@ -53,7 +53,7 @@ journals' look or behaviour, so it waits for a call).
 | 37 | Public library code left unused by the legacy removal | Dead code | Fixed {{commit: Remove library code nothing uses}} |
 | 38 | `fill_with_msg` loops forever when a glyph can't fit on the path | Bug | Fixed {{commit: Fail instead of hanging when text can't fit its path}} |
 | 39 | Script errors surface as a panic with debug formatting | Bug | Fixed {{commit: Report errors in one line instead of panicking}} |
-| 40 | An empty or zero-width canvas panics the Darkly render | Bug | Open |
+| 40 | An empty or zero-width canvas panics the Darkly render | Bug | Fixed {{commit: Render degenerate canvases instead of panicking}} |
 | 41 | `new_brush` accepts nonsense pressures and sizes | Gap | Open |
 | 42 | `splat_msgs` on an empty canvas gives a misleading error | Quirk | Open |
 | 43 | Quadratic curves convert to cubics incorrectly, moving their end point | Bug | Open |
@@ -257,7 +257,7 @@ journals' look or behaviour, so it waits for a call).
 
 ### 44. Non-finite numbers from scripts can panic layout and hatching
 - **Where:** `src/journal/paths.rs`, `src/journal/symbol.rs`, `src/journal/rhaientries/`
-- **Status:** Fixed in {{commit: Report errors in one line instead of panicking}}.
-- **Problem:** a script error printed `Failed to execute result.: Custom { kind: Other, error: "Failed to Evaluate Rhai: ..." }` and a panic note, with exit status 101; a journal with no pages silently rendered nothing; failing to write a render, read the journal or clear the output folder panicked.
-- **Change:** journalbuild's work runs in `run() -> Result`, and every failure is one `error:` line with exit status 1: `error: journals/x/journal_entry.rhai: Runtime error: oops (line 1, position 1)`. `build_entry_*` return rhai's message with the file name; the publishing functions and `prepare_output_dir` return errors naming the file; an entry with no pages is an error. The `EntryPath`/`JournalPath` debug prints are gone, and the GPU is only set up once the script has succeeded.
-- **Why:** script errors are the common case while writing a journal, so they should read like compiler errors, not crashes.
+- **Status:** Fixed in {{commit: Render degenerate canvases instead of panicking}}.
+- **Problem:** an empty canvas, or one with no width or height (a vertical hairline with width 0) or under a pixel at the render scale, rounded to a 0-pixel render and failed Darkly's resize assertion; the plain output failed to parse its zero-size SVG.
+- **Change:** canvases render at `Canvas::render_extents()`, their bounds' extents but at least one unit a side (the bounds centred in it), for both outputs, and Darkly renders are at least 1×1 px. Canvases with no strokes are skipped, with one warning listing them (`page/canvas`).
+- **Why:** an empty or degenerate canvas is a script-level mistake at worst, worth a warning, not a crash mid-render. Every existing render is byte-identical.

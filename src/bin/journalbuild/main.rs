@@ -154,6 +154,10 @@ fn run(args: &Args) -> Result<(), String> {
     if entry.page_count() == 0 {
         return Err(format!("{} produced no pages; add them with journal_entry.add_page(page)", journal_path));
     }
+    let empty = entry.empty_canvases();
+    if !empty.is_empty() {
+        eprintln!("warning: skipping {} empty canvas(es), with nothing drawn on them: {}", empty.len(), empty.join(", "));
+    }
     let pages: Option<Vec<usize>> = match &args.pages {
         None => None,
         Some(pages) => Some(pages.iter().map(|page| entry.page_index(page))
