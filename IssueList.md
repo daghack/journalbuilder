@@ -49,7 +49,7 @@ journals' look or behaviour, so it waits for a call).
 | 33 | Rhai scripts can't emit warnings; `print` goes to stdout | Gap | Fixed {{commit: Add warn() for scripts}} |
 | 34 | Rhai `fn`s can't read script globals | Quirk | Won't fix |
 | 35 | Brush sizes are in output pixels, so each port repeats a 1080 px fit | Anti-pattern | Fixed {{commit: Give the ported journals plain nib sizes}} |
-| 36 | `LockConfig`'s string static inputs only served the JSON journals | Dead code | Open |
+| 36 | `LockConfig`'s string static inputs only served the JSON journals | Dead code | Fixed {{commit: Remove LockConfig's string static inputs}} |
 | 37 | Public library code left unused by the legacy removal | Dead code | Open |
 | 38 | `fill_with_msg` loops forever when a glyph can't fit on the path | Bug | Open |
 | 39 | Script errors surface as a panic with debug formatting | Bug | Open |
@@ -255,8 +255,7 @@ journals' look or behaviour, so it waits for a call).
 
 ### 44. Non-finite numbers from scripts can panic layout and hatching
 - **Where:** `src/journal/paths.rs`, `src/journal/symbol.rs`, `src/journal/rhaientries/`
-- **Status:** Fixed in {{commit: Give the ported journals plain nib sizes}}.
-- **Problem:** each ported journal computed its Calligraphy nib as `1.75 * extent / 1080`, journal 17 through two helper functions, which looked like brush sizes were in output pixels and had to be fitted to each page.
-- **Finding:** they aren't. A canvas unit is a pixel at `--scale 1` and Darkly multiplies brush sizes by the scale, so brush sizes are already in canvas units like everything else. The formula only reproduced the legacy renderer, which fit every page to 1080 px.
-- **Change:** the journals use plain nib sizes with a one-line note on where they came from: 2.15 (first_codex), 1.65 and 2.05 (journal 17's maze and dial), 2.43 (journal 18), the formula's values to two decimals.
-- **Why:** the scripts get simpler and say what they mean; the look is unchanged.
+- **Status:** Fixed in {{commit: Remove LockConfig's string static inputs}}.
+- **Problem:** `LockConfig.static_inputs` held `"bN:..."` strings, parsed by `parse_info_var` when the lock was built. Only the JSON journals wrote them; rhai passes typed values with `set_input` instead.
+- **Change:** the field, its parsing and `parse_info_var` are gone. Fixed inputs are only `CompositeLock::add_static_input` with an `InfoVar`. The validation tests moved onto `base_n_symbols`, which rhai's `symbols()` uses.
+- **Why:** one way to fix a lock input, and no stringly-typed parsing step left over from the JSON format.

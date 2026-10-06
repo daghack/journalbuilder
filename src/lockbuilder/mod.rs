@@ -90,22 +90,6 @@ impl std::fmt::Debug for InfoVar {
     }
 }
 
-/// Parse lock text: `"bN:TEXT"` is TEXT as symbols in base N (see
-/// `base_n_symbols`); anything else is a plain `String` value.
-pub fn parse_info_var(text: &str) -> Result<InfoVar, String> {
-    let Some(rest) = text.strip_prefix('b') else {
-        return Ok(InfoVar::new_with(InfoVarType::String, text.to_string()));
-    };
-    let Some((base, symbols)) = rest.split_once(':') else {
-        return Ok(InfoVar::new_with(InfoVarType::String, text.to_string()));
-    };
-    if base.is_empty() || !base.chars().all(|c| c.is_ascii_digit()) {
-        return Ok(InfoVar::new_with(InfoVarType::String, text.to_string()));
-    }
-    let base: u32 = base.parse().map_err(|_| format!("base '{}' in '{}' is too large", base, text))?;
-    Ok(InfoVar::new_with(InfoVarType::BaseNSymbol(base), base_n_symbols(base, symbols)?))
-}
-
 /// TEXT as symbols in `base`, rejecting characters outside the base rather
 /// than dropping them. Base 10 takes digits 0-9; base 27 takes space (0)
 /// and letters A-Z (1-26); other bases from 2 to 26 take the first `base`
@@ -504,7 +488,6 @@ pub struct LockConfig {
     pub name: String,
     pub locks: HashMap<String, LockTypeConfig>,
     pub connections: Vec<(String, String)>,
-    pub static_inputs: HashMap<String, String>,
 }
 
 impl LockConfig {
@@ -554,16 +537,6 @@ impl LockConfig {
             remaining_inputs.remove(input);
             remaining_outputs.remove(output);
         }
-        // add static inputs
-        let mut static_inputs = HashMap::new();
-        for (input_name, input_value) in self.static_inputs {
-            let required_input_type = remaining_inputs.get(&input_name).ok_or(format!("Input {} not found in remaining inputs", input_name))?;
-            let input_var = parse_info_var(&input_value).map_err(|e| format!("static input '{}': {}", input_name, e))?;
-            if input_var.var_type != *required_input_type && *required_input_type != InfoVarType::MatchAll {
-                return Err(format!("Static input {} has the wrong type", input_name).into());
-            }
-            static_inputs.insert(input_name, input_var);
-        }
         Ok(CompositeLock {
             name: self.name,
             locks,
@@ -571,7 +544,7 @@ impl LockConfig {
             cached_inputs: remaining_inputs,
             cached_outputs: remaining_outputs,
             exec_graph: None,
-            static_inputs,
+            static_inputs: HashMap::new(),
         })
     }
 }
@@ -596,55 +569,26 @@ pub fn string_infovar_set(lock_output: &InfoVarSet) -> HashMap<String, String> {
 mod tests {
     use super::*;
 
-    fn symbols(text: &str) -> (InfoVarType, Vec<u32>) {
-        let var = parse_info_var(text).expect("should parse");
-        let data = var.borrow_data::<Vec<u32>>().expect("symbol data").clone();
-        (var.var_type, data)
-    }
-
     #[test]
-    fn parses_base_n_text() {
-        assert_eq!(symbols("b27:Hi z"), (InfoVarType::BaseNSymbol(27), vec![8, 9, 0, 26]));
-        assert_eq!(symbols("b10:1084"), (InfoVarType::BaseNSymbol(10), vec![1, 0, 8, 4]));
-        assert_eq!(symbols("b26:baz"), (InfoVarType::BaseNSymbol(26), vec![1, 0, 25]));
-        assert_eq!(symbols("b3:CAB"), (InfoVarType::BaseNSymbol(3), vec![2, 0, 1]));
-    }
-
-    #[test]
-    fn other_text_is_a_string() {
-        for text in ["hello", "b:", "bx:1", "b27", ""] {
-            let var = parse_info_var(text).expect("should parse");
-            assert_eq!(var.var_type, InfoVarType::String, "{:?}", text);
-            assert_eq!(var.borrow_data::<String>().unwrap(), text);
-        }
+    fn reads_base_n_text() {
+        assert_eq!(base_n_symbols(27, "Hi z"), Ok(vec![8, 9, 0, 26]));
+        assert_eq!(base_n_symbols(10, "1084"), Ok(vec![1, 0, 8, 4]));
+        assert_eq!(base_n_symbols(26, "baz"), Ok(vec![1, 0, 25]));
+        assert_eq!(base_n_symbols(3, "CAB"), Ok(vec![2, 0, 1]));
     }
 
     #[test]
     fn rejects_characters_outside_the_base() {
         let cases = [
-            ("b27:HELLO, WORLD", "',' isn't a base-27 symbol"),
-            ("b10:12a", "'a' isn't a base-10 symbol"),
-            ("b26:hello world", "' ' isn't a base-26 symbol"),
-            ("b3:ABD", "'D' isn't a base-3 symbol (letters A-C)"),
-            ("b40:A", "between 2 and 27"),
-            ("b99999999999:A", "too large"),
+            (27, "HELLO, WORLD", "',' isn't a base-27 symbol"),
+            (10, "12a", "'a' isn't a base-10 symbol"),
+            (26, "hello world", "' ' isn't a base-26 symbol"),
+            (3, "ABD", "'D' isn't a base-3 symbol (letters A-C)"),
+            (40, "A", "between 2 and 27"),
         ];
-        for (text, expected) in cases {
-            let err = parse_info_var(text).err().unwrap_or_else(|| panic!("{} should fail", text));
+        for (base, text, expected) in cases {
+            let err = base_n_symbols(base, text).err().unwrap_or_else(|| panic!("{} should fail", text));
             assert!(err.contains(expected), "{}: {}", text, err);
         }
-    }
-
-    #[test]
-    fn invalid_static_input_fails_the_lock() {
-        let config: LockConfig = serde_json::from_value(serde_json::json!({
-            "name": "x",
-            "locks": { "s": { "type_name": "substitution_cipher", "options": { "base_n": 27 } } },
-            "connections": [],
-            "static_inputs": { "s.ordering": "b27:IKBNAZ-XYF" },
-        })).unwrap();
-        let err = CompositeLock::from_lockconfig(config, |c| registry::build_lock(&c.type_name, &c.options))
-            .expect_err("invalid static input should fail").to_string();
-        assert!(err.contains("static input 's.ordering'") && err.contains("'-'"), "{}", err);
     }
 }

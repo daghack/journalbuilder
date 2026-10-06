@@ -52,7 +52,6 @@ impl LockBuilder {
             name: name.to_string(),
             locks: HashMap::new(),
             connections: Vec::new(),
-            static_inputs: HashMap::new(),
         };
         let lock = compile(&config, &[]).map_err(|e| format!("new_lock: {}", e))?;
         Ok(Self { config, fixed_inputs: Vec::new(), lock })
