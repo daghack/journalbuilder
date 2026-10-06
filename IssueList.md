@@ -23,11 +23,11 @@ Nothing. (10's exact ink bounds remain deferred; it has a margin now.)
 | 3 | `bN:` text parsing silently dropped invalid characters | Bug | Fixed `1c93e9e` |
 | 4 | Missing glyphs became `X` with only a stray message | Quirk | Fixed `8a1ca2e` |
 | 5 | Darkly pressure ramps from min to max along every substroke | Quirk | Fixed `aa79ac3` |
-| 6 | A style's `width` is stroke width in SVG but a pressure multiplier in Darkly | Anti-pattern | Fixed {{commit: Make the SVG output opt-in with --svg}} (width kept, documented) |
+| 6 | A style's `width` is stroke width in SVG but a pressure multiplier in Darkly | Anti-pattern | Fixed `658ee48` (width kept, documented) |
 | 7 | Rust-side randomness was unseeded | Quirk | Fixed `92d9eeb` (plain output: see 26) |
 | 8 | Maze cells' colour and orientation are generated, then zeroed | Dead logic | Fixed `245a5a0` |
 | 9 | Plain-PNG style was hard-coded | Gap | Fixed `3275800` |
-| 10 | Canvases are sized to loose stroke bounds, with no margin | Quirk | Fixed {{commit: Add page.margin, defaulting to half the largest brush}} (margin; exact bounds deferred) |
+| 10 | Canvases are sized to loose stroke bounds, with no margin | Quirk | Fixed `58c59c6` (margin; exact bounds deferred) |
 | 11 | The output folder is silently emptied before every render | Anti-pattern | Fixed `5f2ff6a` |
 | 12 | `config/symbols.json` is opened relative to the working directory | Anti-pattern | Fixed `7ca07bf` |
 | 13 | `&'j mut Journal<'j>` lifetime tangle | Anti-pattern | Resolved `3c547e8` |
@@ -91,7 +91,7 @@ Nothing. (10's exact ink bounds remain deferred; it has a margin now.)
 
 ### 6. A style's `width` is stroke width in SVG but a pressure multiplier in Darkly
 - **Where:** `src/journal/canvas/mod.rs`, `src/journal/darkly.rs`
-- **Status:** Fixed in {{commit: Make the SVG output opt-in with --svg}}: the width behaviour is kept and documented, and the output where it's geometric is now opt-in. Earlier, a saturation warning was added in `71e8f42`.
+- **Status:** Fixed in `658ee48`: the width behaviour is kept and documented, and the output where it's geometric is now opt-in. Earlier, a saturation warning was added in `71e8f42`.
 - **Problem:** the same number means a geometric width in the SVG ("plain") output and a pressure multiplier in Darkly, so the two outputs can't be tuned together; and Darkly caps pressure at 1, so past `1 / max_pressure` a wider stroke looks no heavier.
 - **Change:** journalbuild renders only Darkly by default; `--svg` adds the SVG output, now written as `{page}_{canvas}.svg` as well as rasterised to `{page}_{canvas}.png` (`--no-plain` is gone). `page.plain_style` is renamed `page.svg_style`. `new_strokestyle`, `--svg`'s help and `publish_svgs` document what `width` means in each output, and the saturation warning stays.
 - **Why:** Darkly is the output the journals are tuned for, so `width` keeps its Darkly meaning; the SVG output, where it means something else, is something you ask for.
@@ -111,7 +111,7 @@ Nothing. (10's exact ink bounds remain deferred; it has a margin now.)
 
 ### 10. Canvases are sized to loose stroke bounds, with no margin
 - **Where:** `src/journal/canvas/mod.rs`
-- **Status:** Fixed in {{commit: Add page.margin, defaulting to half the largest brush}} with a margin; exact ink bounds remain deferred (judged too complex for now).
+- **Status:** Fixed in `58c59c6` with a margin; exact ink bounds remain deferred (judged too complex for now).
 - **Problem:** each render was sized to its canvas's bounds with no margin, so outer strokes touched the image edge and Darkly's brush marks there could be cut off. The bounds are loose in the other direction too: they include Bézier control points and pad every point by the stroke's width.
 - **Change:** `page.margin` (canvas units) adds space around every canvas on the page, in both outputs. It defaults to half the largest brush size on the canvas, the least that keeps edge marks whole (e.g. about 1 unit on `first_codex`, 1329 to 1331 px); set a number (`0` for none) to override, or `()` for the default again.
 - **Why:** a small, predictable fix for clipped edges, without the exact-ink machinery.
