@@ -108,13 +108,14 @@ impl PathCmd {
             PathCmd::ClosePath => PathCmd::ClosePath,
         }
     }
-    pub fn pos_roughen_by(&self, max_magnitude: f32) -> Self {
-        let new_roughen = || {
-            let random_theta = rand::random::<f32>() * std::f32::consts::PI * 2.0;
-            let random_magnitude = rand::random::<f32>() * max_magnitude;
+    /// Nudge the end point and control points by random offsets of up to
+    /// `max_magnitude`.
+    pub fn pos_roughen_by(&self, max_magnitude: f32, rng: &mut dyn RngCore) -> Self {
+        let mut new_roughen = || {
+            let random_theta = rng.random::<f32>() * std::f32::consts::PI * 2.0;
+            let random_magnitude = rng.random::<f32>() * max_magnitude;
             Vec2::new(random_magnitude * random_theta.cos(), random_magnitude * random_theta.sin())
         };
-        let n_roughens = |c| { let mut roughens = vec![]; for _ in 0..c { roughens.push(new_roughen()); } roughens };
         let pos_roughen = new_roughen();
         match self {
             PathCmd::MoveTo(x, y) => {
@@ -124,9 +125,9 @@ impl PathCmd {
                 PathCmd::LineTo(x + pos_roughen.x, y + pos_roughen.y)
             }
             PathCmd::CubicCurveTo(x1, y1, x2, y2, x, y) => {
-                let control_roughens = n_roughens(2);
-                PathCmd::CubicCurveTo(x1 + control_roughens[0].x, y1 + control_roughens[0].y,
-                                      x2 + control_roughens[1].x, y2 + control_roughens[1].y,
+                let (c1, c2) = (new_roughen(), new_roughen());
+                PathCmd::CubicCurveTo(x1 + c1.x, y1 + c1.y,
+                                      x2 + c2.x, y2 + c2.y,
                                       x + pos_roughen.x, y + pos_roughen.y)
             }
             PathCmd::QuadraticCurveTo(x1, y1, x, y) => {
@@ -271,7 +272,7 @@ impl StrokePath {
         }
         self
     }
-    pub fn adjust_by(&mut self, f: impl Fn(&PathCmd) -> PathCmd) {
+    pub fn adjust_by(&mut self, mut f: impl FnMut(&PathCmd) -> PathCmd) {
         for cmd in &mut self.commands {
             *cmd = f(cmd);
         }
@@ -304,12 +305,6 @@ impl StrokePath {
             substrokes.push(current_substroke);
         }
         substrokes
-    }
-    pub fn roughened_by(mut self, max_magnitude: f32) -> Self {
-        for cmd in &mut self.commands {
-            *cmd = cmd.pos_roughen_by(max_magnitude);
-        }
-        self
     }
     pub fn new() -> Self {
         StrokePath {

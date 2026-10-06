@@ -39,7 +39,7 @@ journals' look or behaviour, so it waits for a call).
 | 23 | Chained calls on a variable only apply the first call to it | Quirk | Needs decision (documented {{commit: Document the chain-on-a-variable caveat}}) |
 | 24 | A rhai `for` loop variable is a copy | Quirk | Won't fix (documented `76d8d84`) |
 | 25 | Darkly renders each canvas separately; plain output merges them | Anti-pattern | Fixed {{commit: Render the plain output per canvas, like Darkly}} |
-| 26 | Plain-output roughening and noise are unseeded | Quirk | Open |
+| 26 | Plain-output roughening and noise are unseeded | Quirk | Fixed {{commit: Seed the plain output's roughening and noise}} |
 | 27 | `left_handed_maze_path` duplicates `new_maze(..).path()` | Redundancy | Open |
 | 28 | `--page` takes only indices, not page names | Gap | Open |
 | 29 | Font sets send digits and punctuation to the upper fonts | Quirk | Open |
@@ -247,7 +247,7 @@ journals' look or behaviour, so it waits for a call).
 
 ### 44. Non-finite numbers from scripts can panic layout and hatching
 - **Where:** `src/journal/paths.rs`, `src/journal/symbol.rs`, `src/journal/rhaientries/`
-- **Status:** Fixed in {{commit: Render the plain output per canvas, like Darkly}}.
-- **Problem:** a page with two canvases gave one plain PNG (its canvases layered) but two Darkly PNGs, so "page" meant different things per output, and canvas names only reached the Darkly files.
-- **Change:** the plain output is one PNG per canvas too, `{page}_{canvas}.png` beside `darkly_{page}_{canvas}.png`; the page-layering conversion is gone. To draw several canvases as one image, merge them with `canvas.add_canvas(..)`, as the journals already do for splatted notes.
-- **Why:** per-canvas images are what canvas names were added for, so the plain output follows Darkly rather than the other way round. Plain file names change (`page_0.png` becomes `page_0_0.png`; journalbuild clears the old ones on the next full render).
+- **Status:** Fixed in {{commit: Seed the plain output's roughening and noise}}.
+- **Problem:** the plain PNG's roughened strokes and Perlin texture used `rand::random`, so the plain output differed on every run even with a seeded script.
+- **Change:** `Canvas::to_svg` and `to_png` take a seed, and the roughening and noise draw from a generator seeded with it. Each canvas is seeded with an FNV-1a hash of its output name (`{page}_{canvas}`), stable across runs and Rust versions, so canvases differ from each other but not from run to run. The unused `roughen_by`, `roughened_by`, `save_to_png` and `save_to_svg` went rather than being converted.
+- **Why:** with this, every output of a journal (plain and Darkly) is byte-identical run to run.

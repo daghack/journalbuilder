@@ -3,6 +3,8 @@ use serde::Deserialize;
 use crate::journal::{symbol::AvoidanceKdTree, StrokePath, img::pixmap_from_svg_tree};
 use parry2d::math::{Vec2};
 use noise::{NoiseFn, Perlin};
+use rand::rngs::StdRng;
+use rand::{Rng, RngCore, SeedableRng};
 use parry2d::bounding_volume;
 
 pub mod textbox;
@@ -236,11 +238,11 @@ impl Canvas {
     pub fn strokes(&self) -> &Vec<ColoredStroke> {
         &self.strokes
     }
-    pub fn to_svg_group(&self, id: Option<&str>, style: Option<&CanvasStyleOptions>) -> String {
+    pub fn to_svg_group(&self, id: Option<&str>, style: Option<&CanvasStyleOptions>, rng: &mut dyn RngCore) -> String {
         let mut svg = String::new();
         for stroke in &self.strokes {
             if let Some(opts) = style {
-                svg.push_str(&self.stylized_path(stroke, opts));
+                svg.push_str(&self.stylized_path(stroke, opts, rng));
             } else {
                 let ColoredStroke{path, style} = stroke;
                 svg.push_str(&format!(
@@ -257,7 +259,12 @@ impl Canvas {
             format!("<g>{}</g>", svg)
         }
     }
-    pub fn to_svg(&self, stylized: Option<&CanvasStyleOptions>) -> String {
+    /// The canvas as SVG. With a style, strokes are roughened and tapered
+    /// using a generator seeded with `seed`, so the result is reproducible.
+    pub fn to_svg(&self, stylized: Option<&CanvasStyleOptions>, seed: u64) -> String {
+        self.to_svg_with(stylized, &mut StdRng::seed_from_u64(seed))
+    }
+    fn to_svg_with(&self, stylized: Option<&CanvasStyleOptions>, rng: &mut dyn RngCore) -> String {
         let mut svg = String::new();
         let (min, max) = (self.bounds.mins, self.bounds.maxs);
         let invalid_bounds = min.x > max.x || min.y > max.y;
@@ -277,13 +284,13 @@ impl Canvas {
             "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{}\" height=\"{}\" viewBox=\"{}\">",
             width, height, viewbox
         ));
-        svg.push_str(&self.to_svg_group(None, stylized));
+        svg.push_str(&self.to_svg_group(None, stylized, rng));
         svg.push_str("</svg>");
         svg
     }
-    pub fn stylize_pixmap(pixmap: &mut tiny_skia::Pixmap, stylized: &CanvasStyleOptions) {
+    pub fn stylize_pixmap(pixmap: &mut tiny_skia::Pixmap, stylized: &CanvasStyleOptions, rng: &mut dyn RngCore) {
         if stylized.noise_amplitude > 0.0 {
-            let perlin = Perlin::new(rand::random::<u32>());
+            let perlin = Perlin::new(rng.random::<u32>());
             let width = pixmap.width();
             pixmap.pixels_mut().par_iter_mut().enumerate().for_each(|(i, p)| {
                 let x = (i as u32 % width) as f64;
@@ -311,26 +318,18 @@ impl Canvas {
             });
         }
     }
-    pub fn save_to_png(&self, path: String, scale: f32, stylized: Option<&CanvasStyleOptions>) {
-        let png_data = self.to_png(scale, stylized);
-        let path = format!("{}.png", path);
-        std::fs::write(path, png_data).expect("Failed to write PNG file");
-    }
-    pub fn to_png(&self, scale: f32, stylized: Option<&CanvasStyleOptions>) -> Vec<u8> {
-        let svg_data = self.to_svg(stylized);
+    /// The canvas as a PNG; see `to_svg` for `seed`.
+    pub fn to_png(&self, scale: f32, stylized: Option<&CanvasStyleOptions>, seed: u64) -> Vec<u8> {
+        let rng = &mut StdRng::seed_from_u64(seed);
+        let svg_data = self.to_svg_with(stylized, rng);
         let svg_tree = usvg::Tree::from_str(&svg_data, &usvg::Options::default()).expect("Failed to parse SVG");
         let mut pixmap = pixmap_from_svg_tree(&svg_tree, scale, scale);
         if let Some(opts) = stylized {
-            Self::stylize_pixmap(&mut pixmap, opts);
+            Self::stylize_pixmap(&mut pixmap, opts, rng);
         }
         pixmap.encode_png().expect("Failed to encode PNG")
     }
-    pub fn save_to_svg(&self, path: String, stylized: Option<&CanvasStyleOptions>) {
-        let svg_data = self.to_svg(stylized);
-        let path = format!("{}.svg", path);
-        std::fs::write(path, svg_data).expect("Failed to write SVG file");
-    }
-    pub fn stylized_path(&self, stroke: &ColoredStroke, opts: &CanvasStyleOptions) -> String {
+    pub fn stylized_path(&self, stroke: &ColoredStroke, opts: &CanvasStyleOptions, rng: &mut dyn RngCore) -> String {
         let pos_roughen = opts.roughness;
         let distance = opts.point_sample_distance;
         let trail_off_percent = opts.trail_off_percent;
@@ -339,7 +338,7 @@ impl Canvas {
         let width = stroke.style.width;
         let halfwidth = width / 2.0;
         path.adjust_by(|&cmd| {
-            cmd.to_cubic_curve().pos_roughen_by(pos_roughen)
+            cmd.to_cubic_curve().pos_roughen_by(pos_roughen, rng)
         });
         let substrokes = path.to_substrokes();
         let mut path = StrokePath::new();
@@ -380,13 +379,6 @@ impl Canvas {
             path = path.close_path();
         }
         format!("<path d=\"{}\" fill=\"{}\" stroke=\"{}\" />", path, color, color)
-    }
-    pub fn roughen_by(&mut self, roughness: f32) {
-        for stroke in &mut self.strokes {
-            stroke.path.adjust_by(|&cmd| {
-                cmd.to_cubic_curve().pos_roughen_by(roughness)
-            });
-        }
     }
     pub fn translate_by(&mut self, translation: Vec2) {
         for stroke in &mut self.strokes {
@@ -502,6 +494,22 @@ mod tests {
     fn rejects_invalid_colors() {
         assert!(parse_color("darkredd").is_err());
         assert!(parse_color("").is_err());
+    }
+}
+
+#[cfg(test)]
+mod plain_output_tests {
+    use super::*;
+
+    #[test]
+    fn styled_output_follows_the_seed() {
+        let mut canvas = Canvas::new();
+        let style = StrokeStyle { width: 2.0, color: "black".to_string(), brush: None };
+        canvas.add_strokes(StrokePath::new().move_to(0.0, 0.0).cubic_curve_to(10.0, 0.0, 20.0, 10.0, 30.0, 30.0), style);
+        let opts = CanvasStyleOptions { roughness: 2.0, point_sample_distance: 1.0, trail_off_percent: 0.15, noise_amplitude: 1.5 };
+        assert_eq!(canvas.to_png(1.0, Some(&opts), 7), canvas.to_png(1.0, Some(&opts), 7));
+        assert_ne!(canvas.to_png(1.0, Some(&opts), 7), canvas.to_png(1.0, Some(&opts), 8));
+        assert_eq!(canvas.to_svg(Some(&opts), 7), canvas.to_svg(Some(&opts), 7));
     }
 }
 

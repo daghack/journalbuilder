@@ -71,9 +71,12 @@ impl Entry {
         println!("Publishing PNGs:");
         for (i, page) in self.selected_pages(only) {
             for (canvas_i, canvas) in page.canvases().iter().enumerate() {
-                let filename = format!("{}/{}_{}.png", dirname, page.label(i), canvas.label(canvas_i));
+                let name = format!("{}_{}", page.label(i), canvas.label(canvas_i));
+                let filename = format!("{}/{}.png", dirname, name);
                 let canvas: JournalCanvas = canvas.into();
-                let png = canvas.to_png(2.0 * scale, page.plain_style.as_ref());
+                // Seeded by the file's name: the same every run, but each
+                // canvas roughened differently.
+                let png = canvas.to_png(2.0 * scale, page.plain_style.as_ref(), stable_hash(&name));
                 println!("\t - {}", filename);
                 std::fs::write(&filename, png).unwrap_or_else(|e| panic!("Failed to write {}: {}", filename, e));
             }
@@ -130,6 +133,12 @@ impl From<BrushSettings> for Brush {
             pressure_profile: bs.pressure_profile,
         }
     }
+}
+
+/// FNV-1a: a string hash that, unlike std's, is guaranteed stable across
+/// Rust versions.
+fn stable_hash(text: &str) -> u64 {
+    text.bytes().fold(0xcbf29ce484222325, |hash, byte| (hash ^ byte as u64).wrapping_mul(0x100000001b3))
 }
 
 /// Names become file names, so they're limited to letters, digits, `_`,
@@ -754,7 +763,7 @@ mod tests {
     fn page_svg(script: &str) -> String {
         let entry = engine().build_entry_str(script).expect("script should run");
         let canvas: JournalCanvas = entry.pages[0].canvases()[0].clone().into();
-        canvas.to_svg(None)
+        canvas.to_svg(None, 0)
     }
 
     #[test]
