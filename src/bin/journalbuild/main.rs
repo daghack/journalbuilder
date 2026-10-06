@@ -40,8 +40,8 @@ const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--no-
                     [--scale S] [--supersample K] [--strict-glyphs]
                     [--journals-dir DIR] [--output-dir DIR] [--symbols FILE]
 
-  --page N,...        Render only these pages (0-based). Other pages'
-                      existing output is kept.
+  --page P,...        Render only these pages, by index (0-based) or by
+                      name. Other pages' existing output is kept.
   --no-plain          Skip the plain PNG/SVG output; only render with Darkly.
   --strict-glyphs     Fail before rendering if any character had no glyph
                       (by default they're drawn as X and listed as a warning).
@@ -64,7 +64,7 @@ struct Args {
     strict_glyphs: bool,
     journal_name: String,
     journals_dir: String,
-    pages: Option<Vec<usize>>,
+    pages: Option<Vec<String>>,
     plain: bool,
     scale: f32,
     supersample: f32,
@@ -74,7 +74,7 @@ struct Args {
 
 fn parse_args() -> Result<Args, String> {
     let mut journal_name = None;
-    let mut pages: Option<Vec<usize>> = None;
+    let mut pages: Option<Vec<String>> = None;
     let mut plain = true;
     let mut strict_glyphs = false;
     let mut scale = 1.0;
@@ -112,9 +112,9 @@ fn parse_args() -> Result<Args, String> {
                 output_dir = Some(args.next().ok_or("--output-dir needs a directory")?);
             }
             "--page" => {
-                let list = args.next().ok_or("--page needs a page number or list, e.g. --page 0,2")?;
-                let parsed = list.split(',')
-                    .map(|n| n.trim().parse::<usize>().map_err(|_| format!("invalid page number '{}'", n)))
+                let list = args.next().ok_or("--page needs a page or list, e.g. --page 0,2 or --page maze")?;
+                let parsed = list.split(',').map(str::trim)
+                    .map(|p| if p.is_empty() { Err(format!("empty page in '{}'", list)) } else { Ok(p.to_string()) })
                     .collect::<Result<Vec<_>, _>>()?;
                 pages.get_or_insert_with(Vec::new).extend(parsed);
             }
@@ -153,19 +153,19 @@ fn main() {
         .build_entry_file(&journal_path)
         .expect("Failed to execute result.");
     check_missing_glyphs(&symdarc, args.strict_glyphs);
-    if let Some(pages) = &args.pages
-        && let Some(bad) = pages.iter().find(|&&p| p >= entry.page_count()) {
-            eprintln!("error: page {} doesn't exist; {} has {} page(s) (0-{})",
-                bad, journal_name, entry.page_count(), entry.page_count().saturating_sub(1));
+    let pages: Option<Vec<usize>> = args.pages.as_ref().map(|pages| {
+        pages.iter().map(|page| entry.page_index(page)).collect::<Result<_, _>>().unwrap_or_else(|err| {
+            eprintln!("error: {} (in {})", err, journal_name);
             std::process::exit(1);
-        }
-    if args.pages.is_some() {
+        })
+    });
+    if pages.is_some() {
         // Rendering a subset: keep the other pages' existing output.
         std::fs::create_dir_all(&output_dir).expect("Failed to create output directory");
     } else {
         prepare_output_dir(&output_dir);
     }
-    let only = args.pages.as_deref();
+    let only = pages.as_deref();
     if args.plain {
         entry.publish_pngs(&output_dir, args.scale, only);
     }

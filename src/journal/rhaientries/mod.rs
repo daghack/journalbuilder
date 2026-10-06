@@ -40,6 +40,18 @@ impl Entry {
     pub fn page_count(&self) -> usize {
         self.pages.len()
     }
+    /// The index of a page given by index or by name (its output label).
+    pub fn page_index(&self, page: &str) -> Result<usize, String> {
+        let labels: Vec<String> = self.pages.iter().enumerate().map(|(i, p)| p.label(i)).collect();
+        let found = match page.parse::<usize>() {
+            Ok(index) => Some(index).filter(|&i| i < labels.len()),
+            Err(_) => labels.iter().position(|label| label == page),
+        };
+        found.ok_or_else(|| match labels.len() {
+            0 => format!("page '{}' doesn't exist; the journal has no pages", page),
+            n => format!("page '{}' doesn't exist; pages are 0-{}: {}", page, n - 1, labels.join(", ")),
+        })
+    }
     /// Pages to publish with their original indices: all of them, or only
     /// those listed in `only`.
     fn selected_pages<'a>(&'a self, only: Option<&'a [usize]>) -> impl Iterator<Item = (usize, &'a Page)> + 'a {
@@ -804,6 +816,17 @@ mod tests {
         entry.publish_pngs(dir.to_str().unwrap(), 0.1, Some(&[1]));
         assert!(dir.join("maze_ring.png").is_file() && dir.join("maze_1.png").is_file());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn pages_are_found_by_index_or_name() {
+        let entry = engine().build_entry_str(NAMED).expect("script should run");
+        assert_eq!(entry.page_index("0"), Ok(0));
+        assert_eq!(entry.page_index("maze"), Ok(1));
+        assert_eq!(entry.page_index("page_0"), Ok(0));
+        let err = entry.page_index("2").unwrap_err();
+        assert!(err.contains("pages are 0-1: page_0, maze"), "{}", err);
+        assert!(entry.page_index("lock").is_err());
     }
 
     #[test]

@@ -41,7 +41,7 @@ journals' look or behaviour, so it waits for a call).
 | 25 | Darkly renders each canvas separately; plain output merges them | Anti-pattern | Fixed {{commit: Render the plain output per canvas, like Darkly}} |
 | 26 | Plain-output roughening and noise are unseeded | Quirk | Fixed {{commit: Seed the plain output's roughening and noise}} |
 | 27 | `left_handed_maze_path` duplicates `new_maze(..).path()` | Redundancy | Fixed {{commit: Replace left_handed_maze_path with new_maze}} |
-| 28 | `--page` takes only indices, not page names | Gap | Open |
+| 28 | `--page` takes only indices, not page names | Gap | Fixed {{commit: Let --page take page names}} |
 | 29 | Font sets send digits and punctuation to the upper fonts | Quirk | Open |
 | 30 | A glyph that is a single straight line panics when loaded | Bug | Open |
 | 31 | The Darkly dependency follows a branch instead of a pinned revision | Anti-pattern | Open |
@@ -174,7 +174,10 @@ journals' look or behaviour, so it waits for a call).
 - **Why:** one maze API. The copper letters' renders are byte-identical (all 24 files).
 
 ### 28. `--page` takes only indices, not page names
-- **Status:** Open.
+- **Status:** Fixed in {{commit: Let --page take page names}}.
+- **Problem:** `--page` took only indices, though pages can now be named (`maze`, `balanced_ternary`), and output files are named after them.
+- **Change:** `--page` takes indices or names, mixed (`--page 0,maze`). `Entry::page_index` resolves them; an unknown page is an error that lists the journal's pages with their indices.
+- **Why:** names are what you see in the output folder, and they don't shift when pages are added or reordered.
 
 ### 29. Font sets send digits and punctuation to the upper fonts
 - **Where:** `src/journal/styles/mod.rs`
