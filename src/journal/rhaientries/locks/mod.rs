@@ -36,11 +36,19 @@ pub fn register(engine: &mut Engine, library: Rc<LockLibrary>) {
         .build_type::<LockBuilder>()
         .build_type::<LockValue>()
         .build_type::<LockResult>()
-        .build_type::<Maze>()
         .register_fn("new_lock", move |name: &str| LockBuilder::new(library.clone(), name))
-        .register_fn("new_maze", |seed: i64, width: i64, height: i64| new_maze(seed, width, height, "LeftHanded"))
-        .register_fn("new_maze", new_maze)
         .register_fn("symbols", symbols);
+    register_maze(engine);
+    // Paths are for drawing, so lock files don't get this one.
+    engine.register_fn("path", |maze: &mut Maze| maze.path());
+}
+
+/// `new_maze` and the `Maze` type, for journals and lock files alike.
+fn register_maze(engine: &mut Engine) {
+    engine
+        .build_type::<Maze>()
+        .register_fn("new_maze", |seed: i64, width: i64, height: i64| new_maze(seed, width, height, "LeftHanded"))
+        .register_fn("new_maze", new_maze);
 }
 
 /// A lock chain under construction: named locks, connections from one
@@ -318,6 +326,22 @@ impl Maze {
             .collect()
     }
 
+    /// Write `symbols` into the cells in traversal order, and 0 into any
+    /// cells left over.
+    fn fill(&mut self, symbols: Array) -> RhaiResult<()> {
+        let cells = self.locked.maze.all_cells().len();
+        if symbols.len() > cells {
+            return Err(format!("fill: {} symbols don't fit in the maze's {} cells", symbols.len(), cells).into());
+        }
+        let symbols = symbols.iter().enumerate()
+            .map(|(i, item)| item.as_int().ok().and_then(|s| u32::try_from(s).ok())
+                .ok_or_else(|| -> Box<EvalAltResult> { format!("fill: item {} ({:?}) isn't a symbol", i, item).into() }))
+            .collect::<RhaiResult<Vec<u32>>>()?;
+        let mut symbols = symbols.into_iter();
+        self.locked.maze.map_inners(self.locked.strategy, |inner| inner.symbol = symbols.next().unwrap_or(0));
+        Ok(())
+    }
+
     /// A path along the corridors, in grid units, following the same
     /// traversal the text was written in.
     fn path(&mut self) -> Path {
@@ -332,7 +356,7 @@ impl CustomType for Maze {
             .with_fn("width", Self::width)
             .with_fn("height", Self::height)
             .with_fn("cells", Self::cells)
-            .with_fn("path", Self::path);
+            .with_fn("fill", Self::fill);
     }
 }
 
@@ -617,10 +641,42 @@ mod tests {
             [w, h]
         "#, MAZE));
         let (w, h) = (size[0].clone().cast::<i64>(), size[1].clone().cast::<i64>());
-        // 11 symbols need 6 nodes; MazeLock sizes mazes to stay square, so
+        // 11 symbols need 6 nodes; maze_lock sizes mazes to stay square, so
         // that's 3x3 nodes rather than 3x2: 5x5 grid cells with the
         // passages between them.
         assert_eq!((w, h), (5, 5));
+    }
+
+    #[test]
+    fn maze_lock_uses_the_smallest_square_maze() {
+        // A w x w maze holds w*w nodes and w*w - 1 passages, so 7 symbols
+        // need 2x2 nodes, 11 and 17 need 3x3, and 19 need 4x4.
+        for (len, side) in [(0, 1), (1, 1), (7, 2), (8, 3), (11, 3), (17, 3), (19, 4)] {
+            let width: i64 = eval(&format!(r#"
+                let lock = new_lock("m").add("m", "maze_lock", #{{ input_base: 27 }})
+                    .set_input("m.random_seed", symbols(10, "42"));
+                let text = "{}";
+                let result = lock.run(#{{ "m.maze_text": symbols(27, text) }});
+                if lock.unlock(result).text("m.maze_text") != text {{ throw "didn't round-trip"; }}
+                result.get("m.generated_maze").maze().width()
+            "#, "A".repeat(len)));
+            assert_eq!(width, 2 * side - 1, "{} symbols", len);
+        }
+    }
+
+    #[test]
+    fn maze_fill_writes_in_traversal_order() {
+        let symbols: Array = eval(r#"
+            let maze = new_maze(3, 2, 2);
+            maze.fill([5, 6, 7]);
+            maze.cells().map(|c| c.symbol)
+        "#);
+        let symbols: Vec<i64> = symbols.into_iter().map(|s| s.cast::<i64>()).collect();
+        assert_eq!(symbols, vec![5, 6, 7, 0, 0, 0, 0]);
+        let err = error("let m = new_maze(3, 2, 2);\nm.fill([1, 2, 3, 4, 5, 6, 7, 8]);");
+        assert!(err.contains("8 symbols don't fit in the maze's 7 cells") && err.contains("line 2"), "{}", err);
+        let err = error("let m = new_maze(3, 2, 2);\nm.fill([1, -2]);");
+        assert!(err.contains("item 1 (-2) isn't a symbol"), "{}", err);
     }
 
     #[test]

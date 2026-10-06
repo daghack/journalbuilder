@@ -4,7 +4,6 @@
 use super::Lock;
 use super::locks::doublering::{DoubleRingLock, KeyedDoubleRingLock};
 use super::locks::huffman::HuffmanEncodingLock;
-use super::locks::maze::MazeLock;
 use super::locks::util::mergealpha::MergeAlphaInputs;
 use super::locks::util::splitsymbols::SplitSymbolsLock;
 use serde::de::DeserializeOwned;
@@ -18,7 +17,6 @@ pub const LOCK_TYPES: &[&str] = &[
     "keyed_doublering",
     "merge_alpha",
     "split_symbols",
-    "maze_lock",
 ];
 
 /// Build a lock of the named type from its JSON options.
@@ -29,7 +27,6 @@ pub fn build_lock(type_name: &str, options: &serde_json::Value) -> Result<Rc<dyn
         "keyed_doublering" => make(type_name, options, KeyedDoubleRingLock::new),
         "merge_alpha" => make(type_name, options, MergeAlphaInputs::new),
         "split_symbols" => make(type_name, options, SplitSymbolsLock::new),
-        "maze_lock" => make(type_name, options, MazeLock::new),
         _ => Err(format!("unknown lock type '{}'; available: {}", type_name, LOCK_TYPES.join(", ")).into()),
     }
 }
@@ -75,7 +72,7 @@ mod tests {
     #[test]
     fn reports_unknown_type_and_bad_options() {
         let unknown = build_lock("rot13", &serde_json::json!({})).err().unwrap().to_string();
-        assert!(unknown.contains("unknown lock type 'rot13'") && unknown.contains("maze_lock"), "{}", unknown);
+        assert!(unknown.contains("unknown lock type 'rot13'") && unknown.contains("keyed_doublering"), "{}", unknown);
         let bad = build_lock("keyed_doublering", &serde_json::json!({ "base": "lots" })).err().unwrap().to_string();
         assert!(bad.contains("invalid options for lock type 'keyed_doublering'"), "{}", bad);
     }

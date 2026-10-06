@@ -5,7 +5,6 @@ use crate::journal::symbol::Symbol;
 use crate::journal::paths::StrokePath;
 
 use std::collections::{HashMap, HashSet};
-use serde::{Serialize, Deserialize};
 use petgraph::graph::{UnGraph, NodeIndex};
 use petgraph::algo::min_spanning_tree;
 use rand::{Rng, RngCore, SeedableRng, Fill};
@@ -276,12 +275,6 @@ impl<T> BuiltMaze<T> where
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct MazeOptions {
-    pub strategy: MazeTraversalStrategy,
-    pub input_base: u32,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct MazeLockCell<T: Clone> {
     pub position: MazePosition,
@@ -309,7 +302,7 @@ impl PartialOrd for MazeLockEdge {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MazeTraversalStrategy {
     LeftHanded,
     RightHanded,

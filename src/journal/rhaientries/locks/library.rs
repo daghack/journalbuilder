@@ -2,7 +2,7 @@
 //! Lock files run in an engine of their own and work with plain rhai
 //! values; locks/README.md describes what a lock file defines.
 
-use super::{parse_type, type_name, Maze};
+use super::{parse_type, register_maze, type_name, Maze};
 use crate::lockbuilder::{
     base_n_symbols, symbols_to_string, InfoVar, InfoVarGraphType, InfoVarSet, InfoVarType, InfoVarTypeSet, Lock,
 };
@@ -387,11 +387,12 @@ impl Lock for RhaiLock {
     }
 }
 
-/// The engine lock files run in: rhai's standard library plus symbol
-/// helpers. Nothing random and nothing drawn, so a lock is a pure function
-/// of its options and values.
+/// The engine lock files run in: rhai's standard library, symbol helpers
+/// and mazes. Nothing random and nothing drawn, so a lock is a pure
+/// function of its options and values.
 fn lock_engine() -> Engine {
     let mut engine = Engine::new();
+    register_maze(&mut engine);
     engine
         // symbol_type(27) is "Base27Symbol".
         .register_fn("symbol_type", |base: Dynamic| -> RhaiResult<String> {
