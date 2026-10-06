@@ -54,8 +54,26 @@ impl SymbolBase {
                 path.get_hull_points()
             }
         };
-        let points = gift_wrap(&points);
-        parry2d::shape::ConvexPolygon::from_convex_hull(&points).expect("Failed to generate convex hull")
+        if points.len() >= 3 {
+            if let Some(hull) = parry2d::shape::ConvexPolygon::from_convex_hull(&gift_wrap(&points)) {
+                return hull;
+            }
+        }
+        // A straight line (or a point, or nothing) has no area to wrap, so
+        // use its bounding box, padded so layout still sees a little width
+        // and height.
+        const PAD: f32 = 0.02;
+        let (mut min, mut max) = (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN));
+        for p in &points {
+            min = min.min(*p);
+            max = max.max(*p);
+        }
+        if points.is_empty() {
+            (min, max) = (Vec2::ZERO, Vec2::ZERO);
+        }
+        let (min, max) = (min - Vec2::splat(PAD), max + Vec2::splat(PAD));
+        parry2d::shape::ConvexPolygon::from_convex_hull(&[min, Vec2::new(max.x, min.y), max, Vec2::new(min.x, max.y)])
+            .expect("a padded box has area")
     }
     pub fn get_hull(&self) -> &parry2d::shape::ConvexPolygon {
         &self.hull

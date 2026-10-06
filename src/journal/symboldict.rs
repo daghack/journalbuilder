@@ -158,6 +158,15 @@ mod tests {
     const WITH_X: &str = r#"[{"name": "X", "path": "M -1 -1 L 1 1 M -1 1 L 1 -1", "adj": null}]"#;
 
     #[test]
+    fn straight_line_glyphs_load() {
+        for path in ["M -1 -1 L 1 1", "M -1 0 L 1 0", "M 0 -1 L 0 1", "M 0 0 L 0 0"] {
+            let json = format!(r#"[{{"name": "line", "path": "{}", "adj": null}}]"#, path);
+            let symd = dict(&json);
+            assert!(symd.get_symbol_base("line").is_some(), "{}", path);
+        }
+    }
+
+    #[test]
     fn bad_path_data_names_the_symbol() {
         let json = r#"[{"name": "broken", "path": "M 0 0 L 1", "adj": null}]"#;
         let err = SymbolPathDict::from_bytes(json.as_bytes()).expect_err("bad path should fail").to_string();

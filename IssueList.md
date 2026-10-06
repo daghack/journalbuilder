@@ -43,7 +43,7 @@ journals' look or behaviour, so it waits for a call).
 | 27 | `left_handed_maze_path` duplicates `new_maze(..).path()` | Redundancy | Fixed {{commit: Replace left_handed_maze_path with new_maze}} |
 | 28 | `--page` takes only indices, not page names | Gap | Fixed {{commit: Let --page take page names}} |
 | 29 | Font sets send digits and punctuation to the upper fonts | Quirk | Fixed {{commit: Fall back to the other case's fonts before the X glyph}} |
-| 30 | A glyph that is a single straight line panics when loaded | Bug | Open |
+| 30 | A glyph that is a single straight line panics when loaded | Bug | Fixed {{commit: Give straight-line glyphs a hull instead of panicking}} |
 | 31 | The Darkly dependency follows a branch instead of a pinned revision | Anti-pattern | Open |
 | 32 | The copper letters' brush sizes predate the fork's Calligraphy change | Quirk | Open |
 | 33 | Rhai scripts can't emit warnings; `print` goes to stdout | Gap | Open |
@@ -253,7 +253,7 @@ journals' look or behaviour, so it waits for a call).
 
 ### 44. Non-finite numbers from scripts can panic layout and hatching
 - **Where:** `src/journal/paths.rs`, `src/journal/symbol.rs`, `src/journal/rhaientries/`
-- **Status:** Fixed in {{commit: Fall back to the other case's fonts before the X glyph}}.
-- **Problem:** `FontSet` looked up lowercase letters only in the lower fonts and everything else (capitals, digits, punctuation) only in the upper fonts, so a character one set lacked became `X` even when the other set had it.
-- **Change:** each character still tries its own set first (lowercase letters the lower fonts; everything else the upper fonts), then falls back to the other set, then to `X`. `missing_glyphs()` lists every font tried.
-- **Why:** sending punctuation to the upper fonts is right for the existing fonts (only `loche_upper` has punctuation), so the priority stays; the fallback can only replace an `X` with a real glyph. No journal had missing glyphs, so no render changes.
+- **Status:** Fixed in {{commit: Give straight-line glyphs a hull instead of panicking}}.
+- **Problem:** a glyph whose points are collinear (a single straight stroke like `-` or `/`), a single point, or empty, has no convex hull, and loading the dictionary panicked with "Failed to generate convex hull".
+- **Change:** when the points don't wrap into a hull, the glyph's hull is its bounding box padded by 0.02 (1% of a glyph's span), so layout still sees a sliver of width and height.
+- **Why:** such glyphs are legitimate (dashes, slashes, `I`). Glyphs that already had a hull are untouched.
