@@ -15,26 +15,6 @@ use ::darkly::engine::DarklyEngine;
 
 type JournalEntryFunc = for<'j> fn(&'j mut Journal<'j>, &'j symboldict::SymbolPathDict) -> JournalManifest<'j>;
 
-fn journal_entry_17<'j>(journal: &'j mut Journal<'j>, symd: &'j symboldict::SymbolPathDict) -> JournalManifest<'j> {
-    journal.add_symboldict(&symd);
-    journal.build_entries(|journal, _, entry| {
-
-        let maze_canvas = build_maze_canvas_from_entry(&entry, &symd);
-        journal.add_page(
-            "maze".to_string(),
-            JournalPage::CanvasIllustration(maze_canvas),
-            entry.canvas_options.clone(),
-        );
-
-        let bt_canvas = build_balanced_ternary_canvas(&symd);
-        journal.add_page(
-            "balanced_ternary".to_string(),
-            JournalPage::SplatMsgsOnCanvas(bt_canvas, entry.shorts.clone(), 30.0, 2.0, "darkred".to_string()),
-            entry.canvas_options.clone(),
-        );
-    })
-}
-
 fn journal_entry_18<'j>(journal: &'j mut Journal<'j>, symd: &'j symboldict::SymbolPathDict) -> JournalManifest<'j> {
     let textbox_width = 150.0;
     let textbox_height = 150.0;
@@ -115,7 +95,6 @@ const LEGACY_DARKLY_SIZE: f32 = 1080.0;
 
 fn legacy_journalbuild(symd: &symboldict::SymbolPathDict, engine: &mut DarklyEngine, journal_dir: &str, journal_name: &str, dir_name: &str, plain: bool, scale: f32, supersample: f32, strict_glyphs: bool) {
     let journal_funcs: HashMap<&str, JournalEntryFunc> = HashMap::from([
-        ("journal_entry_17", journal_entry_17 as JournalEntryFunc),
         ("journal_entry_18", journal_entry_18 as JournalEntryFunc),
     ]);
 
