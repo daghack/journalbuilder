@@ -38,7 +38,7 @@ journals' look or behaviour, so it waits for a call).
 | 22 | Legacy splat: lost jitter, a possible infinite loop, silent drops | Bug | Fixed `d1ff166` |
 | 23 | Chained calls on a variable only apply the first call to it | Quirk | Needs decision (documented {{commit: Document the chain-on-a-variable caveat}}) |
 | 24 | A rhai `for` loop variable is a copy | Quirk | Won't fix (documented `76d8d84`) |
-| 25 | Darkly renders each canvas separately; plain output merges them | Anti-pattern | Open |
+| 25 | Darkly renders each canvas separately; plain output merges them | Anti-pattern | Fixed {{commit: Render the plain output per canvas, like Darkly}} |
 | 26 | Plain-output roughening and noise are unseeded | Quirk | Open |
 | 27 | `left_handed_maze_path` duplicates `new_maze(..).path()` | Redundancy | Open |
 | 28 | `--page` takes only indices, not page names | Gap | Open |
@@ -247,11 +247,7 @@ journals' look or behaviour, so it waits for a call).
 
 ### 44. Non-finite numbers from scripts can panic layout and hatching
 - **Where:** `src/journal/paths.rs`, `src/journal/symbol.rs`, `src/journal/rhaientries/`
-- **Status:** Needs decision. Documented in {{commit: Document the chain-on-a-variable caveat}}.
-- **Problem:** path, glyph and canvas functions modify their target and return a copy, so `g.translate_by(v).scale_by(2.0);` changes `g` only by the translation: rhai passes the variable by reference to the first call of a chain only, and later calls act on the returned copy, which is then dropped. Chains on temporaries and `x = x.a().b()` work. There's no way for a function to tell which case it's in, so it can't even warn.
-- **Change so far:** the caveat and the `x = x.a().b()` form are documented next to the functions and in the glyph module docs.
-- **Options for a real fix:**
-  1. *Handle semantics*: these types share their data behind `Rc<RefCell<..>>`, so every copy of a value aliases one object. Chains then work everywhere, and so does mutating in a `for` loop (24). But plain assignment aliases too: after `let b = a; b.translate_by(v);`, `a` has moved as well, and code that copies a canvas to vary it (the naming test does) needs an explicit `.copy()`.
-  2. *Return nothing from mutators* (`p.line_to(v)` returns `()`): a chain on anything becomes a clear "function not found" error instead of a silent no-op, but every chain on a temporary (`new_strokepath().move_to(a).line_to(b)`, used throughout the journals) has to be rewritten as statements.
-  3. *Keep it, documented* (the current state).
-- **Recommendation:** 1, with a `.copy()` function and a sweep of the journals for copy-then-modify code; it removes both this and 24's footgun. It changes the meaning of assignment for these types, so it's your call.
+- **Status:** Fixed in {{commit: Render the plain output per canvas, like Darkly}}.
+- **Problem:** a page with two canvases gave one plain PNG (its canvases layered) but two Darkly PNGs, so "page" meant different things per output, and canvas names only reached the Darkly files.
+- **Change:** the plain output is one PNG per canvas too, `{page}_{canvas}.png` beside `darkly_{page}_{canvas}.png`; the page-layering conversion is gone. To draw several canvases as one image, merge them with `canvas.add_canvas(..)`, as the journals already do for splatted notes.
+- **Why:** per-canvas images are what canvas names were added for, so the plain output follows Darkly rather than the other way round. Plain file names change (`page_0.png` becomes `page_0_0.png`; journalbuild clears the old ones on the next full render).

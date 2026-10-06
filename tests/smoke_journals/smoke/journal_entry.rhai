@@ -130,8 +130,8 @@ for (block, i) in boxes {
 	}
 }
 
-// Named pages and canvases name their output files: lock.png and
-// darkly_lock_maze.png, instead of page_2.png and darkly_page_2_0.png.
+// Named pages and canvases name their output files: lock_maze.png and
+// darkly_lock_maze.png, instead of page_2_0.png and darkly_page_2_0.png.
 maze_canvas.name = "maze";
 let page_three = new_page();
 page_three.name = "lock";

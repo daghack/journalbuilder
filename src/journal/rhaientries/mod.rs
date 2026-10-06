@@ -65,15 +65,18 @@ impl Entry {
             }
         }
     }
+    /// Plain renders, one per canvas like the Darkly ones:
+    /// `{page}_{canvas}.png`.
     pub fn publish_pngs(&self, dirname: &str, scale: f32, only: Option<&[usize]>) {
         println!("Publishing PNGs:");
         for (i, page) in self.selected_pages(only) {
-            let page_canvas: JournalCanvas = page.clone().into();
-            let png = page_canvas.to_png(2.0 * scale, page.plain_style.as_ref());
-            let filename = format!("{}/{}.png", dirname, page.label(i));
-            println!("\t - {}", filename);
-            let failmsg = format!("Failed to write page: {}", i);
-            std::fs::write(filename, png).expect(&failmsg);
+            for (canvas_i, canvas) in page.canvases().iter().enumerate() {
+                let filename = format!("{}/{}_{}.png", dirname, page.label(i), canvas.label(canvas_i));
+                let canvas: JournalCanvas = canvas.into();
+                let png = canvas.to_png(2.0 * scale, page.plain_style.as_ref());
+                println!("\t - {}", filename);
+                std::fs::write(&filename, png).unwrap_or_else(|e| panic!("Failed to write {}: {}", filename, e));
+            }
         }
     }
 }
@@ -253,17 +256,6 @@ impl Page {
             .with_get_set("name", Self::get_name, Self::set_name)
             .with_get_set("plain_style", Self::get_plain_style, Self::set_plain_style)
         ;
-    }
-}
-
-/// A page's canvases layered into one, as the plain output draws it.
-impl From<Page> for JournalCanvas {
-    fn from(val: Page) -> Self {
-        let mut combined = JournalCanvas::new();
-        for canvas in val.canvases {
-            combined.merge_canvas(canvas.into());
-        }
-        combined
     }
 }
 
@@ -761,7 +753,7 @@ mod tests {
     /// The svg of the first page of `script`'s entry, built by a fresh engine.
     fn page_svg(script: &str) -> String {
         let entry = engine().build_entry_str(script).expect("script should run");
-        let canvas: JournalCanvas = entry.pages[0].clone().into();
+        let canvas: JournalCanvas = entry.pages[0].canvases()[0].clone().into();
         canvas.to_svg(None)
     }
 
@@ -809,7 +801,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("journal_names_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         entry.publish_pngs(dir.to_str().unwrap(), 0.1, Some(&[1]));
-        assert!(dir.join("maze.png").is_file());
+        assert!(dir.join("maze_ring.png").is_file() && dir.join("maze_1.png").is_file());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
