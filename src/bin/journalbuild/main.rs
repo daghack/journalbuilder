@@ -6,32 +6,34 @@ use std::rc::Rc;
 /// Create the output directory, or clear out the renders (`.png` and `.svg`
 /// files) of earlier runs, so renamed or removed pages don't linger. Other
 /// files are left alone.
-fn prepare_output_dir(dir: &str) {
-    std::fs::create_dir_all(dir).expect("Failed to create output directory");
+fn prepare_output_dir(dir: &str) -> Result<(), String> {
+    let io_error = |what: &str, e: std::io::Error| format!("couldn't {} {}: {}", what, dir, e);
+    std::fs::create_dir_all(dir).map_err(|e| io_error("create", e))?;
     let mut cleared = 0;
-    for entry in std::fs::read_dir(dir).expect("Failed to read output directory") {
-        let path = entry.expect("Failed to read directory entry").path();
+    for entry in std::fs::read_dir(dir).map_err(|e| io_error("read", e))? {
+        let path = entry.map_err(|e| io_error("read", e))?.path();
         let is_render = path.extension().is_some_and(|ext| ext == "png" || ext == "svg");
         if path.is_file() && is_render {
-            std::fs::remove_file(&path).expect("Failed to remove an earlier render");
+            std::fs::remove_file(&path).map_err(|e| format!("couldn't remove the earlier render {}: {}", path.display(), e))?;
             cleared += 1;
         }
     }
     if cleared > 0 {
         println!("Cleared {} earlier render(s) from {}", cleared, dir);
     }
+    Ok(())
 }
 
 /// Report characters drawn with the fallback glyph; with `strict`, stop
 /// before rendering instead.
-fn check_missing_glyphs(symd: &symboldict::SymbolPathDict, strict: bool) {
+fn check_missing_glyphs(symd: &symboldict::SymbolPathDict, strict: bool) -> Result<(), String> {
     if let Some(report) = symd.missing_glyph_report() {
         if strict {
-            eprintln!("error: {} (failing because of --strict-glyphs)", report);
-            std::process::exit(1);
+            return Err(format!("{} (failing because of --strict-glyphs)", report));
         }
         eprintln!("warning: {}", report);
     }
+    Ok(())
 }
 
 const DEFAULT_SUPERSAMPLE: f32 = 1.2;
@@ -132,42 +134,43 @@ fn main() {
         eprintln!("error: {}\n\n{}", err, USAGE);
         std::process::exit(1);
     });
-    let symd = symboldict::SymbolPathDict::from_file(&args.symbols).unwrap_or_else(|err| {
-        eprintln!("error: couldn't load the symbol dictionary {}: {}", args.symbols, err);
+    if let Err(err) = run(&args) {
+        eprintln!("error: {}", err);
         std::process::exit(1);
-    });
+    }
+}
+
+fn run(args: &Args) -> Result<(), String> {
+    let symd = symboldict::SymbolPathDict::from_file(&args.symbols)
+        .map_err(|err| format!("couldn't load the symbol dictionary {}: {}", args.symbols, err))?;
+    let symd = Rc::new(symd);
 
     let journal_name = &args.journal_name;
-    let journal_dir = args.journals_dir.as_str();
+    let journal_path = format!("{}/{}/journal_entry.rhai", args.journals_dir, journal_name);
     let output_dir = args.output_dir.clone()
-        .unwrap_or_else(|| format!("{}/{}/output", journal_dir, journal_name));
-    // One Darkly engine for the whole run; canvases resize it as needed.
-    let mut darkly_engine = darkly::new_engine(1, 1);
-    let symdarc = Rc::new(symd);
-    let mut engine = JournalEngine::new(symdarc.clone());
-    let entry_path = format!("{}/{}", journal_dir, journal_name);
-    println!("EntryPath: {}", entry_path);
-    let journal_path = format!("{}/journal_entry.rhai", entry_path);
-    println!("JournalPath: {}", journal_path);
-    let entry = engine
-        .build_entry_file(&journal_path)
-        .expect("Failed to execute result.");
-    check_missing_glyphs(&symdarc, args.strict_glyphs);
-    let pages: Option<Vec<usize>> = args.pages.as_ref().map(|pages| {
-        pages.iter().map(|page| entry.page_index(page)).collect::<Result<_, _>>().unwrap_or_else(|err| {
-            eprintln!("error: {} (in {})", err, journal_name);
-            std::process::exit(1);
-        })
-    });
+        .unwrap_or_else(|| format!("{}/{}/output", args.journals_dir, journal_name));
+    let entry = JournalEngine::new(symd.clone()).build_entry_file(&journal_path)?;
+    check_missing_glyphs(&symd, args.strict_glyphs)?;
+    if entry.page_count() == 0 {
+        return Err(format!("{} produced no pages; add them with journal_entry.add_page(page)", journal_path));
+    }
+    let pages: Option<Vec<usize>> = match &args.pages {
+        None => None,
+        Some(pages) => Some(pages.iter().map(|page| entry.page_index(page))
+            .collect::<Result<_, _>>()
+            .map_err(|err| format!("{} (in {})", err, journal_name))?),
+    };
     if pages.is_some() {
         // Rendering a subset: keep the other pages' existing output.
-        std::fs::create_dir_all(&output_dir).expect("Failed to create output directory");
+        std::fs::create_dir_all(&output_dir).map_err(|e| format!("couldn't create {}: {}", output_dir, e))?;
     } else {
-        prepare_output_dir(&output_dir);
+        prepare_output_dir(&output_dir)?;
     }
     let only = pages.as_deref();
     if args.plain {
-        entry.publish_pngs(&output_dir, args.scale, only);
+        entry.publish_pngs(&output_dir, args.scale, only)?;
     }
-    entry.darkly_publish_pngs(&mut darkly_engine, &output_dir, args.scale, args.supersample, only);
+    // One Darkly engine for the whole run; canvases resize it as needed.
+    let mut darkly_engine = darkly::new_engine(1, 1);
+    entry.darkly_publish_pngs(&mut darkly_engine, &output_dir, args.scale, args.supersample, only)
 }

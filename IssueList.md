@@ -52,7 +52,7 @@ journals' look or behaviour, so it waits for a call).
 | 36 | `LockConfig`'s string static inputs only served the JSON journals | Dead code | Fixed {{commit: Remove LockConfig's string static inputs}} |
 | 37 | Public library code left unused by the legacy removal | Dead code | Fixed {{commit: Remove library code nothing uses}} |
 | 38 | `fill_with_msg` loops forever when a glyph can't fit on the path | Bug | Fixed {{commit: Fail instead of hanging when text can't fit its path}} |
-| 39 | Script errors surface as a panic with debug formatting | Bug | Open |
+| 39 | Script errors surface as a panic with debug formatting | Bug | Fixed {{commit: Report errors in one line instead of panicking}} |
 | 40 | An empty or zero-width canvas panics the Darkly render | Bug | Open |
 | 41 | `new_brush` accepts nonsense pressures and sizes | Gap | Open |
 | 42 | `splat_msgs` on an empty canvas gives a misleading error | Quirk | Open |
@@ -257,7 +257,7 @@ journals' look or behaviour, so it waits for a call).
 
 ### 44. Non-finite numbers from scripts can panic layout and hatching
 - **Where:** `src/journal/paths.rs`, `src/journal/symbol.rs`, `src/journal/rhaientries/`
-- **Status:** Fixed in {{commit: Fail instead of hanging when text can't fit its path}}.
-- **Problem:** `fill_with_msg` lays the message along fresh copies of the path until every glyph is placed; when a glyph didn't fit at all (a short path, a big font) no copy placed anything and it looped forever. `fit_msg_to` had the quiet version of the same bug: if the message didn't fit even at its smallest font size it returned whatever fitted.
-- **Change:** `fill_with_msg` stops with an error naming the glyph that can't fit (and rejects a font size that isn't positive); `fit_msg_to` errors when glyphs are left over at its smallest size.
-- **Why:** a hung render is the worst way to learn a path is too short. Every journal still renders as before.
+- **Status:** Fixed in {{commit: Report errors in one line instead of panicking}}.
+- **Problem:** a script error printed `Failed to execute result.: Custom { kind: Other, error: "Failed to Evaluate Rhai: ..." }` and a panic note, with exit status 101; a journal with no pages silently rendered nothing; failing to write a render, read the journal or clear the output folder panicked.
+- **Change:** journalbuild's work runs in `run() -> Result`, and every failure is one `error:` line with exit status 1: `error: journals/x/journal_entry.rhai: Runtime error: oops (line 1, position 1)`. `build_entry_*` return rhai's message with the file name; the publishing functions and `prepare_output_dir` return errors naming the file; an entry with no pages is an error. The `EntryPath`/`JournalPath` debug prints are gone, and the GPU is only set up once the script has succeeded.
+- **Why:** script errors are the common case while writing a journal, so they should read like compiler errors, not crashes.

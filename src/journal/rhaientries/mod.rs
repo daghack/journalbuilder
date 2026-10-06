@@ -4,7 +4,6 @@ mod locks;
 mod random;
 
 use rhai::{Engine, EvalAltResult, ImmutableString, Dynamic, CustomType, TypeBuilder, Scope};
-use std::io::Error;
 use super::paths::StrokePath;
 use super::symboldict::SymbolPathDict;
 use super::canvas::Canvas as JournalCanvas;
@@ -59,7 +58,7 @@ impl Entry {
         self.pages.iter().enumerate()
             .filter(move |(i, _)| only.is_none_or(|pages| pages.contains(i)))
     }
-    pub fn darkly_publish_pngs(&self, engine: &mut DarklyEngine, dirname: &str, scale: f32, supersample: f32, only: Option<&[usize]>) {
+    pub fn darkly_publish_pngs(&self, engine: &mut DarklyEngine, dirname: &str, scale: f32, supersample: f32, only: Option<&[usize]>) -> Result<(), String> {
         for (i, page) in self.selected_pages(only) {
             let canvases = page.canvases();
             for (canvas_i, canvas) in canvases.iter().enumerate() {
@@ -73,13 +72,14 @@ impl Entry {
                     (canvas_dim.x * scale) as u32, (canvas_dim.y * scale) as u32,
                     scale, supersample,
                 );
-                buff.save(filename).expect("Failed to save png");
+                buff.save(&filename).map_err(|e| format!("couldn't write {}: {}", filename, e))?;
             }
         }
+        Ok(())
     }
     /// Plain renders, one per canvas like the Darkly ones:
     /// `{page}_{canvas}.png`.
-    pub fn publish_pngs(&self, dirname: &str, scale: f32, only: Option<&[usize]>) {
+    pub fn publish_pngs(&self, dirname: &str, scale: f32, only: Option<&[usize]>) -> Result<(), String> {
         println!("Publishing PNGs:");
         for (i, page) in self.selected_pages(only) {
             for (canvas_i, canvas) in page.canvases().iter().enumerate() {
@@ -90,9 +90,10 @@ impl Entry {
                 // canvas roughened differently.
                 let png = canvas.to_png(2.0 * scale, page.plain_style.as_ref(), stable_hash(&name));
                 println!("\t - {}", filename);
-                std::fs::write(&filename, png).unwrap_or_else(|e| panic!("Failed to write {}: {}", filename, e));
+                std::fs::write(&filename, png).map_err(|e| format!("couldn't write {}: {}", filename, e))?;
             }
         }
+        Ok(())
     }
 }
 
@@ -672,21 +673,19 @@ impl JournalEngine {
     pub fn warnings(&self) -> Vec<String> {
         self.warnings.borrow().clone()
     }
-    pub fn build_entry_str(&mut self, script_str: &str) -> Result<Entry, Error> {
+    /// Run a journal script, returning the `journal_entry` it built. Errors
+    /// are rhai's message, with the script line.
+    pub fn build_entry_str(&mut self, script_str: &str) -> Result<Entry, String> {
         let mut scope = Scope::new();
         scope.push("journal_entry", Entry::default());
-        self.engine.run_with_scope(&mut scope, script_str)
-            .map_err(|err| {
-                let msg = format!("Failed to Evaluate Rhai: {}", err);
-                Error::other(msg)
-            })?;
+        self.engine.run_with_scope(&mut scope, script_str).map_err(|err| err.to_string())?;
         scope.get_value("journal_entry")
-            .ok_or(Error::other("journal_entry value not found"))
-
+            .ok_or_else(|| "the script replaced journal_entry with something that isn't an entry".to_string())
     }
-    pub fn build_entry_file(&mut self, rhai_filename: &str) -> Result<Entry, Error> {
-        let file_contents = std::fs::read_to_string(rhai_filename)?;
-        self.build_entry_str(&file_contents)
+    pub fn build_entry_file(&mut self, rhai_filename: &str) -> Result<Entry, String> {
+        let file_contents = std::fs::read_to_string(rhai_filename)
+            .map_err(|err| format!("couldn't read {}: {}", rhai_filename, err))?;
+        self.build_entry_str(&file_contents).map_err(|err| format!("{}: {}", rhai_filename, err))
     }
 }
 
