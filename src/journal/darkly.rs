@@ -45,6 +45,9 @@ const SAMPLE_SPACING_PX: f32 = 1.0;
 /// reads `time_ms`, so feeding all zeros gives it no cadence to work with.
 const PEN_SPEED_PX_PER_MS: f64 = 0.25;
 
+/// How many strokes to draw between frame ticks (see `render_canvas`).
+const FRAME_EVERY_STROKES: u32 = 25;
+
 /// Render a canvas with Darkly into a `width` x `height` image.
 ///
 /// `brush_scale` multiplies every brush size: brush sizes are in pixels, so
@@ -165,6 +168,14 @@ fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, default_brush: Opti
                 });
             }
             engine.stroke_path(layer, &ops).expect("stroke_path failed");
+            // Darkly finishes each stroke's bookkeeping (its undo snapshot)
+            // asynchronously, on the next frame. Offline we never draw frames
+            // until the export, so without this every stroke's ~4 MB of GPU
+            // readbacks piles up: journal_entry_18 peaked at 14 GB and was
+            // killed. Ticking every few strokes keeps it near 250 MB.
+            if stroke_index % FRAME_EVERY_STROKES == 0 {
+                engine.render(0.0);
+            }
         }
     }
 
