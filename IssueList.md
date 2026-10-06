@@ -42,7 +42,7 @@ journals' look or behaviour, so it waits for a call).
 | 26 | Plain-output roughening and noise are unseeded | Quirk | Fixed {{commit: Seed the plain output's roughening and noise}} |
 | 27 | `left_handed_maze_path` duplicates `new_maze(..).path()` | Redundancy | Fixed {{commit: Replace left_handed_maze_path with new_maze}} |
 | 28 | `--page` takes only indices, not page names | Gap | Fixed {{commit: Let --page take page names}} |
-| 29 | Font sets send digits and punctuation to the upper fonts | Quirk | Open |
+| 29 | Font sets send digits and punctuation to the upper fonts | Quirk | Fixed {{commit: Fall back to the other case's fonts before the X glyph}} |
 | 30 | A glyph that is a single straight line panics when loaded | Bug | Open |
 | 31 | The Darkly dependency follows a branch instead of a pinned revision | Anti-pattern | Open |
 | 32 | The copper letters' brush sizes predate the fork's Calligraphy change | Quirk | Open |
@@ -253,7 +253,7 @@ journals' look or behaviour, so it waits for a call).
 
 ### 44. Non-finite numbers from scripts can panic layout and hatching
 - **Where:** `src/journal/paths.rs`, `src/journal/symbol.rs`, `src/journal/rhaientries/`
-- **Status:** Fixed in {{commit: Seed the plain output's roughening and noise}}.
-- **Problem:** the plain PNG's roughened strokes and Perlin texture used `rand::random`, so the plain output differed on every run even with a seeded script.
-- **Change:** `Canvas::to_svg` and `to_png` take a seed, and the roughening and noise draw from a generator seeded with it. Each canvas is seeded with an FNV-1a hash of its output name (`{page}_{canvas}`), stable across runs and Rust versions, so canvases differ from each other but not from run to run. The unused `roughen_by`, `roughened_by`, `save_to_png` and `save_to_svg` went rather than being converted.
-- **Why:** with this, every output of a journal (plain and Darkly) is byte-identical run to run.
+- **Status:** Fixed in {{commit: Fall back to the other case's fonts before the X glyph}}.
+- **Problem:** `FontSet` looked up lowercase letters only in the lower fonts and everything else (capitals, digits, punctuation) only in the upper fonts, so a character one set lacked became `X` even when the other set had it.
+- **Change:** each character still tries its own set first (lowercase letters the lower fonts; everything else the upper fonts), then falls back to the other set, then to `X`. `missing_glyphs()` lists every font tried.
+- **Why:** sending punctuation to the upper fonts is right for the existing fonts (only `loche_upper` has punctuation), so the priority stays; the fallback can only replace an `X` with a real glyph. No journal had missing glyphs, so no render changes.

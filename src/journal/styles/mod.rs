@@ -127,13 +127,17 @@ impl FontSet {
                 Symbol::new_default_from_base_rc(symbase)
             } else {
                 let mut chosen_keys = None;
-                let fontset = if c.is_lowercase() {
-                    lower_fonts
+                // Lowercase letters look in the lower fonts first; everything
+                // else (capitals, digits, punctuation) in the upper fonts
+                // first. Either way the other set is the fallback, before
+                // the fallback glyph.
+                let (first, then) = if c.is_lowercase() {
+                    (lower_fonts, upper_fonts)
                 } else {
-                    upper_fonts
+                    (upper_fonts, lower_fonts)
                 };
                 let mut tried = Vec::new();
-                for prefix in fontset {
+                for prefix in first.iter().chain(then) {
                     let key = format!("{}_{}", prefix, prefix_c);
                     tried.push(key.clone());
                     let poss_keys = symd.symbols_with_prefix(key.as_str());

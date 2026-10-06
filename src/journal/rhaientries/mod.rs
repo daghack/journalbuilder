@@ -757,8 +757,9 @@ mod tests {
             let canvas = new_line(new_vec(0.0, 0.0), new_vec(400.0, 0.0)).fit_msg_to(style, font, "a~b~");
             let missing = missing_glyphs();
             if missing["~"].count != 2 { throw "expected ~ twice, got " + missing; }
-            // Non-lowercase characters (punctuation included) use the upper fonts.
-            if missing["~"].tried != ["copper_upper_~"] { throw "unexpected tried list: " + missing["~"].tried; }
+            // Non-lowercase characters (punctuation included) try the upper
+            // fonts first, then the lower ones.
+            if missing["~"].tried != ["copper_upper_~", "copper_lower_~"] { throw "unexpected tried list: " + missing["~"].tried; }
         "#;
         engine().build_entry_str(script).expect("script should run");
     }

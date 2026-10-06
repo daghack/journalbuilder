@@ -254,6 +254,18 @@ mod tests {
     }
 
     #[test]
+    fn font_sets_fall_back_to_the_other_case() {
+        // copper_upper has neither '?' nor a capital Q; the lower fonts
+        // (loche_upper, copper_lower) do.
+        let missing: rhai::Map = eval(r#"
+            let g = new_fontset(["copper_upper"], ["loche_upper"]).glyphs("?");
+            let h = new_fontset(["copper_upper"], ["copper_lower"]).glyphs("Q");
+            missing_glyphs()
+        "#);
+        assert!(missing.is_empty(), "{:?}", missing);
+    }
+
+    #[test]
     fn unknown_fonts_and_glyphs_fail_at_their_line() {
         for (script, want) in [
             ("let ok = 1;\nternary_font(\"no_such_font\");", "ternary_font: no glyphs named 'no_such_font_*'"),
