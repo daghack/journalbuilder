@@ -18,6 +18,7 @@ use crate::lockbuilder::{
 };
 use crate::lockbuilder::locks::maze::LockedMaze;
 use crate::lockbuilder::registry::build_lock;
+use crate::journal::canvas::artistic::{BuiltMaze, MazeTraversalStrategy};
 use crate::journal::paths::StrokePath;
 use std::collections::HashMap;
 
@@ -30,6 +31,8 @@ pub fn register(engine: &mut Engine) {
         .build_type::<LockResult>()
         .build_type::<Maze>()
         .register_fn("new_lock", LockBuilder::new)
+        .register_fn("new_maze", |seed: i64, width: i64, height: i64| new_maze(seed, width, height, "LeftHanded"))
+        .register_fn("new_maze", new_maze)
         .register_fn("symbols", symbols);
 }
 
@@ -253,9 +256,9 @@ impl CustomType for LockResult {
     }
 }
 
-/// A maze from a maze lock, for drawing. Cells sit on an integer grid:
-/// nodes at even coordinates, passages between connected nodes. Each cell
-/// holds one symbol of the locked text.
+/// A maze for drawing, from a maze lock or `new_maze`. Cells sit on an
+/// integer grid: nodes at even coordinates, passages between connected
+/// nodes. In a lock's maze each cell holds one symbol of the locked text.
 #[derive(Clone)]
 pub struct Maze {
     locked: LockedMaze,
@@ -272,8 +275,9 @@ impl Maze {
         self.locked.maze.all_cells().iter().map(|c| c.position.1).max().map_or(0, |y| y as i64 + 1)
     }
 
-    /// Every cell, in the order the text was written into the maze:
-    /// `#{ x, y, symbol, step }`.
+    /// Every cell, in traversal order (the order a lock writes its text):
+    /// `#{ x, y, step, symbol }`. `symbol` is 0-26: the text's symbol in a
+    /// lock's maze, random in `new_maze`'s.
     fn cells(&mut self) -> Array {
         self.locked.maze.iter_inners(self.locked.strategy)
             .enumerate()
@@ -281,8 +285,8 @@ impl Maze {
                 let mut cell = Map::new();
                 cell.insert("x".into(), Dynamic::from(x as i64));
                 cell.insert("y".into(), Dynamic::from(y as i64));
-                cell.insert("symbol".into(), Dynamic::from(inner.symbol as i64));
                 cell.insert("step".into(), Dynamic::from(step as i64));
+                cell.insert("symbol".into(), Dynamic::from(inner.symbol as i64));
                 Dynamic::from_map(cell)
             })
             .collect()
@@ -304,6 +308,21 @@ impl CustomType for Maze {
             .with_fn("cells", Self::cells)
             .with_fn("path", Self::path);
     }
+}
+
+/// `new_maze(seed, width, height[, strategy])`: a maze of `width` x `height`
+/// nodes (so a grid of 2w-1 x 2h-1 cells), traversed "LeftHanded" (the
+/// default) or "RightHanded". Its layout depends only on the seed and size.
+fn new_maze(seed: i64, width: i64, height: i64, strategy: &str) -> RhaiResult<Maze> {
+    let strategy = match strategy {
+        "LeftHanded" => MazeTraversalStrategy::LeftHanded,
+        "RightHanded" => MazeTraversalStrategy::RightHanded,
+        other => return Err(format!("new_maze: unknown strategy '{}'; expected \"LeftHanded\" or \"RightHanded\"", other).into()),
+    };
+    let size = |n: i64, what: &str| u32::try_from(n).ok().filter(|&n| n >= 1)
+        .ok_or_else(|| -> Box<EvalAltResult> { format!("new_maze: {} must be at least 1, got {}", what, n).into() });
+    let (width, height) = (size(width, "width")?, size(height, "height")?);
+    Ok(Maze { locked: LockedMaze { maze: BuiltMaze::new(seed as u64, width, height), strategy } })
 }
 
 /// `symbols(base, text)`: text as symbols in `base`. Base 10 takes digits,
@@ -543,6 +562,45 @@ mod tests {
         // Every coordinate is a grid cell inside the maze.
         let numbers: Vec<f32> = path.split_whitespace().filter_map(|t| t.parse().ok()).collect();
         assert!(numbers.iter().all(|&n| n >= 0.0 && n <= 4.0 && n.fract() == 0.0), "{}", path);
+    }
+
+    #[test]
+    fn new_maze_layout_depends_only_on_seed_and_size() {
+        let layout = |script: &str| -> Vec<(i64, i64)> {
+            let cells: Array = eval(&format!("{}.cells()", script));
+            cells.into_iter().map(|c| { let c = c.cast::<Map>(); (c["x"].clone().cast(), c["y"].clone().cast()) }).collect()
+        };
+        let maze = layout("new_maze(1043, 4, 3)");
+        // 4x3 nodes: 7x5 grid cells, and a spanning tree reaches every node
+        // through 11 passages.
+        assert_eq!(maze.len(), 12 + 11);
+        assert!(maze.iter().all(|&(x, y)| (0..7).contains(&x) && (0..5).contains(&y)), "{:?}", maze);
+        assert_eq!(maze, layout("new_maze(1043, 4, 3, \"LeftHanded\")"));
+        assert_ne!(maze, layout("new_maze(1044, 4, 3)"));
+        let mut right = layout("new_maze(1043, 4, 3, \"RightHanded\")");
+        assert_ne!(maze, right);
+        // The same cells, walked the other way round.
+        let mut left = maze.clone();
+        left.sort();
+        right.sort();
+        assert_eq!(left, right);
+        // The legacy journals' mazes have the same layout for a seed.
+        let legacy = BuiltMaze::<[i64; 1]>::new(1043, 4, 3);
+        let legacy: Vec<(i64, i64)> = legacy.iter_inners(MazeTraversalStrategy::LeftHanded)
+            .map(|((x, y), _)| (x as i64, y as i64)).collect();
+        assert_eq!(maze, legacy);
+    }
+
+    #[test]
+    fn new_maze_rejects_bad_arguments() {
+        for (script, want) in [
+            ("let ok = 1;\nnew_maze(1, 0, 3);", "width must be at least 1"),
+            ("let ok = 1;\nnew_maze(1, 3, -2);", "height must be at least 1"),
+            ("let ok = 1;\nnew_maze(1, 3, 3, \"Sideways\");", "unknown strategy 'Sideways'"),
+        ] {
+            let err = error(script);
+            assert!(err.contains(want) && err.contains("line 2"), "{}", err);
+        }
     }
 
     #[test]

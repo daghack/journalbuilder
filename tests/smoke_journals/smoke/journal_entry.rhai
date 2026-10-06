@@ -66,7 +66,9 @@ page_one.add_canvas(shapes);
 journal_entry.add_page(page_one);
 
 // ---- page two: a maze filled with text, and a second canvas on the page ----
-let maze_path = left_handed_maze_path(7, 3, 3);
+let page_maze = new_maze(7, 3, 3);
+if page_maze.cells().len() != 9 + 8 { throw "a 3x3 maze should have 9 nodes and 8 passages"; }
+let maze_path = page_maze.path();
 maze_path.scale_by(40.0);
 let maze_canvas = maze_path.fit_msg_to(text, font, "Every path leads back here.");
 maze_canvas.add_strokepath(maze_path, faint);
