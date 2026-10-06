@@ -55,7 +55,7 @@ journals' look or behaviour, so it waits for a call).
 | 39 | Script errors surface as a panic with debug formatting | Bug | Fixed {{commit: Report errors in one line instead of panicking}} |
 | 40 | An empty or zero-width canvas panics the Darkly render | Bug | Fixed {{commit: Render degenerate canvases instead of panicking}} |
 | 41 | `new_brush` accepts nonsense pressures and sizes | Gap | Fixed {{commit: Validate new_brush's pressures and size}} |
-| 42 | `splat_msgs` on an empty canvas gives a misleading error | Quirk | Open |
+| 42 | `splat_msgs` on an empty canvas gives a misleading error | Quirk | Fixed {{commit: Explain why splat_msgs can't use an empty canvas}} |
 | 43 | Quadratic curves convert to cubics incorrectly, moving their end point | Bug | Open |
 | 44 | Non-finite numbers from scripts can panic layout and hatching | Bug | Open |
 
@@ -245,10 +245,10 @@ journals' look or behaviour, so it waits for a call).
 - **Why:** mistakes in brush settings show up at the line that made them. Every existing journal's brushes are within range.
 
 ### 42. `splat_msgs` on an empty canvas gives a misleading error
-- **Status:** Fixed in {{commit: Parse SVG path data properly}}.
-- **Problem:** only absolute `M L C Q Z` were understood; comma-separated numbers were silently skipped; too few arguments panicked; the regex was recompiled on every call.
-- **Change:** `StrokePath` implements `FromStr` with a small hand-written parser for the SVG path grammar: every command except arcs, absolute and relative (`H`/`V`, smooth `S`/`T` with control-point reflection), commas, compact numbers (`.5.5`, `1-2`, exponents), and repeated argument groups (extra pairs after a moveto are linetos). Bad data is an error naming the byte offset, and the dictionary load reports which symbol it's in. The `regex` dependency is gone.
-- **Why:** the dictionary happened to use only the supported subset, but any symbol exported with relative commands or commas would have loaded wrong or crashed. All 249 existing symbols parse exactly as before (checked against the old parser's output).
+- **Status:** Fixed in {{commit: Explain why splat_msgs can't use an empty canvas}}.
+- **Problem:** messages are placed in boxes within the canvas's bounds; an empty canvas has none, and after 100 hopeless tries the error said "message 0 doesn't fit".
+- **Change:** `splat_msgs` on a canvas with no strokes fails straight away with "the canvas is empty, so there's nowhere to place messages; draw on it first".
+- **Why:** the error now names the actual cause.
 
 ### 43. Quadratic curves convert to cubics incorrectly, moving their end point
 - **Where:** `src/journal/paths.rs` (`PathCmd::to_cubic_curve`)

@@ -213,6 +213,10 @@ const SPLAT_KEYS: [&str; 7] = ["symbol_scale", "width_range", "height_range", "r
 fn splat(canvas: &Canvas, msgs: Array, font: &Font, style: StrokeStyle, options: Map, symdict: &SymbolPathDict, rng: &SharedRng) -> RhaiResult<Canvas> {
     const CALLER: &str = "splat_msgs";
     check_keys(CALLER, &options, &SPLAT_KEYS)?;
+    if canvas.strokes.is_empty() {
+        // Messages are placed in boxes within the canvas's bounds.
+        return Err(format!("{}: the canvas is empty, so there's nowhere to place messages; draw on it first", CALLER).into());
+    }
     let max_attempts = match options.get("max_attempts") {
         None => 100,
         Some(n) => match n.as_int() {
@@ -454,6 +458,12 @@ mod tests {
             base.splat_msgs(msgs, lowercase_font("loche_upper"), style, opts);
         "#, SPLAT_SETUP));
         assert!(err.contains("splat_msgs: message 0 doesn't fit in 5 tries"), "{}", err);
+    }
+
+    #[test]
+    fn splat_needs_something_drawn() {
+        let err = fails(&format!("{}\nnew_canvas().splat_msgs(msgs, lowercase_font(\"loche_upper\"), style, opts);", SPLAT_SETUP));
+        assert!(err.contains("splat_msgs: the canvas is empty"), "{}", err);
     }
 
     #[test]
