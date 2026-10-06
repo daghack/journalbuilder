@@ -5,6 +5,8 @@
 let ink_pen = new_brush("Ink Pen", 0.3, 0.7, 1.0);
 let rough = new_brush("Rough Ink", 0.25, 0.5, 1.0);
 let calli = new_brush("Calligraphy", 0.6, 1.0, 0.7);
+let tapered = new_brush("Ink Pen", 0.1, 1.0, 1.5);
+tapered.pressure_profile = "taper";
 
 // Named, hex, hsl-with-alpha and rgba colors.
 let outline = new_strokestyle(2.0, "black", ink_pen);
@@ -12,6 +14,7 @@ let text = new_strokestyle(1.5, "darkred", rough);
 let accent = new_strokestyle(2.0, "#1d2a5c", calli);
 let faint = new_strokestyle(1.0, "hsl(160, 50%, 40%, 0.6)", ink_pen);
 let shade = new_strokestyle(1.0, "rgba(0, 0, 0, 0.4)", ink_pen);
+let swell = new_strokestyle(2.0, "#5c1d2a", tapered);
 
 let font = new_fontset(["copper_upper", "loche_upper"], ["copper_lower", "loche_lower"]);
 
@@ -20,6 +23,7 @@ let shapes = new_canvas();
 shapes.add_strokepath(new_circle(new_vec(0.0, 0.0), 60.0), outline);
 shapes.add_strokepath(new_rectangle(new_vec(160.0, 0.0), 100.0, 70.0), accent);
 shapes.add_strokepath(new_line(new_vec(-60.0, 90.0), new_vec(210.0, 90.0)), faint);
+shapes.add_strokepath(new_line(new_vec(-60.0, 110.0), new_vec(210.0, 110.0)), swell);
 shapes.add_strokepath(new_arc(new_vec(0.0, 170.0), 50.0, 0.0, 4.71), shade);
 shapes.add_strokepath(
 	new_strokepath().move_to(new_vec(100.0, 170.0))

@@ -27,6 +27,51 @@ pub struct Brush {
     pub size: f32,
     pub min_pressure: f32,
     pub max_pressure: f32,
+    pub pressure_profile: PressureProfile,
+}
+
+/// How pressure runs along each stroke, between a brush's min and max.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum PressureProfile {
+    /// From min at the start up to max at the end, so strokes get heavier
+    /// as they go.
+    #[default]
+    Ramp,
+    /// From min up to max at the middle and back down: tapered ends.
+    Taper,
+    /// Max all the way.
+    Constant,
+}
+
+impl PressureProfile {
+    pub const NAMES: [&'static str; 3] = ["ramp", "taper", "constant"];
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "ramp" => Some(Self::Ramp),
+            "taper" => Some(Self::Taper),
+            "constant" => Some(Self::Constant),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Ramp => "ramp",
+            Self::Taper => "taper",
+            Self::Constant => "constant",
+        }
+    }
+
+    /// Where pressure sits between min (0) and max (1), `t` of the way
+    /// along a stroke.
+    pub fn at(self, t: f32) -> f32 {
+        match self {
+            Self::Ramp => t,
+            Self::Taper => (t * std::f32::consts::PI).sin(),
+            Self::Constant => 1.0,
+        }
+    }
 }
 
 impl StrokeStyle {
@@ -451,5 +496,24 @@ mod tests {
     fn rejects_invalid_colors() {
         assert!(parse_color("darkredd").is_err());
         assert!(parse_color("").is_err());
+    }
+}
+
+#[cfg(test)]
+mod pressure_tests {
+    use super::PressureProfile;
+
+    #[test]
+    fn profiles_run_between_min_and_max() {
+        for t in [0.0, 0.25, 0.5, 0.75] {
+            assert_eq!(PressureProfile::Ramp.at(t), t);
+            assert_eq!(PressureProfile::Constant.at(t), 1.0);
+        }
+        let taper = |t| PressureProfile::Taper.at(t);
+        assert!(taper(0.0).abs() < 1e-6 && taper(1.0).abs() < 1e-6 && (taper(0.5) - 1.0).abs() < 1e-6);
+        assert!((taper(0.25) - taper(0.75)).abs() < 1e-6);
+        for name in PressureProfile::NAMES {
+            assert_eq!(PressureProfile::from_name(name).unwrap().name(), name);
+        }
     }
 }

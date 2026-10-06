@@ -149,7 +149,7 @@ fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, brush_scale: f32) -
             let sample_count = samples.len();
             for (i, CurveSample { point,  .. }) in samples.into_iter().enumerate() {
                 let t_param = i as f32 / sample_count as f32;
-                let pressure = style.width * (t_param * pressure_range + pressure_min);
+                let pressure = style.width * (brush.pressure_profile.at(t_param) * pressure_range + pressure_min);
                 ops.push(StrokeOp::BrushStroke {
                     x: (point.x - bounds.mins.x) * w_ratio,
                     y: (point.y - bounds.mins.y) * h_ratio,

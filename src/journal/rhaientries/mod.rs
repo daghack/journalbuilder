@@ -10,7 +10,7 @@ use super::symboldict::SymbolPathDict;
 use super::canvas::Canvas as JournalCanvas;
 use super::canvas::StrokeStyle as JournalStrokeStyle;
 use super::canvas::CanvasStyleOptions;
-use super::canvas::Brush;
+use super::canvas::{Brush, PressureProfile};
 use super::symbol::{place_along_path, SymbolPlacementArgs};
 use super::styles::Font;
 use super::canvas::artistic::{BuiltMaze, MazeTraversalStrategy};
@@ -90,11 +90,14 @@ pub enum LayoutStyle {
 }
 
 #[derive(Debug, Default, Clone, CustomType)]
+#[rhai_type(extra = Self::build_extra)]
 pub struct BrushSettings {
     brush_style: ImmutableString,
     min_pressure: f64,
     max_pressure: f64,
     size: f64,
+    #[rhai_type(skip)]
+    pressure_profile: PressureProfile,
 }
 
 impl BrushSettings {
@@ -106,7 +109,22 @@ impl BrushSettings {
             min_pressure,
             max_pressure,
             size,
+            pressure_profile: PressureProfile::default(),
         }
+    }
+    fn get_pressure_profile(&mut self) -> String {
+        self.pressure_profile.name().to_string()
+    }
+    /// `brush.pressure_profile = "taper"`: "ramp" (min to max, the default),
+    /// "taper" (min to max at the middle and back) or "constant" (max).
+    fn set_pressure_profile(&mut self, name: String) -> Result<(), Box<EvalAltResult>> {
+        self.pressure_profile = PressureProfile::from_name(&name).ok_or_else(|| -> Box<EvalAltResult> {
+            format!("brush.pressure_profile: unknown profile '{}'; expected one of {}", name, PressureProfile::NAMES.join(", ")).into()
+        })?;
+        Ok(())
+    }
+    fn build_extra(builder: &mut TypeBuilder<Self>) {
+        builder.with_get_set("pressure_profile", Self::get_pressure_profile, Self::set_pressure_profile);
     }
 }
 
@@ -117,6 +135,7 @@ impl From<BrushSettings> for Brush {
             size: bs.size as f32,
             min_pressure: bs.min_pressure as f32,
             max_pressure: bs.max_pressure as f32,
+            pressure_profile: bs.pressure_profile,
         }
     }
 }
@@ -855,6 +874,26 @@ mod tests {
             let err = engine().build_entry_str(script).err().expect("script should fail").to_string();
             assert!(err.contains(want) && err.contains("line 2"), "{}: {}", want, err);
         }
+    }
+
+    #[test]
+    fn brushes_carry_a_pressure_profile() {
+        let script = r#"
+            let b = new_brush("Ink Pen", 0.2, 0.8, 1.0);
+            if b.pressure_profile != "ramp" { throw "default should be ramp"; }
+            b.pressure_profile = "taper";
+            let c = new_canvas();
+            c.add_strokepath(new_line(new_vec(0.0, 0.0), new_vec(10.0, 0.0)), new_strokestyle(1.0, "black", b));
+            let p = new_page();
+            p.add_canvas(c);
+            journal_entry.add_page(p);
+        "#;
+        let entry = engine().build_entry_str(script).expect("script should run");
+        let jc: JournalCanvas = entry.pages[0].canvases()[0].clone().into();
+        assert_eq!(jc.strokes()[0].style.brush.as_ref().unwrap().pressure_profile, PressureProfile::Taper);
+        let err = engine().build_entry_str("let b = new_brush(\"Ink Pen\", 0.2, 0.8, 1.0);\nb.pressure_profile = \"wobbly\";")
+            .err().expect("unknown profile should fail").to_string();
+        assert!(err.contains("unknown profile 'wobbly'") && err.contains("ramp, taper, constant") && err.contains("line 2"), "{}", err);
     }
 
     #[test]

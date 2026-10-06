@@ -18,7 +18,7 @@ journals' look or behaviour, so it waits for a call).
 | 2 | `StrokePath::from_str` handles only a subset of SVG path syntax | Bug | Fixed {{commit: Parse SVG path data properly}} |
 | 3 | `bN:` text parsing silently dropped invalid characters | Bug | Fixed `1c93e9e` |
 | 4 | Missing glyphs became `X` with only a stray message | Quirk | Fixed `8a1ca2e` |
-| 5 | Darkly pressure ramps from min to max along every substroke | Quirk | Open |
+| 5 | Darkly pressure ramps from min to max along every substroke | Quirk | Fixed {{commit: Add pressure profiles to brushes}} |
 | 6 | A style's `width` is stroke width in SVG but a pressure multiplier in Darkly | Anti-pattern | Open |
 | 7 | Rust-side randomness was unseeded | Quirk | Fixed `92d9eeb` (plain output: see 26) |
 | 8 | Maze cells' colour and orientation are generated, then zeroed | Dead logic | Open |
@@ -237,5 +237,7 @@ journals' look or behaviour, so it waits for a call).
 
 ### 43. Quadratic curves convert to cubics incorrectly, moving their end point
 - **Where:** `src/journal/paths.rs` (`PathCmd::to_cubic_curve`)
-- **Status:** Open.
-- **Problem:** the conversion doesn't know the segment's start point, so it computes wrong control points and shifts the end point by a third of the way past the control point. The plain output's roughening uses it, so quadratic strokes are distorted there.
+- **Status:** Fixed in {{commit: Add pressure profiles to brushes}}.
+- **Problem:** pressure rose linearly from the brush's min to its max over each substroke, so every line got heavier toward its end, whatever its direction or length, with no way to choose otherwise.
+- **Change:** brushes have a `pressure_profile`: `"ramp"` (the old behaviour, still the default), `"taper"` (a sine swell, light at both ends, full at the middle) or `"constant"`. Set it in rhai with `brush.pressure_profile = "taper"`; unknown names fail at their line.
+- **Why:** the ramp is part of how the existing journals look, so changing the default would have altered every render (renders with the default are byte-identical to before). Making it an explicit, documented option turns a hidden quirk into a choice.
