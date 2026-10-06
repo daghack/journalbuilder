@@ -167,11 +167,12 @@ impl StrokePath {
         let sample_points =
             self.sample_points_along(avoid_scale * 1.0)
             .into_iter().map(|sample| sample.point - min_vec);
-        for point in sample_points {
-            let lhpoint = point - sw_vec;
-            avoid_tree.add([lhpoint.x, lhpoint.y], (lhpoint.x, lhpoint.y)).unwrap();
-            let rhpoint = point + sw_vec;
-            avoid_tree.add([rhpoint.x, rhpoint.y], (rhpoint.x, rhpoint.y)).unwrap();
+        // The k-d tree rejects non-finite points; they can't be avoided
+        // anyway.
+        for point in sample_points.filter(|p| p.is_finite()) {
+            for side in [point - sw_vec, point + sw_vec] {
+                avoid_tree.add([side.x, side.y], (side.x, side.y)).expect("finite points are accepted");
+            }
         }
         avoid_tree
     }
@@ -878,7 +879,7 @@ impl SubstrokePath {
                 }
                 //sort by distance along ray, from nearest to farthest
             }
-            intersections.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+            intersections.sort_by(|a, b| a.1.total_cmp(&b.1));
             let mut kept_intersections = Vec::new();
             let mut last_dist = f32::MIN;
             for inter in intersections {

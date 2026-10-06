@@ -104,10 +104,13 @@ impl CustomType for Glyph {
 }
 
 /// Add a glyph's strokes to a canvas; blanks add nothing.
-pub(super) fn add_glyph(canvas: &mut Canvas, glyph: &Glyph, style: &StrokeStyle) {
+pub(super) fn add_glyph(canvas: &mut Canvas, glyph: &Glyph, style: &StrokeStyle) -> RhaiResult<()> {
     if !glyph.0.is_blank() {
-        canvas.add_strokepath(glyph.0.placed_strokepath(), style.clone());
+        let path = glyph.0.placed_strokepath();
+        super::check_finite("add_glyph", &path)?;
+        canvas.add_strokepath(path, style.clone());
     }
+    Ok(())
 }
 
 /// Glyphs from a rhai array, failing on anything that isn't one.
@@ -170,12 +173,12 @@ pub fn register(engine: &mut Engine, symdict: Rc<SymbolPathDict>, rng: SharedRng
             .ok_or_else(|| format!("glyph: unknown symbol '{}'", name).into())
     });
 
-    engine.register_fn("add_glyph", |canvas: &mut Canvas, glyph: Glyph, style: StrokeStyle| {
-        add_glyph(canvas, &glyph, &style);
+    engine.register_fn("add_glyph", |canvas: &mut Canvas, glyph: Glyph, style: StrokeStyle| -> RhaiResult<()> {
+        add_glyph(canvas, &glyph, &style)
     });
     engine.register_fn("add_glyphs", |canvas: &mut Canvas, glyphs: Array, style: StrokeStyle| -> RhaiResult<()> {
         for glyph in glyph_array("add_glyphs", glyphs)? {
-            add_glyph(canvas, &glyph, &style);
+            add_glyph(canvas, &glyph, &style)?;
         }
         Ok(())
     });

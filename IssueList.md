@@ -57,7 +57,7 @@ journals' look or behaviour, so it waits for a call).
 | 41 | `new_brush` accepts nonsense pressures and sizes | Gap | Fixed {{commit: Validate new_brush's pressures and size}} |
 | 42 | `splat_msgs` on an empty canvas gives a misleading error | Quirk | Fixed {{commit: Explain why splat_msgs can't use an empty canvas}} |
 | 43 | Quadratic curves convert to cubics incorrectly, moving their end point | Bug | Fixed {{commit: Convert quadratic curves to cubics exactly}} |
-| 44 | Non-finite numbers from scripts can panic layout and hatching | Bug | Open |
+| 44 | Non-finite numbers from scripts can panic layout and hatching | Bug | Fixed {{commit: Refuse non-finite coordinates from scripts}} |
 
 ## Details
 
@@ -259,7 +259,7 @@ journals' look or behaviour, so it waits for a call).
 
 ### 44. Non-finite numbers from scripts can panic layout and hatching
 - **Where:** `src/journal/paths.rs`, `src/journal/symbol.rs`, `src/journal/rhaientries/`
-- **Status:** Fixed in {{commit: Convert quadratic curves to cubics exactly}}.
-- **Problem:** the plain output's roughening converts every segment to a cubic first, one command at a time, so a quadratic's conversion didn't know its start point: it placed the control points wrongly and moved the end point a third of the way past the control point. Quadratic strokes (the fixture's `quad_to`, and the 50 quadratic segments in the glyph dictionary) were distorted in the plain PNGs.
-- **Change:** `StrokePath::to_cubics()` converts a whole path, tracking the current point, with the exact cubic for each quadratic (control points 2/3 of the way from each end to the quadratic's control point). `PathCmd::to_cubic_curve` is gone.
-- **Why:** the plain output now draws the shapes the script describes, matching Darkly. Only plain renders containing quadratics changed; no Darkly render did.
+- **Status:** Fixed in {{commit: Refuse non-finite coordinates from scripts}}.
+- **Problem:** an infinite or NaN coordinate (from dividing or scaling by zero in a script) crashed the render, since infinite bounds asked for an impossibly large image, or quietly drew garbage, and could reach the k-d tree (which panics on non-finite points) and the hatch's `partial_cmp(..).unwrap()` sort.
+- **Change:** `new_vec` refuses non-finite coordinates, and `add_strokepath`, `add_stroke`, `add_glyph(s)` (and so `splat_msgs`) refuse paths with any; each fails at the script line. Inside, avoid trees skip non-finite points, `AvoidanceKdTree::add_point` skips infinities as well as NaN, and the hatch sorts with `total_cmp`.
+- **Why:** the error appears at the line that made the bad number, rather than as a crash later. Renders are byte-identical.

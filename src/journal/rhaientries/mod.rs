@@ -163,6 +163,17 @@ impl From<BrushSettings> for Brush {
     }
 }
 
+/// Fail if a path has an infinite or NaN coordinate. Scaling or dividing
+/// by zero in a script makes them, and they'd otherwise break the render's
+/// sizing far from the line that caused them.
+pub(super) fn check_finite(caller: &str, path: &StrokePath) -> Result<(), Box<EvalAltResult>> {
+    if path.points_within().iter().all(|p| p.is_finite()) {
+        Ok(())
+    } else {
+        Err(format!("{}: the path has a non-finite (infinite or NaN) coordinate", caller).into())
+    }
+}
+
 /// FNV-1a: a string hash that, unlike std's, is guaranteed stable across
 /// Rust versions.
 fn stable_hash(text: &str) -> u64 {
@@ -308,9 +319,17 @@ impl Vec2 {
     pub fn new(x: f64, y: f64) -> Self {
         Vec2{ x, y }
     }
+    /// `new_vec(x, y)`, refusing infinite and NaN coordinates (from a
+    /// division by zero, say), which would otherwise surface far away.
+    fn checked(x: f64, y: f64) -> Result<Self, Box<EvalAltResult>> {
+        if !(x.is_finite() && y.is_finite()) {
+            return Err(format!("new_vec: coordinates must be finite numbers, got ({}, {})", x, y).into());
+        }
+        Ok(Vec2 { x, y })
+    }
     fn build_extra(builder: &mut TypeBuilder<Self>) {
         builder
-            .with_fn("new_vec", Self::new)
+            .with_fn("new_vec", Self::checked)
         ;
     }
 }
@@ -341,6 +360,18 @@ impl Canvas {
     }
     fn set_name(&mut self, name: Dynamic) -> Result<(), Box<EvalAltResult>> {
         self.name = Some(check_name("canvas.name", name)?);
+        Ok(())
+    }
+    /// Script-facing `add_stroke`, refusing paths with non-finite points
+    /// (see `check_finite`).
+    fn add_stroke_checked(&mut self, stroke: Stroke) -> Result<(), Box<EvalAltResult>> {
+        check_finite("add_stroke", &stroke.path)?;
+        self.add_stroke(stroke);
+        Ok(())
+    }
+    fn add_strokepath_checked(&mut self, path: StrokePath, style: StrokeStyle) -> Result<(), Box<EvalAltResult>> {
+        check_finite("add_strokepath", &path)?;
+        self.add_strokepath(path, style);
         Ok(())
     }
     pub fn add_stroke(&mut self, stroke: Stroke) {
@@ -379,8 +410,8 @@ impl Canvas {
     }
     fn build_extra(builder: &mut TypeBuilder<Self>) {
         builder
-            .with_fn("add_stroke", Self::add_stroke)
-            .with_fn("add_strokepath", Self::add_strokepath)
+            .with_fn("add_stroke", Self::add_stroke_checked)
+            .with_fn("add_strokepath", Self::add_strokepath_checked)
             .with_fn("rotate_around", Self::rotate_around)
             .with_fn("translate", Self::translate)
             .with_fn("scale", Self::scale)
@@ -941,6 +972,23 @@ mod tests {
         entry.publish_pngs(dir.to_str().unwrap(), 1.0, None).expect("publish should succeed");
         assert!(dir.join("page_0_0.png").is_file() && !dir.join("page_0_1.png").exists());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn non_finite_coordinates_fail_where_they_enter() {
+        let setup = r#"
+            let s = new_strokestyle(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
+            let c = new_canvas();
+        "#;
+        for (script, want) in [
+            ("new_vec(1.0 / 0.0, 0.0);", "new_vec: coordinates must be finite"),
+            ("new_vec(0.0, 0.0 / 0.0);", "new_vec: coordinates must be finite"),
+            ("c.add_strokepath(new_circle(new_vec(0.0, 0.0), 5.0).scale_by(0.0 / 0.0), s);", "add_strokepath: the path has a non-finite"),
+            ("c.add_glyph(glyph(\"basic_eye\").scale_by(1.0 / 0.0), s);", "add_glyph: the path has a non-finite"),
+        ] {
+            let err = engine().build_entry_str(&format!("{}\n{}", setup, script)).expect_err(script).to_string();
+            assert!(err.contains(want), "{}: {}", want, err);
+        }
     }
 
     #[test]

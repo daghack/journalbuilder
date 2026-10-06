@@ -167,7 +167,7 @@ impl AvoidanceKdTree {
         Self { kdtree: KdTree::new(2), scale }
     }
     pub fn add_point(&mut self, point: Vec2) {
-        if point.x.is_nan() || point.y.is_nan() {
+        if !point.is_finite() {
             return
         }
         self.kdtree.add([point.x, point.y], (point.x, point.y)).unwrap();

@@ -255,7 +255,7 @@ fn splat(canvas: &Canvas, msgs: Array, font: &Font, style: StrokeStyle, options:
 
     let mut splatted = Canvas::default();
     for symbol in placed.into_iter().flatten() {
-        add_glyph(&mut splatted, &Glyph(symbol), &style);
+        add_glyph(&mut splatted, &Glyph(symbol), &style)?;
     }
     Ok(splatted)
 }
