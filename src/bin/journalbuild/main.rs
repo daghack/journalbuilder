@@ -1,101 +1,18 @@
-use scribe::journal::{Journal, JournalManifest, JournalPage};
+use scribe::journal::{Journal, JournalManifest};
 use scribe::journal::rhaientries::{JournalEngine};
-use scribe::journal::canvas::artistic::*;
 use scribe::journal::{symboldict, darkly};
-use scribe::journal::canvas::{Brush, Canvas, StrokeStyle};
+use scribe::journal::canvas::Brush;
 use std::collections::HashMap;
-use scribe::journal::canvas::textbox::{TextBox, TextBoxOptions, TextBoxLineMode};
-use scribe::journal::styles;
-use parry2d::math::{Vec2};
-use parry2d::bounding_volume::Aabb;
-use rand::{Fill};
 
 use std::sync::Arc;
 use ::darkly::engine::DarklyEngine;
 
 type JournalEntryFunc = for<'j> fn(&'j mut Journal<'j>, &'j symboldict::SymbolPathDict) -> JournalManifest<'j>;
 
-fn journal_entry_18<'j>(journal: &'j mut Journal<'j>, symd: &'j symboldict::SymbolPathDict) -> JournalManifest<'j> {
-    let textbox_width = 150.0;
-    let textbox_height = 150.0;
-    let symbol_scale = 19.0;
-    journal.add_symboldict(&symd);
-    journal.build_entries(move |journal, entry_name, entry| {
-        let builder = styles::lowercase_builder(&symd, "loche_upper");
-        let fateful_pages = entry.named_entries.get("fateful_pages")
-            .expect("Entry 'fateful_pages' not found in journal entry");
-        let spider_web = entry.named_entries.get("spider_web")
-            .expect("Entry 'spider_web' not found in journal entry");
-
-        let rng: &mut dyn rand::RngCore = &mut rand::rng();
-        let fateful_symbols = builder.build(fateful_pages, rng);
-
-        let spider_symbols = builder.build(spider_web, rng);
-
-        let bounds = Aabb::new(
-            Vec2::new(-textbox_width / 2.0, -textbox_height / 2.0),
-            Vec2::new(textbox_width / 2.0, textbox_height / 2.0),
-        );
-        let textbox_opts = TextBoxOptions {
-            jagged_edge: 0.5,
-            layout: TextBoxLineMode::WordsByBlankSymbol,
-            bounds,
-            symbol_scale,
-            avoid_tree: None,
-        };
-
-        let textbox = TextBox::new(textbox_opts);
-        let fateful_sym_set = textbox.place_all_symbols(fateful_symbols, rng);
-        let spider_sym_set = textbox.place_all_symbols(spider_symbols, rng);
-        let total_count = (fateful_sym_set.len() + spider_sym_set.len()) as f32 / 2.0;
-        let canvas_count = total_count.sqrt().ceil() as usize;
-
-        #[derive(Clone, Default)]
-        struct Orientation(u32);
-        impl Fill for Orientation {
-            fn fill<R: rand::Rng + ?Sized>(&mut self, rng: &mut R) -> () {
-                self.0 = rng.random_range(0..4);
-            }
-        }
-        let built_maze = BuiltMaze::<Orientation>::new(1043, canvas_count as u32, canvas_count as u32);
-        let maze_iter = built_maze.iter_inners(MazeTraversalStrategy::LeftHanded);
-        let mut fateful_iter = fateful_sym_set.into_iter().map(|sym| (sym, "black"));
-        let mut spider_iter = spider_sym_set.into_iter().map(|sym| (sym, "hsl(160, 50%, 40%, 0.8)"));
-        let mut page_canvas = Canvas::new();
-        for ((x, y), _orientation) in maze_iter {
-            let first_choice = rand::random::<bool>();
-            if let Some((next_block, color)) = if first_choice {
-                fateful_iter.next().or_else(|| spider_iter.next())
-            } else {
-                spider_iter.next().or_else(|| fateful_iter.next())
-            } {
-                for mut symbol in next_block {
-                    // translate the symbol by textbox_width * x, textbox_height * y
-                    symbol.translate_by(Vec2::new(
-                        (textbox_width + symbol_scale) * x as f32,
-                        (textbox_height + symbol_scale) * y as f32,
-                    ));
-                    page_canvas.add_strokes(symbol, StrokeStyle {
-                        color: color.to_string(),
-                        width: 2.0,
-                        brush: None,
-                    });
-                }
-            }
-        }
-        journal.add_page(
-            format!("{}.maze_textbox", entry_name),
-            JournalPage::SplatMsgsOnCanvas(page_canvas, entry.shorts.clone(), 23.0, 2.0, "hsl(200, 50%, 40%, 0.8)".to_string()),
-            entry.canvas_options.clone(),
-        );
-    })
-}
-
 const LEGACY_DARKLY_SIZE: f32 = 1080.0;
 
 fn legacy_journalbuild(symd: &symboldict::SymbolPathDict, engine: &mut DarklyEngine, journal_dir: &str, journal_name: &str, dir_name: &str, plain: bool, scale: f32, supersample: f32, strict_glyphs: bool) {
     let journal_funcs: HashMap<&str, JournalEntryFunc> = HashMap::from([
-        ("journal_entry_18", journal_entry_18 as JournalEntryFunc),
     ]);
 
     let journal_path = format!("{}/{}/journal_entry.json", journal_dir, journal_name);
