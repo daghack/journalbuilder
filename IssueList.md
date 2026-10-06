@@ -54,7 +54,7 @@ journals' look or behaviour, so it waits for a call).
 | 38 | `fill_with_msg` loops forever when a glyph can't fit on the path | Bug | Fixed {{commit: Fail instead of hanging when text can't fit its path}} |
 | 39 | Script errors surface as a panic with debug formatting | Bug | Fixed {{commit: Report errors in one line instead of panicking}} |
 | 40 | An empty or zero-width canvas panics the Darkly render | Bug | Fixed {{commit: Render degenerate canvases instead of panicking}} |
-| 41 | `new_brush` accepts nonsense pressures and sizes | Gap | Open |
+| 41 | `new_brush` accepts nonsense pressures and sizes | Gap | Fixed {{commit: Validate new_brush's pressures and size}} |
 | 42 | `splat_msgs` on an empty canvas gives a misleading error | Quirk | Open |
 | 43 | Quadratic curves convert to cubics incorrectly, moving their end point | Bug | Open |
 | 44 | Non-finite numbers from scripts can panic layout and hatching | Bug | Open |
@@ -239,8 +239,10 @@ journals' look or behaviour, so it waits for a call).
 - **Problem:** the render size rounds to 0 and the canvas resize assertion fails.
 
 ### 41. `new_brush` accepts nonsense pressures and sizes
-- **Status:** Open.
-- **Problem:** min pressure above max, negative pressures and sizes are accepted.
+- **Status:** Fixed in {{commit: Validate new_brush's pressures and size}}.
+- **Problem:** `new_brush` accepted a min pressure above the max, pressures outside Darkly's 0–1 range, and zero or negative sizes, which rendered as nothing or as nonsense without an error.
+- **Change:** `new_brush` requires `0 <= min <= max <= 1` and a positive size, failing at the script line otherwise. Equal pressures (a fixed pressure) are still fine.
+- **Why:** mistakes in brush settings show up at the line that made them. Every existing journal's brushes are within range.
 
 ### 42. `splat_msgs` on an empty canvas gives a misleading error
 - **Status:** Fixed in {{commit: Parse SVG path data properly}}.

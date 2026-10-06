@@ -663,6 +663,17 @@ impl JournalEngine {
             if !brush_names.iter().any(|known| known == name) {
                 return Err(format!("new_brush: unknown brush '{}'; available: {}", name, brush_names.join(", ")).into());
             }
+            // Darkly pressure runs from 0 to 1 (see also the width warning
+            // in darkly.rs).
+            if !(0.0..=1.0).contains(&min_pressure) || !(0.0..=1.0).contains(&max_pressure) || min_pressure > max_pressure {
+                return Err(format!(
+                    "new_brush: pressures must satisfy 0 <= min <= max <= 1, got min {} and max {}",
+                    min_pressure, max_pressure,
+                ).into());
+            }
+            if !(size > 0.0) {
+                return Err(format!("new_brush: size must be positive, got {}", size).into());
+            }
             Ok(BrushSettings::new_brush(name, min_pressure, max_pressure, size))
         });
 
@@ -747,6 +758,23 @@ mod tests {
         assert!(err.contains("unknown brush 'Crayon'"), "{}", err);
         assert!(err.contains("Calligraphy"), "error should list available brushes: {}", err);
         assert!(err.contains("line 2"), "{}", err);
+    }
+
+    #[test]
+    fn new_brush_rejects_bad_pressures_and_sizes() {
+        for (args, want) in [
+            ("0.8, 0.2, 1.0", "0 <= min <= max <= 1, got min 0.8 and max 0.2"),
+            ("-0.1, 0.5, 1.0", "got min -0.1"),
+            ("0.2, 1.5, 1.0", "max 1.5"),
+            ("0.2, 0.5, 0.0", "size must be positive, got 0"),
+            ("0.2, 0.5, -1.0", "size must be positive"),
+        ] {
+            let err = engine().build_entry_str(&format!("let ok = 1;\nnew_brush(\"Ink Pen\", {});", args))
+                .expect_err(args).to_string();
+            assert!(err.contains(want) && err.contains("line 2"), "{}: {}", want, err);
+        }
+        // Equal pressures (a fixed pressure) are fine.
+        assert!(engine().build_entry_str("new_brush(\"Calligraphy\", 1.0, 1.0, 0.8); journal_entry.add_page(new_page());").is_ok());
     }
 
     #[test]
