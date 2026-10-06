@@ -13,7 +13,6 @@ journals' look or behaviour, so it waits for a call).
 ## Waiting on a decision
 
 - **6:** make `width` geometric in Darkly too (recommended), or keep it as a pressure multiplier. Changes every journal's Darkly look.
-- **32:** set `copper_letter_1_sharp`'s Calligraphy nib to 2.0 (recommended) so it renders solid instead of as hairlines.
 - **10** stays deferred (exact ink bounds).
 
 ## Summary
@@ -51,7 +50,7 @@ journals' look or behaviour, so it waits for a call).
 | 29 | Font sets send digits and punctuation to the upper fonts | Quirk | Fixed `5219415` |
 | 30 | A glyph that is a single straight line panics when loaded | Bug | Fixed `9c79679` |
 | 31 | The Darkly dependency follows a branch instead of a pinned revision | Anti-pattern | Fixed `6e14f59` |
-| 32 | The copper letters' brush sizes predate the fork's Calligraphy change | Quirk | Needs decision |
+| 32 | The copper letters' brush sizes predate the fork's Calligraphy change | Quirk | Resolved {{commit: Delete copper_letter_1_sharp}} |
 | 33 | Rhai scripts can't emit warnings; `print` goes to stdout | Gap | Fixed `8a177dc` |
 | 34 | Rhai `fn`s can't read script globals | Quirk | Won't fix |
 | 35 | Each ported journal repeated a 1080 px brush-size fit | Anti-pattern | Fixed `99d38c1` |
@@ -237,10 +236,9 @@ journals' look or behaviour, so it waits for a call).
 
 ### 32. The copper letters' brush sizes predate the fork's Calligraphy change
 - **Where:** `journals/copper_letter_1*/journal_entry.rhai`
-- **Status:** Needs decision.
-- **Problem:** the fork treats Calligraphy's size as the nib's long axis, 2.5× its old meaning. The legacy default brush was rescaled for it (0.7 to 1.75), but `copper_letter_1_sharp`'s Calligraphy brush (size 0.8) wasn't. (`copper_letter_1` uses Rough Ink, which the fork didn't change.)
-- **Finding:** at 0.8 the letter's strokes render as broken, striped hairlines; at 2.0 (0.8 × 2.5, the fork's equivalent of the old size) they're solid calligraphy again.
-- **Recommendation:** change the brush to `new_brush("Calligraphy", 1.0, 1.0, 2.0)`. It's a one-line edit, left undone because it changes a finished journal's look.
+- **Status:** Resolved in {{commit: Delete copper_letter_1_sharp}}: the journal was deleted.
+- **Problem:** the fork treats Calligraphy's size as the nib's long axis, 2.5× its old meaning, and `copper_letter_1_sharp`'s brush (size 0.8) wasn't rescaled, so it rendered as striped hairlines.
+- **Change:** the journal was only a quick Darkly test, so it's gone rather than retuned. (`copper_letter_1` uses Rough Ink, which the fork didn't change.)
 
 ### 33. Rhai scripts can't emit warnings; `print` goes to stdout
 - **Status:** Fixed in `8a177dc`.
