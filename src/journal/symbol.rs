@@ -54,10 +54,9 @@ impl SymbolBase {
                 path.get_hull_points()
             }
         };
-        if points.len() >= 3 {
-            if let Some(hull) = parry2d::shape::ConvexPolygon::from_convex_hull(&gift_wrap(&points)) {
-                return hull;
-            }
+        if points.len() >= 3
+            && let Some(hull) = parry2d::shape::ConvexPolygon::from_convex_hull(&gift_wrap(&points)) {
+            return hull;
         }
         // A straight line (or a point, or nothing) has no area to wrap, so
         // use its bounding box, padded so layout still sees a little width
