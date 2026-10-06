@@ -569,7 +569,7 @@ mod tests {
     fn mistakes_fail_at_their_line() {
         let cases = [
             ("let l = new_lock(\"x\");\nl.add(\"a\", \"rot13\", #{});", "unknown lock type 'rot13'"),
-            ("let l = new_lock(\"x\");\nl.add(\"a\", \"substitution_cipher\", #{ base_n: \"lots\" });", "invalid options"),
+            ("let l = new_lock(\"x\");\nl.add(\"a\", \"substitution_cipher\", #{ base_n: \"lots\" });", "base must be an integer from 2 to 27"),
             ("let l = new_lock(\"x\").add(\"a\", \"substitution_cipher\", #{ base_n: 27 });\nl.add(\"a\", \"substitution_cipher\", #{ base_n: 27 });", "already added"),
             ("let l = new_lock(\"x\").add(\"a\", \"substitution_cipher\", #{ base_n: 27 });\nl.connect(\"a.nope\", \"a.plain_text\");", "a.nope"),
             ("let l = new_lock(\"x\").add(\"a\", \"substitution_cipher\", #{ base_n: 27 });\nl.set_input(\"a.ordering\", symbols(10, \"123\"));", "expects Base27Symbol, got Base10Symbol"),
