@@ -10,54 +10,61 @@ with other work), **Deferred** (postponed by choice), **Won't fix**
 (documented instead), and **Needs decision** (analysed, but it changes the
 journals' look or behaviour, so it waits for a call).
 
+## Waiting on a decision
+
+- **6:** make `width` geometric in Darkly too (recommended), or keep it as a pressure multiplier. Changes every journal's Darkly look.
+- **23:** give paths, glyphs and canvases shared (handle) semantics so chained calls work on variables (recommended), at the cost of assignment aliasing.
+- **32:** set `copper_letter_1_sharp`'s Calligraphy nib to 2.0 (recommended) so it renders solid instead of as hairlines.
+- **10** stays deferred (exact ink bounds).
+
 ## Summary
 
 | # | Item | Kind | Status |
 |---|---|---|---|
 | 1 | Ternary glyphs used only the first balanced-ternary digit | Bug | Fixed `9465169` |
-| 2 | `StrokePath::from_str` handles only a subset of SVG path syntax | Bug | Fixed {{commit: Parse SVG path data properly}} |
+| 2 | `StrokePath::from_str` handles only a subset of SVG path syntax | Bug | Fixed `184fed3` |
 | 3 | `bN:` text parsing silently dropped invalid characters | Bug | Fixed `1c93e9e` |
 | 4 | Missing glyphs became `X` with only a stray message | Quirk | Fixed `8a1ca2e` |
-| 5 | Darkly pressure ramps from min to max along every substroke | Quirk | Fixed {{commit: Add pressure profiles to brushes}} |
-| 6 | A style's `width` is stroke width in SVG but a pressure multiplier in Darkly | Anti-pattern | Needs decision (saturation warning added {{commit: Warn when a style's width saturates Darkly pressure}}) |
+| 5 | Darkly pressure ramps from min to max along every substroke | Quirk | Fixed `aa79ac3` |
+| 6 | A style's `width` is stroke width in SVG but a pressure multiplier in Darkly | Anti-pattern | Needs decision (saturation warning added `71e8f42`) |
 | 7 | Rust-side randomness was unseeded | Quirk | Fixed `92d9eeb` (plain output: see 26) |
-| 8 | Maze cells' colour and orientation are generated, then zeroed | Dead logic | Fixed {{commit: Drop the maze cells' unused colour and orientation}} |
+| 8 | Maze cells' colour and orientation are generated, then zeroed | Dead logic | Fixed `245a5a0` |
 | 9 | Plain-PNG style was hard-coded | Gap | Fixed `3275800` |
 | 10 | Canvases are sized to loose stroke bounds, with no margin | Quirk | Deferred |
-| 11 | The output folder is silently emptied before every render | Anti-pattern | Fixed {{commit: Clear only earlier renders from the output folder}} |
-| 12 | `config/symbols.json` is opened relative to the working directory | Anti-pattern | Fixed {{commit: Find the symbol dictionary and journals from the repository}} |
+| 11 | The output folder is silently emptied before every render | Anti-pattern | Fixed `5f2ff6a` |
+| 12 | `config/symbols.json` is opened relative to the working directory | Anti-pattern | Fixed `7ca07bf` |
 | 13 | `&'j mut Journal<'j>` lifetime tangle | Anti-pattern | Resolved `3c547e8` |
 | 14 | Two parallel pipelines, legacy JSON and rhai | Anti-pattern | Resolved `3c547e8` |
-| 15 | Placeholder types with no content | Dead code | Fixed {{commit: Remove the empty placeholder types}} |
-| 16 | `get_convex_hull()` clones a polygon to read its bounding box | Performance | Fixed {{commit: Cache glyph hull bounds instead of cloning hulls}} |
-| 17 | `unwrap`/`expect`/`panic` everywhere, clippy warnings, deprecations | Code health | Fixed {{commit: Fix every clippy warning and the deprecations}} (panics: see 30, 38–41, 44) |
+| 15 | Placeholder types with no content | Dead code | Fixed `7e5f569` |
+| 16 | `get_convex_hull()` clones a polygon to read its bounding box | Performance | Fixed `e96587f` |
+| 17 | `unwrap`/`expect`/`panic` everywhere, clippy warnings, deprecations | Code health | Fixed `d42af3c` (panics: see 30, 38–41, 44) |
 | 18 | Offline Darkly renders piled up GPU readbacks (14 GB on journal 18) | Bug | Fixed `ece9149` |
 | 19 | Glyph variant picks depended on hash-map order | Bug | Fixed `92d9eeb` |
 | 20 | Glyph hulls used an unseeded jitter | Bug | Fixed `92d9eeb` |
 | 21 | Darkly seeded each stroke from the wall clock | Quirk | Fixed `92d9eeb` |
 | 22 | Legacy splat: lost jitter, a possible infinite loop, silent drops | Bug | Fixed `d1ff166` |
-| 23 | Chained calls on a variable only apply the first call to it | Quirk | Needs decision (documented {{commit: Document the chain-on-a-variable caveat}}) |
+| 23 | Chained calls on a variable only apply the first call to it | Quirk | Needs decision (documented `03eddbb`) |
 | 24 | A rhai `for` loop variable is a copy | Quirk | Won't fix (documented `76d8d84`) |
-| 25 | Darkly renders each canvas separately; plain output merges them | Anti-pattern | Fixed {{commit: Render the plain output per canvas, like Darkly}} |
-| 26 | Plain-output roughening and noise are unseeded | Quirk | Fixed {{commit: Seed the plain output's roughening and noise}} |
-| 27 | `left_handed_maze_path` duplicates `new_maze(..).path()` | Redundancy | Fixed {{commit: Replace left_handed_maze_path with new_maze}} |
-| 28 | `--page` takes only indices, not page names | Gap | Fixed {{commit: Let --page take page names}} |
-| 29 | Font sets send digits and punctuation to the upper fonts | Quirk | Fixed {{commit: Fall back to the other case's fonts before the X glyph}} |
-| 30 | A glyph that is a single straight line panics when loaded | Bug | Fixed {{commit: Give straight-line glyphs a hull instead of panicking}} |
-| 31 | The Darkly dependency follows a branch instead of a pinned revision | Anti-pattern | Fixed {{commit: Pin the Darkly fork to a commit}} |
+| 25 | Darkly renders each canvas separately; plain output merges them | Anti-pattern | Fixed `3cd2cb2` |
+| 26 | Plain-output roughening and noise are unseeded | Quirk | Fixed `35b0435` |
+| 27 | `left_handed_maze_path` duplicates `new_maze(..).path()` | Redundancy | Fixed `234187a` |
+| 28 | `--page` takes only indices, not page names | Gap | Fixed `68bc49b` |
+| 29 | Font sets send digits and punctuation to the upper fonts | Quirk | Fixed `5219415` |
+| 30 | A glyph that is a single straight line panics when loaded | Bug | Fixed `9c79679` |
+| 31 | The Darkly dependency follows a branch instead of a pinned revision | Anti-pattern | Fixed `6e14f59` |
 | 32 | The copper letters' brush sizes predate the fork's Calligraphy change | Quirk | Needs decision |
-| 33 | Rhai scripts can't emit warnings; `print` goes to stdout | Gap | Fixed {{commit: Add warn() for scripts}} |
+| 33 | Rhai scripts can't emit warnings; `print` goes to stdout | Gap | Fixed `8a177dc` |
 | 34 | Rhai `fn`s can't read script globals | Quirk | Won't fix |
-| 35 | Brush sizes are in output pixels, so each port repeats a 1080 px fit | Anti-pattern | Fixed {{commit: Give the ported journals plain nib sizes}} |
-| 36 | `LockConfig`'s string static inputs only served the JSON journals | Dead code | Fixed {{commit: Remove LockConfig's string static inputs}} |
-| 37 | Public library code left unused by the legacy removal | Dead code | Fixed {{commit: Remove library code nothing uses}} |
-| 38 | `fill_with_msg` loops forever when a glyph can't fit on the path | Bug | Fixed {{commit: Fail instead of hanging when text can't fit its path}} |
-| 39 | Script errors surface as a panic with debug formatting | Bug | Fixed {{commit: Report errors in one line instead of panicking}} |
-| 40 | An empty or zero-width canvas panics the Darkly render | Bug | Fixed {{commit: Render degenerate canvases instead of panicking}} |
-| 41 | `new_brush` accepts nonsense pressures and sizes | Gap | Fixed {{commit: Validate new_brush's pressures and size}} |
-| 42 | `splat_msgs` on an empty canvas gives a misleading error | Quirk | Fixed {{commit: Explain why splat_msgs can't use an empty canvas}} |
-| 43 | Quadratic curves convert to cubics incorrectly, moving their end point | Bug | Fixed {{commit: Convert quadratic curves to cubics exactly}} |
-| 44 | Non-finite numbers from scripts can panic layout and hatching | Bug | Fixed {{commit: Refuse non-finite coordinates from scripts}} |
+| 35 | Each ported journal repeated a 1080 px brush-size fit | Anti-pattern | Fixed `99d38c1` |
+| 36 | `LockConfig`'s string static inputs only served the JSON journals | Dead code | Fixed `52640ed` |
+| 37 | Public library code left unused by the legacy removal | Dead code | Fixed `bbdb500` |
+| 38 | `fill_with_msg` loops forever when a glyph can't fit on the path | Bug | Fixed `997cb65` |
+| 39 | Script errors surface as a panic with debug formatting | Bug | Fixed `5ac0e02` |
+| 40 | An empty or zero-width canvas panics the Darkly render | Bug | Fixed `22d95b8` |
+| 41 | `new_brush` accepts nonsense pressures and sizes | Gap | Fixed `0608f7c` |
+| 42 | `splat_msgs` on an empty canvas gives a misleading error | Quirk | Fixed `f6986c1` |
+| 43 | Quadratic curves convert to cubics incorrectly, moving their end point | Bug | Fixed `6b98c5b` |
+| 44 | Non-finite numbers from scripts can panic layout and hatching | Bug | Fixed `8e631e6` |
 
 ## Details
 
@@ -67,8 +74,10 @@ journals' look or behaviour, so it waits for a call).
 
 ### 2. `StrokePath::from_str` handles only a subset of SVG path syntax
 - **Where:** `src/journal/paths.rs`
-- **Status:** Open.
-- **Problem:** only absolute `M L C Q Z` are understood; comma-separated numbers are silently skipped; too few arguments panic; the regex is recompiled on every call.
+- **Status:** Fixed in `184fed3`.
+- **Problem:** only absolute `M L C Q Z` were understood; comma-separated numbers were silently skipped; too few arguments panicked; the regex was recompiled on every call.
+- **Change:** `StrokePath` implements `FromStr` with a small hand-written parser for the SVG path grammar: every command except arcs, absolute and relative (`H`/`V`, smooth `S`/`T` with control-point reflection), commas, compact numbers (`.5.5`, `1-2`, exponents), and repeated argument groups (extra pairs after a moveto are linetos). Bad data is an error naming the byte offset, and the dictionary load reports which symbol it's in. The `regex` dependency is gone.
+- **Why:** the dictionary happened to use only the supported subset, but any symbol exported with relative commands or commas would have loaded wrong or crashed. All 249 existing symbols parse exactly as before (checked against the old parser's output).
 
 ### 3. `bN:` text parsing silently dropped invalid characters
 - **Status:** Fixed in `1c93e9e`; the JSON journals that used it are gone too (`3c547e8`).
@@ -78,21 +87,31 @@ journals' look or behaviour, so it waits for a call).
 
 ### 5. Darkly pressure ramps from min to max along every substroke
 - **Where:** `src/journal/darkly.rs`
-- **Status:** Open.
-- **Problem:** pressure rises linearly from the brush's min to its max over each substroke, so every line gets heavier toward its end, whatever its direction or length.
+- **Status:** Fixed in `aa79ac3`.
+- **Problem:** pressure rose linearly from the brush's min to its max over each substroke, so every line got heavier toward its end, whatever its direction or length, with no way to choose otherwise.
+- **Change:** brushes have a `pressure_profile`: `"ramp"` (the old behaviour, still the default), `"taper"` (a sine swell, light at both ends, full at the middle) or `"constant"`. Set it in rhai with `brush.pressure_profile = "taper"`; unknown names fail at their line.
+- **Why:** the ramp is part of how the existing journals look, so changing the default would have altered every render (renders with the default are byte-identical to before). Making it an explicit, documented option turns a hidden quirk into a choice.
 
 ### 6. A style's `width` is stroke width in SVG but a pressure multiplier in Darkly
 - **Where:** `src/journal/canvas/mod.rs`, `src/journal/darkly.rs`
-- **Status:** Open.
-- **Problem:** the same number means a geometric width in the plain output and a pressure scale in Darkly, so the two outputs can't be tuned together.
+- **Status:** Needs decision. Partly addressed in `71e8f42`.
+- **Problem:** the same number means a geometric width in the plain output and a pressure multiplier in Darkly, so the two outputs can't be tuned together. Worse, Darkly clamps pressure to 1, so in Darkly `width` stops having any effect past `1 / max_pressure`: journal 17's dial (width 6.75 × max 0.25 = 1.69) and maze glyphs (5 × 0.25), and `copper_letter_1_sharp`'s text (1.5 × 1.0), are saturated for much of each stroke.
+- **Change so far:** `new_strokestyle` documents both meanings, and the Darkly render warns once per style when `width × max_pressure > 1`.
+- **Options for the real fix:**
+  1. *Width is geometric everywhere*: Darkly's brush size becomes `brush.size × width`, with pressure only from the brush's min/max and profile. One meaning, no clamping; but every journal's Darkly look changes and brush sizes need re-tuning (Darkly's size/pressure response is per brush, so there's no exact conversion).
+  2. *Separate knobs*: keep `width` for the plain output only and ignore it in Darkly, so pressure is purely the brush's. Simple, but the journals that rely on width for Darkly weight (17's ring hierarchy) lose it.
+  3. *Keep it, documented* (the current state).
+- **Recommendation:** option 1, with a side-by-side re-tune of each journal's brush sizes. (Brush sizes are already in canvas units, see 35, so only the width/pressure meaning changes.)
 
 ### 7. Rust-side randomness was unseeded
 - **Status:** Fixed in `92d9eeb`: glyph picks, jitter, text-box edges, hatching and splatting draw from the engine's seeded generator. The plain output's roughening is split out as 26.
 
 ### 8. Maze cells' colour and orientation are generated, then zeroed
 - **Where:** `src/lockbuilder/locks/maze.rs`
-- **Status:** Open.
-- **Problem:** `SymbolInfo` fills `color` and `orientation` randomly and the maze lock immediately zeroes both; nothing reads them.
+- **Status:** Fixed in `245a5a0`.
+- **Problem:** `SymbolInfo` filled `color` and `orientation` randomly and the maze lock immediately zeroed both; the legacy journal 17 code that mapped them to colours and rotations never had any effect.
+- **Change:** both fields are gone; a cell holds only its symbol.
+- **Why:** dead state that suggested a feature that didn't exist. Lock mazes are unaffected (the layout is generated before cells are filled, and the lock overwrites every symbol), so journal 17's maze renders byte-identically; only `new_maze`'s random placeholder symbols differ.
 
 ### 9. Plain-PNG style was hard-coded
 - **Status:** Fixed in `3275800`: `page.plain_style`.
@@ -104,13 +123,17 @@ journals' look or behaviour, so it waits for a call).
 
 ### 11. The output folder is silently emptied before every render
 - **Where:** `src/bin/journalbuild/main.rs`
-- **Status:** Open. (The duplicate copy went with the legacy code in `3c547e8`.)
-- **Problem:** `create_dir` deletes every file in the output directory, including ones journalbuild didn't write, without saying so.
+- **Status:** Fixed in `5f2ff6a`. (The duplicate copy went with the legacy code in `3c547e8`.)
+- **Problem:** `create_dir` deleted every file in the output directory, including ones journalbuild didn't write, without saying so.
+- **Change:** `prepare_output_dir` removes only `.png` and `.svg` files (the only things journalbuild writes), reports how many it cleared, and leaves everything else. `--page` runs still clear nothing. The usage text says so.
+- **Why:** clearing is still wanted, so renamed or removed pages don't leave stale renders behind, but notes or other files kept next to the renders shouldn't vanish.
 
 ### 12. `config/symbols.json` is opened relative to the working directory
 - **Where:** `src/bin/journalbuild/main.rs`, tests
-- **Status:** Open.
-- **Problem:** running journalbuild from anywhere but the repository root fails to find the symbol dictionary.
+- **Status:** Fixed in `7ca07bf`.
+- **Problem:** running journalbuild (or the tests) from anywhere but the repository root failed to find `config/symbols.json` and `journals/`, with a bare panic.
+- **Change:** the defaults are resolved from the crate directory at build time (`symboldict::DEFAULT_SYMBOLS`, and the repository's `journals/`); `--symbols FILE` overrides the dictionary; a dictionary that won't load is a one-line error naming the path. The tests use the same constants.
+- **Why:** journalbuild is run from the repository it's built in, so baking in its location is the simplest correct default; explicit flags cover anything else.
 
 ### 13. `&'j mut Journal<'j>` lifetime tangle
 - **Status:** Resolved in `3c547e8`: the legacy `Journal` type is gone.
@@ -120,16 +143,20 @@ journals' look or behaviour, so it waits for a call).
 
 ### 15. Placeholder types with no content
 - **Where:** `src/journal/rhaientries/mod.rs`
-- **Status:** Open.
-- **Problem:** `EntryMetadata`, `PageMetadata`, `MarkdownContent` and a one-variant `LayoutStyle` carry nothing.
+- **Status:** Fixed in `7e5f569`.
+- **Problem:** `EntryMetadata`, `PageMetadata`, `MarkdownContent` and a one-variant `LayoutStyle` carried nothing, and the page-to-canvas conversion matched on the single variant.
+- **Change:** all four are gone. Page metadata that does exist now (`name`, `plain_style`) lives on `Page` itself. (The page-layering conversion went later, with 25.)
+- **Why:** they suggested features that weren't there, and were registered as rhai types nobody could use. They're easy to reintroduce with real content if layouts or metadata are ever needed.
 
 ### 16. `get_convex_hull()` clones a polygon to read its bounding box
 - **Where:** `src/journal/symbol.rs`, `src/journal/canvas/textbox.rs`
-- **Status:** Open.
-- **Problem:** text layout clones each glyph's hull, in its inner loop, just to read its extents.
+- **Status:** Fixed in `e96587f`.
+- **Problem:** text layout cloned each glyph's convex hull, in its inner loop, just to read its extents.
+- **Change:** each glyph base caches its hull's bounding box, read through `Symbol::hull_aabb()`. `get_convex_hull` is gone, along with the unused `intersects`, `placed_bounds` and `placed_convex_hull`; `intersects` was also wrong, scaling the other glyph's hull by this glyph's scale.
+- **Why:** cheap and allocation-free. Evaluating every journal script got about 9% faster (0.69 s to 0.63 s, mostly journal 18's layout), with identical output.
 
 ### 17. `unwrap`/`expect`/`panic` everywhere, clippy warnings, deprecations
-- **Status:** Fixed in {{commit: Fix every clippy warning and the deprecations}}, for clippy and the deprecations; the panics that scripts can reach are tracked individually (30, 38–41, 44).
+- **Status:** Fixed in `d42af3c`, for clippy and the deprecations; the panics that scripts can reach are tracked individually (30, 38–41, 44).
 - **Problem:** about 120 clippy warnings, `std::f32::MAX`/`MIN` deprecation warnings in `paths.rs`, and around 120 `unwrap`/`expect`/`panic` calls.
 - **Change:** `cargo clippy --all-targets` is clean. Clippy's machine fixes were reviewed and kept (`From` instead of `Into` impls, slices instead of `&Vec`, `Default` impls, collapsed `if let`s, redundant clones and conversions); by hand: the deprecated constants, `Display` instead of inherent `to_string`s, a `SymbolFilter` alias, and `Rc` instead of `Arc` for the symbol dictionary (it holds `Rc`s and a `RefCell`, so `Arc` gave no thread safety). The NaN-rejecting `!(x > 0.0)` argument checks are kept deliberately, with a crate-level `allow` explaining why. The panicking calls dropped from about 120 to 52 outside tests, most of the rest being internal invariants (lookups the code just populated).
 - **Why:** a quiet build makes new warnings visible. All 20 Darkly renders across the journals and the fixture are byte-identical before and after.
@@ -151,55 +178,74 @@ journals' look or behaviour, so it waits for a call).
 
 ### 23. Chained calls on a variable only apply the first call to it
 - **Where:** `src/journal/rhaientries/` (paths, glyphs, canvases)
-- **Status:** Open.
-- **Problem:** functions modify their target and return a copy, so `g.translate_by(v).scale_by(2.0);` changes `g` only by the translation; the scale applies to the copy and is lost. Chains on temporaries and `x = x.a().b()` work.
+- **Status:** Needs decision. Documented in `03eddbb`.
+- **Problem:** path, glyph and canvas functions modify their target and return a copy, so `g.translate_by(v).scale_by(2.0);` changes `g` only by the translation: rhai passes the variable by reference to the first call of a chain only, and later calls act on the returned copy, which is then dropped. Chains on temporaries and `x = x.a().b()` work. There's no way for a function to tell which case it's in, so it can't even warn.
+- **Change so far:** the caveat and the `x = x.a().b()` form are documented next to the functions and in the glyph module docs.
+- **Options for a real fix:**
+  1. *Handle semantics*: these types share their data behind `Rc<RefCell<..>>`, so every copy of a value aliases one object. Chains then work everywhere, and so does mutating in a `for` loop (24). But plain assignment aliases too: after `let b = a; b.translate_by(v);`, `a` has moved as well, and code that copies a canvas to vary it (the naming test does) needs an explicit `.copy()`.
+  2. *Return nothing from mutators* (`p.line_to(v)` returns `()`): a chain on anything becomes a clear "function not found" error instead of a silent no-op, but every chain on a temporary (`new_strokepath().move_to(a).line_to(b)`, used throughout the journals) has to be rewritten as statements.
+  3. *Keep it, documented* (the current state).
+- **Recommendation:** 1, with a `.copy()` function and a sweep of the journals for copy-then-modify code; it removes both this and 24's footgun. It changes the meaning of assignment for these types, so it's your call.
 
 ### 24. A rhai `for` loop variable is a copy
 - **Status:** Won't fix: it's rhai's semantics. Documented in `glyphs.rs` (`76d8d84`) with the index-based alternative.
 
 ### 25. Darkly renders each canvas separately; plain output merges them
 - **Where:** `src/journal/rhaientries/mod.rs`
-- **Status:** Open.
-- **Problem:** a page with two canvases gives one plain PNG but two Darkly PNGs, so "page" means different things per output.
+- **Status:** Fixed in `3cd2cb2`.
+- **Problem:** a page with two canvases gave one plain PNG (its canvases layered) but two Darkly PNGs, so "page" meant different things per output, and canvas names only reached the Darkly files.
+- **Change:** the plain output is one PNG per canvas too, `{page}_{canvas}.png` beside `darkly_{page}_{canvas}.png`; the page-layering conversion is gone. To draw several canvases as one image, merge them with `canvas.add_canvas(..)`, as the journals already do for splatted notes.
+- **Why:** per-canvas images are what canvas names were added for, so the plain output follows Darkly rather than the other way round. Plain file names change (`page_0.png` becomes `page_0_0.png`; journalbuild clears the old ones on the next full render).
 
 ### 26. Plain-output roughening and noise are unseeded
 - **Where:** `src/journal/canvas/mod.rs`, `src/journal/paths.rs`
-- **Status:** Open.
-- **Problem:** the plain PNG/SVG differ on every run even with a seeded script.
+- **Status:** Fixed in `35b0435`.
+- **Problem:** the plain PNG's roughened strokes and Perlin texture used `rand::random`, so the plain output differed on every run even with a seeded script.
+- **Change:** `Canvas::to_svg` and `to_png` take a seed, and the roughening and noise draw from a generator seeded with it. Each canvas is seeded with an FNV-1a hash of its output name (`{page}_{canvas}`), stable across runs and Rust versions, so canvases differ from each other but not from run to run. The unused `roughen_by`, `roughened_by`, `save_to_png` and `save_to_svg` went rather than being converted.
+- **Why:** with this, every output of a journal (plain and Darkly) is byte-identical run to run.
 
 ### 27. `left_handed_maze_path` duplicates `new_maze(..).path()`
-- **Status:** Fixed in {{commit: Replace left_handed_maze_path with new_maze}}.
+- **Status:** Fixed in `234187a`.
 - **Problem:** `left_handed_maze_path(seed, w, h)` built the same maze as `new_maze(seed, w, h)` and returned its `path()`, so there were two spellings for one thing.
 - **Change:** the copper letters use `new_maze(index, 10, 10).path()` and the old function is gone.
 - **Why:** one maze API. The copper letters' renders are byte-identical (all 24 files).
 
 ### 28. `--page` takes only indices, not page names
-- **Status:** Fixed in {{commit: Let --page take page names}}.
+- **Status:** Fixed in `68bc49b`.
 - **Problem:** `--page` took only indices, though pages can now be named (`maze`, `balanced_ternary`), and output files are named after them.
 - **Change:** `--page` takes indices or names, mixed (`--page 0,maze`). `Entry::page_index` resolves them; an unknown page is an error that lists the journal's pages with their indices.
 - **Why:** names are what you see in the output folder, and they don't shift when pages are added or reordered.
 
 ### 29. Font sets send digits and punctuation to the upper fonts
 - **Where:** `src/journal/styles/mod.rs`
-- **Status:** Open.
-- **Problem:** `FontSet` picks the lower fonts only for lowercase letters, so digits and punctuation are looked up in the upper fonts first.
+- **Status:** Fixed in `5219415`.
+- **Problem:** `FontSet` looked up lowercase letters only in the lower fonts and everything else (capitals, digits, punctuation) only in the upper fonts, so a character one set lacked became `X` even when the other set had it.
+- **Change:** each character still tries its own set first (lowercase letters the lower fonts; everything else the upper fonts), then falls back to the other set, then to `X`. `missing_glyphs()` lists every font tried.
+- **Why:** sending punctuation to the upper fonts is right for the existing fonts (only `loche_upper` has punctuation), so the priority stays; the fallback can only replace an `X` with a real glyph. No journal had missing glyphs, so no render changes.
 
 ### 30. A glyph that is a single straight line panics when loaded
 - **Where:** `src/journal/symbol.rs`
-- **Status:** Open.
-- **Problem:** a straight line's convex hull is degenerate and `ConvexPolygon::from_convex_hull` fails; the dictionary load panics.
+- **Status:** Fixed in `9c79679`.
+- **Problem:** a glyph whose points are collinear (a single straight stroke like `-` or `/`), a single point, or empty, has no convex hull, and loading the dictionary panicked with "Failed to generate convex hull".
+- **Change:** when the points don't wrap into a hull, the glyph's hull is its bounding box padded by 0.02 (1% of a glyph's span), so layout still sees a sliver of width and height.
+- **Why:** such glyphs are legitimate (dashes, slashes, `I`). Glyphs that already had a hull are untouched.
 
 ### 31. The Darkly dependency follows a branch instead of a pinned revision
 - **Where:** `Cargo.toml`
-- **Status:** Open.
+- **Status:** Fixed in `6e14f59`.
+- **Problem:** `Cargo.toml` followed the fork's `offline-stroke-path` branch, so a `cargo update` would pull whatever the branch held next, silently changing how journals render.
+- **Change:** pinned with `rev = "3f99aea…"` (the commit already in `Cargo.lock`), with a comment naming the branch.
+- **Why:** renders are now byte-reproducible, and the renderer version should only change deliberately. Moving to a newer fork commit, or back to upstream once `stroke_path` lands, is a one-line edit.
 
 ### 32. The copper letters' brush sizes predate the fork's Calligraphy change
 - **Where:** `journals/copper_letter_1*/journal_entry.rhai`
-- **Status:** Open.
-- **Problem:** the fork treats Calligraphy's size as the nib's long axis (2.5× the old meaning); the legacy default was rescaled for it, the copper letters weren't.
+- **Status:** Needs decision.
+- **Problem:** the fork treats Calligraphy's size as the nib's long axis, 2.5× its old meaning. The legacy default brush was rescaled for it (0.7 to 1.75), but `copper_letter_1_sharp`'s Calligraphy brush (size 0.8) wasn't. (`copper_letter_1` uses Rough Ink, which the fork didn't change.)
+- **Finding:** at 0.8 the letter's strokes render as broken, striped hairlines; at 2.0 (0.8 × 2.5, the fork's equivalent of the old size) they're solid calligraphy again.
+- **Recommendation:** change the brush to `new_brush("Calligraphy", 1.0, 1.0, 2.0)`. It's a one-line edit, left undone because it changes a finished journal's look.
 
 ### 33. Rhai scripts can't emit warnings; `print` goes to stdout
-- **Status:** Fixed in {{commit: Add warn() for scripts}}.
+- **Status:** Fixed in `8a177dc`.
 - **Problem:** a script could only `print` (stdout, mixed into progress output) or `throw` (stopping the render); there was no way to flag a problem and carry on.
 - **Change:** `warn(message)` writes `warning: message (line N)` to stderr, like journalbuild's own warnings (so smoke.sh shows it), and records it for `JournalEngine::warnings()`. Journal 17 uses it for key symbols that don't fit around its maze.
 - **Why:** the journals already wanted it (17 was printing a fake "warning:" to stdout).
@@ -207,59 +253,70 @@ journals' look or behaviour, so it waits for a call).
 ### 34. Rhai `fn`s can't read script globals
 - **Status:** Won't fix: rhai functions are pure by design; pass values in, or use `this` for the method target.
 
-### 35. Brush sizes are in output pixels, so each port repeats a 1080 px fit
+### 35. Each ported journal repeated a 1080 px brush-size fit
 - **Where:** `journals/*/journal_entry.rhai`, `src/journal/darkly.rs`
-- **Status:** Open.
-- **Problem:** brush size is in render pixels while everything else is in canvas units, so the ported journals each compute `1.75 * extent / 1080` to keep the legacy look.
+- **Status:** Fixed in `99d38c1`.
+- **Problem:** each ported journal computed its Calligraphy nib as `1.75 * extent / 1080`, journal 17 through two helper functions, which looked like brush sizes were in output pixels and had to be fitted to each page.
+- **Finding:** they aren't. A canvas unit is a pixel at `--scale 1` and Darkly multiplies brush sizes by the scale, so brush sizes are already in canvas units like everything else. The formula only reproduced the legacy renderer, which fit every page to 1080 px.
+- **Change:** the journals use plain nib sizes with a one-line note on where they came from: 2.15 (first_codex), 1.65 and 2.05 (journal 17's maze and dial), 2.43 (journal 18), the formula's values to two decimals.
+- **Why:** the scripts get simpler and say what they mean; the look is unchanged.
 
 ### 36. `LockConfig`'s string static inputs only served the JSON journals
 - **Where:** `src/lockbuilder/mod.rs`
-- **Status:** Open.
-- **Problem:** static inputs as `"bN:..."` strings are parsed at build time; rhai passes typed values instead, so the string path is now unused.
+- **Status:** Fixed in `52640ed`.
+- **Problem:** `LockConfig.static_inputs` held `"bN:..."` strings, parsed by `parse_info_var` when the lock was built. Only the JSON journals wrote them; rhai passes typed values with `set_input` instead.
+- **Change:** the field, its parsing and `parse_info_var` are gone. Fixed inputs are only `CompositeLock::add_static_input` with an `InfoVar`. The validation tests moved onto `base_n_symbols`, which rhai's `symbols()` uses.
+- **Why:** one way to fix a lock input, and no stringly-typed parsing step left over from the JSON format.
 
 ### 37. Public library code left unused by the legacy removal
-- **Status:** Fixed in {{commit: Remove library code nothing uses}}.
+- **Status:** Fixed in `bbdb500`.
 - **Problem:** the library's `pub` items aren't checked by the dead-code lint, so helpers only the legacy code used lingered.
 - **Change:** with the library's modules made private for one build (exporting only what journalbuild calls), the compiler listed everything unreachable, and it's gone: `CanvasShape`; a dozen `Canvas` transforms and fitting helpers; `TextBox::place_all_symbols` (rhai's `place_all` replaced it); unused `Symbol` constructors and accessors, its `color` field, and the stored hull (only its bounding box is read); assorted `PathCmd`/`StrokePath` point and transform helpers; the symbol builder's filter hook; `SymbolPathDict::new_symbol`; `string_infovar_set`. About 320 lines. `Canvas::to_svg` stays for the tests. Earlier items removed more of the same (`intersects`, `roughen_by`, `save_to_png`, `parse_info_var`, ...).
 - **Why:** code nobody calls still has to be read and kept compiling. All 28 renders across the journals and fixture are byte-identical.
 
 ### 38. `fill_with_msg` loops forever when a glyph can't fit on the path
 - **Where:** `src/journal/rhaientries/mod.rs`
-- **Status:** Open.
-- **Problem:** it keeps placing the unplaced glyphs on new copies of the path; if a glyph never fits (a short path, a big font) no progress is made and it never returns.
+- **Status:** Fixed in `997cb65`.
+- **Problem:** `fill_with_msg` lays the message along fresh copies of the path until every glyph is placed; when a glyph didn't fit at all (a short path, a big font) no copy placed anything and it looped forever. `fit_msg_to` had the quiet version of the same bug: if the message didn't fit even at its smallest font size it returned whatever fitted.
+- **Change:** `fill_with_msg` stops with an error naming the glyph that can't fit (and rejects a font size that isn't positive); `fit_msg_to` errors when glyphs are left over at its smallest size.
+- **Why:** a hung render is the worst way to learn a path is too short. Every journal still renders as before.
 
 ### 39. Script errors surface as a panic with debug formatting
 - **Where:** `src/bin/journalbuild/main.rs`
-- **Status:** Open.
-- **Problem:** a script error prints `Failed to execute result.: Custom { kind: Other, error: "..." }` and a panic note, exit status 101. A journal with no pages silently renders nothing.
+- **Status:** Fixed in `5ac0e02`.
+- **Problem:** a script error printed `Failed to execute result.: Custom { kind: Other, error: "Failed to Evaluate Rhai: ..." }` and a panic note, with exit status 101; a journal with no pages silently rendered nothing; failing to write a render, read the journal or clear the output folder panicked.
+- **Change:** journalbuild's work runs in `run() -> Result`, and every failure is one `error:` line with exit status 1: `error: journals/x/journal_entry.rhai: Runtime error: oops (line 1, position 1)`. `build_entry_*` return rhai's message with the file name; the publishing functions and `prepare_output_dir` return errors naming the file; an entry with no pages is an error. The `EntryPath`/`JournalPath` debug prints are gone, and the GPU is only set up once the script has succeeded.
+- **Why:** script errors are the common case while writing a journal, so they should read like compiler errors, not crashes.
 
 ### 40. An empty or zero-width canvas panics the Darkly render
 - **Where:** `src/journal/rhaientries/mod.rs`, `src/journal/darkly.rs`
-- **Status:** Open.
-- **Problem:** the render size rounds to 0 and the canvas resize assertion fails.
+- **Status:** Fixed in `22d95b8`, tested in `5327540`.
+- **Problem:** an empty canvas, or one with no width or height (a vertical hairline with width 0) or under a pixel at the render scale, rounded to a 0-pixel render and failed Darkly's resize assertion; the plain output failed to parse its zero-size SVG.
+- **Change:** canvases render at `Canvas::render_extents()`, their bounds' extents but at least one unit a side (the bounds centred in it), for both outputs, and Darkly renders are at least 1×1 px. Canvases with no strokes are skipped, with one warning listing them (`page/canvas`).
+- **Why:** an empty or degenerate canvas is a script-level mistake at worst, worth a warning, not a crash mid-render. Every existing render is byte-identical.
 
 ### 41. `new_brush` accepts nonsense pressures and sizes
-- **Status:** Fixed in {{commit: Validate new_brush's pressures and size}}.
+- **Status:** Fixed in `0608f7c`.
 - **Problem:** `new_brush` accepted a min pressure above the max, pressures outside Darkly's 0–1 range, and zero or negative sizes, which rendered as nothing or as nonsense without an error.
 - **Change:** `new_brush` requires `0 <= min <= max <= 1` and a positive size, failing at the script line otherwise. Equal pressures (a fixed pressure) are still fine.
 - **Why:** mistakes in brush settings show up at the line that made them. Every existing journal's brushes are within range.
 
 ### 42. `splat_msgs` on an empty canvas gives a misleading error
-- **Status:** Fixed in {{commit: Explain why splat_msgs can't use an empty canvas}}.
+- **Status:** Fixed in `f6986c1`.
 - **Problem:** messages are placed in boxes within the canvas's bounds; an empty canvas has none, and after 100 hopeless tries the error said "message 0 doesn't fit".
 - **Change:** `splat_msgs` on a canvas with no strokes fails straight away with "the canvas is empty, so there's nowhere to place messages; draw on it first".
 - **Why:** the error now names the actual cause.
 
 ### 43. Quadratic curves convert to cubics incorrectly, moving their end point
 - **Where:** `src/journal/paths.rs` (`PathCmd::to_cubic_curve`)
-- **Status:** Fixed in {{commit: Cache glyph hull bounds instead of cloning hulls}}.
-- **Problem:** text layout cloned each glyph's convex hull, in its inner loop, just to read its extents.
-- **Change:** each glyph base caches its hull's bounding box, read through `Symbol::hull_aabb()`. `get_convex_hull` is gone, along with the unused `intersects`, `placed_bounds` and `placed_convex_hull`; `intersects` was also wrong, scaling the other glyph's hull by this glyph's scale.
-- **Why:** cheap and allocation-free. Evaluating every journal script got about 9% faster (0.69 s to 0.63 s, mostly journal 18's layout), with identical output.
+- **Status:** Fixed in `6b98c5b`.
+- **Problem:** the plain output's roughening converts every segment to a cubic first, one command at a time, so a quadratic's conversion didn't know its start point: it placed the control points wrongly and moved the end point a third of the way past the control point. Quadratic strokes (the fixture's `quad_to`, and the 50 quadratic segments in the glyph dictionary) were distorted in the plain PNGs.
+- **Change:** `StrokePath::to_cubics()` converts a whole path, tracking the current point, with the exact cubic for each quadratic (control points 2/3 of the way from each end to the quadratic's control point). `PathCmd::to_cubic_curve` is gone.
+- **Why:** the plain output now draws the shapes the script describes, matching Darkly. Only plain renders containing quadratics changed; no Darkly render did.
 
 ### 44. Non-finite numbers from scripts can panic layout and hatching
 - **Where:** `src/journal/paths.rs`, `src/journal/symbol.rs`, `src/journal/rhaientries/`
-- **Status:** Fixed in {{commit: Refuse non-finite coordinates from scripts}}.
+- **Status:** Fixed in `8e631e6`.
 - **Problem:** an infinite or NaN coordinate (from dividing or scaling by zero in a script) crashed the render, since infinite bounds asked for an impossibly large image, or quietly drew garbage, and could reach the k-d tree (which panics on non-finite points) and the hatch's `partial_cmp(..).unwrap()` sort.
 - **Change:** `new_vec` refuses non-finite coordinates, and `add_strokepath`, `add_stroke`, `add_glyph(s)` (and so `splat_msgs`) refuse paths with any; each fails at the script line. Inside, avoid trees skip non-finite points, `AvoidanceKdTree::add_point` skips infinities as well as NaN, and the hatch sorts with `total_cmp`.
 - **Why:** the error appears at the line that made the bad number, rather than as a crash later. Renders are byte-identical.
