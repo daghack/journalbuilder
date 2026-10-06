@@ -390,68 +390,6 @@ pub fn draw_msgs_overtop(canvas: &mut Canvas, symd: &symboldict::SymbolPathDict,
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct SymbolCircleStyleOptions {
-    pub stroke_style: StrokeStyle,
-    pub fill_style: Option<StrokeStyle>,
-}
-
-#[derive(Clone, Debug)]
-pub struct SymbolCircleParams {
-    pub rotation: f32,
-    pub center: Vec2,
-    pub radius: f32,
-    pub style_options: Option<SymbolCircleStyleOptions>,
-    pub symbol_scale: f32,
-}
-
-pub fn symbols_in_circle(symbols: Vec<Symbol>, params: &SymbolCircleParams, rng: &mut dyn RngCore) -> Canvas {
-    let stroke_style = if let Some(style_opts) = &params.style_options {
-        style_opts.stroke_style.clone()
-    } else {
-        StrokeStyle {
-            color: "black".to_string(),
-            width: 3.0,
-            brush: None,
-        }
-    };
-    let mut canvas = Canvas::new();
-    let SymbolCircleParams {
-        rotation,
-        center, radius,
-        symbol_scale,
-        style_options: _ } = params;
-    let num_symbols = symbols.len();
-    for (i, mut symbol) in symbols.into_iter().enumerate() {
-        let angle = (i as f32) * (2.0 * std::f32::consts::PI / (num_symbols as f32)) - (std::f32::consts::PI / 2.0);
-        let angle = angle + rotation;
-        let x = center.x + angle.cos() * radius;
-        let y = center.y + angle.sin() * radius;
-        if let Some(style_opts) = &params.style_options {
-            if let Some(fill_style) = &style_opts.fill_style {
-                let background_circle : StrokePath = CanvasShape::Circle {
-                    center: Vec2::new(x, y),
-                    radius: symbol_scale * 0.75,
-                }.into();
-                let background_circle_ss = background_circle.to_substrokes();
-                for substroke in background_circle_ss {
-                    // a small random offset for the ray stroke fill
-                    for _ in 0..3 {
-                        let rand_rad_offset = rng.random::<f32>() * std::f32::consts::TAU;
-                        let stroke = substroke.ray_stroke_fill(3.0, rand_rad_offset, 3.0, rng);
-                        canvas.add_strokes(stroke, fill_style.clone());
-                    }
-                }
-            }
-        }
-        symbol.scale_by(*symbol_scale);
-        symbol.set_position(Vec2::new(x, y));
-        symbol.rotate_rad_by(angle + (std::f32::consts::PI / 2.0));
-        canvas.add_strokes(symbol, stroke_style.clone());
-    }
-    canvas
-}
-
 pub type MazePosition = (i32, i32);
 
 #[derive(Clone, Debug)]

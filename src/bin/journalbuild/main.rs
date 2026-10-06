@@ -2,8 +2,7 @@ use scribe::journal::{Journal, JournalManifest, JournalPage};
 use scribe::journal::rhaientries::{JournalEngine};
 use scribe::journal::canvas::artistic::*;
 use scribe::journal::{symboldict, darkly};
-use scribe::journal::canvas::{Brush, Canvas, StrokeStyle, CanvasShape};
-use scribe::journal::styles::{ternary_builder};
+use scribe::journal::canvas::{Brush, Canvas, StrokeStyle};
 use std::collections::HashMap;
 use scribe::journal::canvas::textbox::{TextBox, TextBoxOptions, TextBoxLineMode};
 use scribe::journal::styles;
@@ -112,67 +111,12 @@ fn journal_entry_18<'j>(journal: &'j mut Journal<'j>, symd: &'j symboldict::Symb
     })
 }
 
-fn first_codex<'j>(journal: &'j mut Journal<'j>, symd: &'j symboldict::SymbolPathDict) -> JournalManifest<'j> {
-    let builder = ternary_builder(&symd, "balanced_ternary");
-    let symbol_scale = 30.0;
-    let symbol_rings = [2, 3, 5, 7, 11, 13, 27];
-    let mut base_canvas = Canvas::new();
-    let symbol_set = "abcdefghijklmnopqrstuvwxyz";
-    for (i, &ring_size) in symbol_rings.iter().enumerate() {
-        let radius = 100.0 + i as f32 * (symbol_scale * 3.0);
-        let circle = CanvasShape::Circle {
-            center: Vec2::new(0.0, 0.0),
-            radius,
-        };
-        let half_ring = ring_size / 2;
-        let first_half = &symbol_set[0..half_ring];
-        let second_half = &symbol_set[symbol_set.len() - half_ring..].chars().collect::<String>();
-        let msg = format!(" {}{}", first_half, second_half);
-        let symbols = builder.build(msg.as_str(), &mut rand::rng());
-        let circle_count = 5;
-        for _ in 0..circle_count {
-            base_canvas.add_strokes(circle.clone(), StrokeStyle {
-                color: "hsla(150, 30%, 50%, 0.1)".to_string(),
-                width: 2.5,
-                brush: None,
-            });
-        }
-        let drawn_canvas = symbols_in_circle(symbols, &SymbolCircleParams {
-            rotation: i as f32 * 137.5_f32.to_radians(),
-            center: Vec2::new(0.0, 0.0),
-            radius: 100.0 + i as f32 * (symbol_scale * 3.0),
-            style_options: Some(SymbolCircleStyleOptions{
-                stroke_style: StrokeStyle {
-                    color: "rgba(0, 0, 0, 0.7)".to_string(),
-                    width: 2.5,
-                    brush: None,
-                },
-                fill_style: Some(StrokeStyle {
-                    color: "hsla(150, 30%, 70%, 0.3)".to_string(),
-                    width: 2.0,
-                    brush: None,
-                }),
-            }),
-            symbol_scale,
-        }, &mut rand::rng());
-        base_canvas.merge_canvas(drawn_canvas);
-    }
-    journal.add_symboldict(&symd);
-    journal.add_page(
-        "first_codex".to_string(),
-        JournalPage::CanvasIllustration(base_canvas),
-        None,
-    );
-    journal.build_entries(|_, _, _| {})
-}
-
 const LEGACY_DARKLY_SIZE: f32 = 1080.0;
 
 fn legacy_journalbuild(symd: &symboldict::SymbolPathDict, engine: &mut DarklyEngine, journal_dir: &str, journal_name: &str, dir_name: &str, plain: bool, scale: f32, supersample: f32, strict_glyphs: bool) {
     let journal_funcs: HashMap<&str, JournalEntryFunc> = HashMap::from([
         ("journal_entry_17", journal_entry_17 as JournalEntryFunc),
         ("journal_entry_18", journal_entry_18 as JournalEntryFunc),
-        ("first_codex", first_codex as JournalEntryFunc),
     ]);
 
     let journal_path = format!("{}/{}/journal_entry.json", journal_dir, journal_name);

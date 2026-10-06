@@ -84,7 +84,12 @@ render fixture-supersampled darkly_page_0_0.png \
 for journal in journals/*/; do
 	name=$(basename "$journal")
 	if [[ -f "$journal/journal_entry.rhai" ]]; then
-		render "$name" darkly_page_0_0.png -- "$name" --page 0 --no-plain --scale 0.25
+		# Named pages name their files, so just require some Darkly output.
+		render "$name" -- "$name" --page 0 --no-plain --scale 0.25
+		if [[ -z "$(ls "$OUT/$name"/darkly_*.png 2>/dev/null)" ]]; then
+			echo "FAIL $name: no Darkly output"
+			FAILURES=$((FAILURES + 1))
+		fi
 	elif [[ -f "$journal/journal_entry.json" ]]; then
 		# Legacy page names vary; just require some Darkly output.
 		render "$name" -- "$name" --legacy --no-plain --scale 0.1
