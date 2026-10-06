@@ -853,7 +853,7 @@ mod tests {
 
         let dir = std::env::temp_dir().join(format!("journal_names_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        entry.publish_pngs(dir.to_str().unwrap(), 0.1, Some(&[1]));
+        entry.publish_pngs(dir.to_str().unwrap(), 0.1, Some(&[1])).expect("publish should succeed");
         assert!(dir.join("maze_ring.png").is_file() && dir.join("maze_1.png").is_file());
         std::fs::remove_dir_all(&dir).unwrap();
     }
