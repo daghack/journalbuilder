@@ -95,6 +95,7 @@ render fixture-supersampled darkly_page_0_0.png \
 	-- smoke --journals-dir tests/smoke_journals --page 0 --supersample 2
 # Every page of the showcase, every character with a glyph.
 render showcase darkly_pens_brushes.png darkly_fonts_0.png darkly_glyphs_0.png darkly_art_0.png darkly_text_0.png darkly_locks_ciphers.png \
+	darkly_layout_0_0.png darkly_layout_1_0.png darkly_title_0_0.png \
 	-- showcase --strict-glyphs --scale 0.25
 
 for journal in journals/*/; do

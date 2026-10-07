@@ -8,6 +8,9 @@
 //            clear of drawings with avoidance trees
 //   locks    every lock type, a lock chain drawn as a maze, and the page
 //            split into tiles
+//   layout   pages typeset from layouts: an inline one, text chained over
+//            two columns and two pages (layout_0, layout_1), and a layout
+//            file (title_0)
 //
 // When journals gain a capability (a function, an art tool, a brush, a
 // font, a lock type), it gets a labelled example here: see CLAUDE.md.
@@ -439,6 +442,73 @@ journal_entry.add_page(locks_page);
 let tiles = locks_page.split(2, 1);
 if tiles[1].tile.column != 1 { throw "tiles know their place"; }
 journal_entry.add_pages(tiles);
+
+// ---- layout: pages typeset from flexbox layouts ----
+//
+// A layout gives page n's tree of boxes: rows and columns, and slots that
+// typeset fills. Here: a heading that shrinks to fit, a drop cap the text
+// wraps around, a body flowing down one column and on down the next (and
+// on to a second page), a band of ornaments between them, a figure fitted
+// to its box, a rule, a spacer and a page label. Layouts usually live in
+// layouts/ (see the file one below and layouts/README.md).
+fn showcase_page(n, info) {
+	column(#{ padding: 50, gap: 16 }, [
+		if n == 0 { flow("title", #{ role: "heading", height: 90, fit: true }) } else { spacer(#{ height: 90 }) },
+		rule(#{ height: 10, margin: [0, 200] }),
+		row(#{ grow: 1, gap: 30 }, [
+			column(#{ grow: 1 }, [
+				if n == 0 { initial("body", #{ position: "absolute", top: 0, left: 0, width: 80, height: 80 }) } else { spacer() },
+				flow("body", #{ grow: 1 }),
+			]),
+			band("diamond", #{ width: 14 }),
+			column(#{ grow: 1 }, [
+				if n == 0 { figure("plant", #{ height: 260, border: "frame" }) } else { spacer() },
+				flow("body", #{ grow: 1 }),
+			]),
+		]),
+		label(if n == 0 { "the first page" } else { "the second page" }, #{ role: "folio", align: "center", height: 30 }),
+	])
+}
+let diamond = new_strokepath().move_to(new_vec(0.0, -10.0)).line_to(new_vec(6.0, 0.0)).line_to(new_vec(0.0, 10.0)).line_to(new_vec(-6.0, 0.0)).close();
+let story = body + body + body + "\n\n" + body + body + body + body + body + body + body;
+let page_layout = new_layout("layout", Fn("showcase_page"));
+if page_layout.name != "layout" { throw "layouts have names"; }
+journal_entry.add_pages(page_layout.typeset(#{
+	width: 1100, height: 900,
+	flows: #{ title: "pages from a layout", body: story },
+	roles: #{
+		body: #{ font: label_font, style: words_ink, size: 20.0, align: "justify", indent: 1.5, line_height: 1.3 },
+		heading: #{ font: label_font, style: heading_style, size: 70.0, align: "center", valign: "center" },
+		initial: #{ font: label_font, style: heading_style },
+		folio: #{ font: label_font, style: thin_red, size: 18.0 },
+		rule: #{ style: thin_red },
+		frame: #{ style: thin_red },
+		diamond: #{ style: thin_red },
+	},
+	art: #{ diamond: diamond, plant: |b| {
+		let plant = art::bramble(new_vec(b.center.x, b.y + b.height), -PI() / 2.0, b.height * 0.95, b.height * 0.2, 5);
+		let c = new_canvas();
+		c.add_strokepath(plant.vines, new_strokestyle(1.0, "#c8a27a", new_brush("Ink Pen", 0.4, 0.8, 1.6)));
+		c.add_strokepath(plant.leaves, new_strokestyle(1.0, "#a8d68a", new_brush("Ink Pen", 0.4, 0.8, 1.6)));
+		c.add_strokepath(plant.flowers, new_strokestyle(1.0, "#f2ead8", new_brush("Ink Pen", 0.4, 0.8, 1.6)));
+		c
+	} },
+}));
+
+// A layout file: layouts/missal_title.rhai, a framed title page.
+let leaf = new_strokepath().move_to(new_vec(0.0, -22.0)).quad_to(new_vec(14.0, -4.0), new_vec(0.0, 22.0)).quad_to(new_vec(-14.0, -4.0), new_vec(0.0, -22.0));
+journal_entry.add_pages(layout("missal_title").typeset(#{
+	name: "title",
+	flows: #{ title: "The Showcase", subtitle: "everything there is to draw with", credits: "a layout file\nlayouts slash missal title" },
+	roles: #{
+		title: #{ font: new_fontset(["copper_upper"], ["copper_lower"]), style: heading_style, size: 150.0, line_height: 1.0 },
+		subtitle: #{ font: label_font, style: words_ink, size: 40.0 },
+		credits: #{ font: label_font, style: words_ink, size: 30.0 },
+		frame: #{ style: thin_red },
+		border: #{ style: line_style },
+	},
+	art: #{ border: leaf },
+}));
 
 // Every character above has a glyph.
 if missing_glyphs().len() > 0 {

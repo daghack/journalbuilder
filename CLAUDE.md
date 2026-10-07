@@ -4,8 +4,9 @@
 
 `journals/showcase` is a journal of everything journals can draw with: a
 page each for pens (Darkly brushes, pressure profiles, widths, colours),
-fonts, every glyph, art tools, text layout, and locks. It's the reference
-for what's available, so it must never fall behind.
+fonts, every glyph, art tools, text layout, locks, and pages typeset from
+layouts. It's the reference for what's available, so it must never fall
+behind.
 
 Whenever a change adds or changes a capability, update the showcase in
 the same change:
