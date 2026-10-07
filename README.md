@@ -40,13 +40,14 @@ Useful flags (`journalbuild` with no arguments lists them all):
 | `journals/showcase` | a page each of every brush, font, glyph, art tool, text layout and lock type, with the calls that make them |
 | `locks/` | lock types, one rhai file each; see [locks/README.md](locks/README.md) |
 | `layouts/` | page layouts, one rhai file each; see [layouts/README.md](layouts/README.md) |
-| `config/symbols.json` | the symbol dictionary: every glyph's SVG path, by name |
+| `config/symbols.json` | the symbol dictionary: every glyph's SVG path, by name, with optional `bearing` (room either side when text is set) or `blank` (a space this wide, such as a font's own `{font}_ `) |
 | `src/journal/` | canvases, paths, glyph placement, and Darkly and SVG rendering |
 | `src/journal/art/` | procedural path art: snakes and brambles, free or along a path |
 | `src/journal/rhaientries/` | the rhai API journals and lock files use |
 | `src/lockbuilder/` | runs lock chains forward (lock) and backward (unlock) |
 | `src/bin/journalbuild/` | the command line |
 | `tests/`, `scripts/smoke.sh` | tests, below |
+| `scripts/plain_font.py` | draws the plain font into `config/symbols.json` |
 | `assets/svgsets/` | source artwork for symbol sets (not read by the build) |
 
 ## Writing a journal
@@ -96,7 +97,9 @@ What to know:
   seed, so a journal renders the same every run. `seed(n)` changes it.
 - **Glyphs and fonts.** `glyph("balanced_ternary_3")` loads a symbol by
   name; `new_fontset`, `ternary_font` and `lowercase_font` map text to
-  glyphs. Text layout: `new_textbox` flows glyphs into a box,
+  glyphs; `new_fontset(["plain_upper"], ["plain_lower"])` is plain, a
+  simple font made to read easily, with digits and punctuation. Text
+  layout: `new_textbox` flows glyphs into a box,
   `canvas.splat_msgs` scatters messages across a canvas, and
   `path.fill_with_msg` / `fit_msg_to` write along a path.
 - **Keeping text clear.** Every text layout takes `avoid` (a path, canvas,

@@ -20,8 +20,17 @@ enum AdjType {
 #[derive(Serialize, Deserialize, Debug)]
 struct SymbolEntry {
     name: String,
+    /// The glyph's strokes, as SVG path data; none for a blank.
+    #[serde(default)]
     path: String,
     adj: Option<AdjType>,
+    /// Room either side of the glyph's strokes when text is set, in glyph
+    /// units (the path spans about -1..1).
+    #[serde(default)]
+    bearing: f32,
+    /// A blank this wide in glyph units, such as a font's space, instead
+    /// of strokes.
+    blank: Option<f32>,
 }
 
 #[derive(Clone, Debug)]
@@ -62,8 +71,16 @@ impl SymbolPathDict {
         let mut symbol_map = HashMap::new();
         let mut symbol_base = HashMap::new();
         for symbol in symbols {
-            let mut stroke_path: StrokePath = symbol.path.parse()
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("symbol '{}': {}", symbol.name, e)))?;
+            let invalid = |what: String| io::Error::new(io::ErrorKind::InvalidData, format!("symbol '{}': {}", symbol.name, what));
+            if let Some(width) = symbol.blank {
+                if !(width.is_finite() && width > 0.0) || !symbol.path.is_empty() {
+                    return Err(invalid(format!("a blank needs a positive width and no path, got width {} and path '{}'", width, symbol.path)));
+                }
+                symbol_map.insert(symbol.name.clone(), StrokePath::new());
+                symbol_base.insert(symbol.name, Rc::new(SymbolBase::new(SymbolType::Blank(width, 1.0))));
+                continue;
+            }
+            let mut stroke_path: StrokePath = symbol.path.parse().map_err(invalid)?;
             match symbol.adj {
                 Some(AdjType::ZeroToOneRemap) => {
                     // This is for when the incoming path is in a 0-1 coordinate space.
@@ -73,8 +90,12 @@ impl SymbolPathDict {
                 }
                 None => {}
             }
+            if !(symbol.bearing.is_finite() && symbol.bearing >= 0.0) {
+                return Err(invalid(format!("bearing must be a number of at least 0, got {}", symbol.bearing)));
+            }
             symbol_map.insert(symbol.name.clone(), stroke_path.clone());
-            symbol_base.insert(symbol.name, Rc::new(SymbolBase::new(SymbolType::Pathed(stroke_path))));
+            let base = SymbolBase::new(SymbolType::Pathed(stroke_path)).with_bearing(symbol.bearing);
+            symbol_base.insert(symbol.name, Rc::new(base));
         }
         Ok(SymbolPathDict {
             symbols: symbol_map,
@@ -157,6 +178,30 @@ mod tests {
             let json = format!(r#"[{{"name": "line", "path": "{}", "adj": null}}]"#, path);
             let symd = dict(&json);
             assert!(symd.get_symbol_base("line").is_some(), "{}", path);
+        }
+    }
+
+    #[test]
+    fn bearings_widen_glyphs_but_not_their_outlines() {
+        let symd = dict(r#"[{"name": "bare", "path": "M -0.5 -1 L 0.5 1"}, {"name": "roomy", "path": "M -0.5 -1 L 0.5 1", "bearing": 0.2}]"#);
+        let (bare, roomy) = (symd.get_symbol_base("bare").unwrap(), symd.get_symbol_base("roomy").unwrap());
+        let (bare, roomy) = (Symbol::new_default_from_base_rc(bare), Symbol::new_default_from_base_rc(roomy));
+        assert!((roomy.hull_aabb().extents().x - bare.hull_aabb().extents().x - 0.4).abs() < 1e-5);
+        assert_eq!(roomy.hull_aabb().extents().y, bare.hull_aabb().extents().y);
+        assert_eq!(roomy.footprint(), bare.footprint());
+        let err = SymbolPathDict::from_bytes(br#"[{"name": "bad", "path": "M 0 0 L 1 1", "bearing": -1}]"#).expect_err("negative bearing").to_string();
+        assert!(err.contains("symbol 'bad': bearing"), "{}", err);
+    }
+
+    #[test]
+    fn blanks_have_a_width_and_no_strokes() {
+        let symd = dict(r#"[{"name": "font_ ", "blank": 0.6}]"#);
+        let space = Symbol::new_default_from_base_rc(symd.get_symbol_base("font_ ").unwrap());
+        assert!(space.is_blank());
+        assert!((space.hull_aabb().extents().x - 0.6).abs() < 1e-5);
+        for bad in [r#"[{"name": "b", "blank": 0}]"#, r#"[{"name": "b", "blank": 1, "path": "M 0 0 L 1 1"}]"#] {
+            let err = SymbolPathDict::from_bytes(bad.as_bytes()).expect_err("bad blank").to_string();
+            assert!(err.contains("symbol 'b': a blank needs"), "{}", err);
         }
     }
 

@@ -37,10 +37,10 @@ glyph, and look at the pages you changed:
 ./target/release/journalbuild showcase --strict-glyphs --output-dir /tmp/showcase
 ```
 
-Conventions there: labels are lowercase loche (`label_font`), which has
-punctuation but no digits; strokes are light colours, since renders are
-viewed on a dark background; sections are labelled with the calls they
-show.
+Conventions there: labels and body text are in plain (`label_font`),
+which has capitals, digits and punctuation, and headings in loche
+(`heading_font`); strokes are light colours, since renders are viewed on
+a dark background; sections are labelled with the calls they show.
 
 ## Checking changes
 

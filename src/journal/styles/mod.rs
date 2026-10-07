@@ -20,6 +20,29 @@ pub fn balanced_base27_symbol(c: char) -> i32 {
     }
 }
 
+/// The width of a space (and a line break) in fonts without a space of
+/// their own, and of a tab, in glyph units.
+const SPACE: f32 = 1.0;
+const TAB: f32 = 4.0;
+
+/// The blank for a whitespace character: a space or line break is the
+/// first of the fonts' own spaces (a blank glyph named `{prefix}_ `), or
+/// `SPACE` wide; a tab is `TAB` wide. Other whitespace has no glyph.
+fn whitespace_symbol(symd: &SymbolPathDict, c: char, prefixes: &[&str]) -> Symbol {
+    let width = match c {
+        ' ' | '\n' => {
+            let own = prefixes.iter().find_map(|prefix| symd.get_symbol_base(&format!("{}_ ", prefix)).filter(|base| base.is_blank()));
+            if let Some(base) = own {
+                return Symbol::new_default_from_base_rc(base);
+            }
+            SPACE
+        }
+        '\t' => TAB,
+        _ => return symd.fallback_symbol(c, &[]),
+    };
+    Symbol::new_default_from_base_rc(Rc::new(SymbolBase::new(SymbolType::Blank(width, 1.0))))
+}
+
 pub struct SymbolStringBuilder<'symdict> {
     symdict: &'symdict SymbolPathDict,
     transformer: StrToSymTransformer<'symdict>,
@@ -58,13 +81,7 @@ pub fn lowercase_builder<'sd>(symdict: &'sd SymbolPathDict, prefix: &str) -> Sym
     SymbolStringBuilder::<'sd>::new(symdict, move |symd, original, rng| {
         let c = original.to_lowercase().next().unwrap_or(' ');
         if c.is_whitespace() {
-            if c == ' ' || c == '\n' {
-                Symbol::new_default_from_base_rc(Rc::new(SymbolBase::new(SymbolType::Blank(1.0, 1.0))))
-            } else if c == '\t' {
-                Symbol::new_default_from_base_rc(Rc::new(SymbolBase::new(SymbolType::Blank(4.0, 1.0))))
-            } else {
-                symd.fallback_symbol(original, &[])
-            }
+            whitespace_symbol(symd, original, &[prefix.as_str()])
         } else {
             let mut key = format!("{}_{}", prefix, c);
             let possible_keys = symd.symbols_with_prefix(key.as_str());
@@ -99,16 +116,8 @@ impl FontSet {
             let FontSet{upper_fonts, lower_fonts} = &self;
             let prefix_c = c.to_lowercase().next().unwrap_or(' ');
             if prefix_c.is_whitespace() {
-                let symbase = match prefix_c {
-                    ' ' | '\n' => {
-                        Rc::new(SymbolBase::new(SymbolType::Blank(1.0, 1.0)))
-                    }
-                    '\t' => {
-                        Rc::new(SymbolBase::new(SymbolType::Blank(4.0, 1.0)))
-                    }
-                    _ => return symd.fallback_symbol(c, &[]),
-                };
-                Symbol::new_default_from_base_rc(symbase)
+                let prefixes: Vec<&str> = upper_fonts.iter().chain(lower_fonts).map(String::as_str).collect();
+                whitespace_symbol(symd, c, &prefixes)
             } else {
                 let mut chosen_keys = None;
                 // Lowercase letters look in the lower fonts first; everything

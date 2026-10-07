@@ -32,8 +32,10 @@ let heading_style = new_strokestyle(1.2, red, heading_nib);
 let line_style = new_strokestyle(1.0, pale, new_brush("Ink Pen", 0.3, 0.7, 2.0));
 let thin_red = new_strokestyle(1.0, red, new_brush("Ink Pen", 0.3, 0.7, 1.2));
 
-// Labels are in loche, which has punctuation; no font has digits.
-let label_font = lowercase_font("loche_upper");
+// Labels and body text are in plain, a font made to read easily, with
+// capitals, digits and punctuation; headings are in loche.
+let label_font = new_fontset(["plain_upper"], ["plain_lower"]);
+let heading_font = lowercase_font("loche_upper");
 
 // `text` written from (x, y) to the right, along a line through the middle
 // of its glyphs.
@@ -72,10 +74,10 @@ fn heading(text, style, font) {
 
 let pens = new_canvas();
 pens.name = "brushes";
-pens.add_canvas(heading("pens", heading_style, label_font));
+pens.add_canvas(heading("pens", heading_style, heading_font));
 let y = 0.0;
 for name in brush_names() {
-	pens.add_canvas(write(name.to_lower(), 0.0, y, 26.0, label_style, label_font));
+	pens.add_canvas(write(name, 0.0, y, 26.0, label_style, label_font));
 	pens.add_strokepath(new_rectangle(new_vec(1040.0, y), 420.0, 60.0).hatch(7.0, 0.8, 0.6), thin_red);
 	let brush = new_brush(name, 0.3, 0.9, 6.0);
 	brush.size = 9.0;
@@ -86,7 +88,7 @@ for name in brush_names() {
 // Pressure runs along each stroke as its brush's profile says, between the
 // brush's min_pressure and max_pressure.
 y += 40.0;
-pens.add_canvas(write("pressure profiles", 0.0, y, 34.0, heading_style, label_font));
+pens.add_canvas(write("pressure profiles", 0.0, y, 34.0, heading_style, heading_font));
 y += 70.0;
 for profile in ["ramp", "taper", "constant"] {
 	let brush = new_brush("Ink Pen", 0.05, 1.0, 10.0);
@@ -100,7 +102,7 @@ for profile in ["ramp", "taper", "constant"] {
 // A style's width scales its brush's pressure (in SVG output it's the
 // stroke's width).
 y += 40.0;
-pens.add_canvas(write("widths", 0.0, y, 34.0, heading_style, label_font));
+pens.add_canvas(write("widths", 0.0, y, 34.0, heading_style, heading_font));
 y += 70.0;
 for (width, i) in [0.3, 0.7, 1.2] {
 	let style = new_strokestyle(1.0, blue, new_brush("Charcoal", 0.3, 0.8, 8.0));
@@ -112,7 +114,7 @@ for (width, i) in [0.3, 0.7, 1.2] {
 
 // Colours: CSS names, hex, rgb(), hsl() and alpha.
 y += 40.0;
-pens.add_canvas(write("colours", 0.0, y, 34.0, heading_style, label_font));
+pens.add_canvas(write("colours", 0.0, y, 34.0, heading_style, heading_font));
 y += 70.0;
 let colours = [["named", "gold"], ["hex", "#9ad0ff"], ["rgb", "rgb(255, 138, 122)"], ["hsl", "hsl(100, 50%, 70%)"], ["alpha", "rgba(242, 234, 216, 0.4)"]];
 for (colour, i) in colours {
@@ -137,9 +139,10 @@ let alphabet = "abcdefghijklmnopqrstuvwxyz";
 let ink = new_strokestyle(1.0, pale, new_brush("Calligraphy", 0.4, 0.8, 2.0));
 
 let fonts = new_canvas();
-fonts.add_canvas(heading("fonts", heading_style, label_font));
+fonts.add_canvas(heading("fonts", heading_style, heading_font));
 let y = 0.0;
 for f in [
+	#{ label: "plain: new_fontset([\"plain_upper\"], [\"plain_lower\"]), made to read easily", font: label_font, lines: [alphabet.to_upper(), alphabet, "0123456789  . , ; : ! ? ' \" - — _ ( ) [ ] { } / # + = * < > % &", "The Quick Brown Fox, 1234 times over the lazy dog."] },
 	#{ label: "copper: new fontset of copper upper and copper lower", font: new_fontset(["copper_upper"], ["copper_lower"]), lines: [alphabet.to_upper(), alphabet, pangram, "variants picked at random  aaaa eeee ssss"] },
 	#{ label: "loche: lowercase font of loche upper", font: lowercase_font("loche_upper"), lines: [alphabet, pangram + ".", "punctuation  . , ; : ' \" ? - —"] },
 	#{ label: "loche lower", font: lowercase_font("loche_lower"), lines: [alphabet, pangram + "."] },
@@ -199,7 +202,7 @@ fn family(name) {
 }
 
 let catalogue = new_canvas();
-catalogue.add_canvas(heading("every glyph", heading_style, label_font));
+catalogue.add_canvas(heading("every glyph", heading_style, heading_font));
 let y = 0.0;
 let current = ();
 let column = 0;
@@ -209,9 +212,7 @@ for name in glyph_names("") {
 	if f != current || column == 30 {
 		if f != current {
 			y += if current == () { 0.0 } else { 70.0 };
-			let label = f.to_lower();
-			label.replace("_", " ");
-			catalogue.add_canvas(write(label, 0.0, y, 22.0, thin_red, label_font));
+			catalogue.add_canvas(write(f, 0.0, y, 22.0, thin_red, label_font));
 			current = f;
 		}
 		y += 60.0;
@@ -236,7 +237,7 @@ journal_entry.add_page(glyphs_page);
 
 seed(7);
 let art = new_canvas();
-art.add_canvas(heading("art", heading_style, label_font));
+art.add_canvas(heading("art", heading_style, heading_font));
 
 // Shapes and curves, moved, scaled and turned.
 art.add_canvas(write("shapes and curves", 0.0, 0.0, 24.0, thin_red, label_font));
@@ -333,7 +334,7 @@ journal_entry.add_page(art_page);
 let body = "Fate is not subtle. I knew from the moment I picked up the slightly ripped paper that it was a thing to be returned and not kept. ";
 body = body + body + body;
 let text = new_canvas();
-text.add_canvas(heading("text", heading_style, label_font));
+text.add_canvas(heading("text", heading_style, heading_font));
 let words_ink = new_strokestyle(1.0, pale, pen);
 
 // A text box, flat (glyph by glyph) with jagged edges.
@@ -411,7 +412,7 @@ journal_entry.add_page(text_page);
 
 let locks = new_canvas();
 locks.name = "ciphers";
-locks.add_canvas(heading("locks", heading_style, label_font));
+locks.add_canvas(heading("locks", heading_style, heading_font));
 let plain = "EVERY LOCK OPENS";
 let letters = "EVERYLOCKOPENS";
 let ordering = symbols(26, "QWERTYUIOPASDFGHJKLZXCVBNM");
@@ -430,7 +431,7 @@ for row in rows {
 	let result = lock.run(row[2]);
 	if result.get(row[3]).base() < 26 || result.get(row[3]).type_name() == "" { throw "unexpected output type"; }
 	locks.add_canvas(write(row[0], 0.0, y, 24.0, thin_red, label_font));
-	locks.add_canvas(write(plain.to_lower() + "  becomes  " + result.text(row[3]).to_lower(), 340.0, y, 24.0, label_style, label_font));
+	locks.add_canvas(write(plain + "  becomes  " + result.text(row[3]), 340.0, y, 24.0, label_style, label_font));
 	y += 60.0;
 }
 
@@ -512,8 +513,8 @@ journal_entry.add_pages(page_layout.typeset(#{
 	flows: #{ title: "pages from a layout", body: story },
 	roles: #{
 		body: #{ font: label_font, style: words_ink, size: 20.0, align: "justify", indent: 1.5, line_height: 1.3 },
-		heading: #{ font: label_font, style: heading_style, size: 70.0, align: "center", valign: "center" },
-		initial: #{ font: label_font, style: heading_style },
+		heading: #{ font: heading_font, style: heading_style, size: 70.0, align: "center", valign: "center" },
+		initial: #{ font: heading_font, style: heading_style },
 		folio: #{ font: label_font, style: thin_red, size: 18.0 },
 		rule: #{ style: thin_red },
 		frame: #{ style: thin_red },
@@ -533,7 +534,7 @@ journal_entry.add_pages(page_layout.typeset(#{
 let leaf = new_strokepath().move_to(new_vec(0.0, -22.0)).quad_to(new_vec(14.0, -4.0), new_vec(0.0, 22.0)).quad_to(new_vec(-14.0, -4.0), new_vec(0.0, -22.0));
 journal_entry.add_pages(layout("missal_title").typeset(#{
 	name: "title",
-	flows: #{ title: "The Showcase", subtitle: "everything there is to draw with", credits: "a layout file\nlayouts slash missal title" },
+	flows: #{ title: "The Showcase", subtitle: "everything there is to draw with", credits: "a layout file\nlayouts/missal_title.rhai" },
 	roles: #{
 		title: #{ font: new_fontset(["copper_upper"], ["copper_lower"]), style: heading_style, size: 150.0, line_height: 1.0 },
 		subtitle: #{ font: label_font, style: words_ink, size: 40.0 },

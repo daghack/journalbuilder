@@ -14,7 +14,8 @@ pub enum SymbolType {
 #[derive(Debug, Clone)]
 pub struct SymbolBase {
     symbol_type: SymbolType,
-    /// The hull's bounding box, which text layout reads for every glyph.
+    /// The hull's bounding box, widened across by the glyph's bearing:
+    /// the room text layout gives the glyph.
     hull_aabb: parry2d::bounding_volume::Aabb,
     /// The convex hull of its strokes, unplaced: what text keeps clear of.
     hull: Vec<Vec2>,
@@ -28,6 +29,14 @@ impl SymbolBase {
             hull: hull.points().to_vec(),
             symbol_type,
         }
+    }
+    /// The same glyph with `bearing` (in glyph units) of room either side
+    /// of it when text is set. What text keeps clear of is still its
+    /// strokes' hull.
+    pub fn with_bearing(mut self, bearing: f32) -> SymbolBase {
+        self.hull_aabb.mins.x -= bearing;
+        self.hull_aabb.maxs.x += bearing;
+        self
     }
     pub fn is_blank(&self) -> bool {
         matches!(self.symbol_type, SymbolType::Blank(_, _))
@@ -122,7 +131,7 @@ impl Symbol {
     }
 
     /// The bounding box of the unplaced glyph's hull (its path spans about
-    /// -1..1), without copying the hull.
+    /// -1..1), widened across by its bearing: the room text gives it.
     pub fn hull_aabb(&self) -> parry2d::bounding_volume::Aabb {
         self.base.hull_aabb
     }
