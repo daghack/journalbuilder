@@ -143,9 +143,6 @@ pub struct Frame {
     /// Seeds the SVG output's roughening and noise, as the whole page's
     /// file name would.
     pub svg_seed: u64,
-    /// Seeds what covers the whole page, such as its paper, as the whole
-    /// page's name would.
-    pub page_seed: u64,
 }
 
 impl Frame {

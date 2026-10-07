@@ -53,11 +53,11 @@ const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--svg
                       Stroke widths are geometric widths there, while in
                       Darkly they scale brush pressure.
   --background PAPER  Render each page as one image on paper,
-                      darkly_{page}.png, its canvases layered in order:
-                      parchment (a scroll: mottled, with scorched
-                      edges) or stained (tea-stained, with tide lines
-                      and cup rings). Pages get a border of paper; split
-                      and typeset pages get their part of one sheet.
+                      darkly_{page}.png, its canvases layered in order.
+                      The paper is parchment: a mottled scroll browning
+                      toward its edges. Pages get a border of paper round
+                      their strokes; each tile of a split page is a sheet
+                      of its own.
   --strict-glyphs     Fail before rendering if any character had no glyph
                       (by default they're drawn as X and listed as a warning).
   --scale S           Scale output images (default 1.0), brushes included.
@@ -133,7 +133,7 @@ fn parse_args() -> Result<Args, String> {
                     .ok_or(format!("invalid supersample '{}'; expected a number >= 1, e.g. 1.5", value))?;
             }
             "--background" => {
-                let value = args.next().ok_or("--background needs a paper, e.g. --background parchment")?;
+                let value = args.next().ok_or("--background needs a paper: --background parchment")?;
                 background = Some(Paper::from_name(&value)
                     .ok_or(format!("unknown paper '{}'; expected one of {}", value, Paper::NAMES.join(", ")))?);
             }

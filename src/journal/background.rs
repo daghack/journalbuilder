@@ -1,10 +1,11 @@
 //! Paper to render pages on: procedural textures in the manner of old
-//! letters and scrolls, drawn under a page's strokes (`--background`).
+//! scrolls, drawn under a page's strokes (`--background`).
 //!
 //! Textures are worked out in canvas units, so they look the same at any
-//! `--scale`, and from the whole page's pixel grid, so a split page's tiles
-//! have their own parts of one sheet. Each page's sheet is seeded from its
-//! name: the same every run, and different from page to page.
+//! `--scale`. Each page is a sheet of its own, seeded from its name: the
+//! same every run, and different from page to page. A split page's tiles
+//! are sheets of their own too, like a big drawing spread over several
+//! pages.
 
 use image::{ImageBuffer, RgbaImage};
 use noise::{NoiseFn, Perlin};
@@ -13,52 +14,36 @@ use rayon::prelude::*;
 /// A kind of paper.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Paper {
-    /// Cream parchment, mottled and fibrous, darkening to scorched,
-    /// ragged edges: a scroll.
+    /// Cream parchment, mottled and fibrous, browning toward ragged
+    /// edges: a scroll.
     Parchment,
-    /// Pale paper splashed with tea: blotches with dark tide lines at
-    /// their edges, cup rings, and clear patches between.
-    Stained,
 }
 
 impl Paper {
-    pub const NAMES: [&'static str; 2] = ["parchment", "stained"];
+    pub const NAMES: [&'static str; 1] = ["parchment"];
 
     pub fn from_name(name: &str) -> Option<Self> {
         match name {
             "parchment" => Some(Self::Parchment),
-            "stained" => Some(Self::Stained),
             _ => None,
         }
     }
 }
 
 /// A sheet of paper on a grid of pixels from the canvas units' origin at
-/// `scale` pixels per unit: its corner and size, and the pixels to paint,
-/// `[x0, y0, x1, y1)` (all of it, but for a tile). The texture is fixed to
-/// canvas units, so the same spot looks the same on any sheet with the
-/// same seed; only the edges follow the sheet.
+/// `scale` pixels per unit: its corner and size.
 #[derive(Clone, Copy, Debug)]
 pub struct Sheet {
     pub corner: (i64, i64),
     pub size: (u32, u32),
-    pub crop: [i64; 4],
     pub scale: f32,
     pub seed: u64,
 }
 
-impl Sheet {
-    /// A whole sheet, painted all over.
-    pub fn whole(corner: (i64, i64), size: (u32, u32), scale: f32, seed: u64) -> Self {
-        let crop = [corner.0, corner.1, corner.0 + size.0 as i64, corner.1 + size.1 as i64];
-        Sheet { corner, size, crop, scale, seed }
-    }
-}
-
-/// The paper under `sheet`'s pixels, opaque.
+/// The sheet, opaque.
 pub fn paint(paper: Paper, sheet: &Sheet) -> RgbaImage {
-    let [x0, y0, x1, y1] = sheet.crop;
-    let (width, height) = ((x1 - x0).max(0) as u32, (y1 - y0).max(0) as u32);
+    let (x0, y0) = sheet.corner;
+    let (width, height) = sheet.size;
     let texture = Texture::new(sheet);
     let pixels: Vec<u8> = (0..height).into_par_iter().flat_map_iter(|row| {
         let texture = &texture;
@@ -69,7 +54,6 @@ pub fn paint(paper: Paper, sheet: &Sheet) -> RgbaImage {
             let p = [x / texture.scale, y / texture.scale];
             let [r, g, b] = match paper {
                 Paper::Parchment => texture.parchment(p),
-                Paper::Stained => texture.stained(p),
             };
             let byte = |v: f64| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
             [byte(r), byte(g), byte(b), 255]
@@ -121,8 +105,6 @@ struct Texture {
     seed: u64,
     /// Independent noise for each feature, so they don't line up.
     layers: Vec<Perlin>,
-    /// Cup rings: centre, radius and how far they wander.
-    rings: Vec<([f64; 2], f64, f64)>,
 }
 
 /// Noise layers, by what they're for.
@@ -131,11 +113,7 @@ const CLOUD: usize = 1;
 const GRAIN: usize = 2;
 const FIBRE: usize = 3;
 const EDGE: usize = 4;
-const WARP_X: usize = 5;
-const WARP_Y: usize = 6;
-const STAIN: usize = 7;
-const DEPTH: usize = 8;
-const LAYERS: usize = 9;
+const LAYERS: usize = 5;
 
 impl Texture {
     fn new(sheet: &Sheet) -> Self {
@@ -143,16 +121,7 @@ impl Texture {
         let min = [sheet.corner.0 as f64 / scale, sheet.corner.1 as f64 / scale];
         let size = [sheet.size.0 as f64 / scale, sheet.size.1 as f64 / scale];
         let layers = (0..LAYERS).map(|i| Perlin::new(hash(sheet.seed, i as i64, 0) as u32)).collect();
-        // A few cup rings, more on bigger sheets, kept mostly on the sheet.
-        let area = size[0] * size[1];
-        let count = 1 + (unit(hash(sheet.seed, -1, 0)) * (area / 700_000.0).clamp(1.0, 4.0)) as i64;
-        let rings = (0..count).map(|i| {
-            let u = |k: i64| unit(hash(sheet.seed, -2 - i, k));
-            let radius = size[0].min(size[1]) * (0.08 + 0.1 * u(0));
-            let centre = [min[0] + size[0] * (0.1 + 0.8 * u(1)), min[1] + size[1] * (0.1 + 0.8 * u(2))];
-            (centre, radius, radius * (0.05 + 0.06 * u(3)))
-        }).collect();
-        Texture { scale, min, max: [min[0] + size[0], min[1] + size[1]], seed: sheet.seed, layers, rings }
+        Texture { scale, min, max: [min[0] + size[0], min[1] + size[1]], seed: sheet.seed, layers }
     }
 
     /// Fractal noise of `octaves` octaves at `period` units, about -1..1.
@@ -240,95 +209,20 @@ impl Texture {
         c = mix(c, rgb(0x9C6C3C), 0.45 * smoothstep(width * 0.3, -width * 0.1, into));
         mix(c, rgb(0x5A3A1E), self.specks(p, 0.05))
     }
-
-    /// The tea's level here, and how far `p` is from where it dried at
-    /// each of `SHORES`, in units: positive inside.
-    fn tea(&self, p: [f64; 2]) -> (f64, [f64; 2]) {
-        let level = |p: [f64; 2]| {
-            let warp = [p[0] + 25.0 * self.fbm(WARP_X, p, 200.0, 3), p[1] + 25.0 * self.fbm(WARP_Y, p, 200.0, 3)];
-            self.fbm(STAIN, warp, 380.0, 7)
-        };
-        let here = level(p);
-        // The slope gives the distance to a shore, so tide lines are as
-        // wide where the level is flat as where it's steep.
-        const H: f64 = 0.75;
-        let slope = (((level([p[0] + H, p[1]]) - here) / H).powi(2) + ((level([p[0], p[1] + H]) - here) / H).powi(2)).sqrt().max(1e-4);
-        (here, SHORES.map(|shore| (here - shore) / slope))
-    }
-
-    fn stained(&self, p: [f64; 2]) -> Rgb {
-        let paper = rgb(0xF6F0E2);
-        let wash = rgb(0xEDD9B4);
-        let pale_tea = rgb(0xE8C38C);
-        let strong_tea = rgb(0xCC7F3C);
-        let tide = rgb(0x9A4A1E);
-        let tooth = self.tooth(p);
-        // A faint wash over everything, so no paper is quite clean.
-        let mut c = mix(paper, wash, 0.35 * smoothstep(-0.4, 0.8, self.fbm(CLOUD, p, 300.0, 4)));
-        c = shade(c, tooth);
-        // Blotches where the tea's level is high: darkest in a band inside
-        // their edges, where it pooled as it dried, with a dark tide line at
-        // the edge itself, and a fainter one where a second, smaller pool
-        // dried inside it.
-        let (level, [shore, inner]) = self.tea(p);
-        let depth = 0.5 + 0.5 * self.fbm(DEPTH, p, 55.0, 4);
-        let feather = 0.6 + 2.5 * smoothstep(0.3, 1.0, self.fbm(MOTTLE, p, 160.0, 3));
-        let wet = smoothstep(-feather, feather, shore);
-        let pooled = (-shore.max(0.0) / 28.0).exp();
-        let darker = 0.15 + 0.4 * depth * depth + 0.35 * pooled + 0.25 * smoothstep(-2.0, 6.0, inner) + 0.2 * smoothstep(SHORES[0] + 0.3, SHORES[0] + 0.8, level);
-        let tea = shade(mix(pale_tea, strong_tea, darker), tooth);
-        c = mix(c, tea, 0.92 * wet);
-        let line = |from_shore: f64, width: f64| (-((from_shore - width) / width).powi(2)).exp();
-        let width = 1.4 + 1.6 * depth;
-        c = mix(c, tide, 0.7 * line(shore, width) / feather.sqrt());
-        c = mix(c, tide, 0.35 * line(inner, width * 0.8));
-        // Cup rings, wobbling and broken.
-        for (i, &(centre, radius, wander)) in self.rings.iter().enumerate() {
-            let (dx, dy) = (p[0] - centre[0], p[1] - centre[1]);
-            let angle = dy.atan2(dx);
-            let around = [angle.cos() * 1.7 + i as f64 * 9.0, angle.sin() * 1.7];
-            let wobble = wander * self.layers[EDGE].get(around);
-            let off = (dx * dx + dy * dy).sqrt() - radius - wobble;
-            let thickness = radius * 0.02 + 1.5;
-            let strength = smoothstep(-0.45, 0.3, self.layers[CLOUD].get([around[0] * 1.4, around[1] * 1.4 + 3.0]));
-            let ring = (-(off / thickness).powi(2)).exp() * strength;
-            c = mix(c, pale_tea, 0.3 * smoothstep(0.0, -thickness * 2.0, off));
-            c = mix(c, tide, 0.6 * ring);
-        }
-        let (into, width) = self.edge(p);
-        c = mix(c, shade(strong_tea, 0.9), 0.4 * smoothstep(width * 0.8, 0.0, into).powf(1.5));
-        mix(c, rgb(0x6B4426), self.specks(p, 0.03))
-    }
 }
-
-/// Where tea dried: the levels of the stain noise at a blotch's edge, and
-/// at a smaller pool's inside it.
-const SHORES: [f64; 2] = [0.1, 0.32];
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn papers_are_opaque_and_follow_their_seed() {
-        for paper in [Paper::Parchment, Paper::Stained] {
-            let sheet = Sheet::whole((-10, 5), (60, 40), 0.2, 3);
-            let a = paint(paper, &sheet);
-            assert_eq!(a.dimensions(), (60, 40));
-            assert!(a.pixels().all(|p| p.0[3] == 255));
-            assert_eq!(a, paint(paper, &sheet));
-            assert_ne!(a, paint(paper, &Sheet { seed: 4, ..sheet }));
-        }
-    }
-
-    #[test]
-    fn a_tile_is_its_part_of_the_whole_sheet() {
-        let whole = Sheet::whole((0, 0), (50, 30), 0.1, 9);
-        let tile = Sheet { crop: [20, 10, 50, 30], ..whole };
-        let (whole, tile) = (paint(Paper::Stained, &whole), paint(Paper::Stained, &tile));
-        for (x, y, p) in tile.enumerate_pixels() {
-            assert_eq!(p, whole.get_pixel(x + 20, y + 10));
-        }
+    fn paper_is_opaque_and_follows_its_seed() {
+        let sheet = Sheet { corner: (-10, 5), size: (60, 40), scale: 0.2, seed: 3 };
+        let a = paint(Paper::Parchment, &sheet);
+        assert_eq!(a.dimensions(), (60, 40));
+        assert!(a.pixels().all(|p| p.0[3] == 255));
+        assert_eq!(a, paint(Paper::Parchment, &sheet));
+        assert_ne!(a, paint(Paper::Parchment, &Sheet { seed: 4, ..sheet }));
     }
 
     #[test]

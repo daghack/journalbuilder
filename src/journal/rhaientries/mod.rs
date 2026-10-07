@@ -299,8 +299,9 @@ impl Page {
     /// The page rendered with Darkly as one image, `label` being its name
     /// in output: its canvases layered in order, each where it is on the
     /// page, on `paper` if given. On paper, a page that isn't a tile (or
-    /// typeset) gets a border of paper round its strokes; a tile's paper is
-    /// its part of the whole page's sheet. `None` if nothing is drawn.
+    /// typeset) gets a border of paper round its strokes; each tile of a
+    /// split page is a sheet of its own, like a big drawing spread over
+    /// several pages. `None` if nothing is drawn.
     pub fn darkly_render(&self, engine: &mut DarklyEngine, label: &str, scale: f32, supersample: f32, paper: Option<Paper>) -> Option<RgbaImage> {
         let mut layers = Vec::new();
         let mut frame = None;
@@ -311,22 +312,22 @@ impl Page {
         }
         let ink = compose::flatten(layers)?;
         let Some(paper) = paper else { return Some(ink.image) };
-        let sheet = match frame {
+        // A tile or typeset page is a sheet as big as its frame; other pages
+        // get a border of paper round their strokes.
+        let (corner, size) = match frame {
             Some(frame) => {
-                let size = frame.page_pixels(scale);
-                let [x0, y0, x1, y1] = frame.pixels(size).map(|v| v as i64);
-                let corner = ((frame.page.mins.x * scale).round() as i64, (frame.page.mins.y * scale).round() as i64);
-                let crop = [corner.0 + x0, corner.1 + y0, corner.0 + x1, corner.1 + y1];
-                Sheet { corner, size, crop, scale, seed: frame.page_seed }
+                let [x0, y0, x1, y1] = frame.pixels(frame.page_pixels(scale)).map(|v| v as i64);
+                let page = ((frame.page.mins.x * scale).round() as i64, (frame.page.mins.y * scale).round() as i64);
+                ((page.0 + x0, page.1 + y0), ((x1 - x0) as u32, (y1 - y0) as u32))
             }
             None => {
                 let (w, h) = ink.image.dimensions();
                 let border = (w.max(h) as f32 * PAPER_BORDER).max(PAPER_BORDER_MIN * scale).round() as u32;
-                let corner = (ink.at.0 - border as i64, ink.at.1 - border as i64);
-                Sheet::whole(corner, (w + 2 * border, h + 2 * border), scale, stable_hash(label))
+                ((ink.at.0 - border as i64, ink.at.1 - border as i64), (w + 2 * border, h + 2 * border))
             }
         };
-        let at = (sheet.crop[0], sheet.crop[1]);
+        let sheet = Sheet { corner, size, scale, seed: stable_hash(label) };
+        let at = corner;
         let mut sheet = Placed { image: background::paint(paper, &sheet), at };
         compose::draw(&mut sheet, &ink, compose::ink_on_paper);
         Some(sheet.image)
@@ -512,7 +513,6 @@ impl Page {
                         page: region,
                         column, columns, row, rows,
                         svg_seed: stable_hash(&format!("{}_{}", name, canvas.label(*i))),
-                        page_seed: stable_hash(&name),
                     });
                     // Named as it was, since its index might change.
                     part.name = Some(canvas.label(*i));

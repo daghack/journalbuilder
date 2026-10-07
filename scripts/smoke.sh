@@ -95,7 +95,7 @@ render fixture-supersampled darkly_page_0_0.png \
 	-- smoke --journals-dir tests/smoke_journals --page 0 --supersample 2
 # Pages on paper: one image per page, split and typeset pages included.
 render fixture-paper darkly_page_0.png darkly_page_1.png darkly_art_0_0.png darkly_book_0.png \
-	-- smoke --journals-dir tests/smoke_journals --background stained --scale 0.5
+	-- smoke --journals-dir tests/smoke_journals --background parchment --scale 0.5
 # Every page of the showcase, every character with a glyph.
 render showcase darkly_pens_brushes.png darkly_fonts_0.png darkly_glyphs_0.png darkly_art_0.png darkly_text_0.png darkly_locks_ciphers.png \
 	darkly_layout_0_0.png darkly_layout_1_0.png darkly_title_0_0.png \
