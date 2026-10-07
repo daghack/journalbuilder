@@ -19,13 +19,13 @@ let paragraphs = [
 let maze_canvases = [];
 let origin = new_vec(0.0, 0.0);
 let brush_style = new_brush("Rough Ink", 0.25, 0.5, 1.0);
-let style = new_strokestyle(1.5, "darkred", brush_style);
+let style = new_style(1.5, "darkred", brush_style);
 let copper_font = new_fontset(["copper_upper", "loche_upper"], ["copper_lower", "loche_lower"]);
 
 for (paragraph, index) in paragraphs {
 	let maze_path = new_maze(index, 10, 10).path();
 	maze_path.scale_by(40.0);
-	let maze_canvas = maze_path.fit_msg_to(style, copper_font, paragraph);
+	let maze_canvas = maze_path.fit_text(paragraph, copper_font, style);
 	let page = new_page();
 	page.add_canvas(maze_canvas);
 	journal_entry.add_page(page);

@@ -39,8 +39,8 @@ let spacing = box_size + symbol_scale;
 // Nib sizes are in canvas units, like everything else; 2.43 keeps the look
 // of the legacy render (which fit this page to 1080 px with a 1.75 nib).
 let brush = new_brush("Calligraphy", 0.15, 0.25, 2.43);
-let fateful_style = new_strokestyle(2.0, "black", brush);
-let spider_style = new_strokestyle(2.0, "hsl(160, 50%, 40%, 0.8)", brush);
+let fateful_style = new_style(2.0, "black", brush);
+let spider_style = new_style(2.0, "hsl(160, 50%, 40%, 0.8)", brush);
 
 let canvas = new_canvas();
 let next_fateful = 0;
@@ -67,7 +67,7 @@ for cell in new_maze(1043, nodes, nodes).cells() {
 	}
 }
 
-canvas.add_canvas(canvas.splat_msgs(shorts, font, new_strokestyle(2.0, "hsl(200, 50%, 40%, 0.8)", brush),
+canvas.add_canvas(canvas.scatter_notes(shorts, font, new_style(2.0, "hsl(200, 50%, 40%, 0.8)", brush),
 	#{ symbol_scale: 23.0, width_range: [200, 500], height_range: [300, 600] }));
 
 let page = new_page();

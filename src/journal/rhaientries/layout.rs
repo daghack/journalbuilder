@@ -815,7 +815,7 @@ fn typeset_page(ctx: &NativeCallContext, root: &Node, n: usize, content: &mut Co
     let mut moved = false;
     let draw = |canvas: &mut CanvasData, path: StrokePath, style: &StrokeStyle| -> RhaiResult<()> {
         check_finite("typeset", &path)?;
-        canvas.add_strokepath(path, style.clone());
+        canvas.add_path(path, style.clone());
         Ok(())
     };
     let keep_clear = |avoid: &mut AvoidanceTree, node: &Node, rect: Aabb, drawn: &[PVec]| match node.wrap {
@@ -1061,8 +1061,8 @@ mod tests {
 
     const SETUP: &str = r#"
         let pen = new_brush("Ink Pen", 0.3, 0.7, 1.0);
-        let ink = new_strokestyle(1.0, "black", pen);
-        let red = new_strokestyle(1.0, "darkred", pen);
+        let ink = new_style(1.0, "black", pen);
+        let red = new_style(1.0, "darkred", pen);
         let font = lowercase_font("loche_upper");
         let words = "the quick brown fox jumps over the lazy dog ";
         let roles = #{

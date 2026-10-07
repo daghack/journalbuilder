@@ -6,7 +6,7 @@
 //! // the tip of its tail at (40, 400), 900 units long along its spine and 36
 //! // across at its widest. The last argument is the seed for its winding.
 //! let snake = art::snake_path(new_vec(0.0, 0.0), -PI() / 2.0, new_vec(40.0, 400.0), 900.0, 36.0, 7);
-//! canvas.add_strokepath(snake, ink);
+//! canvas.add_path(snake, ink);
 //! ```
 //!
 //! `snake_path` gives the snake's outline. Where the body crosses itself,
@@ -20,7 +20,7 @@
 //!
 //! ```rhai
 //! let back = art::snake_spine(new_vec(0.0, 0.0), -PI() / 2.0, new_vec(40.0, 400.0), 900.0, 36.0, 7);
-//! canvas.add_canvas(back.fill_with_msg(ink, font, 30.0, "a snake")[0]);
+//! canvas.add_canvas(back.fill_with_text("a snake", font, 30.0, ink)[0]);
 //! ```
 //!
 //! `bramble` grows a blackberry bramble and gives its parts as separate
@@ -30,9 +30,9 @@
 //!
 //! ```rhai
 //! let plant = art::bramble(new_vec(0.0, 0.0), -PI() / 2.0, 1400.0, 200.0, 7);
-//! canvas.add_strokepath(plant.vines, bark);     // canes, thorns and stalks
-//! canvas.add_strokepath(plant.leaves, green);   // leaflets and their veins
-//! canvas.add_strokepath(plant.flowers, white);  // flowers, buds and sepals
+//! canvas.add_path(plant.vines, bark);     // canes, thorns and stalks
+//! canvas.add_path(plant.leaves, green);   // leaflets and their veins
+//! canvas.add_path(plant.flowers, white);  // flowers, buds and sepals
 //! ```
 //!
 //! Flowers, from closed buds to full blooms, and leaves are modelled in 3D
@@ -56,7 +56,7 @@
 //! and a head at every other dead end.
 //!
 //! ```rhai
-//! canvas.add_strokepath(art::snake_along(path, 30.0, 2), ink);   // 30 wide
+//! canvas.add_path(art::snake_along(path, 30.0, 2), ink);   // 30 wide
 //! ```
 
 use rhai::{Dynamic, Engine, EvalAltResult, Map, Module, NativeCallContext};
@@ -142,7 +142,7 @@ mod tests {
             let spine = art::snake_spine(new_vec(0.0, 0.0), -PI() / 2.0, new_vec(20.0, 300.0), 900.0, 30.0, 7);
             if spine.to_string() == snake.to_string() { throw "the spine should be another path"; }
             let c = new_canvas();
-            c.add_strokepath(snake, new_strokestyle(1.0, "#f2ead8", new_brush("Ink Pen", 0.3, 0.7, 1.0)));
+            c.add_path(snake, new_style(1.0, "#f2ead8", new_brush("Ink Pen", 0.3, 0.7, 1.0)));
             // The tail's tip reaches the tail end (the outline's bounds include
             // the stroke's width).
             if c.bounds().max.y < 300.0 { throw "the tail should reach the tail end: " + c.bounds(); }
@@ -165,9 +165,9 @@ mod tests {
             let plant = art::bramble(new_vec(0.0, 0.0), -PI() / 2.0, 1000.0, 150.0, 5);
             let pen = new_brush("Ink Pen", 0.3, 0.7, 1.0);
             let c = new_canvas();
-            c.add_strokepath(plant.vines, new_strokestyle(1.0, "#c8a27a", pen));
-            c.add_strokepath(plant.leaves, new_strokestyle(1.0, "#9fd17a", pen));
-            c.add_strokepath(plant.flowers, new_strokestyle(1.0, "#f2ead8", pen));
+            c.add_path(plant.vines, new_style(1.0, "#c8a27a", pen));
+            c.add_path(plant.leaves, new_style(1.0, "#9fd17a", pen));
+            c.add_path(plant.flowers, new_style(1.0, "#f2ead8", pen));
             if plant.keys().len() != 3 { throw "expected vines, leaves and flowers: " + plant.keys(); }
             let p = new_page();
             p.add_canvas(c);
@@ -186,9 +186,9 @@ mod tests {
             let plant = art::bramble_along(path, 40.0, 1);
             let pen = new_brush("Ink Pen", 0.3, 0.7, 1.0);
             let c = new_canvas();
-            c.add_strokepath(plant.vines, new_strokestyle(1.0, "#c8a27a", pen));
-            c.add_strokepath(plant.leaves, new_strokestyle(1.0, "#a8d68a", pen));
-            c.add_strokepath(plant.flowers, new_strokestyle(1.0, "#f2ead8", pen));
+            c.add_path(plant.vines, new_style(1.0, "#c8a27a", pen));
+            c.add_path(plant.leaves, new_style(1.0, "#a8d68a", pen));
+            c.add_path(plant.flowers, new_style(1.0, "#f2ead8", pen));
             // The vines span the maze: 2 nodes across, 140 apart.
             let b = c.bounds();
             if b.width < 140.0 { throw "the vines should cross the maze: " + b; }
@@ -197,7 +197,7 @@ mod tests {
             journal_entry.add_page(p);
         "##;
         engine().build_entry_str(script).expect("script should run");
-        let err = engine().build_entry_str("let ok = 1;\nart::bramble_along(new_strokepath(), 40.0, 1);")
+        let err = engine().build_entry_str("let ok = 1;\nart::bramble_along(new_path(), 40.0, 1);")
             .expect_err("an empty path should fail").to_string();
         assert!(err.contains("art::bramble_along: the path has no lines to follow") && err.contains("line 2"), "{}", err);
     }
@@ -207,7 +207,7 @@ mod tests {
         let script = r##"
             let path = new_maze(2, 3, 2).path().scale_by(70.0);
             let c = new_canvas();
-            c.add_strokepath(art::snake_along(path, 30.0, 1), new_strokestyle(1.0, "#f2ead8", new_brush("Ink Pen", 0.3, 0.7, 1.0)));
+            c.add_path(art::snake_along(path, 30.0, 1), new_style(1.0, "#f2ead8", new_brush("Ink Pen", 0.3, 0.7, 1.0)));
             if c.bounds().width < 140.0 { throw "the serpent should cross the maze: " + c.bounds(); }
             let p = new_page();
             p.add_canvas(c);

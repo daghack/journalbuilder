@@ -17,9 +17,9 @@
 //!
 //! ```rhai
 //! new_textbox(#{ center: c, width: 400, height: 300, symbol_scale: 20.0, avoid: avoid });
-//! path.fill_with_msg(style, font, 20.0, msg, #{ avoid: drawing, clearance: 6.0 });
-//! path.fit_msg_to(style, font, msg, #{ avoid: [drawing, border] });
-//! canvas.splat_msgs(msgs, font, style, #{ symbol_scale: 20.0, ..., avoid: avoid });
+//! path.fill_with_text(msg, font, 20.0, style, #{ avoid: drawing, clearance: 6.0 });
+//! path.fit_text(msg, font, style, #{ avoid: [drawing, border] });
+//! canvas.scatter_notes(msgs, font, style, #{ symbol_scale: 20.0, ..., avoid: avoid });
 //! ```
 //!
 //! `avoid` is a tree, or a path, canvas or glyph, or an array of any of
@@ -224,9 +224,9 @@ mod tests {
     #[test]
     fn trees_block_near_what_was_added() {
         let ok: bool = eval(r#"
-            let style = new_strokestyle(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 2.0));
+            let style = new_style(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 2.0));
             let c = new_canvas();
-            c.add_strokepath(new_line(new_vec(0.0, 100.0), new_vec(100.0, 100.0)), style);
+            c.add_path(new_line(new_vec(0.0, 100.0), new_vec(100.0, 100.0)), style);
             let avoid = new_avoidance_tree();
             if !avoid.is_empty { throw "should start empty"; }
             avoid.add(new_line(new_vec(0.0, 0.0), new_vec(100.0, 0.0)), 5)
@@ -260,10 +260,10 @@ mod tests {
     #[test]
     fn hulls_cover_the_gaps_inside_a_drawing() {
         let ok: bool = eval(r#"
-            let style = new_strokestyle(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 2.0));
+            let style = new_style(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 2.0));
             let c = new_canvas();
-            c.add_strokepath(new_line(new_vec(0.0, 0.0), new_vec(100.0, 0.0)), style);
-            c.add_strokepath(new_line(new_vec(0.0, 100.0), new_vec(100.0, 100.0)), style);
+            c.add_path(new_line(new_vec(0.0, 0.0), new_vec(100.0, 0.0)), style);
+            c.add_path(new_line(new_vec(0.0, 100.0), new_vec(100.0, 100.0)), style);
             let lines = new_avoidance_tree().add(c);
             let hull = new_avoidance_tree().add_hull(c, 5.0);
             // Brush reach (1) plus the clearance.

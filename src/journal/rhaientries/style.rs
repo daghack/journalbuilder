@@ -115,7 +115,7 @@ impl From<StrokeStyle> for JournalStrokeStyle {
 }
 
 impl StrokeStyle {
-    /// `new_strokestyle(width, color, brush)`.
+    /// `new_style(width, color, brush)`.
     ///
     /// `width` means different things in the two outputs:
     /// - Darkly (the default render): it multiplies the brush's pressure,
@@ -129,8 +129,8 @@ impl StrokeStyle {
     /// `color` is a CSS colour string, or a gradient (see gradient.rs).
     pub fn new(width: Dynamic, color: Dynamic, brush: BrushSettings) -> Result<Self, Box<EvalAltResult>> {
         Ok(Self {
-            width: float("new_strokestyle", "the width", &width)?,
-            color: gradient::colour_or_gradient("new_strokestyle", color)?,
+            width: float("new_style", "the width", &width)?,
+            color: gradient::colour_or_gradient("new_style", color)?,
             brush,
         })
     }
@@ -147,7 +147,7 @@ impl StrokeStyle {
     }
     fn build_extra(builder: &mut TypeBuilder<Self>) {
         builder
-            .with_fn("new_strokestyle", Self::new)
+            .with_fn("new_style", Self::new)
             .with_get_set("width", |s: &mut Self| Dynamic::from(s.width), |s: &mut Self, width: Dynamic| -> RhaiResult<()> {
                 s.width = float("style.width", "the width", &width)?;
                 Ok(())

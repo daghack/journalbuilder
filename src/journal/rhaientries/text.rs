@@ -19,7 +19,7 @@
 //!
 //! // Scatter messages over a canvas in random boxes, clear of its strokes
 //! // and of each other. Returns a canvas with just the messages.
-//! let notes = page_canvas.splat_msgs(["first note", "second note"], font, style, #{
+//! let notes = page_canvas.scatter_notes(["first note", "second note"], font, style, #{
 //!     symbol_scale: 23.0,
 //!     width_range: [200, 500], height_range: [300, 600],   // box sizes to try
 //!     rotation_jitter: 0.196,     // radians either way (default pi/16)
@@ -46,7 +46,7 @@ use std::rc::Rc;
 use super::glyphs::{add_glyph, glyph_array, Glyph};
 use super::random::SharedRng;
 use super::{Canvas, CanvasData, StrokeStyle, Vec2};
-use crate::journal::canvas::artistic::{jitter_symbols, splat_msgs, SplatOptions};
+use crate::journal::canvas::artistic::{jitter_symbols, scatter_notes, ScatterOptions};
 use crate::journal::fonts::Font;
 use crate::journal::symboldict::SymbolPathDict;
 use crate::journal::canvas::textbox::{TextBox as CoreTextBox, TextBoxLineMode, TextBoxOptions};
@@ -140,11 +140,11 @@ fn glyphs(symbols: Vec<Symbol>) -> Array {
     symbols.into_iter().map(|s| Dynamic::from(Glyph::new(s))).collect()
 }
 
-const SPLAT_KEYS: [&str; 11] = ["symbol_scale", "width_range", "height_range", "rotation_jitter", "scale_jitter", "jagged_edge", "max_attempts", "spacing", "avoid", "clearance", "layout"];
+const SCATTER_KEYS: [&str; 11] = ["symbol_scale", "width_range", "height_range", "rotation_jitter", "scale_jitter", "jagged_edge", "max_attempts", "spacing", "avoid", "clearance", "layout"];
 
 fn splat(canvas: &Canvas, msgs: Array, font: &Font, style: StrokeStyle, options: Map, symdict: &SymbolPathDict, rng: &SharedRng) -> RhaiResult<Canvas> {
-    const CALLER: &str = "splat_msgs";
-    check_keys(CALLER, &options, &SPLAT_KEYS)?;
+    const CALLER: &str = "scatter_notes";
+    check_keys(CALLER, &options, &SCATTER_KEYS)?;
     if canvas.borrow().strokes.is_empty() {
         // Messages are placed in boxes within the canvas's bounds.
         return Err(format!("{}: the canvas is empty, so there's nowhere to place messages; draw on it first", CALLER).into());
@@ -158,7 +158,7 @@ fn splat(canvas: &Canvas, msgs: Array, font: &Font, style: StrokeStyle, options:
     };
     let symbol_scale = positive(CALLER, &options, "symbol_scale")?;
     let avoid = AvoidOption::parse(CALLER, &options, true)?;
-    let opts = SplatOptions {
+    let opts = ScatterOptions {
         symbol_scale,
         layout: line_mode(CALLER, &options)?,
         clearance: avoid.padding(symbol_scale),
@@ -187,7 +187,7 @@ fn splat(canvas: &Canvas, msgs: Array, font: &Font, style: StrokeStyle, options:
     }).collect();
     let journal_canvas: JournalCanvas = canvas.into();
     let tree = avoid.tree.as_ref().map(|a| a.borrow());
-    let placed = splat_msgs(&journal_canvas, tree.as_deref(), &symbol_msgs, &opts, &mut *rng)
+    let placed = scatter_notes(&journal_canvas, tree.as_deref(), &symbol_msgs, &opts, &mut *rng)
         .map_err(|err| format!("{}: {}", CALLER, err))?;
 
     let mut splatted = CanvasData::default();
@@ -232,7 +232,7 @@ pub fn register(engine: &mut Engine, symdict: Rc<SymbolPathDict>, rng: SharedRng
     });
 
     let r = rng.clone();
-    engine.register_fn("splat_msgs", move |canvas: &mut Canvas, msgs: Array, font: Font, style: StrokeStyle, options: Map| -> RhaiResult<Canvas> {
+    engine.register_fn("scatter_notes", move |canvas: &mut Canvas, msgs: Array, font: Font, style: StrokeStyle, options: Map| -> RhaiResult<Canvas> {
         splat(canvas, msgs, &font, style, options, &symdict, &r)
     });
 
@@ -252,7 +252,7 @@ mod tests {
     /// Run `script` after some shared setup, returning its value.
     fn eval<T: Clone + 'static>(script: &str) -> T {
         let setup = r#"
-            let style = new_strokestyle(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
+            let style = new_style(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
             let font = lowercase_font("loche_upper");
             let text = "the quick brown fox jumps over the lazy dog and keeps on running ";
             text = text + text + text + text;
@@ -303,7 +303,7 @@ mod tests {
     fn avoid_keeps_glyphs_off_a_canvas() {
         let counts: rhai::Array = eval(r#"
             let blot = new_canvas();
-            for i in 0..10 { blot.add_strokepath(new_circle(new_vec(0.0, 0.0), 4.0 * i), style); }
+            for i in 0..10 { blot.add_path(new_circle(new_vec(0.0, 0.0), 4.0 * i), style); }
             let opts = #{ center: new_vec(0.0, 0.0), width: 100, height: 100, symbol_scale: 10.0 };
             let free = new_textbox(opts).fill(font.glyphs(text)).placed;
             opts.avoid = blot;
@@ -321,10 +321,10 @@ mod tests {
     }
 
     const SPLAT_SETUP: &str = r#"
-        let style = new_strokestyle(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
+        let style = new_style(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
         let base = new_canvas();
-        base.add_strokepath(new_rectangle(new_vec(0.0, 0.0), 800.0, 800.0), style);
-        base.add_strokepath(new_circle(new_vec(0.0, 0.0), 150.0), style);
+        base.add_path(new_rectangle(new_vec(0.0, 0.0), 800.0, 800.0), style);
+        base.add_path(new_circle(new_vec(0.0, 0.0), 150.0), style);
         let msgs = ["ash and oak", "a quiet note", "the last word"];
         let opts = #{ symbol_scale: 20.0, width_range: [150, 250], height_range: [100, 200] };
     "#;
@@ -332,7 +332,7 @@ mod tests {
     fn splat_glyph_positions(seed: i64) -> Vec<(f32, f32)> {
         let script = format!(r#"{}
             seed({});
-            let notes = base.splat_msgs(msgs, lowercase_font("loche_upper"), style, opts);
+            let notes = base.scatter_notes(msgs, lowercase_font("loche_upper"), style, opts);
             let page = new_page();
             page.add_canvas(notes);
             journal_entry.add_page(page);
@@ -365,15 +365,15 @@ mod tests {
         let script = format!(r#"{}
             seed(5);
             opts.layout = "words";
-            let notes = base.splat_msgs(msgs, lowercase_font("loche_upper"), style, opts);
+            let notes = base.scatter_notes(msgs, lowercase_font("loche_upper"), style, opts);
             let page = new_page();
             page.add_canvas(notes);
             journal_entry.add_page(page);
         "#, SPLAT_SETUP);
         let entry = engine().build_entry_str(&script).expect("script should run");
         assert_eq!(entry.pages[0].canvases()[0].strokes.len(), 30);
-        let err = fails(&format!("{}\nopts.layout = \"zigzag\";\nbase.splat_msgs(msgs, lowercase_font(\"loche_upper\"), style, opts);", SPLAT_SETUP));
-        assert!(err.contains("splat_msgs: unknown layout 'zigzag'"), "{}", err);
+        let err = fails(&format!("{}\nopts.layout = \"zigzag\";\nbase.scatter_notes(msgs, lowercase_font(\"loche_upper\"), style, opts);", SPLAT_SETUP));
+        assert!(err.contains("scatter_notes: unknown layout 'zigzag'"), "{}", err);
     }
 
     #[test]
@@ -381,15 +381,15 @@ mod tests {
         let err = fails(&format!(r#"{}
             opts.symbol_scale = 400.0;
             opts.max_attempts = 5;
-            base.splat_msgs(msgs, lowercase_font("loche_upper"), style, opts);
+            base.scatter_notes(msgs, lowercase_font("loche_upper"), style, opts);
         "#, SPLAT_SETUP));
-        assert!(err.contains("splat_msgs: message 0 doesn't fit in 5 tries"), "{}", err);
+        assert!(err.contains("scatter_notes: message 0 doesn't fit in 5 tries"), "{}", err);
     }
 
     #[test]
     fn splat_needs_something_drawn() {
-        let err = fails(&format!("{}\nnew_canvas().splat_msgs(msgs, lowercase_font(\"loche_upper\"), style, opts);", SPLAT_SETUP));
-        assert!(err.contains("splat_msgs: the canvas is empty"), "{}", err);
+        let err = fails(&format!("{}\nnew_canvas().scatter_notes(msgs, lowercase_font(\"loche_upper\"), style, opts);", SPLAT_SETUP));
+        assert!(err.contains("scatter_notes: the canvas is empty"), "{}", err);
     }
 
     #[test]
@@ -402,7 +402,7 @@ mod tests {
             ("opts.colour = 1;", "unknown option 'colour'"),
             ("msgs.push(3);", "message 3 is a i64"),
         ] {
-            let err = fails(&format!("{}\n{}\nbase.splat_msgs(msgs, lowercase_font(\"loche_upper\"), style, opts);", SPLAT_SETUP, change));
+            let err = fails(&format!("{}\n{}\nbase.scatter_notes(msgs, lowercase_font(\"loche_upper\"), style, opts);", SPLAT_SETUP, change));
             assert!(err.contains(want) && err.contains("line 10"), "{}: {}", want, err);
         }
     }

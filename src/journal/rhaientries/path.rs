@@ -61,25 +61,25 @@ fn place_text(symbols: Vec<Symbol>, path: &StrokePath, args: &SymbolPlacementArg
     }
 }
 
-/// `path.fill_with_msg(style, font, size, msg[, #{ spacing, avoid, clearance, layout }])`:
-/// the message along as many copies of the path as it takes, one canvas per
+/// `path.fill_with_text(text, font, size, style[, #{ spacing, avoid, clearance, layout }])`:
+/// the text along as many copies of the path as it takes, one canvas per
 /// copy. Glyphs sit at their widths, plus `spacing` (a fraction of the font
 /// size), and keep clear of `avoid` (see avoid.rs). With `layout: "words"`,
 /// words aren't split around what's avoided or between subpaths.
-fn fill_with_msg(path: &mut Path, style: StrokeStyle, font: Font, fontsize: Dynamic, msg: &str, options: Map, (symdict, rng): &TextSource) -> Result<Vec<Dynamic>, Box<EvalAltResult>> {
-    let fontsize = float("fill_with_msg", "the font size", &fontsize)?;
-    check_keys("fill_with_msg", &options, &PATH_TEXT_KEYS)?;
+fn fill_with_text(path: &mut Path, msg: &str, font: Font, fontsize: Dynamic, style: StrokeStyle, options: Map, (symdict, rng): &TextSource) -> RhaiResult<Vec<Dynamic>> {
+    let fontsize = float("fill_with_text", "the font size", &fontsize)?;
+    check_keys("fill_with_text", &options, &PATH_TEXT_KEYS)?;
     if !(fontsize > 0.0) {
-        return Err(format!("fill_with_msg: font size must be positive, got {}", fontsize).into());
+        return Err(format!("fill_with_text: font size must be positive, got {}", fontsize).into());
     }
     let builder = font.builder(symdict);
-    let mode = line_mode("fill_with_msg", &options)?;
-    let avoid = avoid::AvoidOption::parse("fill_with_msg", &options, false)?;
+    let mode = line_mode("fill_with_text", &options)?;
+    let avoid = avoid::AvoidOption::parse("fill_with_text", &options, false)?;
     let tree = avoid.tree.as_ref().map(|a| a.borrow());
     let args = SymbolPlacementArgs {
         avoid: tree.as_deref(),
         padding: avoid.padding(fontsize as f32),
-        spacing: spacing("fill_with_msg", &options)?,
+        spacing: spacing("fill_with_text", &options)?,
         ..SymbolPlacementArgs::new(fontsize as f32)
     };
 
@@ -92,14 +92,14 @@ fn fill_with_msg(path: &mut Path, style: StrokeStyle, font: Font, fontsize: Dyna
         if placed.is_empty() {
             // Another copy of the path wouldn't fit it either.
             return Err(format!(
-                "fill_with_msg: glyph {} of {} doesn't fit on the path at font size {}; use a longer path or a smaller font{}",
+                "fill_with_text: glyph {} of {} doesn't fit on the path at font size {}; use a longer path or a smaller font{}",
                 total - unplaced.len() + 1, total, fontsize,
                 if avoid.tree.is_some() { ", or avoid less" } else { "" },
             ).into());
         }
         let mut canvas = CanvasData::default();
         for symbol in placed {
-            canvas.add_strokepath(symbol.placed_strokepath(), style.clone());
+            canvas.add_path(symbol.placed_strokepath(), style.clone());
         }
         all_canvases.push(Dynamic::from(Canvas::new(canvas)));
         symbols = unplaced;
@@ -107,20 +107,20 @@ fn fill_with_msg(path: &mut Path, style: StrokeStyle, font: Font, fontsize: Dyna
     Ok(all_canvases)
 }
 
-/// `path.fit_msg_to(style, font, msg[, #{ spacing, avoid, clearance, layout }])`:
-/// the message along the path at the largest font size that fits it.
-fn fit_msg_to(path: &mut Path, style: StrokeStyle, font: Font, msg: &str, options: Map, (symdict, rng): &TextSource) -> Result<Canvas, Box<EvalAltResult>> {
-    check_keys("fit_msg_to", &options, &PATH_TEXT_KEYS)?;
+/// `path.fit_text(text, font, style[, #{ spacing, avoid, clearance, layout }])`:
+/// the text along the path at the largest font size that fits it.
+fn fit_text(path: &mut Path, msg: &str, font: Font, style: StrokeStyle, options: Map, (symdict, rng): &TextSource) -> RhaiResult<Canvas> {
+    check_keys("fit_text", &options, &PATH_TEXT_KEYS)?;
     let path = &path.get();
     let mut canvas = CanvasData::default();
     let builder = font.builder(symdict);
     let symbols = builder.build(msg, &mut *rng.borrow_mut());
-    let mode = line_mode("fit_msg_to", &options)?;
-    let avoid = avoid::AvoidOption::parse("fit_msg_to", &options, false)?;
+    let mode = line_mode("fit_text", &options)?;
+    let avoid = avoid::AvoidOption::parse("fit_text", &options, false)?;
     let tree = avoid.tree.as_ref().map(|a| a.borrow());
     let mut args = SymbolPlacementArgs {
         avoid: tree.as_deref(),
-        spacing: spacing("fit_msg_to", &options)?,
+        spacing: spacing("fit_text", &options)?,
         ..SymbolPlacementArgs::new(20.0)
     };
     let mut window_min = 0.1;
@@ -141,12 +141,12 @@ fn fit_msg_to(path: &mut Path, style: StrokeStyle, font: Font, msg: &str, option
     let (placed, unplaced) = place_text(symbols, path, &args, &mode);
     if !unplaced.is_empty() {
         return Err(format!(
-            "fit_msg_to: the message doesn't fit on the path even at font size {}: {} of {} glyphs left over",
+            "fit_text: the text doesn't fit on the path even at font size {}: {} of {} glyphs left over",
             window_min, unplaced.len(), placed.len() + unplaced.len(),
         ).into());
     }
     for symbol in placed {
-        canvas.add_strokepath(symbol.placed_strokepath(), style.clone());
+        canvas.add_path(symbol.placed_strokepath(), style.clone());
     }
     Ok(Canvas::new(canvas))
 }
@@ -172,7 +172,7 @@ pub(super) fn register(engine: &mut Engine, text: TextSource) {
     });
 
     let (t1, t2, t3, t4) = (text.clone(), text.clone(), text.clone(), text);
-    engine.register_type_with_name::<Path>("StrokePath")
+    engine.register_type_with_name::<Path>("Path")
         // Every path function changes the path and returns that same
         // (shared) path, so statements, assignments and chains all work:
         // `p.move_to(a).line_to(b);` draws both segments into `p`.
@@ -185,17 +185,17 @@ pub(super) fn register(engine: &mut Engine, text: TextSource) {
         .register_fn("line_to", |path: &mut Path, pos: Vec2| -> Path {
             update_path(path, |p| p.line_to(pos.x as f32, pos.y as f32))
         })
-        .register_fn("fill_with_msg", move |path: &mut Path, style: StrokeStyle, font: Font, fontsize: Dynamic, msg: &str| {
-            fill_with_msg(path, style, font, fontsize, msg, Map::new(), &t1)
+        .register_fn("fill_with_text", move |path: &mut Path, text: &str, font: Font, size: Dynamic, style: StrokeStyle| {
+            fill_with_text(path, text, font, size, style, Map::new(), &t1)
         })
-        .register_fn("fill_with_msg", move |path: &mut Path, style: StrokeStyle, font: Font, fontsize: Dynamic, msg: &str, options: Map| {
-            fill_with_msg(path, style, font, fontsize, msg, options, &t2)
+        .register_fn("fill_with_text", move |path: &mut Path, text: &str, font: Font, size: Dynamic, style: StrokeStyle, options: Map| {
+            fill_with_text(path, text, font, size, style, options, &t2)
         })
-        .register_fn("fit_msg_to", move |path: &mut Path, style: StrokeStyle, font: Font, msg: &str| {
-            fit_msg_to(path, style, font, msg, Map::new(), &t3)
+        .register_fn("fit_text", move |path: &mut Path, text: &str, font: Font, style: StrokeStyle| {
+            fit_text(path, text, font, style, Map::new(), &t3)
         })
-        .register_fn("fit_msg_to", move |path: &mut Path, style: StrokeStyle, font: Font, msg: &str, options: Map| {
-            fit_msg_to(path, style, font, msg, options, &t4)
+        .register_fn("fit_text", move |path: &mut Path, text: &str, font: Font, style: StrokeStyle, options: Map| {
+            fit_text(path, text, font, style, options, &t4)
         })
         .register_fn("scale_by", |path: &mut Path, scale: Dynamic| -> RhaiResult<Path> {
             let scale = float("scale_by", "the scale", &scale)?;
@@ -208,7 +208,7 @@ pub(super) fn register(engine: &mut Engine, text: TextSource) {
             let rot = float("rotate_around", "the angle", &rot)?;
             Ok(path.update(|p| p.rotate_around(rot_point.into(), rot as f32)))
         })
-        .register_fn("new_strokepath", || Path::new(StrokePath::new()))
+        .register_fn("new_path", || Path::new(StrokePath::new()))
         .register_fn("cubic_to", |path: &mut Path, c1: Vec2, c2: Vec2, end: Vec2| -> Path {
             update_path(path, |p| p.cubic_curve_to(
                 c1.x as f32, c1.y as f32, c2.x as f32, c2.y as f32, end.x as f32, end.y as f32,
@@ -326,7 +326,7 @@ mod tests {
     }
 
     fn eval<T: Clone + 'static>(script: &str) -> T {
-        let setup = r#"let style = new_strokestyle(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));"#;
+        let setup = r#"let style = new_style(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));"#;
         engine().engine.eval::<T>(&format!("{}\n{}", setup, script)).expect("script should evaluate")
     }
 

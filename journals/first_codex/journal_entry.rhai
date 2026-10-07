@@ -13,9 +13,9 @@ let fill_radius = symbol_scale * 0.75;
 // of the legacy render (which fit this page to 1080 px with a 1.75 nib).
 let brush = new_brush("Calligraphy", 0.15, 0.25, 2.15);
 
-let guide = new_strokestyle(2.5, "hsla(150, 30%, 50%, 0.1)", brush);
-let ink = new_strokestyle(2.5, "rgba(0, 0, 0, 0.7)", brush);
-let wash = new_strokestyle(2.0, "hsla(150, 30%, 70%, 0.3)", brush);
+let guide = new_style(2.5, "hsla(150, 30%, 50%, 0.1)", brush);
+let ink = new_style(2.5, "rgba(0, 0, 0, 0.7)", brush);
+let wash = new_style(2.0, "hsla(150, 30%, 70%, 0.3)", brush);
 
 let font = ternary_font("balanced_ternary");
 let origin = new_vec(0.0, 0.0);
@@ -28,7 +28,7 @@ for (ring_size, ring) in ring_sizes {
 
 	// Five faint passes trace the ring.
 	for pass in 0..5 {
-		codex.add_strokepath(new_circle(origin, radius), guide);
+		codex.add_path(new_circle(origin, radius), guide);
 	}
 
 	// Golden-angle turns keep the rings from lining up.
@@ -41,7 +41,7 @@ for (ring_size, ring) in ring_sizes {
 		// A washed disc behind each glyph, hatched three ways.
 		let disc = new_circle(center, fill_radius);
 		for pass in 0..3 {
-			codex.add_strokepath(disc.hatch(3.0, random_range(0.0, 2.0 * PI()), 3.0), wash);
+			codex.add_path(disc.hatch(3.0, random_range(0.0, 2.0 * PI()), 3.0), wash);
 		}
 
 		g.scale = symbol_scale;

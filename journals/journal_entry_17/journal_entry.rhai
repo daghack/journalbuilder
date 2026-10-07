@@ -39,12 +39,12 @@ for cell in maze.cells() {
 	g.scale = cell_size;
 	g.position = new_vec(cell.x * cell_size, cell.y * cell_size);
 	cells.push(g);
-	avoid.add_glyph(g, new_strokestyle(2.0, "black", maze_brush));
+	avoid.add_glyph(g, new_style(2.0, "black", maze_brush));
 }
 let b = avoid.bounds();
 
 let page_canvas = new_canvas();
-page_canvas.add_glyphs(cells, new_strokestyle(5.0, "black", maze_brush));
+page_canvas.add_glyphs(cells, new_style(5.0, "black", maze_brush));
 
 // The key, flowed through a box a little larger than the maze, each glyph
 // nudged a little off true.
@@ -56,7 +56,7 @@ let filled = around.fill(ternary_font("balanced_ternary").glyphs(key));
 if filled.unplaced.len() > 0 {
 	warn(filled.unplaced.len() + " key symbols didn't fit around the maze");
 }
-let key_style = new_strokestyle(1.5, "darkred", maze_brush);
+let key_style = new_style(1.5, "darkred", maze_brush);
 for g in filled.placed {
 	g.scale_by(1.0 + random_range(-0.025, 0.025));
 	g.translate_by(new_vec(random_range(-2.5, 2.5), random_range(-2.5, 2.5)));
@@ -91,7 +91,7 @@ fn add_digit(digit, at, style) {
 	g.scale = 50.0;
 	g.position = at.center;
 	g.rotation = at.angle + PI() / 2.0;
-	this.add_strokepath(new_circle(at.center, 50.0 / 1.5), style);
+	this.add_path(new_circle(at.center, 50.0 / 1.5), style);
 	this.add_glyph(g, style);
 }
 
@@ -103,7 +103,7 @@ let rings = [
 ];
 for (ring, r) in rings {
 	let radius = outer_ring - r * ring_step;
-	let style = new_strokestyle(ring.width, "black", brush);
+	let style = new_style(ring.width, "black", brush);
 	let half = ring.count / 2;
 	for i in -half..=half {
 		let at = ring_point(ring.count, i, radius);
@@ -114,16 +114,16 @@ for (ring, r) in rings {
 			let inner = ring_point(rings[r + 1].count, (i / 3.0).round(), radius - ring_step);
 			let from = new_vec(at.center.x - circle_radius * at.angle.cos(), at.center.y - circle_radius * at.angle.sin());
 			let to = new_vec(inner.center.x + circle_radius * inner.angle.cos(), inner.center.y + circle_radius * inner.angle.sin());
-			dial.add_strokepath(new_line(from, to), style);
+			dial.add_path(new_line(from, to), style);
 		}
 	}
 }
 
 // Concentric circles at the hub.
-let hub_style = new_strokestyle(6.75, "black", brush);
+let hub_style = new_style(6.75, "black", brush);
 let hub_max = outer_ring - 2.0 * ring_step - symbol_radius / 2.0;
 for i in 0..5 {
-	dial.add_strokepath(new_circle(new_vec(0.0, 0.0), 15.0 + i / 5.0 * (hub_max - 15.0)), hub_style);
+	dial.add_path(new_circle(new_vec(0.0, 0.0), 15.0 + i / 5.0 * (hub_max - 15.0)), hub_style);
 }
 
 let shorts = [
@@ -147,7 +147,7 @@ let shorts = [
 	"Do you see this world for what it is?",
 	"There is no number of walking sticks I could retrieve to balance out the ruin I have wrought",
 ];
-dial.add_canvas(dial.splat_msgs(shorts, lowercase_font("loche_upper"), new_strokestyle(2.0, "darkred", brush),
+dial.add_canvas(dial.scatter_notes(shorts, lowercase_font("loche_upper"), new_style(2.0, "darkred", brush),
 	#{ symbol_scale: 30.0, width_range: [200, 500], height_range: [300, 600] }));
 
 let dial_page = new_page();

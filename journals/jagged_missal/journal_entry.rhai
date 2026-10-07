@@ -13,10 +13,10 @@ let pen = new_brush("Ink Pen", 0.3, 0.7, 2.0);
 let on_paper = background() != ();
 let pale = if on_paper { "#2b1d12" } else { "#f2ead8" };
 let rubric = if on_paper { "#9b2318" } else { "#ff8a7a" };
-let ink = new_strokestyle(1.3, pale, nib);
-let red = new_strokestyle(1.3, rubric, nib);
-let thin_red = new_strokestyle(1.0, rubric, pen);
-let thin_ink = new_strokestyle(1.0, pale, pen);
+let ink = new_style(1.3, pale, nib);
+let red = new_style(1.3, rubric, nib);
+let thin_red = new_style(1.0, rubric, pen);
+let thin_ink = new_style(1.0, pale, pen);
 
 let lang = new_fontset(["lang_upper"], ["lang_lower"]);
 let caps = new_fontset(["copper_upper"], ["copper_lower"]);
@@ -24,7 +24,7 @@ let caps = new_fontset(["copper_upper"], ["copper_lower"]);
 // ---- ornaments ----
 
 // A leaf, for the title page's border.
-let leaf = new_strokepath()
+let leaf = new_path()
 	.move_to(new_vec(0.0, -22.0))
 	.quad_to(new_vec(14.0, -4.0), new_vec(0.0, 22.0))
 	.quad_to(new_vec(-14.0, -4.0), new_vec(0.0, -22.0));
@@ -33,17 +33,17 @@ leaf.move_to(new_vec(0.0, -14.0)).line_to(new_vec(0.0, 26.0));
 let knot = new_rectangle(new_vec(0.0, 0.0), 40.0, 40.0);
 knot.translate_by(new_vec(0.0, 0.0));
 let corner = new_canvas();
-corner.add_strokepath(knot, thin_red);
-corner.add_strokepath(new_rectangle(new_vec(0.0, 0.0), 22.0, 22.0).rotate_around(new_vec(0.0, 0.0), PI() / 4.0), thin_red);
-corner.add_strokepath(new_circle(new_vec(0.0, 0.0), 4.0), thin_red);
+corner.add_path(knot, thin_red);
+corner.add_path(new_rectangle(new_vec(0.0, 0.0), 22.0, 22.0).rotate_around(new_vec(0.0, 0.0), PI() / 4.0), thin_red);
+corner.add_path(new_circle(new_vec(0.0, 0.0), 4.0), thin_red);
 // A wave, under the title.
-let flourish = new_strokepath().move_to(new_vec(-120.0, 0.0));
+let flourish = new_path().move_to(new_vec(-120.0, 0.0));
 for i in 0..8 {
 	let x = -120.0 + i * 30.0;
 	flourish.cubic_to(new_vec(x + 10.0, -10.0), new_vec(x + 20.0, 10.0), new_vec(x + 30.0, 0.0));
 }
 // A diamond and a dot, between columns.
-let diamond = new_strokepath().move_to(new_vec(0.0, -10.0)).line_to(new_vec(6.0, 0.0)).line_to(new_vec(0.0, 10.0)).line_to(new_vec(-6.0, 0.0)).close();
+let diamond = new_path().move_to(new_vec(0.0, -10.0)).line_to(new_vec(6.0, 0.0)).line_to(new_vec(0.0, 10.0)).line_to(new_vec(-6.0, 0.0)).close();
 diamond.move_to(new_vec(0.0, 14.0)).line_to(new_vec(0.0, 16.0));
 
 // Art made to measure: a bramble filling the box it's given.
@@ -52,9 +52,9 @@ fn bramble_in(b) {
 	let pen = new_brush("Ink Pen", 0.3, 0.7, 2.0);
 	let on_paper = background() != ();
 	let c = new_canvas();
-	c.add_strokepath(plant.vines, new_strokestyle(1.2, if on_paper { "#6b4423" } else { "#c8a27a" }, pen));
-	c.add_strokepath(plant.leaves, new_strokestyle(1.2, if on_paper { "#3d6b2a" } else { "#a8d68a" }, pen));
-	c.add_strokepath(plant.flowers, new_strokestyle(1.2, if on_paper { "#2b1d12" } else { "#f2ead8" }, pen));
+	c.add_path(plant.vines, new_style(1.2, if on_paper { "#6b4423" } else { "#c8a27a" }, pen));
+	c.add_path(plant.leaves, new_style(1.2, if on_paper { "#3d6b2a" } else { "#a8d68a" }, pen));
+	c.add_path(plant.flowers, new_style(1.2, if on_paper { "#2b1d12" } else { "#f2ead8" }, pen));
 	c
 }
 

@@ -12,7 +12,7 @@
 //! // ...or out from a centre.
 //! let glow = new_gradient(["white", "rgba(255, 200, 0, 0)"], #{ center: new_vec(0.0, 0.0), radius: 120.0 });
 //!
-//! let style = new_strokestyle(1.0, fade, brush);   // in place of a colour
+//! let style = new_style(1.0, fade, brush);   // in place of a colour
 //! style.color = across;                            // or set it later
 //! ```
 //!
@@ -128,7 +128,7 @@ pub fn register(engine: &mut Engine) {
         .register_fn("to_debug", describe);
 }
 
-/// A colour or a gradient, as `new_strokestyle` and `style.color` take.
+/// A colour or a gradient, as `new_style` and `style.color` take.
 pub fn colour_or_gradient(caller: &str, value: Dynamic) -> RhaiResult<crate::journal::canvas::StrokeColor> {
     use crate::journal::canvas::StrokeColor;
     if value.is::<Gradient>() {
@@ -184,7 +184,7 @@ mod tests {
         let e = engine();
         let ok: bool = e.engine.eval(r#"
             let g = new_gradient(["red", "blue"]);
-            let style = new_strokestyle(1.0, g, new_brush("Ink Pen", 0.4, 0.8, 1.6));
+            let style = new_style(1.0, g, new_brush("Ink Pen", 0.4, 0.8, 1.6));
             let back = style.color;
             style.color = "gold";
             let solid = style.color == "gold";
@@ -205,7 +205,7 @@ mod tests {
             (r#"new_gradient(["red", "blue"], #{ from: new_vec(0.0, 0.0) })"#, "give 'from' and 'to'"),
             (r#"new_gradient(["red", "blue"], #{ center: new_vec(0.0, 0.0), radius: 0 })"#, "'radius' must be a positive"),
             (r#"new_gradient(["red", "blue"], #{ angle: 1 })"#, "unknown option 'angle'"),
-            (r#"new_strokestyle(1.0, 3, new_brush("Ink Pen", 0.4, 0.8, 1.6))"#, "expected a colour string or a gradient"),
+            (r#"new_style(1.0, 3, new_brush("Ink Pen", 0.4, 0.8, 1.6))"#, "expected a colour string or a gradient"),
         ] {
             let err = fails(&format!("let ok = 1;\n{};", script));
             assert!(err.contains(want) && err.contains("line 2"), "{}: {}", want, err);

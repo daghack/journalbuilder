@@ -29,7 +29,7 @@ impl CanvasData {
     pub fn add_stroke(&mut self, stroke: Stroke) {
         self.strokes.push(stroke)
     }
-    pub fn add_strokepath(&mut self, path: StrokePath, style: StrokeStyle) {
+    pub fn add_path(&mut self, path: StrokePath, style: StrokeStyle) {
         self.strokes.push(Stroke { path, style, seed: None });
     }
     fn transform(&mut self, f: impl Fn(&mut StrokePath)) {
@@ -61,10 +61,10 @@ pub(super) fn register(engine: &mut Engine) {
             c.borrow_mut().add_stroke(stroke);
             Ok(())
         })
-        .register_fn("add_strokepath", |c: &mut Canvas, path: Path, style: StrokeStyle| -> Result<(), Box<EvalAltResult>> {
+        .register_fn("add_path", |c: &mut Canvas, path: Path, style: StrokeStyle| -> Result<(), Box<EvalAltResult>> {
             let path = path.get();
-            check_finite("add_strokepath", &path)?;
-            c.borrow_mut().add_strokepath(path, style);
+            check_finite("add_path", &path)?;
+            c.borrow_mut().add_path(path, style);
             Ok(())
         })
         .register_fn("add_canvas", |c: &mut Canvas, other: Canvas| {
@@ -72,12 +72,12 @@ pub(super) fn register(engine: &mut Engine) {
             let strokes = other.borrow().strokes.clone();
             c.borrow_mut().strokes.extend(strokes);
         })
-        .register_fn("translate", |c: &mut Canvas, v: Vec2| -> Canvas {
+        .register_fn("translate_by", |c: &mut Canvas, v: Vec2| -> Canvas {
             let v = v.into();
             c.update(|data| data.transform(|p| p.translate_by(v)))
         })
-        .register_fn("scale", |c: &mut Canvas, scale: Dynamic| -> RhaiResult<Canvas> {
-            let scale = float("scale", "the scale", &scale)? as f32;
+        .register_fn("scale_by", |c: &mut Canvas, scale: Dynamic| -> RhaiResult<Canvas> {
+            let scale = float("scale_by", "the scale", &scale)? as f32;
             Ok(c.update(|data| data.transform(|p| p.scale_by(scale))))
         })
         .register_fn("rotate_around", |c: &mut Canvas, point: Vec2, rad: Dynamic| -> RhaiResult<Canvas> {
@@ -180,7 +180,7 @@ mod tests {
     }
 
     fn eval<T: Clone + 'static>(script: &str) -> T {
-        let setup = r#"let style = new_strokestyle(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));"#;
+        let setup = r#"let style = new_style(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));"#;
         engine().engine.eval::<T>(&format!("{}\n{}", setup, script)).expect("script should evaluate")
     }
 
@@ -192,7 +192,7 @@ mod tests {
     fn bounds_include_stroke_width() {
         let ok: bool = eval(r#"
             let c = new_canvas();
-            c.add_strokepath(new_line(new_vec(0.0, 0.0), new_vec(10.0, 20.0)), style);
+            c.add_path(new_line(new_vec(0.0, 0.0), new_vec(10.0, 20.0)), style);
             let b = c.bounds();
             b.min.x == -1.0 && b.min.y == -1.0 && b.max.x == 11.0 && b.max.y == 21.0
                 && b.center.x == 5.0 && b.center.y == 10.0 && b.width == 12.0 && b.height == 22.0
@@ -200,7 +200,7 @@ mod tests {
         assert!(ok);
         // A path's bounds are its line's, curves included.
         let ok: bool = eval(r#"
-            let b = new_strokepath().move_to(new_vec(0, 0)).quad_to(new_vec(10, 20), new_vec(20, 0)).bounds();
+            let b = new_path().move_to(new_vec(0, 0)).quad_to(new_vec(10, 20), new_vec(20, 0)).bounds();
             b.min == new_vec(0, 0) && b.max.x == 20.0 && (b.max.y - 10.0).abs() < 0.01
         "#);
         assert!(ok);

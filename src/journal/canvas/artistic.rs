@@ -40,7 +40,7 @@ pub fn jitter_symbols(symbols: &mut [Symbol], rotation: f32, scale: f32, rng: &m
 }
 
 #[derive(Clone, Debug)]
-pub struct SplatOptions {
+pub struct ScatterOptions {
     pub symbol_scale: f32,
     /// Glyph by glyph, or keeping words together and each message in one
     /// piece.
@@ -63,7 +63,7 @@ const MAX_SPLAT_BACKOFFS: usize = 100;
 /// Try random boxes over `bounds` until `symbols` fit in one, clear of
 /// `avoid`. Keeping words whole, the message must also be in one piece:
 /// nothing to avoid inside its outline.
-fn splat_one(bounds: &Canvas, avoid: &AvoidanceTree, symbols: &[Symbol], opts: &SplatOptions, rng: &mut dyn RngCore) -> Option<Vec<Symbol>> {
+fn scatter_one(bounds: &Canvas, avoid: &AvoidanceTree, symbols: &[Symbol], opts: &ScatterOptions, rng: &mut dyn RngCore) -> Option<Vec<Symbol>> {
     for _ in 0..opts.max_attempts {
         let textbox = TextBox::new(TextBoxOptions {
             jagged_edge: opts.jagged_edge,
@@ -96,7 +96,7 @@ fn splat_one(bounds: &Canvas, avoid: &AvoidanceTree, symbols: &[Symbol], opts: &
 /// message's placed symbols in order. When a message won't fit, the most
 /// recent messages are taken back (more of them the more often it happens)
 /// and placed again.
-pub fn splat_msgs(canvas: &Canvas, avoid: Option<&AvoidanceTree>, msgs: &[Vec<Symbol>], opts: &SplatOptions, rng: &mut dyn RngCore) -> Result<Vec<Vec<Symbol>>, String> {
+pub fn scatter_notes(canvas: &Canvas, avoid: Option<&AvoidanceTree>, msgs: &[Vec<Symbol>], opts: &ScatterOptions, rng: &mut dyn RngCore) -> Result<Vec<Vec<Symbol>>, String> {
     let mut base = canvas.avoidance(0.0);
     if let Some(avoid) = avoid {
         base.merge(avoid);
@@ -113,7 +113,7 @@ pub fn splat_msgs(canvas: &Canvas, avoid: Option<&AvoidanceTree>, msgs: &[Vec<Sy
     let mut backoffs = 0;
     while placed.len() < msgs.len() {
         let next = placed.len();
-        if let Some(symbols) = splat_one(canvas, &working, &msgs[next], opts, rng) {
+        if let Some(symbols) = scatter_one(canvas, &working, &msgs[next], opts, rng) {
             for symbol in &symbols {
                 working.add_symbol(symbol, 0.0);
             }

@@ -9,29 +9,29 @@ let tapered = new_brush("Ink Pen", 0.1, 1.0, 1.5);
 tapered.pressure_profile = "taper";
 
 // Named, hex, hsl-with-alpha and rgba colors.
-let outline = new_strokestyle(2.0, "black", ink_pen);
-let text = new_strokestyle(1.5, "darkred", rough);
-let accent = new_strokestyle(2.0, "#1d2a5c", calli);
-let faint = new_strokestyle(1.0, "hsl(160, 50%, 40%, 0.6)", ink_pen);
-let shade = new_strokestyle(1.0, "rgba(0, 0, 0, 0.4)", ink_pen);
-let swell = new_strokestyle(2.0, "#5c1d2a", tapered);
+let outline = new_style(2.0, "black", ink_pen);
+let text = new_style(1.5, "darkred", rough);
+let accent = new_style(2.0, "#1d2a5c", calli);
+let faint = new_style(1.0, "hsl(160, 50%, 40%, 0.6)", ink_pen);
+let shade = new_style(1.0, "rgba(0, 0, 0, 0.4)", ink_pen);
+let swell = new_style(2.0, "#5c1d2a", tapered);
 
 let font = new_fontset(["copper_upper", "loche_upper"], ["copper_lower", "loche_lower"]);
 
 // ---- page one: shapes, curves, symbols, and text on a path ----
 let shapes = new_canvas();
-shapes.add_strokepath(new_circle(new_vec(0.0, 0.0), 60.0), outline);
-shapes.add_strokepath(new_rectangle(new_vec(160.0, 0.0), 100.0, 70.0), accent);
-shapes.add_strokepath(new_line(new_vec(-60.0, 90.0), new_vec(210.0, 90.0)), faint);
-shapes.add_strokepath(new_line(new_vec(-60.0, 110.0), new_vec(210.0, 110.0)), swell);
-shapes.add_strokepath(new_arc(new_vec(0.0, 170.0), 50.0, 0.0, 4.71), shade);
+shapes.add_path(new_circle(new_vec(0.0, 0.0), 60.0), outline);
+shapes.add_path(new_rectangle(new_vec(160.0, 0.0), 100.0, 70.0), accent);
+shapes.add_path(new_line(new_vec(-60.0, 90.0), new_vec(210.0, 90.0)), faint);
+shapes.add_path(new_line(new_vec(-60.0, 110.0), new_vec(210.0, 110.0)), swell);
+shapes.add_path(new_arc(new_vec(0.0, 170.0), 50.0, 0.0, 4.71), shade);
 // Gradients along a stroke and across the page, drawn next to each other
 // and between solid strokes.
-shapes.add_strokepath(new_arc(new_vec(0.0, 170.0), 35.0, 0.0, 4.71), new_strokestyle(2.0, new_gradient(["darkred", "gold", "#1d2a5c"]), rough));
-shapes.add_strokepath(new_rectangle(new_vec(0.0, 170.0), 40.0, 30.0).hatch(#{ spacing: 4.0, angle: [0.5, 2.1] }),
-	new_strokestyle(1.0, new_gradient(["#1d2a5c", [0.3, "darkred"], "gold"], #{ center: new_vec(0.0, 170.0), radius: 25.0 }), ink_pen));
-shapes.add_strokepath(
-	new_strokepath().move_to(new_vec(100.0, 170.0))
+shapes.add_path(new_arc(new_vec(0.0, 170.0), 35.0, 0.0, 4.71), new_style(2.0, new_gradient(["darkred", "gold", "#1d2a5c"]), rough));
+shapes.add_path(new_rectangle(new_vec(0.0, 170.0), 40.0, 30.0).hatch(#{ spacing: 4.0, angle: [0.5, 2.1] }),
+	new_style(1.0, new_gradient(["#1d2a5c", [0.3, "darkred"], "gold"], #{ center: new_vec(0.0, 170.0), radius: 25.0 }), ink_pen));
+shapes.add_path(
+	new_path().move_to(new_vec(100.0, 170.0))
 		.quad_to(new_vec(150.0, 100.0), new_vec(200.0, 170.0))
 		.cubic_to(new_vec(230.0, 230.0), new_vec(130.0, 250.0), new_vec(100.0, 170.0))
 		.close(),
@@ -39,12 +39,12 @@ shapes.add_strokepath(
 
 // A symbol, transformed with chained calls, at a seeded random tilt.
 seed(3);
-shapes.add_strokepath(
+shapes.add_path(
 	load_symbol("basic_eye").scale_by(30.0).rotate_around(new_vec(0.0, 0.0), random_range(-0.3, 0.3)).translate_by(new_vec(0.0, 0.0)),
 	outline);
 
 // Text fitted along an arc.
-shapes.add_canvas(new_arc(new_vec(80.0, 60.0), 150.0, 3.4, 6.0).fit_msg_to(text, font, "smoke and mirrors"));
+shapes.add_canvas(new_arc(new_vec(80.0, 60.0), 150.0, 3.4, 6.0).fit_text("smoke and mirrors", font, text));
 
 // Glyphs: a ring of ternary glyphs, a lowercase-font word, and a named
 // glyph, placed and turned by hand.
@@ -66,7 +66,7 @@ shapes.add_glyphs(word, text);
 shapes.add_glyph(glyph("basic_eye").scale_by(24.0).translate_by(new_vec(-150.0, 0.0)), accent);
 
 // Notes scattered over the page, clear of the drawing and each other.
-let notes = shapes.splat_msgs(["smoke rises", "glass breaks"], lowercase_font("loche_upper"), faint,
+let notes = shapes.scatter_notes(["smoke rises", "glass breaks"], lowercase_font("loche_upper"), faint,
 	#{ symbol_scale: 12.0, width_range: [60, 100], height_range: [30, 50] });
 shapes.add_canvas(notes);
 
@@ -79,10 +79,10 @@ let page_maze = new_maze(7, 3, 3);
 if page_maze.cells().len() != 9 + 8 { throw "a 3x3 maze should have 9 nodes and 8 passages"; }
 let maze_path = page_maze.path();
 maze_path.scale_by(40.0);
-let maze_canvas = maze_path.fit_msg_to(text, font, "Every path leads back here.");
-maze_canvas.add_strokepath(maze_path, faint);
+let maze_canvas = maze_path.fit_text("Every path leads back here.", font, text);
+maze_canvas.add_path(maze_path, faint);
 
-let filled = new_line(new_vec(0.0, 0.0), new_vec(200.0, 0.0)).fill_with_msg(accent, font, 14.0, "a line of text");
+let filled = new_line(new_vec(0.0, 0.0), new_vec(200.0, 0.0)).fill_with_text("a line of text", font, 14.0, accent);
 // Text along a line that keeps clear of a post crossing it, a closed
 // shape, and the inside of a drawing's outline, whole words at a time.
 let post = new_line(new_vec(60.0, -30.0), new_vec(60.0, 30.0));
@@ -91,15 +91,15 @@ let keep_off = new_avoidance_tree()
 	.add_region(new_circle(new_vec(150.0, 0.0), 12.0))
 	.add_hull(new_arc(new_vec(220.0, 0.0), 15.0, 0.0, 3.0));
 let avoiding = new_line(new_vec(0.0, 0.0), new_vec(300.0, 0.0))
-	.fill_with_msg(accent, font, 12.0, "words go around what they avoid", #{ avoid: keep_off, layout: "words" })[0];
-avoiding.add_strokepath(post, faint);
-avoiding.add_strokepath(new_circle(new_vec(150.0, 0.0), 12.0), faint);
+	.fill_with_text("words go around what they avoid", font, 12.0, accent, #{ avoid: keep_off, layout: "words" })[0];
+avoiding.add_path(post, faint);
+avoiding.add_path(new_circle(new_vec(150.0, 0.0), 12.0), faint);
 
 let page_two = new_page();
 page_two.svg_style = ();   // plain strokes, unstyled
 page_two.add_canvas(maze_canvas);
-page_two.add_canvas(filled[0].translate(new_vec(0.0, 160.0)));
-page_two.add_canvas(avoiding.translate(new_vec(0.0, 200.0)));
+page_two.add_canvas(filled[0].translate_by(new_vec(0.0, 160.0)));
+page_two.add_canvas(avoiding.translate_by(new_vec(0.0, 200.0)));
 journal_entry.add_page(page_two);
 
 // ---- page three: a lock chain drawn as a maze of glyphs ----
@@ -120,16 +120,16 @@ if lock.unlock(result).text("vig.plain_text") != plain.to_upper() {
 let maze = result.get("maze.generated_maze").maze();
 let cell_size = 24.0;
 let maze_canvas = new_canvas();
-maze_canvas.add_strokepath(maze.path().scale_by(cell_size), faint);
+maze_canvas.add_path(maze.path().scale_by(cell_size), faint);
 for cell in maze.cells() {
-	maze_canvas.add_strokepath(
+	maze_canvas.add_path(
 		load_symbol("balanced_ternary_" + (cell.symbol - 13)).scale_by(cell_size / 2.0)
 			.translate_by(new_vec(cell.x * cell_size, cell.y * cell_size)),
 		outline);
 }
 // Shade the maze's start, then flow the key around the glyphs in a box a
 // little larger than the maze.
-maze_canvas.add_strokepath(new_circle(new_vec(0.0, 0.0), cell_size * 0.75).hatch(3.0, random_range(0.0, 6.28), 1.0), shade);
+maze_canvas.add_path(new_circle(new_vec(0.0, 0.0), cell_size * 0.75).hatch(3.0, random_range(0.0, 6.28), 1.0), shade);
 let b = maze_canvas.bounds();
 let around = new_textbox(#{
 	center: b.center, width: b.width * 1.3, height: b.height * 1.3,
@@ -160,22 +160,22 @@ journal_entry.add_page(page_three);
 // ---- page four: procedural art ----
 // Two snakes (one with too little slack to loop, one coiled over itself),
 // a bramble, and a maze grown with brambles and made a serpent.
-let pale = new_strokestyle(1.4, "#f2ead8", ink_pen);
+let pale = new_style(1.4, "#f2ead8", ink_pen);
 let snakes = new_canvas();
-snakes.add_strokepath(art::snake_path(new_vec(0.0, 0.0), -PI() / 2.0, new_vec(10.0, 200.0), 260.0, 14.0, 4), pale);
-snakes.add_strokepath(art::snake_path(new_vec(140.0, 0.0), -PI() / 2.0, new_vec(150.0, 30.0), 480.0, 14.0, 4), pale);
+snakes.add_path(art::snake_path(new_vec(0.0, 0.0), -PI() / 2.0, new_vec(10.0, 200.0), 260.0, 14.0, 4), pale);
+snakes.add_path(art::snake_path(new_vec(140.0, 0.0), -PI() / 2.0, new_vec(150.0, 30.0), 480.0, 14.0, 4), pale);
 // A bramble, its vines, leaves and flowers stroked separately.
 let plant = art::bramble(new_vec(320.0, 220.0), -PI() / 2.0, 420.0, 70.0, 4);
-snakes.add_strokepath(plant.vines, new_strokestyle(1.4, "#c8a27a", ink_pen));
-snakes.add_strokepath(plant.leaves, new_strokestyle(1.4, "#a8d68a", ink_pen));
-snakes.add_strokepath(plant.flowers, pale);
+snakes.add_path(plant.vines, new_style(1.4, "#c8a27a", ink_pen));
+snakes.add_path(plant.leaves, new_style(1.4, "#a8d68a", ink_pen));
+snakes.add_path(plant.flowers, pale);
 // A small maze grown with brambles, and made a many-headed serpent.
 let maze_lines = new_maze(5, 3, 2).path().scale_by(50.0);
 let along = art::bramble_along(maze_lines.copy().translate_by(new_vec(0.0, 300.0)), 30.0, 2);
-snakes.add_strokepath(along.vines, new_strokestyle(1.4, "#c8a27a", ink_pen));
-snakes.add_strokepath(along.leaves, new_strokestyle(1.4, "#a8d68a", ink_pen));
-snakes.add_strokepath(along.flowers, pale);
-snakes.add_strokepath(art::snake_along(maze_lines.copy().translate_by(new_vec(300.0, 300.0)), 20.0, 2), pale);
+snakes.add_path(along.vines, new_style(1.4, "#c8a27a", ink_pen));
+snakes.add_path(along.leaves, new_style(1.4, "#a8d68a", ink_pen));
+snakes.add_path(along.flowers, pale);
+snakes.add_path(art::snake_along(maze_lines.copy().translate_by(new_vec(300.0, 300.0)), 20.0, 2), pale);
 let page_four = new_page();
 page_four.name = "art";
 page_four.add_canvas(snakes);

@@ -121,7 +121,7 @@ pub fn page_image(page: &Page, label: &str, engine: &mut DarklyEngine, render: &
 /// SVG renders, one per canvas like the Darkly ones, each written as
 /// `{page}_{canvas}.svg` and rasterised to `{page}_{canvas}.png`. Here a
 /// style's width is the stroke's geometric width; in Darkly it scales the
-/// brush's pressure instead (see `new_strokestyle`).
+/// brush's pressure instead (see `new_style`).
 pub fn svgs(entry: &Entry, dir: &str, scale: f32, only: Option<&[usize]>) -> Result<(), String> {
     println!("Publishing SVGs:");
     for (i, page) in entry.selected_pages(only) {

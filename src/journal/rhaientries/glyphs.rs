@@ -83,7 +83,7 @@ pub(super) fn add_glyph(canvas: &mut CanvasData, glyph: &Glyph, style: &StrokeSt
     if !glyph.is_blank() {
         let path = glyph.placed_strokepath();
         super::check_finite("add_glyph", &path)?;
-        canvas.add_strokepath(path, style.clone());
+        canvas.add_path(path, style.clone());
     }
     Ok(())
 }
@@ -233,7 +233,7 @@ mod tests {
     #[test]
     fn spaces_are_blank_glyphs_and_add_nothing() {
         let script = r#"
-            let style = new_strokestyle(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
+            let style = new_style(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
             let g = lowercase_font("loche_upper").glyphs("a b");
             if !g[1].is_blank || g[0].is_blank { throw "expected only the space to be blank"; }
             let canvas = new_canvas();
@@ -266,7 +266,7 @@ mod tests {
             ("let ok = 1;\nnew_fontset([\"copper_upper\"], [\"coper_lower\"]);", "new_fontset: no glyphs named 'coper_lower_*'"),
             ("let ok = 1;\nnew_fontset([\"copper_upper\"], [3]);", "font names must be strings"),
             ("let ok = 1;\nglyph(\"no_such_glyph\");", "glyph: unknown symbol 'no_such_glyph'"),
-            ("let ok = 1;\nnew_canvas().add_glyphs([glyph(\"basic_eye\"), 3], new_strokestyle(1.0, \"black\", new_brush(\"Ink Pen\", 0.3, 0.7, 1.0)));", "add_glyphs: item 1"),
+            ("let ok = 1;\nnew_canvas().add_glyphs([glyph(\"basic_eye\"), 3], new_style(1.0, \"black\", new_brush(\"Ink Pen\", 0.3, 0.7, 1.0)));", "add_glyphs: item 1"),
         ] {
             let err = fails(script);
             assert!(err.contains(want) && err.contains("line 2"), "{}", err);

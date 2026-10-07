@@ -68,10 +68,10 @@ more canvases of strokes:
 
 ```rhai
 let brush = new_brush("Calligraphy", 0.15, 0.25, 2.0);
-let ink = new_strokestyle(2.5, "rgba(0, 0, 0, 0.8)", brush);
+let ink = new_style(2.5, "rgba(0, 0, 0, 0.8)", brush);
 
 let canvas = new_canvas();
-canvas.add_strokepath(new_circle(new_vec(0.0, 0.0), 100.0), ink);
+canvas.add_path(new_circle(new_vec(0.0, 0.0), 100.0), ink);
 
 let font = new_fontset(["copper_upper"], ["copper_lower"]);
 for (g, i) in font.glyphs("ink") {
@@ -103,7 +103,7 @@ What to know:
   `#{ min, max, center, width, height }`.
 - **Brushes and widths.** `new_brush(name, min_pressure, max_pressure,
   size)` picks a Darkly brush; `size` is how wide its marks are. In
-  `new_strokestyle(width, color, brush)`, `width` scales the brush's
+  `new_style(width, color, brush)`, `width` scales the brush's
   pressure in Darkly renders, so past `1 / max_pressure` a stroke gets no
   heavier (the render warns), but it's the stroke's geometric width in SVG.
 - **Gradients.** In place of a colour, `new_gradient(["red", "gold",
@@ -122,7 +122,7 @@ What to know:
   glyphs; `new_fontset(["plain_upper"], ["plain_lower"])` is plain, a
   simple font made to read easily, with digits and punctuation. Text
   layout: `new_textbox` flows glyphs into a box,
-  `canvas.splat_msgs` scatters messages across a canvas, and
+  `canvas.scatter_notes` scatters messages across a canvas, and
   `path.fill_with_msg` / `fit_msg_to` write along a path.
 - **Keeping text clear.** Every text layout takes `avoid` (a path, canvas,
   glyph, or an array of them) and `clearance`, and keeps each glyph's
