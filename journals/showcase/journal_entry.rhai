@@ -27,7 +27,8 @@ let bark = "#c8a27a";
 
 let pen = new_brush("Ink Pen", 0.4, 0.8, 1.6);
 let label_style = new_strokestyle(1.0, pale, pen);
-let heading_nib = new_brush("Calligraphy", 0.4, 0.8, 3.0);
+// A fine nib: loche is hard to read drawn broad.
+let heading_nib = new_brush("Calligraphy", 0.4, 0.8, 1.5);
 heading_nib.pressure_profile = "constant";
 let heading_style = new_strokestyle(1.2, red, heading_nib);
 let line_style = new_strokestyle(1.0, pale, new_brush("Ink Pen", 0.3, 0.7, 2.0));
