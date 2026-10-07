@@ -57,7 +57,8 @@ const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--svg
                       The paper is parchment: a mottled scroll browning
                       toward its edges. Pages get a border of paper round
                       their strokes; each tile of a split page is a sheet
-                      of its own.
+                      of its own. Scripts see the paper's name from
+                      background(), to pick inks that show on it.
   --pdf               Put the pages in one PDF, {journal}.pdf, a page per
                       page, rather than writing images: each page's
                       canvases layered into one image (on paper, with
@@ -201,7 +202,9 @@ fn run(args: &Args) -> Result<(), String> {
     let journal_path = format!("{}/{}/journal_entry.rhai", args.journals_dir, journal_name);
     let output_dir = args.output_dir.clone()
         .unwrap_or_else(|| format!("{}/{}/output", args.journals_dir, journal_name));
-    let entry = JournalEngine::with_dirs(symd.clone(), &args.locks_dir, &args.layouts_dir).build_entry_file(&journal_path)?;
+    let mut engine = JournalEngine::with_dirs(symd.clone(), &args.locks_dir, &args.layouts_dir);
+    engine.set_background(args.background);
+    let entry = engine.build_entry_file(&journal_path)?;
     check_missing_glyphs(&symd, args.strict_glyphs)?;
     if entry.page_count() == 0 {
         return Err(format!("{} produced no pages; add them with journal_entry.add_page(page)", journal_path));

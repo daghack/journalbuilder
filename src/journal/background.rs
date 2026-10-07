@@ -28,6 +28,12 @@ impl Paper {
             _ => None,
         }
     }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Parchment => "parchment",
+        }
+    }
 }
 
 /// A sheet of paper on a grid of pixels from the canvas units' origin at

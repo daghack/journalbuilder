@@ -8,10 +8,15 @@
 let nib = new_brush("Calligraphy", 0.4, 0.7, 2.3);
 nib.pressure_profile = "constant";
 let pen = new_brush("Ink Pen", 0.3, 0.7, 2.0);
-let ink = new_strokestyle(1.3, "#f2ead8", nib);
-let red = new_strokestyle(1.3, "#ff8a7a", nib);
-let thin_red = new_strokestyle(1.0, "#ff8a7a", pen);
-let thin_ink = new_strokestyle(1.0, "#f2ead8", pen);
+// Light inks for a transparent render, viewed on a dark background; dark
+// ones on paper (--background).
+let on_paper = background() != ();
+let pale = if on_paper { "#2b1d12" } else { "#f2ead8" };
+let rubric = if on_paper { "#9b2318" } else { "#ff8a7a" };
+let ink = new_strokestyle(1.3, pale, nib);
+let red = new_strokestyle(1.3, rubric, nib);
+let thin_red = new_strokestyle(1.0, rubric, pen);
+let thin_ink = new_strokestyle(1.0, pale, pen);
 
 let lang = new_fontset(["lang_upper"], ["lang_lower"]);
 let caps = new_fontset(["copper_upper"], ["copper_lower"]);
@@ -45,10 +50,11 @@ diamond.move_to(new_vec(0.0, 14.0)).line_to(new_vec(0.0, 16.0));
 fn bramble_in(b) {
 	let plant = art::bramble(new_vec(b.center.x, b.y + b.height), -PI() / 2.0, b.height * 0.95, b.height * 0.2, 5);
 	let pen = new_brush("Ink Pen", 0.3, 0.7, 2.0);
+	let on_paper = background() != ();
 	let c = new_canvas();
-	c.add_strokepath(plant.vines, new_strokestyle(1.2, "#c8a27a", pen));
-	c.add_strokepath(plant.leaves, new_strokestyle(1.2, "#a8d68a", pen));
-	c.add_strokepath(plant.flowers, new_strokestyle(1.2, "#f2ead8", pen));
+	c.add_strokepath(plant.vines, new_strokestyle(1.2, if on_paper { "#6b4423" } else { "#c8a27a" }, pen));
+	c.add_strokepath(plant.leaves, new_strokestyle(1.2, if on_paper { "#3d6b2a" } else { "#a8d68a" }, pen));
+	c.add_strokepath(plant.flowers, new_strokestyle(1.2, if on_paper { "#2b1d12" } else { "#f2ead8" }, pen));
 	c
 }
 

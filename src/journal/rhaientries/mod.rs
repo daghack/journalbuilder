@@ -951,6 +951,8 @@ fn update_path(path: &mut Path, f: impl FnOnce(StrokePath) -> StrokePath) -> Pat
 pub struct JournalEngine {
     engine: Engine,
     warnings: Rc<RefCell<Vec<String>>>,
+    /// The paper pages will be rendered on, for `background()`.
+    paper: Rc<std::cell::Cell<Option<Paper>>>,
 }
 
 impl JournalEngine {
@@ -1103,6 +1105,15 @@ impl JournalEngine {
             Ok(BrushSettings::new_brush(name, min_pressure, max_pressure, size))
         });
 
+        // `background()`: the paper pages are rendered on ("parchment"),
+        // or () for none, so a journal can pick inks that show on it:
+        // dark on paper, light on a transparent render.
+        let paper: Rc<std::cell::Cell<Option<Paper>>> = Rc::default();
+        let p = paper.clone();
+        engine.register_fn("background", move || -> Dynamic {
+            p.get().map_or(Dynamic::UNIT, |paper| paper.name().into())
+        });
+
         art::register(&mut engine);
         avoid::register(&mut engine);
         book::register(&mut engine, symdict.clone(), rng.clone(), layouts_dir.into());
@@ -1122,6 +1133,7 @@ impl JournalEngine {
         JournalEngine {
             engine,
             warnings,
+            paper,
         }
     }
     /// The name of every function scripts can call that this crate
@@ -1148,6 +1160,11 @@ impl JournalEngine {
         scope.get_value("journal_entry")
             .ok_or_else(|| "the script replaced journal_entry with something that isn't an entry".to_string())
     }
+    /// Tell scripts, through `background()`, the paper their pages will be
+    /// rendered on.
+    pub fn set_background(&mut self, paper: Option<Paper>) {
+        self.paper.set(paper);
+    }
     pub fn build_entry_file(&mut self, rhai_filename: &str) -> Result<Entry, String> {
         let file_contents = std::fs::read_to_string(rhai_filename)
             .map_err(|err| format!("couldn't read {}: {}", rhai_filename, err))?;
@@ -1165,6 +1182,14 @@ mod tests {
     }
 
     const BRUSH: &str = r#"let brush = new_brush("Calligraphy", 0.25, 0.5, 1.0);"#;
+
+    #[test]
+    fn scripts_see_the_paper_they_are_rendered_on() {
+        let mut e = engine();
+        assert!(e.engine.eval::<Dynamic>("background()").unwrap().is_unit());
+        e.set_background(Some(Paper::Parchment));
+        assert_eq!(e.engine.eval::<String>("background()").unwrap(), "parchment");
+    }
 
     #[test]
     fn new_strokestyle_accepts_css_colors() {

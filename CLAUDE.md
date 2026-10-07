@@ -39,8 +39,10 @@ glyph, and look at the pages you changed:
 
 Conventions there: labels and body text are in plain (`label_font`),
 which has capitals, digits and punctuation, and headings in loche
-(`heading_font`); strokes are light colours, since renders are viewed on
-a dark background; sections are labelled with the calls they show.
+(`heading_font`); strokes are light colours, since transparent renders
+are viewed on a dark background, but dark on paper (`--background`),
+which the palette at the top switches on `background()`; sections are
+labelled with the calls they show.
 
 ## Checking changes
 

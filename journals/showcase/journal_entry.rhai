@@ -16,14 +16,19 @@
 // When journals gain a capability (a function, an art tool, a brush, a
 // font, a lock type), it gets a labelled example here: see CLAUDE.md.
 // tests/showcase.rs fails when a function scripts can call, or a glyph
-// family, isn't in this file. Strokes are light, for a dark background.
+// family, isn't in this file. Strokes are light, for a dark background,
+// or dark on paper (journalbuild showcase --background parchment).
 
-let pale = "#f2ead8";
-let red = "#ff8a7a";
-let green = "#a8d68a";
-let blue = "#9ad0ff";
-let gold = "#e8c170";
-let bark = "#c8a27a";
+// Inks: light, for transparent renders viewed on a dark background, or
+// dark when the pages are rendered on paper (--background), which
+// background() tells.
+let on_paper = background() != ();
+let pale = if on_paper { "#2b1d12" } else { "#f2ead8" };
+let red = if on_paper { "#9b2318" } else { "#ff8a7a" };
+let green = if on_paper { "#3d6b2a" } else { "#a8d68a" };
+let blue = if on_paper { "#1f4e7a" } else { "#9ad0ff" };
+let gold = if on_paper { "#8a6212" } else { "#e8c170" };
+let bark = if on_paper { "#6b4423" } else { "#c8a27a" };
 
 let pen = new_brush("Ink Pen", 0.4, 0.8, 1.6);
 let label_style = new_strokestyle(1.0, pale, pen);
@@ -118,7 +123,11 @@ for (width, i) in [0.3, 0.7, 1.2] {
 y += 40.0;
 pens.add_canvas(write("colours", 0.0, y, 34.0, heading_style, heading_font));
 y += 70.0;
-let colours = [["named", "gold"], ["hex", "#9ad0ff"], ["rgb", "rgb(255, 138, 122)"], ["hsl", "hsl(100, 50%, 70%)"], ["alpha", "rgba(242, 234, 216, 0.4)"]];
+let colours = if on_paper {
+	[["named", "darkgoldenrod"], ["hex", "#1f4e7a"], ["rgb", "rgb(155, 35, 24)"], ["hsl", "hsl(100, 50%, 28%)"], ["alpha", "rgba(43, 29, 18, 0.4)"]]
+} else {
+	[["named", "gold"], ["hex", "#9ad0ff"], ["rgb", "rgb(255, 138, 122)"], ["hsl", "hsl(100, 50%, 70%)"], ["alpha", "rgba(242, 234, 216, 0.4)"]]
+};
 for (colour, i) in colours {
 	let x = i * 260.0;
 	let style = new_strokestyle(1.0, colour[1], new_brush("Rough Ink", 0.4, 0.8, 9.0));
@@ -149,7 +158,7 @@ pens.add_canvas(write("style.color = a gradient", 0.0, y, 24.0, label_style, lab
 pens.add_canvas(write("Written in a gradient, left to right", 620.0, y, 30.0, words, label_font));
 y += 150.0;
 pens.add_canvas(write("#{ center, radius }: out from a point", 0.0, y, 24.0, label_style, label_font));
-let glow = new_gradient([pale, gold, "rgba(255, 138, 122, 0.2)"], #{ center: new_vec(935.0, y), radius: 110.0 });
+let glow = new_gradient([pale, gold, if on_paper { "rgba(155, 35, 24, 0.3)" } else { "rgba(255, 138, 122, 0.2)" }], #{ center: new_vec(935.0, y), radius: 110.0 });
 let spiral = new_strokepath().move_to(new_vec(935.0, y));
 for i in 1..240 {
 	let a = i * 0.11;
@@ -553,9 +562,9 @@ journal_entry.add_pages(page_layout.typeset(#{
 	art: #{ diamond: diamond, plant: |b| {
 		let plant = art::bramble(new_vec(b.center.x, b.y + b.height), -PI() / 2.0, b.height * 0.95, b.height * 0.2, 5);
 		let c = new_canvas();
-		c.add_strokepath(plant.vines, new_strokestyle(1.0, "#c8a27a", new_brush("Ink Pen", 0.4, 0.8, 1.6)));
-		c.add_strokepath(plant.leaves, new_strokestyle(1.0, "#a8d68a", new_brush("Ink Pen", 0.4, 0.8, 1.6)));
-		c.add_strokepath(plant.flowers, new_strokestyle(1.0, "#f2ead8", new_brush("Ink Pen", 0.4, 0.8, 1.6)));
+		c.add_strokepath(plant.vines, new_strokestyle(1.0, bark, new_brush("Ink Pen", 0.4, 0.8, 1.6)));
+		c.add_strokepath(plant.leaves, new_strokestyle(1.0, green, new_brush("Ink Pen", 0.4, 0.8, 1.6)));
+		c.add_strokepath(plant.flowers, new_strokestyle(1.0, pale, new_brush("Ink Pen", 0.4, 0.8, 1.6)));
 		c
 	} },
 }));
