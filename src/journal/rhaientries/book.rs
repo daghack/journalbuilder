@@ -1011,6 +1011,7 @@ fn typeset(ctx: NativeCallContext, layout: &mut Layout, content: Map, symdict: &
             page: Aabb::new(PVec::ZERO, PVec::new(content.width, content.height)),
             column: 0, columns: 1, row: 0, rows: 1,
             svg_seed: stable_hash(&format!("{}_0", name)),
+            page_seed: stable_hash(&name),
         });
         pages.push(Dynamic::from(Page { name: Some(name), canvases: vec![canvas], ..Page::default() }));
     }

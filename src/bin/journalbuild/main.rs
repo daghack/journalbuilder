@@ -1,5 +1,6 @@
 use scribe::journal::rhaientries::{JournalEngine, LockLibrary, DEFAULT_LAYOUTS_DIR, DEFAULT_LOCKS_DIR};
 use scribe::journal::{symboldict, darkly};
+use scribe::journal::background::Paper;
 
 use std::rc::Rc;
 
@@ -40,6 +41,7 @@ const DEFAULT_SUPERSAMPLE: f32 = 1.2;
 
 const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--svg]
                     [--scale S] [--supersample K] [--strict-glyphs]
+                    [--background PAPER]
                     [--journals-dir DIR] [--output-dir DIR] [--symbols FILE]
                     [--locks-dir DIR] [--layouts-dir DIR]
        journalbuild --check-locks [--locks-dir DIR]
@@ -50,6 +52,12 @@ const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--svg
                       and that SVG as a PNG; by default only Darkly renders.
                       Stroke widths are geometric widths there, while in
                       Darkly they scale brush pressure.
+  --background PAPER  Render each page as one image on paper,
+                      darkly_{page}.png, its canvases layered in order:
+                      parchment (a scroll: mottled, with scorched
+                      edges) or stained (tea-stained, with tide lines
+                      and cup rings). Pages get a border of paper; split
+                      and typeset pages get their part of one sheet.
   --strict-glyphs     Fail before rendering if any character had no glyph
                       (by default they're drawn as X and listed as a warning).
   --scale S           Scale output images (default 1.0), brushes included.
@@ -86,6 +94,7 @@ struct Args {
     symbols: String,
     locks_dir: String,
     layouts_dir: String,
+    background: Option<Paper>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -106,6 +115,7 @@ fn parse_args() -> Result<Args, String> {
     let mut locks_dir = DEFAULT_LOCKS_DIR.to_string();
     let mut layouts_dir = DEFAULT_LAYOUTS_DIR.to_string();
     let mut output_dir = None;
+    let mut background = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -121,6 +131,11 @@ fn parse_args() -> Result<Args, String> {
                 let value = args.next().ok_or("--supersample needs a value, e.g. --supersample 2")?;
                 supersample = value.parse::<f32>().ok().filter(|k| *k >= 1.0)
                     .ok_or(format!("invalid supersample '{}'; expected a number >= 1, e.g. 1.5", value))?;
+            }
+            "--background" => {
+                let value = args.next().ok_or("--background needs a paper, e.g. --background parchment")?;
+                background = Some(Paper::from_name(&value)
+                    .ok_or(format!("unknown paper '{}'; expected one of {}", value, Paper::NAMES.join(", ")))?);
             }
             "--journals-dir" => {
                 journals_dir = args.next().ok_or("--journals-dir needs a directory")?;
@@ -155,7 +170,7 @@ fn parse_args() -> Result<Args, String> {
         (Some(_), true) => return Err("--check-locks checks lock files, so it takes no journal name".to_string()),
         (None, false) => return Err("missing journal name".to_string()),
     };
-    Ok(Args { strict_glyphs, check_locks, journal_name, journals_dir, pages, svg, scale, supersample, output_dir, symbols, locks_dir, layouts_dir })
+    Ok(Args { strict_glyphs, check_locks, journal_name, journals_dir, pages, svg, scale, supersample, output_dir, symbols, locks_dir, layouts_dir, background })
 }
 
 fn main() {
@@ -206,7 +221,10 @@ fn run(args: &Args) -> Result<(), String> {
     }
     // One Darkly engine for the whole run; canvases resize it as needed.
     let mut darkly_engine = darkly::new_engine(1, 1);
-    entry.darkly_publish_pngs(&mut darkly_engine, &output_dir, args.scale, args.supersample, only)
+    match args.background {
+        Some(paper) => entry.darkly_publish_pages(&mut darkly_engine, &output_dir, args.scale, args.supersample, only, Some(paper)),
+        None => entry.darkly_publish_pngs(&mut darkly_engine, &output_dir, args.scale, args.supersample, only),
+    }
 }
 
 /// Run every lock file's examples, listing each lock type's result.

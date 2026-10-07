@@ -20,7 +20,10 @@ use super::symbol::{place_along_path, place_words_along_path, Symbol, SymbolPlac
 use super::canvas::textbox::TextBoxLineMode;
 use super::styles::Font;
 use super::darkly;
+use super::background::{self, Paper, Sheet};
+use super::compose::{self, Placed};
 use ::darkly::engine::DarklyEngine;
+use image::RgbaImage;
 use parry2d::math::Vec2 as PVec;
 
 use std::cell::RefCell;
@@ -98,6 +101,20 @@ impl Entry {
                 let buff = darkly::render(&canvas, engine, scale, supersample);
                 buff.save(&filename).map_err(|e| format!("couldn't write {}: {}", filename, e))?;
             }
+        }
+        Ok(())
+    }
+    /// Darkly renders a page at a time, each page's canvases layered into
+    /// one image on `paper` (see `Page::darkly_render`), written as
+    /// `darkly_{page}.png`.
+    pub fn darkly_publish_pages(&self, engine: &mut DarklyEngine, dirname: &str, scale: f32, supersample: f32, only: Option<&[usize]>, paper: Option<Paper>) -> Result<(), String> {
+        for (i, page) in self.selected_pages(only) {
+            let label = page.label(i);
+            let Some(image) = page.darkly_render(engine, &label, scale, supersample, paper) else {
+                continue; // journalbuild warns about empty canvases
+            };
+            let filename = format!("{}/darkly_{}.png", dirname, label);
+            image.save(&filename).map_err(|e| format!("couldn't write {}: {}", filename, e))?;
         }
         Ok(())
     }
@@ -210,6 +227,11 @@ fn check_name(caller: &str, name: Dynamic) -> Result<String, Box<EvalAltResult>>
     }
 }
 
+/// Paper round a page's strokes, as a fraction of its larger side, and at
+/// least this many units.
+const PAPER_BORDER: f32 = 0.06;
+const PAPER_BORDER_MIN: f32 = 20.0;
+
 /// How a page's SVG output (`--svg`) is drawn, unless the script sets
 /// `page.svg_style`.
 const DEFAULT_SVG_STYLE: CanvasStyleOptions = CanvasStyleOptions {
@@ -273,6 +295,41 @@ impl Page {
             rendered.pad(self.margin_for(canvas));
         }
         Some(rendered)
+    }
+    /// The page rendered with Darkly as one image, `label` being its name
+    /// in output: its canvases layered in order, each where it is on the
+    /// page, on `paper` if given. On paper, a page that isn't a tile (or
+    /// typeset) gets a border of paper round its strokes; a tile's paper is
+    /// its part of the whole page's sheet. `None` if nothing is drawn.
+    pub fn darkly_render(&self, engine: &mut DarklyEngine, label: &str, scale: f32, supersample: f32, paper: Option<Paper>) -> Option<RgbaImage> {
+        let mut layers = Vec::new();
+        let mut frame = None;
+        for canvas in &self.canvases {
+            let Some(canvas) = self.render_canvas(canvas) else { continue };
+            frame = frame.or(canvas.frame().copied());
+            layers.push(Placed { at: canvas.render_origin(scale), image: darkly::render(&canvas, engine, scale, supersample) });
+        }
+        let ink = compose::flatten(layers)?;
+        let Some(paper) = paper else { return Some(ink.image) };
+        let sheet = match frame {
+            Some(frame) => {
+                let size = frame.page_pixels(scale);
+                let [x0, y0, x1, y1] = frame.pixels(size).map(|v| v as i64);
+                let corner = ((frame.page.mins.x * scale).round() as i64, (frame.page.mins.y * scale).round() as i64);
+                let crop = [corner.0 + x0, corner.1 + y0, corner.0 + x1, corner.1 + y1];
+                Sheet { corner, size, crop, scale, seed: frame.page_seed }
+            }
+            None => {
+                let (w, h) = ink.image.dimensions();
+                let border = (w.max(h) as f32 * PAPER_BORDER).max(PAPER_BORDER_MIN * scale).round() as u32;
+                let corner = (ink.at.0 - border as i64, ink.at.1 - border as i64);
+                Sheet::whole(corner, (w + 2 * border, h + 2 * border), scale, stable_hash(label))
+            }
+        };
+        let at = (sheet.crop[0], sheet.crop[1]);
+        let mut sheet = Placed { image: background::paint(paper, &sheet), at };
+        compose::draw(&mut sheet, &ink, compose::ink_on_paper);
+        Some(sheet.image)
     }
     /// The margin rendered around `canvas`: the page's `margin`, or by
     /// default half the largest brush size on the canvas, the least that
@@ -455,6 +512,7 @@ impl Page {
                         page: region,
                         column, columns, row, rows,
                         svg_seed: stable_hash(&format!("{}_{}", name, canvas.label(*i))),
+                        page_seed: stable_hash(&name),
                     });
                     // Named as it was, since its index might change.
                     part.name = Some(canvas.label(*i));

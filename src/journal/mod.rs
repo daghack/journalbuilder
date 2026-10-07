@@ -1,6 +1,8 @@
 pub mod art;
 pub mod avoid;
+pub mod background;
 pub mod canvas;
+pub mod compose;
 pub mod symbol;
 pub mod paths;
 pub mod hatch;

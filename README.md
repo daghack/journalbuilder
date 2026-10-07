@@ -26,6 +26,12 @@ Useful flags (`journalbuild` with no arguments lists them all):
 - `--svg`: also render each canvas as an SVG, and that SVG as a PNG.
 - `--strict-glyphs`: fail if any character has no glyph, instead of
   drawing an X and warning.
+- `--background parchment` or `--background stained`: render each page as
+  one image, `darkly_{page}.png`, on procedural paper: a mottled scroll
+  with browned edges, or paper splashed with tea, with tide lines and cup
+  rings. Pages get a border of paper round their strokes; typeset and
+  split pages are their own sheet, or their part of one. Dark inks show
+  best.
 - `--journals-dir`, `--output-dir`, `--symbols`, `--locks-dir`,
   `--layouts-dir`: read or write somewhere other than the repository's
   defaults.

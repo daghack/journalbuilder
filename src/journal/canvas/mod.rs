@@ -143,6 +143,9 @@ pub struct Frame {
     /// Seeds the SVG output's roughening and noise, as the whole page's
     /// file name would.
     pub svg_seed: u64,
+    /// Seeds what covers the whole page, such as its paper, as the whole
+    /// page's name would.
+    pub page_seed: u64,
 }
 
 impl Frame {
@@ -150,6 +153,11 @@ impl Frame {
     /// each way.
     pub fn page_extents(&self) -> Vec2 {
         self.page.extents().max(Vec2::ONE)
+    }
+    /// The whole page's size in a render at `scale` pixels per unit.
+    pub fn page_pixels(&self, scale: f32) -> (u32, u32) {
+        let extents = self.page_extents();
+        (((extents.x * scale) as u32).max(1), ((extents.y * scale) as u32).max(1))
     }
     /// This tile's pixels, `[x0, y0, x1, y1)`, in a render of the whole
     /// page `size` pixels across and down.
@@ -223,6 +231,20 @@ impl Canvas {
         if margin > 0.0 && self.bounds.mins.x <= self.bounds.maxs.x {
             self.bounds.mins -= Vec2::splat(margin);
             self.bounds.maxs += Vec2::splat(margin);
+        }
+    }
+    /// Where the top-left pixel of this canvas's render at `scale` pixels
+    /// per unit falls on a grid of pixels from the canvas units' origin,
+    /// so renders of a page's canvases can be laid together. A tile's
+    /// render is placed on its whole page's grid.
+    pub fn render_origin(&self, scale: f32) -> (i64, i64) {
+        let px = |v: f32| (v * scale).round() as i64;
+        match &self.frame {
+            Some(frame) => {
+                let [x0, y0, _, _] = frame.pixels(frame.page_pixels(scale));
+                (px(frame.page.mins.x) + x0 as i64, px(frame.page.mins.y) + y0 as i64)
+            }
+            None => (px(self.bounds.mins.x), px(self.bounds.mins.y)),
         }
     }
     pub fn has_strokes(&self) -> bool {
