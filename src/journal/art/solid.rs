@@ -6,6 +6,7 @@
 //! Coordinates are the page's, x right and y down, with z towards the
 //! viewer; the view is straight down z.
 
+use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::ops::{Add, Mul, Sub};
 
@@ -70,9 +71,9 @@ pub(super) fn mix(a: f64, b: f64, t: f64) -> f64 {
 }
 
 /// A surface over (u, v) in [0, 1] x [-1, 1], sampled on an `nu` by `nv`
-/// grid to hide what's behind it.
+/// grid to hide what's behind it. Sampled on several threads at once.
 pub(super) struct Surface {
-    pub point: Box<dyn Fn(f64, f64) -> P3>,
+    pub point: Box<dyn Fn(f64, f64) -> P3 + Send + Sync>,
     pub nu: usize,
     pub nv: usize,
     /// Where to draw its sides (v = -1 and 1) through: u values from its
@@ -151,7 +152,7 @@ impl Model {
         let mut triangles = Vec::new();
         for (index, surface) in surfaces.iter().enumerate() {
             let (nu, nv) = (surface.nu, surface.nv);
-            let grid: Vec<Vec<P3>> = (0..=nu).map(|i| (0..=nv).map(|j| {
+            let grid: Vec<Vec<P3>> = (0..=nu).into_par_iter().map(|i| (0..=nv).map(|j| {
                 (surface.point)(i as f64 / nu as f64, -1.0 + 2.0 * j as f64 / nv as f64)
             }).collect()).collect();
             for i in 0..nu {
@@ -210,23 +211,28 @@ impl Model {
 
     /// Every surface's edges, lines and folds, where they're visible.
     pub fn draw(&self, out: &mut Vec<Run>) {
+        let mut lines: Vec<Line> = Vec::new();
         for index in 0..self.surfaces.len() {
             let surface = &self.surfaces[index];
             if let Some(us) = &surface.edges {
                 let side = |v: f64| us.iter().map(move |&(u, corner)| (self.on(index, u, v), corner));
-                let edge: Line = side(-1.0).chain(side(1.0).rev()).collect();
-                self.visible(&edge, out);
+                lines.push(side(-1.0).chain(side(1.0).rev()).collect());
             }
             for line in &surface.lines {
-                let line: Line = line.iter().map(|&(u, v)| (self.on(index, u, v), false)).collect();
-                self.visible(&line, out);
+                lines.push(line.iter().map(|&(u, v)| (self.on(index, u, v), false)).collect());
             }
             if surface.folds {
-                for fold in self.folds(index) {
-                    self.visible(&fold, out);
-                }
+                lines.extend(self.folds(index));
             }
         }
+        // Each line's visible stretches, on several threads at once, kept
+        // in order.
+        let visible: Vec<Vec<Run>> = lines.par_iter().map(|line| {
+            let mut runs = Vec::new();
+            self.visible(line, &mut runs);
+            runs
+        }).collect();
+        out.extend(visible.into_iter().flatten());
     }
 
     /// The visible stretches of a line, on the page.
@@ -280,7 +286,7 @@ impl Model {
         let (nu, nv) = (surface.nu * 2, surface.nv * 2);
         let at = |i: usize, j: usize| (i as f64 / nu as f64, -1.0 + 2.0 * j as f64 / nv as f64);
         let (du, dv) = (0.25 / nu as f64, 0.5 / nv as f64);
-        let facing: Vec<Vec<f64>> = (0..=nu).map(|i| (0..=nv).map(|j| {
+        let facing: Vec<Vec<f64>> = (0..=nu).into_par_iter().map(|i| (0..=nv).map(|j| {
             // Just inside the ends, where a surface can pinch to a point
             // and have no facing.
             let (u, v) = at(i, j);

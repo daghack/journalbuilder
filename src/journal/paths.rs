@@ -854,7 +854,12 @@ impl SubstrokeStepper {
         let prior_distance = selected_curve.2;
 
         let mut selected_left_sample_index = None;
-        let starting_sample_index = 0; //starting_indices.map(|(_, s)| s).unwrap_or(0);
+        // Targets only move on, so in the same curve the search picks up
+        // where the last one stopped.
+        let starting_sample_index = match starting_indices {
+            Some((c, s)) if c == curve_index => s,
+            _ => 0,
+        };
         let samples_to_search = samples[starting_sample_index..].iter().enumerate();
 
         for (index_offset, left_sample) in samples_to_search {

@@ -51,7 +51,7 @@ impl SymbolBase {
             }
         };
         if points.len() >= 3
-            && let Some(hull) = parry2d::shape::ConvexPolygon::from_convex_hull(&gift_wrap(&points)) {
+            && let Some(hull) = parry2d::shape::ConvexPolygon::from_convex_hull(&parry2d::transformation::convex_hull(&points)) {
             return hull;
         }
         // A straight line (or a point, or nothing) has no area to wrap, so
@@ -171,44 +171,6 @@ impl From<Vec<Symbol>> for StrokePath {
         }
         combined_path
     }
-}
-
-fn orientation(p: Vec2, q: Vec2, r: Vec2) -> i32 {
-    let val = (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y);
-    if val == 0.0 {
-        0 // collinear
-    } else if val > 0.0 {
-        1 // clockwise
-    } else {
-        -1 // counterclockwise
-    }
-}
-
-// the algorithm which generates the convex hull efficiently from a set of points
-// is called the "gift wrapping" algorithm, which is O(n^2) in the worst case.
-fn gift_wrap(points: &[Vec2]) -> Vec<Vec2> {
-    let mut hull = Vec::new();
-    let mut leftmost = 0;
-    for i in 1..points.len() {
-        if points[i].x < points[leftmost].x {
-            leftmost = i;
-        }
-    }
-    let mut p = leftmost;
-    loop {
-        hull.push(points[p]);
-        let mut q = (p + 1) % points.len();
-        for i in 0..points.len() {
-            if orientation(points[p], points[q], points[i]) == -1 {
-                q = i;
-            }
-        }
-        p = q;
-        if p == leftmost {
-            break;
-        }
-    }
-    hull
 }
 
 /// Where and how glyphs go along a path.

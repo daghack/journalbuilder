@@ -1,16 +1,17 @@
 //! What text keeps clear of.
 //!
 //! An `AvoidanceTree` holds lines, each with a clearance (how close
-//! anything may come to it), and regions whose insides are out of bounds
+//! anything may come to it), and polygons whose insides are out of bounds
 //! too. Text placement asks it whether a glyph's footprint, the convex hull
 //! of its strokes as placed, comes within any line's clearance or overlaps
-//! a region; see `symbol::place_along_path`.
+//! a polygon; see `symbol::place_along_path`.
 //!
-//! Curves are flattened into short segments and kept in a grid, so a query
-//! only looks at what's near it.
+//! Curves are flattened into short segments and kept in a grid, as are
+//! polygons, so a query only looks at what's near it.
 
 use parry2d::math::Vec2;
 use std::collections::HashMap;
+use std::hash::{BuildHasherDefault, Hasher};
 
 use crate::journal::canvas::Canvas;
 use crate::journal::paths::StrokePath;
@@ -19,7 +20,8 @@ use crate::journal::symbol::Symbol;
 /// Curves are flattened to within this many canvas units of themselves.
 const FLATTEN_TOLERANCE: f32 = 0.2;
 /// The grid's cell size, in canvas units. Segments are cut to at most this
-/// long, so each sits in a few cells.
+/// long and filed under the cell their middle is in, so a query looking
+/// half a cell further than it reaches finds each segment once.
 const CELL: f32 = 24.0;
 
 #[derive(Clone, Copy, Debug)]
@@ -29,25 +31,80 @@ struct Segment {
     clearance: f32,
 }
 
-/// A closed outline whose inside is out of bounds. Its edges are also kept
-/// as segments, with its clearance.
+/// A closed outline whose inside is out of bounds, and which nothing may
+/// come within `clearance` of.
 #[derive(Clone, Debug)]
-struct Region {
+struct Polygon {
     points: Vec<Vec2>,
     min: Vec2,
     max: Vec2,
+    clearance: f32,
 }
 
+impl Polygon {
+    /// Whether `shape` (with bounds `min` to `max`) comes within the
+    /// polygon's clearance plus `padding` of it, or overlaps it: as
+    /// `shapes_within`, with edges far from the shape skipped by their
+    /// bounds.
+    fn near(&self, shape: &[Vec2], min: Vec2, max: Vec2, padding: f32) -> bool {
+        let limit = self.clearance + padding;
+        if self.min.x - limit > max.x || self.min.y - limit > max.y || self.max.x + limit < min.x || self.max.y + limit < min.y {
+            return false;
+        }
+        let n = self.points.len();
+        (0..n).any(|i| {
+            let (p, q) = (self.points[i], self.points[(i + 1) % n]);
+            let (lo, hi) = (p.min(q) - Vec2::splat(limit), p.max(q) + Vec2::splat(limit));
+            !(lo.x > max.x || lo.y > max.y || hi.x < min.x || hi.y < min.y) && shape_within(shape, p, q, limit)
+        }) || (shape.len() > 2 && point_in_polygon(self.points[0], shape))
+            || point_in_polygon(shape[0], &self.points)
+    }
+}
+
+/// Polygons up to this far across, from their middles, are filed in the
+/// grid; bigger ones are checked one by one.
+const MAX_FILED_HALF: f32 = 2.0 * CELL;
+
 type Cell = (i32, i32);
+
+/// Hashes grid cells quickly: the default hasher resists attacks that don't
+/// matter here and was much of the cost of building and asking a tree.
+#[derive(Clone, Copy, Debug, Default)]
+struct CellHasher(u64);
+
+impl Hasher for CellHasher {
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.write_u64(b as u64);
+        }
+    }
+    fn write_i32(&mut self, n: i32) {
+        self.write_u64(n as u32 as u64);
+    }
+    fn write_u64(&mut self, n: u64) {
+        self.0 = (self.0.rotate_left(5) ^ n).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+    }
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
+type Grid = HashMap<Cell, Vec<u32>, BuildHasherDefault<CellHasher>>;
 
 #[derive(Clone, Debug, Default)]
 pub struct AvoidanceTree {
     segments: Vec<Segment>,
-    regions: Vec<Region>,
-    segment_cells: HashMap<Cell, Vec<u32>>,
-    region_cells: HashMap<Cell, Vec<u32>>,
-    /// The largest clearance of any segment: how far past a query's bounds
-    /// to look.
+    polygons: Vec<Polygon>,
+    /// Segments by the cell their middle is in.
+    segment_cells: Grid,
+    /// Polygons up to `MAX_FILED_HALF` across by the cell their middle is
+    /// in, and how far the widest of them reaches from its middle.
+    polygon_cells: Grid,
+    filed_half: f32,
+    /// Bigger polygons.
+    large_polygons: Vec<u32>,
+    /// The largest clearance of anything: how far past a query's bounds to
+    /// look.
     max_clearance: f32,
 }
 
@@ -61,6 +118,14 @@ fn cells_over(min: Vec2, max: Vec2) -> impl Iterator<Item = Cell> {
     (lo.1..=hi.1).flat_map(move |y| (lo.0..=hi.0).map(move |x| (x, y)))
 }
 
+/// What's filed in `grid` within `reach` of the box from `min` to `max`.
+fn near(grid: &Grid, min: Vec2, max: Vec2, reach: f32) -> impl Iterator<Item = u32> + '_ {
+    cells_over(min - Vec2::splat(reach), max + Vec2::splat(reach))
+        .filter_map(|cell| grid.get(&cell))
+        .flatten()
+        .copied()
+}
+
 fn bounds(points: &[Vec2]) -> (Vec2, Vec2) {
     points.iter().fold((Vec2::splat(f32::MAX), Vec2::splat(f32::MIN)), |(min, max), p| (min.min(*p), max.max(*p)))
 }
@@ -71,7 +136,7 @@ impl AvoidanceTree {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.segments.is_empty() && self.regions.is_empty()
+        self.segments.is_empty() && self.polygons.is_empty()
     }
 
     /// Keep `clearance` away from the line from `a` to `b`.
@@ -86,9 +151,7 @@ impl AvoidanceTree {
             let (p, q) = (a.lerp(b, k as f32 / pieces as f32), a.lerp(b, (k + 1) as f32 / pieces as f32));
             let index = self.segments.len() as u32;
             self.segments.push(Segment { a: p, b: q, clearance });
-            for cell in cells_over(p.min(q), p.max(q)) {
-                self.segment_cells.entry(cell).or_default().push(index);
-            }
+            self.segment_cells.entry(cell_of(p.lerp(q, 0.5))).or_default().push(index);
         }
     }
 
@@ -116,19 +179,27 @@ impl AvoidanceTree {
         }
     }
 
+    fn push_polygon(&mut self, polygon: Polygon) {
+        let index = self.polygons.len() as u32;
+        let half = (polygon.max - polygon.min).max_element() / 2.0;
+        if half <= MAX_FILED_HALF {
+            self.filed_half = self.filed_half.max(half);
+            self.polygon_cells.entry(cell_of(polygon.min.lerp(polygon.max, 0.5))).or_default().push(index);
+        } else {
+            self.large_polygons.push(index);
+        }
+        self.max_clearance = self.max_clearance.max(polygon.clearance);
+        self.polygons.push(polygon);
+    }
+
     /// Keep out of a closed outline, and `clearance` away from its edge.
     pub fn add_polygon(&mut self, points: &[Vec2], clearance: f32) {
         if points.len() < 3 || !points.iter().all(|p| p.is_finite()) {
             self.add_polyline(points, false, clearance);
             return;
         }
-        self.add_polyline(points, true, clearance);
         let (min, max) = bounds(points);
-        let index = self.regions.len() as u32;
-        self.regions.push(Region { points: points.to_vec(), min, max });
-        for cell in cells_over(min, max) {
-            self.region_cells.entry(cell).or_default().push(index);
-        }
+        self.push_polygon(Polygon { points: points.to_vec(), min, max, clearance: clearance.max(0.0) });
     }
 
     /// Keep out of the inside of each of a path's subpaths (open ones are
@@ -176,61 +247,35 @@ impl AvoidanceTree {
         for s in &other.segments {
             self.add_segment(s.a, s.b, s.clearance);
         }
-        for region in &other.regions {
-            let index = self.regions.len() as u32;
-            self.regions.push(region.clone());
-            for cell in cells_over(region.min, region.max) {
-                self.region_cells.entry(cell).or_default().push(index);
-            }
+        for polygon in &other.polygons {
+            self.push_polygon(polygon.clone());
         }
     }
 
-    /// Whether a shape comes within a line's clearance (plus `padding`) or
-    /// overlaps a region. The shape is a point, a segment, or a polygon
-    /// (closed, its inside included).
+    /// Whether a shape comes within a line's or polygon's clearance (plus
+    /// `padding`) or overlaps a polygon. The shape is a point, a segment, or
+    /// a convex polygon (closed, its inside included).
     pub fn blocks(&self, shape: &[Vec2], padding: f32) -> bool {
         if shape.is_empty() || self.is_empty() {
             return false;
         }
+        let padding = padding.max(0.0);
         let (min, max) = bounds(shape);
-        let reach = self.max_clearance + padding.max(0.0);
-        let mut candidates: Vec<u32> = cells_over(min - Vec2::splat(reach), max + Vec2::splat(reach))
-            .filter_map(|cell| self.segment_cells.get(&cell))
-            .flatten()
-            .copied()
-            .collect();
-        candidates.sort_unstable();
-        candidates.dedup();
-        for index in candidates {
+        let mut segments = near(&self.segment_cells, min, max, self.max_clearance + padding + CELL / 2.0);
+        if segments.any(|index| {
             let s = &self.segments[index as usize];
-            let limit = s.clearance + padding.max(0.0);
+            let limit = s.clearance + padding;
             let (smin, smax) = (s.a.min(s.b) - Vec2::splat(limit), s.a.max(s.b) + Vec2::splat(limit));
-            if smin.x > max.x || smin.y > max.y || smax.x < min.x || smax.y < min.y {
-                continue;
-            }
-            if shape_within(shape, s.a, s.b, limit) {
-                return true;
-            }
+            !(smin.x > max.x || smin.y > max.y || smax.x < min.x || smax.y < min.y) && shape_within(shape, s.a, s.b, limit)
+        }) {
+            return true;
         }
-        let mut regions: Vec<u32> = cells_over(min, max)
-            .filter_map(|cell| self.region_cells.get(&cell))
-            .flatten()
-            .copied()
-            .collect();
-        regions.sort_unstable();
-        regions.dedup();
-        regions.into_iter().any(|index| {
-            let r = &self.regions[index as usize];
-            if r.min.x > max.x || r.min.y > max.y || r.max.x < min.x || r.max.y < min.y {
-                return false;
-            }
-            // Edges crossing were caught above, so the shapes overlap only
-            // if one holds the other.
-            point_in_polygon(shape[0], &r.points) || (shape.len() > 2 && point_in_polygon(r.points[0], shape))
-        })
+        let near_polygon = |index: u32| self.polygons[index as usize].near(shape, min, max, padding);
+        near(&self.polygon_cells, min, max, self.filed_half + self.max_clearance + padding).any(near_polygon)
+            || self.large_polygons.iter().any(|&index| near_polygon(index))
     }
 
-    /// Whether a point comes within a line's clearance or lies in a region.
+    /// Whether a point comes within a line's clearance or lies in a polygon.
     pub fn blocks_point(&self, point: Vec2) -> bool {
         self.blocks(&[point], 0.0)
     }

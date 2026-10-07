@@ -8,8 +8,9 @@
 //! Each shape belongs to a part, and a part's visible lines come out as one
 //! path, so parts can be stroked differently.
 
-use std::cell::OnceCell;
+use rayon::prelude::*;
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
 use super::geom::{simplify, spline, spline_closed, V};
 use crate::journal::paths::StrokePath;
@@ -86,15 +87,19 @@ pub(super) struct Scene<T> {
     speck: f64,
     /// The shapes bucketed by where they reach on the page, built when
     /// first needed (after the shapes are all added).
-    index: OnceCell<HashMap<(i64, i64), Vec<usize>>>,
+    index: OnceLock<HashMap<(i64, i64), Vec<usize>>>,
 }
 
 /// A stretch of line: its points, and whether each is a corner.
 pub(super) type Run = Vec<(V, bool)>;
 
-impl<T: Copy + PartialEq> Scene<T> {
+/// What's visible of a shape: its outline's runs (`None` if it's all
+/// visible) and its strokes'.
+type Visible = (Option<Vec<Run>>, Vec<Vec<Run>>);
+
+impl<T: Copy + PartialEq + Send + Sync> Scene<T> {
     pub fn new(tolerance: f64, max_gap: f64, speck: f64) -> Self {
-        Scene { shapes: Vec::new(), tolerance, max_gap, speck, index: OnceCell::new() }
+        Scene { shapes: Vec::new(), tolerance, max_gap, speck, index: OnceLock::new() }
     }
 
     /// Add a shape: its closed outline (not repeating the first point),
@@ -105,7 +110,7 @@ impl<T: Copy + PartialEq> Scene<T> {
         let min = outline.iter().fold(V::new(f64::INFINITY, f64::INFINITY), |m, p| V::new(m.x.min(p.x), m.y.min(p.y)));
         let max = outline.iter().fold(V::new(f64::NEG_INFINITY, f64::NEG_INFINITY), |m, p| V::new(m.x.max(p.x), m.y.max(p.y)));
         self.shapes.push(Shape { part, depth, outline, triangles: None, corners, strokes: Vec::new(), joins: Vec::new(), min, max });
-        self.index = OnceCell::new();
+        self.index = OnceLock::new();
         self.shapes.len() - 1
     }
 
@@ -116,7 +121,7 @@ impl<T: Copy + PartialEq> Scene<T> {
         let max = corners.fold(V::new(f64::NEG_INFINITY, f64::NEG_INFINITY), |m, p| V::new(m.x.max(p.x), m.y.max(p.y)));
         let triangles = Some(Triangles::new(triangles, cell));
         self.shapes.push(Shape { part, depth, outline: Vec::new(), triangles, corners: Vec::new(), strokes, joins: Vec::new(), min, max });
-        self.index = OnceCell::new();
+        self.index = OnceLock::new();
         self.shapes.len() - 1
     }
 
@@ -241,11 +246,21 @@ impl<T: Copy + PartialEq> Scene<T> {
         path
     }
 
-    /// The visible lines of every shape of `part`, as one path.
+    /// The visible lines of every shape of `part`, as one path. What's
+    /// visible is worked out for the shapes on several threads at once.
     pub fn path(&self, part: T) -> StrokePath {
+        let shapes: Vec<(usize, &Shape<T>)> = self.shapes.iter().enumerate().filter(|(_, shape)| shape.part == part).collect();
+        let visible: Vec<Visible> = shapes.par_iter().map(|&(i, shape)| {
+            let outline = if shape.outline.is_empty() { None } else { self.runs(i, &shape.outline, &shape.corners, true) };
+            let strokes = shape.strokes.iter().map(|stroke| {
+                let (points, corners): (Vec<V>, Vec<bool>) = stroke.iter().copied().unzip();
+                self.runs(i, &points, &corners, false).unwrap_or_default()
+            }).collect();
+            (outline, strokes)
+        }).collect();
         let mut path = StrokePath::new();
-        for (i, shape) in self.shapes.iter().enumerate().filter(|(_, shape)| shape.part == part) {
-            match (shape.outline.is_empty(), self.runs(i, &shape.outline, &shape.corners, true)) {
+        for ((_, shape), (outline, strokes)) in shapes.into_iter().zip(visible) {
+            match (shape.outline.is_empty(), outline) {
                 (true, _) => {}
                 (false, Some(runs)) => {
                     for run in runs {
@@ -269,11 +284,8 @@ impl<T: Copy + PartialEq> Scene<T> {
                     }
                 },
             }
-            for stroke in &shape.strokes {
-                let (points, corners): (Vec<V>, Vec<bool>) = stroke.iter().copied().unzip();
-                for run in self.runs(i, &points, &corners, false).unwrap_or_default() {
-                    path = self.draw(path, &run);
-                }
+            for run in strokes.into_iter().flatten() {
+                path = self.draw(path, &run);
             }
         }
         path

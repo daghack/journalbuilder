@@ -53,6 +53,8 @@ fn margin(length: f64, width: f64, teeth: usize) -> (impl Fn(f64) -> f64 + use<>
     let (from, to) = (0.1, 0.97);
     let step = (to - from) / teeth as f64;
     let tooth = 0.03 * length;
+    // How much each tooth fades where the leaflet narrows, worked out once.
+    let fades: Vec<f64> = (0..=teeth).map(|k| (shape(from + (k as f64 + 0.8) * step) / (0.2 * width)).min(1.0)).collect();
     let half = move |u: f64| {
         if !(from..to).contains(&u) {
             return shape(u);
@@ -61,7 +63,7 @@ fn margin(length: f64, width: f64, teeth: usize) -> (impl Fn(f64) -> f64 + use<>
         // where the leaflet narrows.
         let k = ((u - from) / step) as usize;
         let t = (u - from) / step - k as f64;
-        let fade = (shape(from + (k as f64 + 0.8) * step) / (0.2 * width)).min(1.0);
+        let fade = fades[k.min(teeth)];
         let depth = tooth * fade * if k.is_multiple_of(2) { 1.0 } else { 0.6 };
         let offset = if t < 0.8 { -0.4 + t / 0.8 } else { 0.6 - (t - 0.8) / 0.2 };
         (shape(u) + depth * offset).max(0.0)

@@ -79,7 +79,7 @@ struct Organ {
     /// How far it twists about its length by its tip.
     twist: f64,
     widest: f64,
-    width: Box<dyn Fn(f64) -> f64>,
+    width: Box<dyn Fn(f64) -> f64 + Send + Sync>,
 }
 
 impl Organ {
