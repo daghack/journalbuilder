@@ -361,6 +361,32 @@ let coiled = art::snake_path(new_vec(1000.0, 1660.0), 0.0, new_vec(1230.0, 1800.
 art.add_strokepath(coiled, line_style);
 art.add_strokepath(coiled.hatch(#{ spacing: 7.0, angle: 1.2, bow: 2.5, inset: 2.0 }), new_strokestyle(1.0, green, pen));
 
+// Vectors add, subtract and scale by numbers (whole or decimal), and
+// measure: a seven-pointed star from one spoke turned round its hub, and
+// an arrow whose head is its direction turned back either way, with a dot
+// halfway along. Bounds work for paths as for canvases.
+art.add_canvas(write("vectors: + - * /, length, distance, dot, angle, normalized, rotated, and path bounds", 0.0, 1930.0, 24.0, thin_red, label_font));
+let hub = new_vec(110, 2100);
+let spoke = new_vec(0, -85);
+let star = new_strokepath().move_to(hub + spoke);
+for i in 1..=7 {
+	star.line_to(hub + spoke.rotated(i * 6 * PI() / 7));
+}
+art.add_strokepath(star, new_strokestyle(1, gold, pen));
+let tail = new_vec(300, 2160);
+let tip = new_vec(620, 2030);
+let along = (tip - tail).normalized();
+let arrow = new_line(tail, tip);
+arrow.append(new_line(tip, tip - along.rotated(0.45) * 28));
+arrow.append(new_line(tip, tip - along.rotated(-0.45) * 28));
+art.add_strokepath(arrow, line_style);
+art.add_strokepath(new_circle((tail + tip) / 2, 6), thin_red);
+if (tip - tail).length() != tail.distance(tip) || along.dot(along) < 0.999 || along.angle() >= 0.0 || -along == along {
+	throw "vectors should measure";
+}
+let box = arrow.bounds();
+art.add_strokepath(new_rectangle(box.center, box.width + 20, box.height + 20), new_strokestyle(1, blue, pen));
+
 let art_page = new_page();
 art_page.name = "art";
 art_page.svg_style = #{ roughness: 1.5, noise_amplitude: 0.8 };

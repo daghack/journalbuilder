@@ -95,6 +95,12 @@ What to know:
 - **Units.** Coordinates are canvas units, one pixel at `--scale 1`. Each
   canvas is cropped to its strokes, plus `page.margin` (by default half the
   largest brush size).
+- **Numbers and vectors.** Numbers can be whole or decimal anywhere
+  (`new_circle(new_vec(0, 0), 20)`). Vecs add, subtract, negate, and
+  multiply or divide by numbers (`(a + b) / 2`), and have `length()`,
+  `distance(other)`, `dot(other)`, `angle()`, `normalized()` and
+  `rotated(angle)`. `path.bounds()` and `canvas.bounds()` give
+  `#{ min, max, center, width, height }`.
 - **Brushes and widths.** `new_brush(name, min_pressure, max_pressure,
   size)` picks a Darkly brush; `size` is how wide its marks are. In
   `new_strokestyle(width, color, brush)`, `width` scales the brush's

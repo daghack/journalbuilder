@@ -61,6 +61,7 @@
 
 use rhai::{Dynamic, Engine, EvalAltResult, Map, Module, NativeCallContext};
 
+use super::options::float;
 use super::{Path, Vec2};
 use crate::journal::art;
 
@@ -70,6 +71,11 @@ use super::RhaiResult;
 /// functions called through a module, as it does for global ones.
 fn error(ctx: &NativeCallContext, message: String) -> Box<EvalAltResult> {
     EvalAltResult::ErrorRuntime(message.into(), ctx.call_position()).into()
+}
+
+/// A number argument (whole or decimal), failing at the call's line.
+fn number(ctx: &NativeCallContext, caller: &str, what: &str, v: &Dynamic) -> RhaiResult<f32> {
+    float(caller, what, v).map(|n| n as f32).map_err(|err| error(ctx, err.to_string()))
 }
 
 /// A bramble's parts, by name.
@@ -83,28 +89,33 @@ fn parts(bramble: art::Bramble) -> Map {
 
 pub fn register(engine: &mut Engine) {
     let mut module = Module::new();
-    module.set_native_fn("snake_path", |ctx: NativeCallContext, head_center: Vec2, head_angle: f64, tail_end: Vec2, snake_length: f64, max_width: f64, random_seed: i64| -> RhaiResult<Path> {
-        art::snake_path(head_center.into(), head_angle as f32, tail_end.into(), snake_length as f32, max_width as f32, random_seed as u64)
+    module.set_native_fn("snake_path", |ctx: NativeCallContext, head_center: Vec2, head_angle: Dynamic, tail_end: Vec2, snake_length: Dynamic, max_width: Dynamic, random_seed: i64| -> RhaiResult<Path> {
+        let n = |what: &str, v: &Dynamic| number(&ctx, "art::snake_path", what, v);
+        art::snake_path(head_center.into(), n("head_angle", &head_angle)?, tail_end.into(), n("snake_length", &snake_length)?, n("max_width", &max_width)?, random_seed as u64)
             .map(Path::new)
             .map_err(|err| error(&ctx, format!("art::snake_path: {}", err)))
     });
-    module.set_native_fn("snake_spine", |ctx: NativeCallContext, head_center: Vec2, head_angle: f64, tail_end: Vec2, snake_length: f64, max_width: f64, random_seed: i64| -> RhaiResult<Path> {
-        art::snake_spine(head_center.into(), head_angle as f32, tail_end.into(), snake_length as f32, max_width as f32, random_seed as u64)
+    module.set_native_fn("snake_spine", |ctx: NativeCallContext, head_center: Vec2, head_angle: Dynamic, tail_end: Vec2, snake_length: Dynamic, max_width: Dynamic, random_seed: i64| -> RhaiResult<Path> {
+        let n = |what: &str, v: &Dynamic| number(&ctx, "art::snake_spine", what, v);
+        art::snake_spine(head_center.into(), n("head_angle", &head_angle)?, tail_end.into(), n("snake_length", &snake_length)?, n("max_width", &max_width)?, random_seed as u64)
             .map(Path::new)
             .map_err(|err| error(&ctx, format!("art::snake_spine: {}", err)))
     });
-    module.set_native_fn("bramble", |ctx: NativeCallContext, base: Vec2, angle: f64, length: f64, flower_size: f64, random_seed: i64| -> RhaiResult<Map> {
-        let bramble = art::bramble(base.into(), angle as f32, length as f32, flower_size as f32, random_seed as u64)
+    module.set_native_fn("bramble", |ctx: NativeCallContext, base: Vec2, angle: Dynamic, length: Dynamic, flower_size: Dynamic, random_seed: i64| -> RhaiResult<Map> {
+        let n = |what: &str, v: &Dynamic| number(&ctx, "art::bramble", what, v);
+        let bramble = art::bramble(base.into(), n("angle", &angle)?, n("length", &length)?, n("flower_size", &flower_size)?, random_seed as u64)
             .map_err(|err| error(&ctx, format!("art::bramble: {}", err)))?;
         Ok(parts(bramble))
     });
-    module.set_native_fn("bramble_along", |ctx: NativeCallContext, path: Path, flower_size: f64, random_seed: i64| -> RhaiResult<Map> {
-        let bramble = art::bramble_along(&path.borrow(), flower_size as f32, random_seed as u64)
+    module.set_native_fn("bramble_along", |ctx: NativeCallContext, path: Path, flower_size: Dynamic, random_seed: i64| -> RhaiResult<Map> {
+        let flower_size = number(&ctx, "art::bramble_along", "flower_size", &flower_size)?;
+        let bramble = art::bramble_along(&path.borrow(), flower_size, random_seed as u64)
             .map_err(|err| error(&ctx, format!("art::bramble_along: {}", err)))?;
         Ok(parts(bramble))
     });
-    module.set_native_fn("snake_along", |ctx: NativeCallContext, path: Path, max_width: f64, random_seed: i64| -> RhaiResult<Path> {
-        art::snake_along(&path.borrow(), max_width as f32, random_seed as u64)
+    module.set_native_fn("snake_along", |ctx: NativeCallContext, path: Path, max_width: Dynamic, random_seed: i64| -> RhaiResult<Path> {
+        let max_width = number(&ctx, "art::snake_along", "max_width", &max_width)?;
+        art::snake_along(&path.borrow(), max_width, random_seed as u64)
             .map(Path::new)
             .map_err(|err| error(&ctx, format!("art::snake_along: {}", err)))
     });

@@ -1,4 +1,5 @@
-//! Reading options maps, `#{ key: value }`, as many rhai functions take.
+//! Reading arguments: numbers, which scripts may write as whole numbers or
+//! decimals, and options maps, `#{ key: value }`, as many functions take.
 
 use rhai::{Dynamic, EvalAltResult, Map};
 
@@ -9,6 +10,16 @@ pub(super) fn check_keys(caller: &str, options: &Map, known: &[&str]) -> RhaiRes
         Some(key) => Err(format!("{}: unknown option '{}'; options: {}", caller, key, known.join(", ")).into()),
         None => Ok(()),
     }
+}
+
+/// A number argument, `what` of `caller`: an int or a float, finite.
+pub(super) fn float(caller: &str, what: &str, v: &Dynamic) -> RhaiResult<f64> {
+    let n = v.as_float().or_else(|_| v.as_int().map(|i| i as f64))
+        .map_err(|type_name| -> Box<EvalAltResult> { format!("{}: {} should be a number, got {}", caller, what, type_name).into() })?;
+    if !n.is_finite() {
+        return Err(format!("{}: {} must be finite, got {}", caller, what, n).into());
+    }
+    Ok(n)
 }
 
 pub(super) fn as_number(caller: &str, what: &str, v: &Dynamic) -> RhaiResult<f32> {

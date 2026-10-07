@@ -706,10 +706,12 @@ mod tests {
             let c = new_canvas();
         "#;
         for (script, want) in [
-            ("new_vec(1.0 / 0.0, 0.0);", "new_vec: coordinates must be finite"),
-            ("new_vec(0.0, 0.0 / 0.0);", "new_vec: coordinates must be finite"),
-            ("c.add_strokepath(new_circle(new_vec(0.0, 0.0), 5.0).scale_by(0.0 / 0.0), s);", "add_strokepath: the path has a non-finite"),
-            ("c.add_glyph(glyph(\"basic_eye\").scale_by(1.0 / 0.0), s);", "add_glyph: the path has a non-finite"),
+            ("new_vec(1.0 / 0.0, 0.0);", "new_vec: x must be finite"),
+            ("new_vec(0.0, 0.0 / 0.0);", "new_vec: y must be finite"),
+            ("new_circle(new_vec(0.0, 0.0), 5.0).scale_by(0.0 / 0.0);", "scale_by: the scale must be finite"),
+            // Finite, but past what paths hold.
+            ("c.add_strokepath(new_circle(new_vec(0.0, 0.0), 5.0).scale_by(1e300), s);", "add_strokepath: the path has a non-finite"),
+            ("c.add_glyph(glyph(\"basic_eye\").scale_by(1e300), s);", "add_glyph: the path has a non-finite"),
         ] {
             let err = engine().build_entry_str(&format!("{}\n{}", setup, script)).expect_err(script).to_string();
             assert!(err.contains(want), "{}: {}", want, err);

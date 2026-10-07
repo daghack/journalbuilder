@@ -30,6 +30,7 @@
 use rhai::{Array, Dynamic, Engine};
 use std::rc::Rc;
 
+use super::options::float;
 use super::random::SharedRng;
 use super::{Canvas, CanvasData, Path, Shared, StrokeStyle, Vec2};
 use crate::journal::fonts::{Font, FontSet};
@@ -49,17 +50,29 @@ fn register_glyph(engine: &mut Engine) {
             |g: &mut Glyph| { let p = g.borrow().position(); Vec2::new(p.x as f64, p.y as f64) },
             |g: &mut Glyph, position: Vec2| g.borrow_mut().set_position(position.into()))
         .register_get_set("scale",
-            |g: &mut Glyph| g.borrow().scale() as f64,
-            |g: &mut Glyph, scale: f64| g.borrow_mut().set_scale(scale as f32))
+            |g: &mut Glyph| Dynamic::from(g.borrow().scale() as f64),
+            |g: &mut Glyph, scale: Dynamic| -> RhaiResult<()> {
+                g.borrow_mut().set_scale(float("glyph.scale", "the scale", &scale)? as f32);
+                Ok(())
+            })
         .register_get_set("rotation",
-            |g: &mut Glyph| g.borrow().rotation_rad() as f64,
-            |g: &mut Glyph, rotation: f64| g.borrow_mut().set_rotation_rad(rotation as f32))
+            |g: &mut Glyph| Dynamic::from(g.borrow().rotation_rad() as f64),
+            |g: &mut Glyph, rotation: Dynamic| -> RhaiResult<()> {
+                g.borrow_mut().set_rotation_rad(float("glyph.rotation", "the rotation", &rotation)? as f32);
+                Ok(())
+            })
         .register_get("is_blank", |g: &mut Glyph| g.borrow().is_blank())
         // Like the path functions, these change the glyph and return it, so
         // they chain.
         .register_fn("translate_by", |g: &mut Glyph, delta: Vec2| g.update(|s| s.translate_by(delta.into())))
-        .register_fn("scale_by", |g: &mut Glyph, factor: f64| g.update(|s| s.scale_by(factor as f32)))
-        .register_fn("rotate_by", |g: &mut Glyph, rad: f64| g.update(|s| s.rotate_rad_by(rad as f32)))
+        .register_fn("scale_by", |g: &mut Glyph, factor: Dynamic| -> RhaiResult<Glyph> {
+            let factor = float("scale_by", "the scale", &factor)? as f32;
+            Ok(g.update(|s| s.scale_by(factor)))
+        })
+        .register_fn("rotate_by", |g: &mut Glyph, rad: Dynamic| -> RhaiResult<Glyph> {
+            let rad = float("rotate_by", "the angle", &rad)? as f32;
+            Ok(g.update(|s| s.rotate_rad_by(rad)))
+        })
         // The glyph's strokes, placed, as a new path. Empty for blanks.
         .register_fn("path", |g: &mut Glyph| Path::new(g.borrow().placed_strokepath()));
 }

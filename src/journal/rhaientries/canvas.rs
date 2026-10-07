@@ -1,10 +1,12 @@
 //! Canvases for rhai scripts: strokes drawn with styles, added together
 //! and moved as one.
 
+use parry2d::bounding_volume::Aabb;
 use parry2d::math::Vec2 as PVec;
 use rhai::{CustomType, Dynamic, Engine, EvalAltResult, Map, TypeBuilder};
 use super::RhaiResult;
 
+use super::options::float;
 use super::{check_finite, check_name, Canvas, Path, StrokeStyle, Vec2};
 use crate::journal::canvas::Canvas as JournalCanvas;
 use crate::journal::canvas::Frame;
@@ -74,12 +76,13 @@ pub(super) fn register(engine: &mut Engine) {
             let v = v.into();
             c.update(|data| data.transform(|p| p.translate_by(v)))
         })
-        .register_fn("scale", |c: &mut Canvas, scale: f64| -> Canvas {
-            c.update(|data| data.transform(|p| p.scale_by(scale as f32)))
+        .register_fn("scale", |c: &mut Canvas, scale: Dynamic| -> RhaiResult<Canvas> {
+            let scale = float("scale", "the scale", &scale)? as f32;
+            Ok(c.update(|data| data.transform(|p| p.scale_by(scale))))
         })
-        .register_fn("rotate_around", |c: &mut Canvas, point: Vec2, rad: f64| -> Canvas {
-            let point = point.into();
-            c.update(|data| data.transform(|p| p.rotate_around(point, rad as f32)))
+        .register_fn("rotate_around", |c: &mut Canvas, point: Vec2, rad: Dynamic| -> RhaiResult<Canvas> {
+            let (point, rad) = (point.into(), float("rotate_around", "the angle", &rad)? as f32);
+            Ok(c.update(|data| data.transform(|p| p.rotate_around(point, rad))))
         });
 }
 
@@ -143,11 +146,17 @@ fn vec(v: PVec) -> Dynamic {
     Dynamic::from(Vec2::new(v.x as f64, v.y as f64))
 }
 
+/// `canvas.bounds()`: what its strokes cover, their widths included.
 fn bounds(canvas: &mut Canvas) -> RhaiResult<Map> {
     let jc: JournalCanvas = (&*canvas).into();
-    let b = jc.bounds();
+    bounds_map(jc.bounds()).ok_or_else(|| "bounds: the canvas is empty".into())
+}
+
+/// A box as scripts see it: `#{ min, max, center, width, height }`, or
+/// `None` for an empty (invalid) one.
+pub(super) fn bounds_map(b: Aabb) -> Option<Map> {
     if !(b.mins.x <= b.maxs.x && b.mins.y <= b.maxs.y) {
-        return Err("bounds: the canvas is empty".into());
+        return None;
     }
     let extents = b.extents();
     let mut map = Map::new();
@@ -156,7 +165,7 @@ fn bounds(canvas: &mut Canvas) -> RhaiResult<Map> {
     map.insert("center".into(), vec(b.center()));
     map.insert("width".into(), Dynamic::from(extents.x as f64));
     map.insert("height".into(), Dynamic::from(extents.y as f64));
-    Ok(map)
+    Some(map)
 }
 
 #[cfg(test)]
@@ -187,6 +196,12 @@ mod tests {
             let b = c.bounds();
             b.min.x == -1.0 && b.min.y == -1.0 && b.max.x == 11.0 && b.max.y == 21.0
                 && b.center.x == 5.0 && b.center.y == 10.0 && b.width == 12.0 && b.height == 22.0
+        "#);
+        assert!(ok);
+        // A path's bounds are its line's, curves included.
+        let ok: bool = eval(r#"
+            let b = new_strokepath().move_to(new_vec(0, 0)).quad_to(new_vec(10, 20), new_vec(20, 0)).bounds();
+            b.min == new_vec(0, 0) && b.max.x == 20.0 && (b.max.y - 10.0).abs() < 0.01
         "#);
         assert!(ok);
         assert!(fails("new_canvas().bounds()").contains("bounds: the canvas is empty"));

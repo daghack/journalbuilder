@@ -33,8 +33,9 @@ use rhai::{Dynamic, Engine, EvalAltResult, Map};
 use super::RhaiResult;
 use std::rc::Rc;
 
-use super::options::{as_number, check_keys, number, positive};
+use super::options::{as_number, check_keys, float, number, positive};
 use super::text::{line_mode, spacing};
+use super::canvas::bounds_map;
 use super::random::SharedRng;
 use super::{avoid, random, Canvas, CanvasData, Path, StrokeStyle, Vec2};
 use crate::journal::hatch::{FillRule, HatchOptions};
@@ -65,7 +66,8 @@ fn place_text(symbols: Vec<Symbol>, path: &StrokePath, args: &SymbolPlacementArg
 /// copy. Glyphs sit at their widths, plus `spacing` (a fraction of the font
 /// size), and keep clear of `avoid` (see avoid.rs). With `layout: "words"`,
 /// words aren't split around what's avoided or between subpaths.
-fn fill_with_msg(path: &mut Path, style: StrokeStyle, font: Font, fontsize: f64, msg: &str, options: Map, (symdict, rng): &TextSource) -> Result<Vec<Dynamic>, Box<EvalAltResult>> {
+fn fill_with_msg(path: &mut Path, style: StrokeStyle, font: Font, fontsize: Dynamic, msg: &str, options: Map, (symdict, rng): &TextSource) -> Result<Vec<Dynamic>, Box<EvalAltResult>> {
+    let fontsize = float("fill_with_msg", "the font size", &fontsize)?;
     check_keys("fill_with_msg", &options, &PATH_TEXT_KEYS)?;
     if !(fontsize > 0.0) {
         return Err(format!("fill_with_msg: font size must be positive, got {}", fontsize).into());
@@ -158,19 +160,19 @@ fn update_path(path: &mut Path, f: impl FnOnce(StrokePath) -> StrokePath) -> Pat
 pub(super) fn register(engine: &mut Engine, text: TextSource) {
     let rng = text.1.clone();
     let r = rng.clone();
-    engine.register_fn("hatch", move |path: &mut Path, spacing: f64, angle: f64, roughness: f64| -> RhaiResult<Path> {
+    engine.register_fn("hatch", move |path: &mut Path, spacing: Dynamic, angle: Dynamic, roughness: Dynamic| -> RhaiResult<Path> {
         let mut options = Map::new();
-        options.insert("spacing".into(), Dynamic::from(spacing));
-        options.insert("angle".into(), Dynamic::from(angle));
-        options.insert("roughness".into(), Dynamic::from(roughness));
+        options.insert("spacing".into(), spacing);
+        options.insert("angle".into(), angle);
+        options.insert("roughness".into(), roughness);
         hatch(&path.borrow(), &hatch_options(&options)?, &r).map(Path::new)
     });
     engine.register_fn("hatch", move |path: &mut Path, options: Map| -> RhaiResult<Path> {
         hatch(&path.borrow(), &hatch_options(&options)?, &rng).map(Path::new)
     });
 
-let (t1, t2, t3, t4) = (text.clone(), text.clone(), text.clone(), text);
-engine.register_type_with_name::<Path>("StrokePath")
+    let (t1, t2, t3, t4) = (text.clone(), text.clone(), text.clone(), text);
+    engine.register_type_with_name::<Path>("StrokePath")
         // Every path function changes the path and returns that same
         // (shared) path, so statements, assignments and chains all work:
         // `p.move_to(a).line_to(b);` draws both segments into `p`.
@@ -183,10 +185,10 @@ engine.register_type_with_name::<Path>("StrokePath")
         .register_fn("line_to", |path: &mut Path, pos: Vec2| -> Path {
             update_path(path, |p| p.line_to(pos.x as f32, pos.y as f32))
         })
-        .register_fn("fill_with_msg", move |path: &mut Path, style: StrokeStyle, font: Font, fontsize: f64, msg: &str| {
+        .register_fn("fill_with_msg", move |path: &mut Path, style: StrokeStyle, font: Font, fontsize: Dynamic, msg: &str| {
             fill_with_msg(path, style, font, fontsize, msg, Map::new(), &t1)
         })
-        .register_fn("fill_with_msg", move |path: &mut Path, style: StrokeStyle, font: Font, fontsize: f64, msg: &str, options: Map| {
+        .register_fn("fill_with_msg", move |path: &mut Path, style: StrokeStyle, font: Font, fontsize: Dynamic, msg: &str, options: Map| {
             fill_with_msg(path, style, font, fontsize, msg, options, &t2)
         })
         .register_fn("fit_msg_to", move |path: &mut Path, style: StrokeStyle, font: Font, msg: &str| {
@@ -195,14 +197,16 @@ engine.register_type_with_name::<Path>("StrokePath")
         .register_fn("fit_msg_to", move |path: &mut Path, style: StrokeStyle, font: Font, msg: &str, options: Map| {
             fit_msg_to(path, style, font, msg, options, &t4)
         })
-        .register_fn("scale_by", |path: &mut Path, scale: f64| -> Path {
-            path.update(|p| p.scale_by(scale as f32))
+        .register_fn("scale_by", |path: &mut Path, scale: Dynamic| -> RhaiResult<Path> {
+            let scale = float("scale_by", "the scale", &scale)?;
+            Ok(path.update(|p| p.scale_by(scale as f32)))
         })
         .register_fn("translate_by", |path: &mut Path, translate: Vec2| -> Path {
             path.update(|p| p.translate_by(translate.into()))
         })
-        .register_fn("rotate_around", |path: &mut Path, rot_point: Vec2, rot: f64| -> Path {
-            path.update(|p| p.rotate_around(rot_point.into(), rot as f32))
+        .register_fn("rotate_around", |path: &mut Path, rot_point: Vec2, rot: Dynamic| -> RhaiResult<Path> {
+            let rot = float("rotate_around", "the angle", &rot)?;
+            Ok(path.update(|p| p.rotate_around(rot_point.into(), rot as f32)))
         })
         .register_fn("new_strokepath", || Path::new(StrokePath::new()))
         .register_fn("cubic_to", |path: &mut Path, c1: Vec2, c2: Vec2, end: Vec2| -> Path {
@@ -215,6 +219,16 @@ engine.register_type_with_name::<Path>("StrokePath")
                 control.x as f32, control.y as f32, end.x as f32, end.y as f32,
             ))
         })
+        // `path.bounds()`: #{ min, max, center, width, height } of its line.
+        .register_fn("bounds", |path: &mut Path| -> RhaiResult<Map> {
+            let mut b = parry2d::bounding_volume::Aabb::new_invalid();
+            for (points, _) in path.borrow().flattened(0.01) {
+                for p in points {
+                    b.take_point(p);
+                }
+            }
+            bounds_map(b).ok_or_else(|| "bounds: the path is empty".into())
+        })
         .register_fn("close", |path: &mut Path| -> Path {
             update_path(path, |p| p.close_path())
         })
@@ -226,17 +240,21 @@ engine.register_type_with_name::<Path>("StrokePath")
             let other = other.get();
             path.update(|p| p.append(other))
         })
-        .register_fn("new_circle", |center: Vec2, radius: f64| -> Path {
-            Path::new(StrokePath::circle(center.into(), radius as f32))
+        .register_fn("new_circle", |center: Vec2, radius: Dynamic| -> RhaiResult<Path> {
+            let radius = float("new_circle", "the radius", &radius)?;
+            Ok(Path::new(StrokePath::circle(center.into(), radius as f32)))
         })
-        .register_fn("new_rectangle", |center: Vec2, width: f64, height: f64| -> Path {
-            Path::new(StrokePath::rectangle(center.into(), width as f32, height as f32))
+        .register_fn("new_rectangle", |center: Vec2, width: Dynamic, height: Dynamic| -> RhaiResult<Path> {
+            let (width, height) = (float("new_rectangle", "the width", &width)?, float("new_rectangle", "the height", &height)?);
+            Ok(Path::new(StrokePath::rectangle(center.into(), width as f32, height as f32)))
         })
         .register_fn("new_line", |start: Vec2, end: Vec2| -> Path {
             Path::new(StrokePath::line(start.into(), end.into()))
         })
-        .register_fn("new_arc", |center: Vec2, radius: f64, start_rad: f64, end_rad: f64| -> Path {
-            Path::new(StrokePath::arc(center.into(), radius as f32, start_rad as f32, end_rad as f32))
+        .register_fn("new_arc", |center: Vec2, radius: Dynamic, start_rad: Dynamic, end_rad: Dynamic| -> RhaiResult<Path> {
+            let number = |what: &str, v: &Dynamic| float("new_arc", what, v).map(|n| n as f32);
+            let (radius, start, end) = (number("the radius", &radius)?, number("the start angle", &start_rad)?, number("the end angle", &end_rad)?);
+            Ok(Path::new(StrokePath::arc(center.into(), radius, start, end)))
         });
 }
 

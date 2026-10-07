@@ -3,6 +3,8 @@
 use rhai::{CustomType, Dynamic, Engine, EvalAltResult, ImmutableString, TypeBuilder};
 
 use super::gradient;
+use super::options::float;
+use super::RhaiResult;
 use crate::journal::canvas::{Brush, PressureProfile, StrokeColor};
 use crate::journal::canvas::StrokeStyle as JournalStrokeStyle;
 
@@ -10,8 +12,11 @@ use crate::journal::canvas::StrokeStyle as JournalStrokeStyle;
 #[rhai_type(extra = Self::build_extra)]
 pub struct BrushSettings {
     pub(super) brush_style: ImmutableString,
+    #[rhai_type(skip)]
     pub(super) min_pressure: f64,
+    #[rhai_type(skip)]
     pub(super) max_pressure: f64,
+    #[rhai_type(skip)]
     pub(super) size: f64,
     #[rhai_type(skip)]
     pub(super) pressure_profile: PressureProfile,
@@ -40,7 +45,37 @@ impl BrushSettings {
         })?;
         Ok(())
     }
+    /// The checks `new_brush` makes, `caller` failing them.
+    fn check(&self, caller: &str) -> RhaiResult<()> {
+        let (min, max) = (self.min_pressure, self.max_pressure);
+        // Darkly pressure runs from 0 to 1 (see also the width warning in
+        // darkly.rs).
+        if !(0.0..=1.0).contains(&min) || !(0.0..=1.0).contains(&max) || min > max {
+            return Err(format!("{}: pressures must satisfy 0 <= min <= max <= 1, got min {} and max {}", caller, min, max).into());
+        }
+        if !(self.size > 0.0) {
+            return Err(format!("{}: size must be positive, got {}", caller, self.size).into());
+        }
+        Ok(())
+    }
     fn build_extra(builder: &mut TypeBuilder<Self>) {
+        // Numbers may be whole or decimal; changed values are checked as
+        // new_brush checks them.
+        fn number_property(builder: &mut TypeBuilder<BrushSettings>, name: &'static str, field: fn(&mut BrushSettings) -> &mut f64) {
+            builder.with_get_set(name,
+                move |b: &mut BrushSettings| Dynamic::from(*field(b)),
+                move |b: &mut BrushSettings, value: Dynamic| -> RhaiResult<()> {
+                    let caller = format!("brush.{}", name);
+                    let mut changed = b.clone();
+                    *field(&mut changed) = float(&caller, name, &value)?;
+                    changed.check(&caller)?;
+                    *b = changed;
+                    Ok(())
+                });
+        }
+        number_property(builder, "min_pressure", |b| &mut b.min_pressure);
+        number_property(builder, "max_pressure", |b| &mut b.max_pressure);
+        number_property(builder, "size", |b| &mut b.size);
         builder.with_get_set("pressure_profile", Self::get_pressure_profile, Self::set_pressure_profile);
     }
 }
@@ -60,6 +95,7 @@ impl From<BrushSettings> for Brush {
 #[derive(Debug, Clone, CustomType)]
 #[rhai_type(extra = Self::build_extra)]
 pub struct StrokeStyle {
+    #[rhai_type(skip)]
     pub(super) width: f64,
     /// A CSS colour, or a gradient.
     #[rhai_type(skip)]
@@ -91,9 +127,9 @@ impl StrokeStyle {
     /// - SVG (`--svg`): it's the stroke's width in canvas units.
     ///
     /// `color` is a CSS colour string, or a gradient (see gradient.rs).
-    pub fn new(width: f64, color: Dynamic, brush: BrushSettings) -> Result<Self, Box<EvalAltResult>> {
+    pub fn new(width: Dynamic, color: Dynamic, brush: BrushSettings) -> Result<Self, Box<EvalAltResult>> {
         Ok(Self {
-            width,
+            width: float("new_strokestyle", "the width", &width)?,
             color: gradient::colour_or_gradient("new_strokestyle", color)?,
             brush,
         })
@@ -112,6 +148,10 @@ impl StrokeStyle {
     fn build_extra(builder: &mut TypeBuilder<Self>) {
         builder
             .with_fn("new_strokestyle", Self::new)
+            .with_get_set("width", |s: &mut Self| Dynamic::from(s.width), |s: &mut Self, width: Dynamic| -> RhaiResult<()> {
+                s.width = float("style.width", "the width", &width)?;
+                Ok(())
+            })
             .with_get_set("color", Self::get_color, Self::set_color)
         ;
     }
@@ -131,22 +171,14 @@ pub(super) fn register(engine: &mut Engine) {
         names.into_iter().map(Dynamic::from).collect()
     };
     engine.register_fn("brush_names", move || listed.clone());
-    engine.register_fn("new_brush", move |name: &str, min_pressure: f64, max_pressure: f64, size: f64| -> Result<BrushSettings, Box<EvalAltResult>> {
+    engine.register_fn("new_brush", move |name: &str, min_pressure: Dynamic, max_pressure: Dynamic, size: Dynamic| -> RhaiResult<BrushSettings> {
+        const CALLER: &str = "new_brush";
         if !brush_names.iter().any(|known| known == name) {
-            return Err(format!("new_brush: unknown brush '{}'; available: {}", name, brush_names.join(", ")).into());
+            return Err(format!("{}: unknown brush '{}'; available: {}", CALLER, name, brush_names.join(", ")).into());
         }
-        // Darkly pressure runs from 0 to 1 (see also the width warning
-        // in darkly.rs).
-        if !(0.0..=1.0).contains(&min_pressure) || !(0.0..=1.0).contains(&max_pressure) || min_pressure > max_pressure {
-            return Err(format!(
-                "new_brush: pressures must satisfy 0 <= min <= max <= 1, got min {} and max {}",
-                min_pressure, max_pressure,
-            ).into());
-        }
-        if !(size > 0.0) {
-            return Err(format!("new_brush: size must be positive, got {}", size).into());
-        }
-        Ok(BrushSettings::new_brush(name, min_pressure, max_pressure, size))
+        let brush = BrushSettings::new_brush(name, float(CALLER, "min_pressure", &min_pressure)?, float(CALLER, "max_pressure", &max_pressure)?, float(CALLER, "size", &size)?);
+        brush.check(CALLER)?;
+        Ok(brush)
     });
     engine
         .build_type::<BrushSettings>()
