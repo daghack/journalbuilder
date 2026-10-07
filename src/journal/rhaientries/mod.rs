@@ -95,6 +95,8 @@ pub struct JournalEngine {
     warnings: Rc<RefCell<Vec<String>>>,
     /// The paper pages will be rendered on, for `background()`.
     paper: Rc<std::cell::Cell<Option<Paper>>>,
+    /// Whether the script has asked `background()`.
+    asked_background: Rc<std::cell::Cell<bool>>,
 }
 
 impl JournalEngine {
@@ -153,10 +155,13 @@ impl JournalEngine {
 
         // `background()`: the paper pages are rendered on ("parchment"),
         // or () for none, so a journal can pick inks that show on it:
-        // dark on paper, light on a transparent render.
+        // dark on paper, light on a transparent render. A journal that
+        // never asks is drawn in dark ink on paper.
         let paper: Rc<std::cell::Cell<Option<Paper>>> = Rc::default();
-        let p = paper.clone();
+        let asked_background: Rc<std::cell::Cell<bool>> = Rc::default();
+        let (p, asked) = (paper.clone(), asked_background.clone());
         engine.register_fn("background", move || -> Dynamic {
+            asked.set(true);
             p.get().map_or(Dynamic::UNIT, |paper| paper.name().into())
         });
 
@@ -172,6 +177,7 @@ impl JournalEngine {
             engine,
             warnings,
             paper,
+            asked_background,
         }
     }
     /// The name of every function scripts can call that this crate
@@ -194,9 +200,12 @@ impl JournalEngine {
     pub fn build_entry_str(&mut self, script_str: &str) -> Result<Entry, String> {
         let mut scope = Scope::new();
         scope.push("journal_entry", Entry::default());
+        self.asked_background.set(false);
         self.engine.run_with_scope(&mut scope, script_str).map_err(|err| err.to_string())?;
-        scope.get_value("journal_entry")
-            .ok_or_else(|| "the script replaced journal_entry with something that isn't an entry".to_string())
+        let mut entry: Entry = scope.get_value("journal_entry")
+            .ok_or_else(|| "the script replaced journal_entry with something that isn't an entry".to_string())?;
+        entry.picks_ink = self.asked_background.get();
+        Ok(entry)
     }
     /// Tell scripts, through `background()`, the paper their pages will be
     /// rendered on.
@@ -223,6 +232,14 @@ mod tests {
     }
 
     const BRUSH: &str = r#"let brush = new_brush("Calligraphy", 0.25, 0.5, 1.0);"#;
+
+    #[test]
+    fn entries_know_whether_they_pick_their_inks() {
+        let mut e = engine();
+        assert!(!e.build_entry_str("let x = 1;").unwrap().picks_ink());
+        assert!(e.build_entry_str("let on_paper = background() != ();").unwrap().picks_ink());
+        assert!(!e.build_entry_str("let x = 1;").unwrap().picks_ink(), "each build starts afresh");
+    }
 
     #[test]
     fn scripts_see_the_paper_they_are_rendered_on() {

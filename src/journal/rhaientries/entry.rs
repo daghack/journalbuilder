@@ -13,9 +13,19 @@ use crate::journal::stable_hash;
 pub struct Entry {
     #[rhai_type(skip)]
     pub(super) pages: Vec<Page>,
+    /// Whether the script asked `background()`, and so picked inks for
+    /// the paper (or lack of it) itself.
+    #[rhai_type(skip)]
+    pub(super) picks_ink: bool,
 }
 
 impl Entry {
+    /// Whether the script picks its own inks for paper (by asking
+    /// `background()`); if not, renders on paper draw it in dark ink (see
+    /// `StrokeColor::as_ink_on_paper`).
+    pub fn picks_ink(&self) -> bool {
+        self.picks_ink
+    }
     fn add_page(&mut self, page: Page) -> Result<(), Box<EvalAltResult>> {
         let label = page.label(self.pages.len());
         if self.pages.iter().enumerate().any(|(i, p)| p.label(i) == label) {

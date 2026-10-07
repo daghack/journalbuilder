@@ -26,6 +26,36 @@ impl StrokeColor {
     }
 }
 
+impl StrokeColor {
+    /// The colour as ink that shows on paper: colours lighter than a
+    /// mid-tone get as dark as they were light (their lightness mirrored,
+    /// hue and saturation kept), so light inks meant for a dark background
+    /// come out dark; darker ones stay as they are. Gradients' stops each.
+    /// A solid colour that doesn't parse is left for the renderer to warn
+    /// about.
+    pub fn as_ink_on_paper(&self) -> StrokeColor {
+        match self {
+            StrokeColor::Solid(color) => match parse_color(color) {
+                Ok(rgba) => StrokeColor::Solid(css(dark_ink(rgba))),
+                Err(_) => self.clone(),
+            },
+            StrokeColor::Gradient(g) => {
+                let stops = g.stops.iter().map(|(at, c)| (*at, dark_ink(*c))).collect();
+                StrokeColor::Gradient(Gradient { stops, kind: g.kind })
+            }
+        }
+    }
+}
+
+/// An sRGB RGBA colour no lighter than a mid-tone: lightness L (in HSL)
+/// above 1/2 becomes 1 - L. With hue and saturation kept, that shifts every
+/// channel by the same amount, 1 - (max + min).
+fn dark_ink([r, g, b, a]: [f32; 4]) -> [f32; 4] {
+    let (max, min) = (r.max(g).max(b), r.min(g).min(b));
+    let shift = (1.0 - (max + min)).min(0.0);
+    [r + shift, g + shift, b + shift, a]
+}
+
 impl From<&str> for StrokeColor {
     fn from(color: &str) -> Self {
         StrokeColor::Solid(color.to_string())
@@ -376,6 +406,12 @@ impl Canvas {
     pub fn strokes(&self) -> &Vec<ColoredStroke> {
         &self.strokes
     }
+    /// Change every stroke's colour with `f`.
+    pub fn recolor(&mut self, f: impl Fn(&StrokeColor) -> StrokeColor) {
+        for stroke in &mut self.strokes {
+            stroke.style.color = f(&stroke.style.color);
+        }
+    }
     /// Each stroke's seed (see `ColoredStroke::seed`), counting subpaths in
     /// order where a stroke has none of its own.
     pub fn stroke_seeds(&self) -> Vec<u32> {
@@ -629,6 +665,19 @@ mod tests {
 #[cfg(test)]
 mod svg_output_tests {
     use super::*;
+
+    #[test]
+    fn light_inks_darken_for_paper_and_dark_ones_stay() {
+        let ink = |c: &str| StrokeColor::from(c).as_ink_on_paper();
+        assert_eq!(ink("#f2ead8"), StrokeColor::from("rgba(39, 31, 13, 1)"));
+        assert_eq!(ink("rgba(255, 138, 122, 0.4)"), StrokeColor::from("rgba(133, 16, 0, 0.4)"));
+        for dark in ["black", "darkred", "rgb(40, 60, 90)"] {
+            assert_eq!(parse_color(&css(dark_ink(parse_color(dark).unwrap()))).unwrap(), parse_color(dark).unwrap(), "{}", dark);
+        }
+        assert_eq!(ink("not a colour"), StrokeColor::from("not a colour"));
+        let StrokeColor::Gradient(g) = gradient(GradientKind::Along).as_ink_on_paper() else { panic!("still a gradient") };
+        assert_eq!(g.stops[0].1, [1.0, 0.0, 0.0, 1.0], "pure red is a mid-tone, so it stays");
+    }
 
     fn gradient(kind: GradientKind) -> StrokeColor {
         StrokeColor::Gradient(Gradient { stops: vec![(0.0, [1.0, 0.0, 0.0, 1.0]), (1.0, [0.0, 0.0, 1.0, 1.0])], kind })

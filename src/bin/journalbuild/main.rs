@@ -57,8 +57,9 @@ const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--svg
                       The paper is parchment: a mottled scroll browning
                       toward its edges. Pages get a border of paper round
                       their strokes; each tile of a split page is a sheet
-                      of its own. Scripts see the paper's name from
-                      background(), to pick inks that show on it.
+                      of its own. Light inks are drawn dark on paper,
+                      unless the script calls background() (the paper's
+                      name) to pick its own.
   --pdf               Put the pages in one PDF, {journal}.pdf, a page per
                       page, rather than writing images: each page's
                       canvases layered into one image (on paper, with

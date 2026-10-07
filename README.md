@@ -30,9 +30,10 @@ Useful flags (`journalbuild` with no arguments lists them all):
   `darkly_{page}.png`, on procedural paper: a mottled scroll browning
   toward ragged edges. Pages get a border of paper round their strokes;
   typeset pages are a sheet the size of the page, and each tile of a split
-  page a sheet of its own. Scripts can call `background()`, the paper's
-  name or `()`, to pick inks that show on it (dark on paper, light for a
-  transparent render viewed on a dark background).
+  page a sheet of its own. Ink is dark on paper by default: light colours
+  are drawn as dark as they were light, hue kept. A script that calls
+  `background()` (the paper's name, or `()`) picks its own inks instead,
+  e.g. light for transparent renders viewed on a dark background.
 - `--pdf`: put the pages in one PDF, `{journal}.pdf`, instead of images:
   each page's canvases layered into one image (on paper, with
   `--background`), at 150 canvas units to the inch whatever the scale.

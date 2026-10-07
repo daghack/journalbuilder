@@ -5,6 +5,7 @@ use ::darkly::engine::DarklyEngine;
 use image::RgbaImage;
 
 use super::background::{self, Paper, Sheet};
+use super::canvas::StrokeColor;
 use super::compose::{self, Placed};
 use super::darkly;
 use super::pdf::PdfWriter;
@@ -56,7 +57,7 @@ pub fn canvas_images(entry: &Entry, engine: &mut DarklyEngine, dir: &str, render
 pub fn page_images(entry: &Entry, engine: &mut DarklyEngine, dir: &str, render: &Render, only: Option<&[usize]>) -> Result<(), String> {
     for (i, page) in entry.selected_pages(only) {
         let label = page.label(i);
-        if let Some(image) = page_image(page, &label, engine, render) {
+        if let Some(image) = page_image(page, &label, engine, render, entry.picks_ink()) {
             let filename = format!("{}/darkly_{}.png", dir, label);
             image.save(&filename).map_err(|e| write_error(&filename, e))?;
         }
@@ -71,7 +72,7 @@ pub fn pdf(entry: &Entry, engine: &mut DarklyEngine, path: &str, title: &str, re
     let mut pdf = PdfWriter::create(path).map_err(|e| write_error(path, e))?;
     let points = 72.0 / UNITS_PER_INCH / render.scale;
     for (i, page) in entry.selected_pages(only) {
-        if let Some(image) = page_image(page, &page.label(i), engine, render) {
+        if let Some(image) = page_image(page, &page.label(i), engine, render, entry.picks_ink()) {
             pdf.add_page(&image, image.width() as f32 * points, image.height() as f32 * points)
                 .map_err(|e| write_error(path, e))?;
         }
@@ -87,12 +88,17 @@ pub fn pdf(entry: &Entry, engine: &mut DarklyEngine, path: &str, title: &str, re
 /// paper if the render has some. On paper, a page that isn't a tile (or
 /// typeset) gets a border of paper round its strokes; each tile of a split
 /// page is a sheet of its own, like a big drawing spread over several
-/// pages. `None` if nothing is drawn.
-pub fn page_image(page: &Page, label: &str, engine: &mut DarklyEngine, render: &Render) -> Option<RgbaImage> {
+/// pages. On paper, unless the entry `picks_ink` itself, light inks are
+/// drawn dark so they show (see `StrokeColor::as_ink_on_paper`). `None` if
+/// nothing is drawn.
+pub fn page_image(page: &Page, label: &str, engine: &mut DarklyEngine, render: &Render, picks_ink: bool) -> Option<RgbaImage> {
     let scale = render.scale;
     let mut layers = Vec::new();
     let mut frame = None;
-    for (_, canvas) in page.rendered_canvases() {
+    for (_, mut canvas) in page.rendered_canvases() {
+        if render.paper.is_some() && !picks_ink {
+            canvas.recolor(StrokeColor::as_ink_on_paper);
+        }
         frame = frame.or(canvas.frame().copied());
         layers.push(Placed { at: canvas.render_origin(scale), image: darkly::render(&canvas, engine, scale, render.supersample) });
     }

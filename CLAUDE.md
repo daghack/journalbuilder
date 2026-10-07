@@ -41,7 +41,8 @@ Conventions there: labels and body text are in plain (`label_font`),
 which has capitals, digits and punctuation, and headings in loche
 (`heading_font`); strokes are light colours, since transparent renders
 are viewed on a dark background, but dark on paper (`--background`),
-which the palette at the top switches on `background()`; sections are
+which the palette at the top switches on `background()` (journals that
+don't call it get light inks darkened on paper automatically); sections are
 labelled with the calls they show.
 
 ## Checking changes
