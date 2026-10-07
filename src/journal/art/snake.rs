@@ -23,12 +23,12 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::f64::consts::{PI, TAU};
-use std::ops::{Add, Mul, Sub};
 
 use parry2d::math::Vec2;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
+use super::geom::{arc_end, simplify, spline, V};
 use crate::journal::paths::StrokePath;
 
 /// Half widths along the body, as fractions of its full width. The head is
@@ -60,67 +60,6 @@ const CURL_FRACTION: f64 = 0.15;
 
 /// Meanders tried per snake.
 const CANDIDATES: usize = 8;
-
-/// A point or direction; the snake is worked out in f64, then written as an
-/// f32 path.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-struct V {
-    x: f64,
-    y: f64,
-}
-
-impl V {
-    const fn new(x: f64, y: f64) -> Self {
-        V { x, y }
-    }
-    /// The unit vector at `angle` radians from +x, towards +y.
-    fn angle(angle: f64) -> Self {
-        V::new(angle.cos(), angle.sin())
-    }
-    fn dot(self, other: V) -> f64 {
-        self.x * other.x + self.y * other.y
-    }
-    fn len(self) -> f64 {
-        self.x.hypot(self.y)
-    }
-    /// A quarter turn from +x towards +y.
-    fn perp(self) -> V {
-        V::new(-self.y, self.x)
-    }
-    fn lerp(self, other: V, t: f64) -> V {
-        self + (other - self) * t
-    }
-    fn is_finite(self) -> bool {
-        self.x.is_finite() && self.y.is_finite()
-    }
-}
-
-impl Add for V {
-    type Output = V;
-    fn add(self, o: V) -> V {
-        V::new(self.x + o.x, self.y + o.y)
-    }
-}
-
-impl Sub for V {
-    type Output = V;
-    fn sub(self, o: V) -> V {
-        V::new(self.x - o.x, self.y - o.y)
-    }
-}
-
-impl Mul<f64> for V {
-    type Output = V;
-    fn mul(self, s: f64) -> V {
-        V::new(self.x * s, self.y * s)
-    }
-}
-
-impl From<Vec2> for V {
-    fn from(v: Vec2) -> V {
-        V::new(v.x as f64, v.y as f64)
-    }
-}
 
 /// The outline of a snake seen from above, `length` long along its spine
 /// (snout to tail tip) and `max_width` across at its widest. Its head is
@@ -334,20 +273,6 @@ impl Spine {
         let ((at, heading), k) = (joints[i], self.curvatures[i]);
         (arc_end(at, heading, k, along), heading + k * along)
     }
-}
-
-/// The end of an arc `length` long with curvature `k`, from `start` heading
-/// `heading`.
-fn arc_end(start: V, heading: f64, k: f64, length: f64) -> V {
-    // The chord turns half as far as the arc and is sin(x)/x as long, for
-    // x the half turn.
-    let half_turn = k * length / 2.0;
-    let chord = if half_turn.abs() < 1e-4 {
-        length * (1.0 - half_turn * half_turn / 6.0)
-    } else {
-        length * half_turn.sin() / half_turn
-    };
-    start + V::angle(heading + half_turn) * chord
 }
 
 #[derive(Clone)]
@@ -836,70 +761,6 @@ impl Body {
         }
         path
     }
-}
-
-/// `points` thinned out to those needed to follow them within `tolerance`,
-/// at most `max_gap` apart; the ends are always kept.
-fn simplify(points: &[V], tolerance: f64, max_gap: f64) -> Vec<V> {
-    let mut points: Vec<V> = points.to_vec();
-    points.dedup_by(|a, b| (*a - *b).len() < 1e-9);
-    if points.len() < 3 {
-        return points;
-    }
-    let off_chord = |p: V, a: V, b: V| {
-        let ab = b - a;
-        let t = ((p - a).dot(ab) / ab.dot(ab)).clamp(0.0, 1.0);
-        (p - a.lerp(b, t)).len()
-    };
-    let mut kept = vec![points[0]];
-    let mut anchor = 0;
-    for i in 2..points.len() {
-        let (a, b) = (points[anchor], points[i]);
-        let fits = (b - a).len() <= max_gap && points[anchor + 1..i].iter().all(|&p| off_chord(p, a, b) <= tolerance);
-        if !fits {
-            anchor = i - 1;
-            kept.push(points[anchor]);
-        }
-    }
-    kept.push(points[points.len() - 1]);
-    kept
-}
-
-/// Smooth cubics through `points` (Catmull-Rom with chord-length tangents,
-/// so uneven spacing doesn't kink it), added to `path`, continuing its
-/// current stroke if `continues`.
-fn spline(mut path: StrokePath, points: &[V], continues: bool) -> StrokePath {
-    let f = |v: V| (v.x as f32, v.y as f32);
-    if !continues {
-        let (x, y) = f(points[0]);
-        path = path.move_to(x, y);
-    }
-    let n = points.len();
-    if n < 2 {
-        return path;
-    }
-    let gaps: Vec<f64> = points.windows(2).map(|w| (w[1] - w[0]).len()).collect();
-    // A unit-ish tangent at each point.
-    let mut tangents = vec![V::default(); n];
-    for i in 1..n - 1 {
-        let (d0, d1) = (gaps[i - 1], gaps[i]);
-        tangents[i] = ((points[i] - points[i - 1]) * (d1 / d0) + (points[i + 1] - points[i]) * (d0 / d1)) * (1.0 / (d0 + d1));
-    }
-    // At the ends, as a parabola through the end and its neighbour would.
-    let chord = |i: usize| (points[i + 1] - points[i]) * (1.0 / gaps[i]);
-    if n == 2 {
-        tangents[0] = chord(0);
-        tangents[1] = chord(0);
-    } else {
-        tangents[0] = chord(0) * 2.0 - tangents[1];
-        tangents[n - 1] = chord(n - 2) * 2.0 - tangents[n - 2];
-    }
-    for i in 0..n - 1 {
-        let third = gaps[i] / 3.0;
-        let (c1, c2, end) = (f(points[i] + tangents[i] * third), f(points[i + 1] - tangents[i + 1] * third), f(points[i + 1]));
-        path = path.cubic_curve_to(c1.0, c1.1, c2.0, c2.1, end.0, end.1);
-    }
-    path
 }
 
 #[cfg(test)]

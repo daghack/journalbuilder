@@ -22,8 +22,24 @@
 //! let back = art::snake_spine(new_vec(0.0, 0.0), -PI() / 2.0, new_vec(40.0, 400.0), 900.0, 36.0, 7);
 //! canvas.add_canvas(back.fill_with_msg(ink, font, 30.0, "a snake")[0]);
 //! ```
+//!
+//! `bramble` grows a blackberry bramble and gives its parts as separate
+//! paths, to stroke in different colours: a cane from (0, 0) growing up the
+//! page, 1400 long, with flowers about 200 across (which everything else is
+//! sized by).
+//!
+//! ```rhai
+//! let plant = art::bramble(new_vec(0.0, 0.0), -PI() / 2.0, 1400.0, 200.0, 7);
+//! canvas.add_strokepath(plant.vines, bark);     // canes, thorns and stalks
+//! canvas.add_strokepath(plant.leaves, green);   // leaflets and their veins
+//! canvas.add_strokepath(plant.flowers, white);  // flowers, buds and sepals
+//! ```
+//!
+//! Flowers, from closed buds to full blooms, are modelled in 3D and seen
+//! from all sides. Flowers lie over leaves and leaves over the vines, and
+//! each part's lines stop where something in front covers them.
 
-use rhai::{Engine, EvalAltResult, Module, NativeCallContext};
+use rhai::{Dynamic, Engine, EvalAltResult, Map, Module, NativeCallContext};
 
 use super::{Path, Vec2};
 use crate::journal::art;
@@ -47,6 +63,15 @@ pub fn register(engine: &mut Engine) {
         art::snake_spine(head_center.into(), head_angle as f32, tail_end.into(), snake_length as f32, max_width as f32, random_seed as u64)
             .map(Path::new)
             .map_err(|err| error(&ctx, format!("art::snake_spine: {}", err)))
+    });
+    module.set_native_fn("bramble", |ctx: NativeCallContext, base: Vec2, angle: f64, length: f64, flower_size: f64, random_seed: i64| -> RhaiResult<Map> {
+        let bramble = art::bramble(base.into(), angle as f32, length as f32, flower_size as f32, random_seed as u64)
+            .map_err(|err| error(&ctx, format!("art::bramble: {}", err)))?;
+        let mut parts = Map::new();
+        for (name, path) in [("vines", bramble.vines), ("leaves", bramble.leaves), ("flowers", bramble.flowers)] {
+            parts.insert(name.into(), Dynamic::from(Path::new(path)));
+        }
+        Ok(parts)
     });
     engine.register_static_module("art", module.into());
 }
@@ -86,6 +111,26 @@ mod tests {
             journal_entry.add_page(p);
         "##;
         engine().build_entry_str(script).expect("script should run");
+    }
+
+    #[test]
+    fn bramble_gives_its_three_parts() {
+        let script = r##"
+            let plant = art::bramble(new_vec(0.0, 0.0), -PI() / 2.0, 1000.0, 150.0, 5);
+            let pen = new_brush("Ink Pen", 0.3, 0.7, 1.0);
+            let c = new_canvas();
+            c.add_strokepath(plant.vines, new_strokestyle(1.0, "#c8a27a", pen));
+            c.add_strokepath(plant.leaves, new_strokestyle(1.0, "#9fd17a", pen));
+            c.add_strokepath(plant.flowers, new_strokestyle(1.0, "#f2ead8", pen));
+            if plant.keys().len() != 3 { throw "expected vines, leaves and flowers: " + plant.keys(); }
+            let p = new_page();
+            p.add_canvas(c);
+            journal_entry.add_page(p);
+        "##;
+        engine().build_entry_str(script).expect("script should run");
+        let err = engine().build_entry_str("let ok = 1;\nart::bramble(new_vec(0.0, 0.0), 0.0, 100.0, 150.0, 1);")
+            .expect_err("too short a cane should fail").to_string();
+        assert!(err.contains("art::bramble: length must be at least") && err.contains("line 2"), "{}", err);
     }
 
     #[test]

@@ -39,7 +39,7 @@ Useful flags (`journalbuild` with no arguments lists them all):
 | `locks/` | lock types, one rhai file each; see [locks/README.md](locks/README.md) |
 | `config/symbols.json` | the symbol dictionary: every glyph's SVG path, by name |
 | `src/journal/` | canvases, paths, glyph placement, and Darkly and SVG rendering |
-| `src/journal/art/` | procedural path art, such as snakes |
+| `src/journal/art/` | procedural path art: snakes and brambles |
 | `src/journal/rhaientries/` | the rhai API journals and lock files use |
 | `src/lockbuilder/` | runs lock chains forward (lock) and backward (unlock) |
 | `src/bin/journalbuild/` | the command line |
@@ -100,7 +100,10 @@ What to know:
   parameters and a seed: `art::snake_path(head_center, head_angle,
   tail_end, snake_length, max_width, random_seed)` is the outline of a
   snake seen from above, winding from its head to the tip of its tail and
-  passing over and under itself.
+  passing over and under itself. `art::bramble(base, angle, length,
+  flower_size, random_seed)` grows a blackberry bramble and gives its
+  `vines`, `leaves` and `flowers` as separate paths, to stroke in
+  different colours.
 - **Problems.** `warn("...")` reports something without stopping the
   script. Errors give the script line.
 

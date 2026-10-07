@@ -141,11 +141,17 @@ page_three.add_canvas(maze_canvas);
 journal_entry.add_page(page_three);
 
 // ---- page four: procedural art ----
-// Two snakes: one with too little slack to loop, one coiled over itself.
+// Two snakes (one with too little slack to loop, one coiled over itself)
+// and a bramble.
 let pale = new_strokestyle(1.4, "#f2ead8", ink_pen);
 let snakes = new_canvas();
 snakes.add_strokepath(art::snake_path(new_vec(0.0, 0.0), -PI() / 2.0, new_vec(10.0, 200.0), 260.0, 14.0, 4), pale);
 snakes.add_strokepath(art::snake_path(new_vec(140.0, 0.0), -PI() / 2.0, new_vec(150.0, 30.0), 480.0, 14.0, 4), pale);
+// A bramble, its vines, leaves and flowers stroked separately.
+let plant = art::bramble(new_vec(320.0, 220.0), -PI() / 2.0, 420.0, 70.0, 4);
+snakes.add_strokepath(plant.vines, new_strokestyle(1.4, "#c8a27a", ink_pen));
+snakes.add_strokepath(plant.leaves, new_strokestyle(1.4, "#a8d68a", ink_pen));
+snakes.add_strokepath(plant.flowers, pale);
 let page_four = new_page();
 page_four.name = "art";
 page_four.add_canvas(snakes);
