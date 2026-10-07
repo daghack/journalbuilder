@@ -114,6 +114,19 @@ What to know:
   different colours; `art::bramble_along(path, flower_size, random_seed)`
   grows one along a path, such as a maze's, and `art::snake_along(path,
   max_width, random_seed)` makes a many-headed serpent of one.
+- **Splitting pages.** `page.split(columns, rows)` cuts a named page into a
+  grid of tiles, each a page of its own named `{name}_{row}_{column}`
+  (`page.split(#{ tile_width: 1200, tile_height: 1600 })` makes tiles of a
+  set size instead). Each tile renders exactly its share of the pixels of
+  the whole page's render, with strokes that cross a seam drawn whole and
+  cut off at it, so a canvas's tile images placed side by side in order
+  make up that render; with ImageMagick, for a 2 x 2 split:
+
+  ```bash
+  magick \( darkly_big_0_0_0.png darkly_big_0_1_0.png +append \) \( darkly_big_1_0_0.png darkly_big_1_1_0.png +append \) -append +repage big.png
+  ```
+
+  `journal_entry.add_pages(page.split(2, 2))` adds them all.
 - **Problems.** `warn("...")` reports something without stopping the
   script. Errors give the script line.
 

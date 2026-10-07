@@ -175,3 +175,6 @@ let page_four = new_page();
 page_four.name = "art";
 page_four.add_canvas(snakes);
 journal_entry.add_page(page_four);
+// The same page as a 2 x 2 grid of tiles, art_0_0 to art_1_1, which fit
+// together into it.
+journal_entry.add_pages(page_four.split(2, 2));

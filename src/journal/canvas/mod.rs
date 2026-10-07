@@ -1,10 +1,10 @@
 use rayon::prelude::*;
 use serde::Deserialize;
-use crate::journal::{avoid::AvoidanceTree, StrokePath, img::pixmap_from_svg_tree};
+use crate::journal::{avoid::AvoidanceTree, StrokePath};
 use parry2d::math::{Vec2};
 use noise::{NoiseFn, Perlin};
 use rand::rngs::StdRng;
-use rand::{Rng, RngCore, SeedableRng};
+use rand::{RngCore, SeedableRng};
 use parry2d::bounding_volume;
 
 pub mod textbox;
@@ -101,9 +101,12 @@ pub fn parse_color(color: &str) -> Result<[f32; 4], String> {
 pub struct ColoredStroke {
     pub path: StrokePath,
     pub style: StrokeStyle,
+    /// Where this stroke's random texture is seeded from: the number of
+    /// subpaths drawn before it on the canvas it came from. `None` counts
+    /// them on this canvas. A tile keeps its strokes' numbers from the
+    /// whole page, so a stroke drawn in several tiles looks the same in each.
+    pub seed: Option<u32>,
 }
-
-
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct CanvasStyleOptions {
@@ -124,11 +127,49 @@ impl Default for CanvasStyleOptions {
     }
 }
 
+/// One tile of a page split into a grid: a fixed region to render, rather
+/// than the strokes' bounds. A page's tiles share one pixel grid, the one a
+/// render of the whole page would have, so their renders fit together edge
+/// to edge into it. Strokes are drawn whole and cut off at the tile's edges,
+/// so they carry on across seams.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Frame {
+    /// The whole page's region, which the tiles divide evenly.
+    pub page: bounding_volume::Aabb,
+    pub column: u32,
+    pub columns: u32,
+    pub row: u32,
+    pub rows: u32,
+    /// Seeds the SVG output's roughening and noise, as the whole page's
+    /// file name would.
+    pub svg_seed: u64,
+}
+
+impl Frame {
+    /// The whole page's size, as renders size a canvas: at least a unit
+    /// each way.
+    pub fn page_extents(&self) -> Vec2 {
+        self.page.extents().max(Vec2::ONE)
+    }
+    /// This tile's pixels, `[x0, y0, x1, y1)`, in a render of the whole
+    /// page `size` pixels across and down.
+    pub fn pixels(&self, size: (u32, u32)) -> [u32; 4] {
+        let edge = |i: u32, n: u32, total: u32| ((2 * i as u64 * total as u64 + n as u64) / (2 * n as u64)) as u32;
+        [
+            edge(self.column, self.columns, size.0),
+            edge(self.row, self.rows, size.1),
+            edge(self.column + 1, self.columns, size.0),
+            edge(self.row + 1, self.rows, size.1),
+        ]
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Canvas {
     // set of strokes
     strokes: Vec<ColoredStroke>,
     bounds: bounding_volume::Aabb,
+    frame: Option<Frame>,
 }
 
 impl From<Canvas> for StrokePath {
@@ -151,11 +192,21 @@ impl From<&Canvas> for StrokePath {
     }
 }
 
+/// Pixels rendered past a tile's edges in SVG output.
+const SVG_BLEED_PX: u32 = 2;
+
+/// A stroke's random generator for the SVG output's roughening, from the
+/// canvas's seed and the stroke's.
+fn stroke_rng(seed: u64, stroke_seed: u32) -> StdRng {
+    StdRng::seed_from_u64(seed ^ (stroke_seed as u64 + 1).wrapping_mul(0x9e37_79b9_7f4a_7c15))
+}
+
 impl Canvas {
     pub fn new() -> Self {
         Canvas {
             strokes: Vec::new(),
             bounds: bounding_volume::Aabb::new_invalid(),
+            frame: None,
         }
     }
     pub fn bounds(&self) -> bounding_volume::Aabb {
@@ -177,17 +228,23 @@ impl Canvas {
     pub fn has_strokes(&self) -> bool {
         !self.strokes.is_empty()
     }
+    /// The tile of a page this canvas renders, if it's one.
+    pub fn frame(&self) -> Option<&Frame> {
+        self.frame.as_ref()
+    }
+    pub fn set_frame(&mut self, frame: Option<Frame>) {
+        self.frame = frame;
+    }
     fn update_bounds(&mut self, pos: Vec2) {
         self.bounds.take_point(pos);
     }
     pub fn add_strokes<ISP: Into<StrokePath>>(&mut self, into_path: ISP, style: StrokeStyle) {
-        let path: StrokePath = into_path.into();
-        // add stroke to canvas
+        self.add_seeded_stroke(into_path.into(), style, None);
+    }
+    /// Add a stroke, with its texture's seed (see `ColoredStroke::seed`).
+    pub fn add_seeded_stroke(&mut self, path: StrokePath, style: StrokeStyle, seed: Option<u32>) {
+        let width_vec = Vec2::splat(style.width);
         for pos in path.points_within() {
-            let width_vec = Vec2::new(
-                style.width,
-                style.width,
-            );
             self.update_bounds(pos);
             self.update_bounds(pos + width_vec);
             self.update_bounds(pos - width_vec);
@@ -195,18 +252,48 @@ impl Canvas {
         self.strokes.push(ColoredStroke {
             path,
             style,
+            seed,
         });
     }
     pub fn strokes(&self) -> &Vec<ColoredStroke> {
         &self.strokes
     }
-    pub fn to_svg_group(&self, id: Option<&str>, style: Option<&CanvasStyleOptions>, rng: &mut dyn RngCore) -> String {
+    /// Each stroke's seed (see `ColoredStroke::seed`), counting subpaths in
+    /// order where a stroke has none of its own.
+    pub fn stroke_seeds(&self) -> Vec<u32> {
+        let mut next = 0u32;
+        self.strokes.iter().map(|stroke| {
+            let seed = stroke.seed.unwrap_or(next);
+            next = seed.wrapping_add(stroke.path.to_substrokes().len() as u32);
+            seed
+        }).collect()
+    }
+    /// Whether a stroke's marks might reach into the box from `min` to
+    /// `max`: its control points' bounds, grown by `reach`.
+    pub fn stroke_reaches(stroke: &ColoredStroke, min: Vec2, max: Vec2, reach: f32) -> bool {
+        let points = stroke.path.points_within();
+        if points.is_empty() {
+            return false;
+        }
+        let (lo, hi) = points.iter().fold((Vec2::splat(f32::MAX), Vec2::splat(f32::MIN)), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
+        let reach = reach + stroke.style.reach() * 2.0;
+        !(lo.x - reach > max.x || lo.y - reach > max.y || hi.x + reach < min.x || hi.y + reach < min.y)
+    }
+    /// The canvas's strokes as SVG paths in a group, each roughened (with a
+    /// style) by a generator seeded from `seed` and the stroke's own seed,
+    /// so a stroke looks the same whichever tile it's drawn in. Strokes that
+    /// can't reach the box from `min` to `max` are left out.
+    fn to_svg_group(&self, style: Option<&CanvasStyleOptions>, seed: u64, min: Vec2, max: Vec2) -> String {
         let mut svg = String::new();
-        for stroke in &self.strokes {
+        let reach = style.map_or(0.0, |s| s.roughness) + 1.0;
+        for (stroke, stroke_seed) in self.strokes.iter().zip(self.stroke_seeds()) {
+            if !Self::stroke_reaches(stroke, min, max, reach) {
+                continue;
+            }
             if let Some(opts) = style {
-                svg.push_str(&self.stylized_path(stroke, opts, rng));
+                svg.push_str(&self.stylized_path(stroke, opts, &mut stroke_rng(seed, stroke_seed)));
             } else {
-                let ColoredStroke{path, style} = stroke;
+                let ColoredStroke { path, style, .. } = stroke;
                 svg.push_str(&format!(
                     "<path d=\"{}\" style=\"fill:none;stroke:{};stroke-width:{};\" />",
                     path,
@@ -215,45 +302,56 @@ impl Canvas {
                 ));
             }
         }
-        if let Some(id) = id {
-            format!("<g id=\"{}\">{}</g>", id, svg)
-        } else {
-            format!("<g>{}</g>", svg)
-        }
+        format!("<g>{}</g>", svg)
     }
     /// The canvas as SVG. With a style, strokes are roughened and tapered
-    /// using a generator seeded with `seed`, so the result is reproducible.
+    /// using generators seeded with `seed`, so the result is reproducible.
     pub fn to_svg(&self, stylized: Option<&CanvasStyleOptions>, seed: u64) -> String {
-        self.to_svg_with(stylized, &mut StdRng::seed_from_u64(seed))
+        self.to_svg_at(stylized, seed, 1.0).0
     }
-    fn to_svg_with(&self, stylized: Option<&CanvasStyleOptions>, rng: &mut dyn RngCore) -> String {
-        let mut svg = String::new();
+    /// The canvas as SVG, and where its render at `scale` pixels per unit
+    /// falls: the size of the image, and the page pixel of its top-left
+    /// corner (only a tile's isn't 0, 0).
+    fn to_svg_at(&self, stylized: Option<&CanvasStyleOptions>, seed: u64, scale: f32) -> (String, (u32, u32), (u32, u32)) {
         let (min, max) = (self.bounds.mins, self.bounds.maxs);
         let invalid_bounds = min.x > max.x || min.y > max.y;
-        let (width, height, viewbox) = if !invalid_bounds {
+        let (width, height, viewbox, pixels, offset) = if let Some(frame) = &self.frame {
+            // The tile's pixels of the whole page's render, and the part of
+            // the page they show.
+            let extents = frame.page_extents();
+            let page_size = (((extents.x * scale) as u32).max(1), ((extents.y * scale) as u32).max(1));
+            let [x0, y0, x1, y1] = frame.pixels(page_size);
+            let origin = frame.page.mins + Vec2::new(x0 as f32, y0 as f32) / scale;
+            let size = Vec2::new((x1 - x0) as f32, (y1 - y0) as f32) / scale;
+            let viewbox = format!("{} {} {} {}", origin.x, origin.y, size.x, size.y);
+            ((x1 - x0) as f32 / scale, (y1 - y0) as f32 / scale, viewbox, (x1 - x0, y1 - y0), (x0, y0))
+        } else if !invalid_bounds {
             let size = self.render_extents();
             // Center the bounds in the (possibly larger) render area.
             let origin = min - (size - (max - min)) / 2.0;
             let viewbox = format!("{} {} {} {}", origin.x, origin.y, size.x, size.y);
-            (size.x, size.y, viewbox)
+            (size.x, size.y, viewbox, (((size.x * scale) as u32).max(1), ((size.y * scale) as u32).max(1)), (0, 0))
         } else {
-            (100.0, 100.0, "0 0 100 100".to_string())
+            (100.0, 100.0, "0 0 100 100".to_string(), (((100.0 * scale) as u32).max(1), ((100.0 * scale) as u32).max(1)), (0, 0))
         };
-        svg.push_str(&format!(
+        let view: Vec<f32> = viewbox.split(' ').map(|v| v.parse().expect("numbers")).collect();
+        let mut svg = format!(
             "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{}\" height=\"{}\" viewBox=\"{}\">",
             width, height, viewbox
-        ));
-        svg.push_str(&self.to_svg_group(None, stylized, rng));
+        );
+        svg.push_str(&self.to_svg_group(stylized, seed, Vec2::new(view[0], view[1]), Vec2::new(view[0] + view[2], view[1] + view[3])));
         svg.push_str("</svg>");
-        svg
+        (svg, pixels, offset)
     }
-    pub fn stylize_pixmap(pixmap: &mut tiny_skia::Pixmap, stylized: &CanvasStyleOptions, rng: &mut dyn RngCore) {
+    /// Vary the opacity of a render with Perlin noise seeded by `seed`, read
+    /// at page pixel `offset` plus each pixel's, so tiles' noise lines up.
+    pub fn stylize_pixmap(pixmap: &mut tiny_skia::Pixmap, stylized: &CanvasStyleOptions, seed: u64, offset: (u32, u32)) {
         if stylized.noise_amplitude > 0.0 {
-            let perlin = Perlin::new(rng.random::<u32>());
+            let perlin = Perlin::new((seed ^ (seed >> 32)) as u32);
             let width = pixmap.width();
             pixmap.pixels_mut().par_iter_mut().enumerate().for_each(|(i, p)| {
-                let x = (i as u32 % width) as f64;
-                let y = (i as u32 / width) as f64;
+                let x = (i as u32 % width + offset.0) as f64;
+                let y = (i as u32 / width + offset.1) as f64;
                 let octaves = 4;
                 let noise_num = 15.0;
                 let noise_value = (0..octaves).fold(0.0, |acc, octave| {
@@ -281,15 +379,23 @@ impl Canvas {
     pub fn to_png(&self, scale: f32, stylized: Option<&CanvasStyleOptions>, seed: u64) -> Vec<u8> {
         self.to_svg_and_png(scale, stylized, seed).1
     }
-    /// The canvas as SVG and that SVG rasterised (with the style's noise
-    /// added); see `to_svg` for `seed`.
+    /// The canvas as SVG and that SVG rasterised at `scale` pixels per unit
+    /// (with the style's noise added); see `to_svg` for `seed`.
     pub fn to_svg_and_png(&self, scale: f32, stylized: Option<&CanvasStyleOptions>, seed: u64) -> (String, Vec<u8>) {
-        let rng = &mut StdRng::seed_from_u64(seed);
-        let svg_data = self.to_svg_with(stylized, rng);
+        let (svg_data, (width, height), offset) = self.to_svg_at(stylized, seed, scale);
         let svg_tree = usvg::Tree::from_str(&svg_data, &usvg::Options::default()).expect("Failed to parse SVG");
-        let mut pixmap = pixmap_from_svg_tree(&svg_tree, scale, scale);
+        // A tile is drawn with a border of extra pixels and cut out of it,
+        // so its edges are filled as they would be inside the whole page.
+        let bleed = if self.frame.is_some() { SVG_BLEED_PX } else { 0 };
+        let mut pixmap = tiny_skia::Pixmap::new(width + 2 * bleed, height + 2 * bleed).expect("Failed to create Pixmap");
+        let transform = tiny_skia::Transform::from_translate(bleed as f32, bleed as f32).pre_scale(scale, scale);
+        resvg::render(&svg_tree, transform, &mut pixmap.as_mut());
+        if bleed > 0 {
+            let rect = tiny_skia::IntRect::from_xywh(bleed as i32, bleed as i32, width, height).expect("a tile has pixels");
+            pixmap = pixmap.clone_rect(rect).expect("the tile is inside its bled render");
+        }
         if let Some(opts) = stylized {
-            Self::stylize_pixmap(&mut pixmap, opts, rng);
+            Self::stylize_pixmap(&mut pixmap, opts, seed, offset);
         }
         (svg_data, pixmap.encode_png().expect("Failed to encode PNG"))
     }

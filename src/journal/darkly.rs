@@ -2,7 +2,9 @@ use darkly::engine::{DarklyEngine, types::StrokeOp, ExportImageResult};
 use darkly::gpu::context::GpuContext;
 use darkly::coord::CanvasRect;
 use darkly::config::ConfigValue;
-use image::{ImageBuffer, Rgba, imageops::FilterType};
+use image::{ImageBuffer, Rgba};
+use parry2d::math::Vec2;
+use rayon::prelude::*;
 use crate::journal::paths::{CurveSample};
 use crate::journal::canvas::{Canvas, ColoredStroke};
 use std::collections::HashSet;
@@ -48,63 +50,146 @@ const PEN_SPEED_PX_PER_MS: f64 = 0.25;
 /// How many strokes to draw between frame ticks (see `render_canvas`).
 const FRAME_EVERY_STROKES: u32 = 25;
 
-/// Render a canvas with Darkly into a `width` x `height` image.
+/// Output pixels rendered past a tile's edges when supersampling, for the
+/// filter back down to read: Lanczos-3 reaches 3 output pixels.
+const BLEED_PX: i64 = 4;
+
+/// Render a canvas with Darkly at `scale` pixels per canvas unit (brushes
+/// included: their sizes are in units too).
 ///
-/// `brush_scale` multiplies every brush size: brush sizes are in pixels, so
-/// a render at a different scale must scale them too to look the same.
+/// The image covers the canvas's bounds, or for a tile of a page (see
+/// `Frame`) its share of the page's pixels: tiles render on the grid of a
+/// render of the whole page, strokes reaching in from outside included, so
+/// they fit together into exactly that render.
+///
 /// With `supersample` > 1 the canvas is rendered at that multiple of the
 /// size (brushes included) and filtered back down, which smooths the
 /// aliasing Darkly produces for brush marks thinner than about a pixel.
 ///
 /// Each stroke is drawn with its own brush; panics if a stroke has none.
-pub fn render_canvas_scaled(
-    canvas: &Canvas,
-    engine: &mut DarklyEngine,
-    width: u32,
-    height: u32,
-    brush_scale: f32,
-    supersample: f32,
-) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
-    let k = supersample.max(1.0);
+pub fn render(canvas: &Canvas, engine: &mut DarklyEngine, scale: f32, supersample: f32) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+    // The page this canvas is (a tile of), as its own render would size it.
+    let (page_origin, extents, tile) = match canvas.frame() {
+        Some(frame) => (frame.page.mins, frame.page_extents(), Some(frame)),
+        None => (canvas.bounds().mins, canvas.render_extents(), None),
+    };
+    let size = (((extents.x * scale) as u32).max(1), ((extents.y * scale) as u32).max(1));
     // Fractional factors are fine: the render rounds to whole pixels, and
     // the filter scales back down by any ratio.
-    let render_width = (width as f32 * k).round() as u32;
-    let render_height = (height as f32 * k).round() as u32;
-    resize_canvas(engine, render_width, render_height);
-    let rendered = render_canvas(canvas, engine, brush_scale * k);
-    if (render_width, render_height) == (width, height) {
-        rendered
+    let k = supersample.max(1.0);
+    let render_size = ((size.0 as f32 * k).round() as u32, (size.1 as f32 * k).round() as u32);
+    let k = (render_size.0 as f64 / size.0 as f64, render_size.1 as f64 / size.1 as f64);
+    // Render pixels per canvas unit.
+    let ratio = Vec2::new(render_size.0 as f32 / extents.x, render_size.1 as f32 / extents.y);
+    let [x0, y0, x1, y1] = tile.map_or([0, 0, size.0, size.1], |frame| frame.pixels(size)).map(|v| v as i64);
+    let supersampled = k != (1.0, 1.0);
+    let bleed = if supersampled { BLEED_PX } else { 0 };
+    // The render pixels covering the tile and its bleed.
+    let rx0 = ((x0 - bleed) as f64 * k.0).floor() as i64;
+    let ry0 = ((y0 - bleed) as f64 * k.1).floor() as i64;
+    let rx1 = ((x1 + bleed) as f64 * k.0).ceil() as i64;
+    let ry1 = ((y1 + bleed) as f64 * k.1).ceil() as i64;
+    resize_canvas(engine, (rx1 - rx0) as u32, (ry1 - ry0) as u32);
+    let rendered = render_canvas(canvas, engine, page_origin, (rx0 as f32, ry0 as f32), ratio, scale * k.0.max(k.1) as f32);
+    if !supersampled {
+        return rendered;
+    }
+    downsample(&rendered, (rx0, ry0), k, (x0, y0), ((x1 - x0) as u32, (y1 - y0) as u32))
+}
+
+/// The Lanczos-3 kernel.
+fn lanczos3(t: f64) -> f64 {
+    if t == 0.0 {
+        1.0
+    } else if t.abs() < 3.0 {
+        let pt = std::f64::consts::PI * t;
+        3.0 * pt.sin() * (pt / 3.0).sin() / (pt * pt)
     } else {
-        downsample(&rendered, width, height)
+        0.0
     }
 }
 
-/// Resize an RGBA image with a Lanczos filter, in premultiplied alpha so the
-/// transparent background's color doesn't bleed into stroke edges.
-fn downsample(image: &ImageBuffer<Rgba<u8>, Vec<u8>>, width: u32, height: u32) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
-    let premultiplied = ImageBuffer::from_fn(image.width(), image.height(), |x, y| {
-        let [r, g, b, a] = image.get_pixel(x, y).0.map(|v| v as f32 / 255.0);
-        Rgba([r * a, g * a, b * a, a])
-    });
-    let resized = image::imageops::resize(&premultiplied, width, height, FilterType::Lanczos3);
-    ImageBuffer::from_fn(width, height, |x, y| {
-        // Lanczos overshoots slightly; clamp alpha, and color to at most alpha.
-        let [r, g, b, a] = resized.get_pixel(x, y).0;
-        let a = a.clamp(0.0, 1.0);
-        let unpremultiply = |c: f32| if a > 0.0 { (c.clamp(0.0, a) / a * 255.0).round() as u8 } else { 0 };
-        Rgba([unpremultiply(r), unpremultiply(g), unpremultiply(b), (a * 255.0).round() as u8])
-    })
+/// For each of `count` output pixels from `out_origin`, the first source
+/// pixel its filter reads and the weights. Output pixel `x` covers source
+/// pixels `x * k` to `(x + 1) * k`, both counted from the page's corner;
+/// the source starts at `src_origin`. Pixels past the source are
+/// transparent, but still count in the weights' total.
+fn filter_weights(out_origin: i64, count: u32, k: f64, src_origin: i64) -> Vec<(i64, Vec<f32>)> {
+    (0..count as i64).map(|j| {
+        let center = (out_origin + j) as f64 * k + k / 2.0 - src_origin as f64;
+        let (first, last) = ((center - 3.0 * k).floor() as i64, (center + 3.0 * k).ceil() as i64);
+        let weights: Vec<f64> = (first..=last).map(|i| lanczos3((i as f64 + 0.5 - center) / k)).collect();
+        let total: f64 = weights.iter().sum();
+        (first, weights.into_iter().map(|w| (w / total) as f32).collect())
+    }).collect()
 }
 
-/// Render a canvas into the engine's current canvas size.
-fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, brush_scale: f32) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+/// Filter a supersampled render down to output pixels with Lanczos-3, in
+/// premultiplied alpha so the transparent background's color doesn't bleed
+/// into stroke edges. `src` holds the render pixels from `src_origin` on a
+/// grid `k` times as fine as the output's; the result is the output pixels
+/// from `out_origin`, `out_size` of them. Both are counted from the page's
+/// corner, so tiles of a page filter exactly as the whole page would.
+fn downsample(src: &ImageBuffer<Rgba<u8>, Vec<u8>>, src_origin: (i64, i64), k: (f64, f64), out_origin: (i64, i64), out_size: (u32, u32)) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+    let (sw, sh) = (src.width() as i64, src.height() as i64);
+    let premultiplied: Vec<[f32; 4]> = src.pixels().map(|p| {
+        let [r, g, b, a] = p.0.map(|v| v as f32 / 255.0);
+        [r * a, g * a, b * a, a]
+    }).collect();
+    let columns = filter_weights(out_origin.0, out_size.0, k.0, src_origin.0);
+    let rows = filter_weights(out_origin.1, out_size.1, k.1, src_origin.1);
+    // Across first, every source row to output columns...
+    let across: Vec<[f32; 4]> = (0..sh).into_par_iter().flat_map_iter(|y| {
+        let row = &premultiplied[(y * sw) as usize..((y + 1) * sw) as usize];
+        columns.iter().map(move |(first, weights)| {
+            let mut sum = [0.0f32; 4];
+            for (i, w) in weights.iter().enumerate() {
+                let x = first + i as i64;
+                if (0..sw).contains(&x) {
+                    let p = row[x as usize];
+                    for c in 0..4 {
+                        sum[c] += p[c] * w;
+                    }
+                }
+            }
+            sum
+        })
+    }).collect();
+    // ...then down.
+    let width = out_size.0 as usize;
+    let pixels: Vec<u8> = rows.par_iter().flat_map_iter(|(first, weights)| {
+        let across = &across;
+        (0..width).flat_map(move |x| {
+            let mut sum = [0.0f32; 4];
+            for (i, w) in weights.iter().enumerate() {
+                let y = first + i as i64;
+                if (0..sh).contains(&y) {
+                    let p = across[y as usize * width + x];
+                    for c in 0..4 {
+                        sum[c] += p[c] * w;
+                    }
+                }
+            }
+            // Lanczos overshoots slightly; clamp alpha, and color to at most alpha.
+            let a = sum[3].clamp(0.0, 1.0);
+            let unpremultiply = |c: f32| if a > 0.0 { (c.clamp(0.0, a) / a * 255.0).round() as u8 } else { 0 };
+            [unpremultiply(sum[0]), unpremultiply(sum[1]), unpremultiply(sum[2]), (a * 255.0).round() as u8]
+        })
+    }).collect();
+    ImageBuffer::from_raw(out_size.0, out_size.1, pixels).expect("one pixel per output position")
+}
+
+/// Render a canvas into the engine's current canvas size, which shows the
+/// pixels from `offset` on of a render of the page at `page_origin`, with
+/// `ratio` pixels per unit across and down. Strokes that can't reach it are
+/// skipped.
+fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, page_origin: Vec2, offset: (f32, f32), ratio: Vec2, brush_scale: f32) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
     let layer = engine.add_raster_layer(None);
     let (engine_canvas_width, engine_canvas_height) = engine.canvas_dimensions();
-    let bounds = canvas.bounds();
-    let canvas_dims = canvas.render_extents();
-    let w_ratio =  engine_canvas_width as f32 / canvas_dims.x;
-    let h_ratio = engine_canvas_height as f32 / canvas_dims.y;
+    let (w_ratio, h_ratio) = (ratio.x, ratio.y);
     let sample_spacing = SAMPLE_SPACING_PX / w_ratio.max(h_ratio);
+    let origin = page_origin + Vec2::new(offset.0 / w_ratio, offset.1 / h_ratio);
+    let view_max = origin + Vec2::new(engine_canvas_width as f32 / w_ratio, engine_canvas_height as f32 / h_ratio);
 
     let strokes = canvas.strokes();
     let mut warned_colors = HashSet::new();
@@ -112,8 +197,12 @@ fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, brush_scale: f32) -
     // Only reload the brush / reset its size when they change between strokes.
     let mut loaded_name: Option<&str> = None;
     let mut loaded_size: Option<f32> = None;
-    let mut stroke_index: u32 = 0;
-    for ColoredStroke { path, style } in strokes {
+    let mut drawn: u32 = 0;
+    for (stroke, seed) in strokes.iter().zip(canvas.stroke_seeds()) {
+        if !Canvas::stroke_reaches(stroke, origin, view_max, 0.0) {
+            continue;
+        }
+        let ColoredStroke { path, style, .. } = stroke;
         let brush = style.brush.as_ref()
             .expect("Darkly strokes need a brush (rhai stroke styles always have one)");
         if loaded_name != Some(brush.name.as_str()) {
@@ -146,12 +235,13 @@ fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, brush_scale: f32) -
             [0.0, 0.0, 0.0, 1.0]
         });
         let substrokes = path.to_substrokes();
-        for substroke in substrokes {
+        for (i, substroke) in substrokes.iter().enumerate() {
             // Darkly seeds each stroke's random brush texture from the wall
             // clock by default; numbering the strokes instead makes renders
-            // reproducible while keeping neighbouring strokes distinct.
-            engine.set_stroke_seed(Some(stroke_index));
-            stroke_index = stroke_index.wrapping_add(1);
+            // reproducible while keeping neighbouring strokes distinct. (A
+            // tile's strokes keep their numbers from the whole page.)
+            engine.set_stroke_seed(Some(seed.wrapping_add(i as u32)));
+            drawn = drawn.wrapping_add(1);
             // One stroke_path call per substroke: Darkly stabilizes and draws
             // the whole stroke at once, instead of re-rendering and
             // committing on every point as live stroke_to does.
@@ -162,8 +252,11 @@ fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, brush_scale: f32) -
                 let t_param = i as f32 / sample_count as f32;
                 let pressure = style.width * (brush.pressure_profile.at(t_param) * pressure_range + pressure_min);
                 ops.push(StrokeOp::BrushStroke {
-                    x: (point.x - bounds.mins.x) * w_ratio,
-                    y: (point.y - bounds.mins.y) * h_ratio,
+                    // Where it is in the whole page's render, less the
+                    // offset: a whole number, so a tile's strokes land
+                    // exactly where the page's would.
+                    x: (point.x - page_origin.x) * w_ratio - offset.0,
+                    y: (point.y - page_origin.y) * h_ratio - offset.1,
                     pressure,
                     x_tilt: 0.0,
                     y_tilt: 0.0,
@@ -182,7 +275,7 @@ fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, brush_scale: f32) -
             // until the export, so without this every stroke's ~4 MB of GPU
             // readbacks piles up: journal_entry_18 peaked at 14 GB and was
             // killed. Ticking every few strokes keeps it near 250 MB.
-            if stroke_index.is_multiple_of(FRAME_EVERY_STROKES) {
+            if drawn.is_multiple_of(FRAME_EVERY_STROKES) {
                 engine.render(0.0);
             }
         }
@@ -208,6 +301,53 @@ fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, brush_scale: f32) -
             }
             _ => {
                 std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A render's worth of pixels from `origin`: a pattern defined on the
+    /// whole page's render grid.
+    fn pattern(origin: (i64, i64), size: (u32, u32)) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+        ImageBuffer::from_fn(size.0, size.1, |x, y| {
+            let (gx, gy) = (origin.0 + x as i64, origin.1 + y as i64);
+            if (0..39).contains(&gx) && (0..30).contains(&gy) {
+                Rgba([(gx * 7 % 256) as u8, (gy * 11 % 256) as u8, 90, ((gx * gy) % 200 + 55) as u8])
+            } else {
+                Rgba([0, 0, 0, 0])
+            }
+        })
+    }
+
+    #[test]
+    fn tiles_downsample_exactly_as_the_whole_page() {
+        // A page 26 x 20 output pixels, rendered 1.5 times as fine (the
+        // pattern covers it, 39 x 30), filtered down whole and in tiles.
+        let k = (1.5, 1.5);
+        let whole = downsample(&pattern((0, 0), (39, 30)), (0, 0), k, (0, 0), (26, 20));
+        for (x0, y0, x1, y1) in [(0, 0, 9, 7), (9, 0, 26, 7), (0, 7, 13, 20), (13, 7, 26, 20)] {
+            let (rx0, ry0) = (((x0 - BLEED_PX) as f64 * k.0).floor() as i64, ((y0 - BLEED_PX) as f64 * k.1).floor() as i64);
+            let (rx1, ry1) = (((x1 + BLEED_PX) as f64 * k.0).ceil() as i64, ((y1 + BLEED_PX) as f64 * k.1).ceil() as i64);
+            let src = pattern((rx0, ry0), ((rx1 - rx0) as u32, (ry1 - ry0) as u32));
+            let tile = downsample(&src, (rx0, ry0), k, (x0, y0), ((x1 - x0) as u32, (y1 - y0) as u32));
+            for (x, y, p) in tile.enumerate_pixels() {
+                assert_eq!(p, whole.get_pixel(x + x0 as u32, y + y0 as u32), "tile at {},{}: pixel {},{}", x0, y0, x, y);
+            }
+        }
+    }
+
+    #[test]
+    fn downsampling_keeps_flat_color() {
+        let src = ImageBuffer::from_pixel(30, 30, Rgba([200, 100, 50, 255]));
+        let out = downsample(&src, (0, 0), (1.5, 1.5), (0, 0), (20, 20));
+        // Away from the edges, where the transparency past them reaches.
+        for y in 4..16 {
+            for x in 4..16 {
+                assert_eq!(out.get_pixel(x, y), &Rgba([200, 100, 50, 255]));
             }
         }
     }

@@ -13,7 +13,7 @@ use super::symboldict::SymbolPathDict;
 use super::canvas::Canvas as JournalCanvas;
 use super::canvas::StrokeStyle as JournalStrokeStyle;
 use super::canvas::CanvasStyleOptions;
-use super::canvas::{Brush, PressureProfile};
+use super::canvas::{Brush, Frame, PressureProfile};
 use super::symbol::{place_along_path, place_words_along_path, Symbol, SymbolPlacementArgs};
 use super::canvas::textbox::TextBoxLineMode;
 use super::styles::Font;
@@ -39,8 +39,20 @@ impl Entry {
         self.pages.push(page);
         Ok(())
     }
+    /// `journal_entry.add_pages(pages)`, such as a split page's tiles.
+    fn add_pages(&mut self, pages: rhai::Array) -> Result<(), Box<EvalAltResult>> {
+        for (i, page) in pages.into_iter().enumerate() {
+            let type_name = page.type_name();
+            let page = page.try_cast::<Page>()
+                .ok_or_else(|| format!("add_pages: item {} is a {}, not a page", i, type_name))?;
+            self.add_page(page)?;
+        }
+        Ok(())
+    }
     fn build_extra(builder: &mut TypeBuilder<Self>) {
-        builder.with_fn("add_page", Self::add_page);
+        builder
+            .with_fn("add_page", Self::add_page)
+            .with_fn("add_pages", Self::add_pages);
     }
     pub fn page_count(&self) -> usize {
         self.pages.len()
@@ -50,7 +62,7 @@ impl Entry {
     pub fn empty_canvases(&self) -> Vec<String> {
         self.pages.iter().enumerate().flat_map(|(i, page)| {
             page.canvases.iter().enumerate()
-                .filter(|(_, canvas)| canvas.strokes.is_empty())
+                .filter(|(_, canvas)| canvas.strokes.is_empty() && canvas.frame.is_none())
                 .map(move |(c, canvas)| format!("{}/{}", page.label(i), canvas.label(c)))
         }).collect()
     }
@@ -74,23 +86,14 @@ impl Entry {
     }
     pub fn darkly_publish_pngs(&self, engine: &mut DarklyEngine, dirname: &str, scale: f32, supersample: f32, only: Option<&[usize]>) -> Result<(), String> {
         for (i, page) in self.selected_pages(only) {
-            let canvases = page.canvases();
-            for (canvas_i, canvas) in canvases.iter().enumerate() {
+            for (canvas_i, canvas) in page.canvases().iter().enumerate() {
                 let filename = format!("{}/darkly_{}_{}.png", dirname, page.label(i), canvas.label(canvas_i));
-                let margin = page.margin_for(canvas);
-                let mut canvas : JournalCanvas = canvas.into();
-                canvas.pad(margin);
-                if !canvas.has_strokes() {
+                let Some(canvas) = page.render_canvas(canvas) else {
                     continue; // journalbuild warns about these (see empty_canvases)
-                }
-                let canvas_dim = canvas.render_extents();
+                };
                 // Canvas units are pixels at scale 1, so brushes scale with
                 // the render.
-                let buff = darkly::render_canvas_scaled(
-                    &canvas, engine,
-                    ((canvas_dim.x * scale) as u32).max(1), ((canvas_dim.y * scale) as u32).max(1),
-                    scale, supersample,
-                );
+                let buff = darkly::render(&canvas, engine, scale, supersample);
                 buff.save(&filename).map_err(|e| format!("couldn't write {}: {}", filename, e))?;
             }
         }
@@ -107,15 +110,13 @@ impl Entry {
                 let name = format!("{}_{}", page.label(i), canvas.label(canvas_i));
                 let svg_file = format!("{}/{}.svg", dirname, name);
                 let filename = format!("{}/{}.png", dirname, name);
-                let margin = page.margin_for(canvas);
-                let mut canvas: JournalCanvas = canvas.into();
-                canvas.pad(margin);
-                if !canvas.has_strokes() {
+                let Some(canvas) = page.render_canvas(canvas) else {
                     continue;
-                }
+                };
                 // Seeded by the file's name: the same every run, but each
-                // canvas roughened differently.
-                let (svg, png) = canvas.to_svg_and_png(2.0 * scale, page.svg_style.as_ref(), stable_hash(&name));
+                // canvas roughened differently. Tiles use the whole page's.
+                let seed = canvas.frame().map_or_else(|| stable_hash(&name), |frame| frame.svg_seed);
+                let (svg, png) = canvas.to_svg_and_png(2.0 * scale, page.svg_style.as_ref(), seed);
                 println!("\t - {}", svg_file);
                 std::fs::write(&svg_file, svg).map_err(|e| format!("couldn't write {}: {}", svg_file, e))?;
                 std::fs::write(&filename, png).map_err(|e| format!("couldn't write {}: {}", filename, e))?;
@@ -259,6 +260,18 @@ impl Page {
     pub fn canvases(&self) -> &Vec<CanvasData> {
         &self.canvases
     }
+    /// `canvas` as it's rendered: padded by its margin, or a tile's frame.
+    /// `None` if there's nothing to render.
+    pub fn render_canvas(&self, canvas: &CanvasData) -> Option<JournalCanvas> {
+        let mut rendered: JournalCanvas = canvas.into();
+        if rendered.frame().is_none() {
+            if !rendered.has_strokes() {
+                return None;
+            }
+            rendered.pad(self.margin_for(canvas));
+        }
+        Some(rendered)
+    }
     /// The margin rendered around `canvas`: the page's `margin`, or by
     /// default half the largest brush size on the canvas, the least that
     /// keeps brush marks at the edges from being cut off. (The bounds
@@ -345,6 +358,115 @@ impl Page {
         });
         Ok(())
     }
+    /// `page.split(columns, rows)`: the page cut into a grid of tiles, each
+    /// a page of its own, row by row. See `split_with`.
+    fn split(&mut self, columns: i64, rows: i64) -> Result<rhai::Array, Box<EvalAltResult>> {
+        let mut options = Map::new();
+        options.insert("columns".into(), Dynamic::from(columns));
+        options.insert("rows".into(), Dynamic::from(rows));
+        self.split_with(options)
+    }
+    /// `page.split(#{ columns, rows })`, or `#{ tile_width, tile_height }`
+    /// for tiles of a given size (in canvas units; the grid grows evenly
+    /// round the page to a whole number of them), or a mix: one option
+    /// across and one down, each 1 tile by default.
+    ///
+    /// The page is everything its renders cover, every canvas with its
+    /// margin, and the tiles divide it evenly. Each tile page has a part of
+    /// each canvas, named as the canvas was, rendering exactly its share of
+    /// the pixels the whole canvas's render would have: placed side by side
+    /// in order, a canvas's tiles make that render (over the whole page, so
+    /// canvases' tiles line up with each other too). Strokes crossing a
+    /// seam are drawn whole in each tile they reach and cut off at its
+    /// edges, with the same brush texture, so they carry on unbroken.
+    ///
+    /// Tiles are named `{name}_{row}_{column}`, counting from 0, so the page
+    /// needs a name. Their `tile` property gives their place in the grid.
+    fn split_with(&mut self, options: Map) -> Result<rhai::Array, Box<EvalAltResult>> {
+        const CALLER: &str = "page.split";
+        layout::check_keys(CALLER, &options, &["columns", "rows", "tile_width", "tile_height"])?;
+        let name = self.name.clone()
+            .ok_or_else(|| format!("{}: name the page first; its tiles are named after it ({{name}}_{{row}}_{{column}})", CALLER))?;
+        let canvases: Vec<(usize, &CanvasData)> = self.canvases.iter().enumerate()
+            .filter(|(_, canvas)| !canvas.strokes.is_empty()).collect();
+        if self.canvases.iter().any(|canvas| canvas.frame.is_some()) {
+            return Err(format!("{}: the page is already a tile; split the page it came from instead", CALLER).into());
+        }
+        let mut region = parry2d::bounding_volume::Aabb::new_invalid();
+        for (_, canvas) in &canvases {
+            let bounds = self.render_canvas(canvas).expect("the canvas has strokes").bounds();
+            region.take_point(bounds.mins);
+            region.take_point(bounds.maxs);
+        }
+        if canvases.is_empty() {
+            return Err(format!("{}: the page has nothing drawn on it to split", CALLER).into());
+        }
+        // How many tiles across and down, growing the region to a whole
+        // number of tiles where they have a set size.
+        let mut grid = |count_key: &str, size_key: &str, axis: usize| -> Result<u32, Box<EvalAltResult>> {
+            let extent = region.extents()[axis].max(1.0);
+            match (options.get(count_key), layout::number(CALLER, &options, size_key)?) {
+                (Some(_), Some(_)) => Err(format!("{}: give '{}' or '{}', not both", CALLER, count_key, size_key).into()),
+                (Some(count), None) => match count.as_int() {
+                    Ok(n) if (1..=1000).contains(&n) => Ok(n as u32),
+                    _ => Err(format!("{}: '{}' should be a whole number from 1 to 1000, got {}", CALLER, count_key, count).into()),
+                },
+                (None, Some(size)) if size > 0.0 && size.is_finite() => {
+                    let count = (extent / size).ceil().clamp(1.0, 1000.0);
+                    let grow = (count * size - extent) / 2.0;
+                    region.mins[axis] -= grow;
+                    region.maxs[axis] = region.mins[axis] + count * size;
+                    Ok(count as u32)
+                }
+                (None, Some(size)) => Err(format!("{}: '{}' must be positive, got {}", CALLER, size_key, size).into()),
+                (None, None) => Ok(1),
+            }
+        };
+        let columns = grid("columns", "tile_width", 0)?;
+        let rows = grid("rows", "tile_height", 1)?;
+        // Every stroke keeps its texture's seed from the whole canvas.
+        let seeded: Vec<(usize, CanvasData)> = canvases.iter().map(|(i, canvas)| {
+            let seeds = JournalCanvas::from(*canvas).stroke_seeds();
+            let mut canvas = (*canvas).clone();
+            for (stroke, seed) in canvas.strokes.iter_mut().zip(seeds) {
+                stroke.seed = Some(seed);
+            }
+            (*i, canvas)
+        }).collect();
+        let mut tiles = rhai::Array::new();
+        for row in 0..rows {
+            for column in 0..columns {
+                let mut tile = Page {
+                    canvases: Vec::new(),
+                    name: Some(format!("{}_{}_{}", name, row, column)),
+                    svg_style: self.svg_style.clone(),
+                    margin: self.margin,
+                };
+                for (i, canvas) in &seeded {
+                    let mut part = canvas.clone();
+                    part.frame = Some(Frame {
+                        page: region,
+                        column, columns, row, rows,
+                        svg_seed: stable_hash(&format!("{}_{}", name, canvas.label(*i))),
+                    });
+                    // Named as it was, since its index might change.
+                    part.name = Some(canvas.label(*i));
+                    tile.canvases.push(part);
+                }
+                tiles.push(Dynamic::from(tile));
+            }
+        }
+        Ok(tiles)
+    }
+    /// A tile's place in its page's grid, or `()`.
+    fn get_tile(&mut self) -> Dynamic {
+        let Some(frame) = self.canvases.iter().find_map(|c| c.frame) else { return Dynamic::UNIT };
+        let mut map = Map::new();
+        for (key, value) in [("row", frame.row), ("column", frame.column), ("rows", frame.rows), ("columns", frame.columns)] {
+            map.insert(key.into(), Dynamic::from(value as i64));
+        }
+        Dynamic::from_map(map)
+    }
     fn build_extra(builder: &mut TypeBuilder<Self>) {
         builder
             .with_fn("add_canvas", Self::add_canvas)
@@ -352,6 +474,9 @@ impl Page {
             .with_get_set("name", Self::get_name, Self::set_name)
             .with_get_set("svg_style", Self::get_svg_style, Self::set_svg_style)
             .with_get_set("margin", Self::get_margin, Self::set_margin)
+            .with_fn("split", Self::split)
+            .with_fn("split", Self::split_with)
+            .with_get("tile", Self::get_tile)
         ;
     }
 }
@@ -440,6 +565,8 @@ pub struct CanvasData {
     pub strokes: Vec<Stroke>,
     /// Its output files are named after this, or its index on the page.
     name: Option<String>,
+    /// For a tile of a split page, the part of the page it renders.
+    frame: Option<Frame>,
 }
 
 impl CanvasData {
@@ -451,7 +578,7 @@ impl CanvasData {
         self.strokes.push(stroke)
     }
     pub fn add_strokepath(&mut self, path: StrokePath, style: StrokeStyle) {
-        self.strokes.push(Stroke{path, style});
+        self.strokes.push(Stroke { path, style, seed: None });
     }
     fn transform(&mut self, f: impl Fn(&mut StrokePath)) {
         for stroke in &mut self.strokes {
@@ -507,9 +634,10 @@ fn register_canvas(engine: &mut Engine) {
 impl From<CanvasData> for JournalCanvas {
     fn from(val: CanvasData) -> Self {
         let mut canvas = JournalCanvas::new();
-        for Stroke { path, style } in val.strokes {
-            canvas.add_strokes(path, style.into());
+        for Stroke { path, style, seed } in val.strokes {
+            canvas.add_seeded_stroke(path, style.into(), seed);
         }
+        canvas.set_frame(val.frame);
         canvas
     }
 }
@@ -517,9 +645,10 @@ impl From<CanvasData> for JournalCanvas {
 impl From<&CanvasData> for JournalCanvas {
     fn from(val: &CanvasData) -> Self {
         let mut canvas = JournalCanvas::new();
-        for Stroke { path, style } in val.strokes.iter() {
-            canvas.add_strokes(path.clone(), style.clone().into());
+        for Stroke { path, style, seed } in val.strokes.iter() {
+            canvas.add_seeded_stroke(path.clone(), style.clone().into(), *seed);
         }
+        canvas.set_frame(val.frame);
         canvas
     }
 }
@@ -536,6 +665,10 @@ pub struct Stroke {
     #[rhai_type(skip)]
     path: StrokePath,
     style: StrokeStyle,
+    /// Its texture's seed, kept from the whole page in a tile (see
+    /// `ColoredStroke::seed`).
+    #[rhai_type(skip)]
+    seed: Option<u32>,
 }
 
 impl Stroke {
@@ -544,6 +677,7 @@ impl Stroke {
         Self {
             path: path.get(),
             style,
+            seed: None,
         }
     }
     fn build_extra(builder: &mut TypeBuilder<Self>) {
@@ -1218,6 +1352,114 @@ mod tests {
             .map(|s| s.path.points_within().iter().map(|p| p.x).fold(f32::MAX, f32::min))
             .find(|x| *x > 300.0).unwrap();
         assert!(first_after(&words) >= first_after(&flat));
+    }
+
+    const SPLIT: &str = r##"
+        let pen = new_brush("Ink Pen", 0.3, 0.7, 3.0);
+        let c = new_canvas();
+        for i in 0..8 {
+            c.add_strokepath(new_line(new_vec(i * 30.0, 0.0), new_vec(300.0 - i * 20.0, 200.0)), new_strokestyle(2.0, "#203040", pen));
+        }
+        c.add_strokepath(new_circle(new_vec(150.0, 100.0), 90.0), new_strokestyle(3.0, "darkred", pen));
+        let other = new_canvas();
+        other.name = "dot";
+        other.add_strokepath(new_circle(new_vec(20.0, 20.0), 5.0), new_strokestyle(1.0, "black", pen));
+        let p = new_page();
+        p.name = "big";
+        p.svg_style = #{ roughness: 1.5, noise_amplitude: 1.0 };
+        p.add_canvas(c);
+        p.add_canvas(other);
+        p.add_canvas(new_canvas());
+        journal_entry.add_page(p);
+    "##;
+
+    fn png_pixels(file: &std::path::Path) -> image::RgbaImage {
+        image::open(file).unwrap_or_else(|e| panic!("{}: {}", file.display(), e)).to_rgba8()
+    }
+
+    #[test]
+    fn split_pages_render_tiles_that_make_the_whole() {
+        let script = format!("{}\njournal_entry.add_pages(p.split(3, 2));", SPLIT);
+        let entry = engine().build_entry_str(&script).expect("script should run");
+        let labels: Vec<String> = entry.pages.iter().enumerate().map(|(i, p)| p.label(i)).collect();
+        assert_eq!(labels, ["big", "big_0_0", "big_0_1", "big_0_2", "big_1_0", "big_1_1", "big_1_2"]);
+        // Tiles keep the canvases' names, and not the empty canvas.
+        let names: Vec<String> = entry.pages[1].canvases().iter().enumerate().map(|(i, c)| c.label(i)).collect();
+        assert_eq!(names, ["0", "dot"]);
+        assert!(entry.empty_canvases() == ["big/2"], "{:?}", entry.empty_canvases());
+
+        let dir = std::env::temp_dir().join(format!("journal_split_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        entry.publish_svgs(dir.to_str().unwrap(), 0.75, None).expect("publish should succeed");
+        let whole = png_pixels(&dir.join("big_0.png"));
+        let tiles: Vec<image::RgbaImage> = (0..6).map(|i| png_pixels(&dir.join(format!("big_{}_{}_0.png", i / 3, i % 3)))).collect();
+        // Side by side, in order, they make the whole canvas's render.
+        let widths: u32 = tiles[..3].iter().map(|t| t.width()).sum();
+        let heights: u32 = [&tiles[0], &tiles[3]].iter().map(|t| t.height()).sum();
+        assert_eq!((widths, heights), whole.dimensions());
+        let mut worst = 0;
+        let (mut y0, mut diff_sum) = (0, 0u64);
+        for row in 0..2 {
+            let mut x0 = 0;
+            for column in 0..3 {
+                let tile = &tiles[row * 3 + column];
+                assert!(tile.height() == tiles[row * 3].height(), "tiles in a row share a height");
+                for (x, y, p) in tile.enumerate_pixels() {
+                    let q = whole.get_pixel(x0 + x, y0 + y);
+                    // Compare premultiplied, so transparent pixels' colors don't count.
+                    for c in 0..4 {
+                        let (a, b) = (p[c] as i32 * p[3] as i32 / 255, q[c] as i32 * q[3] as i32 / 255);
+                        let d = (a - b).abs();
+                        worst = worst.max(d);
+                        diff_sum += d as u64;
+                    }
+                }
+                x0 += tile.width();
+            }
+            y0 += tiles[row * 3].height();
+        }
+        // Anti-aliasing can differ a hair where a stroke's outline crosses
+        // a seam; nowhere more.
+        assert!(worst <= 12, "a pixel differs by {}", worst);
+        assert!((diff_sum as f64) / (whole.len() as f64) < 0.01, "mean difference {}", diff_sum as f64 / whole.len() as f64);
+        // Every canvas's tiles cover the whole page, the same pixels each.
+        assert_eq!(png_pixels(&dir.join("big_1_2_dot.png")).dimensions(), tiles[5].dimensions());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn split_takes_tile_sizes_and_checks_its_options() {
+        let script = format!("{}\nlet tiles = p.split(#{{ tile_width: 100, rows: 2 }});\nif tiles.len() != 8 {{ throw \"expected 4 x 2, got \" + tiles.len(); }}\nif tiles[5].tile.column != 1 || tiles[5].tile.rows != 2 {{ throw \"bad tile: \" + tiles[5].tile; }}\nif p.tile != () {{ throw \"the page isn't a tile\"; }}\njournal_entry.add_pages(tiles);", SPLIT);
+        let entry = engine().build_entry_str(&script).expect("script should run");
+        // 100-unit tiles: the page's ~310 units grow to 400, evenly.
+        let canvas: JournalCanvas = entry.pages[1].canvases()[0].clone().into();
+        let frame = canvas.frame().expect("tiles have frames");
+        assert!((frame.page.extents().x - 400.0).abs() < 1e-3, "{:?}", frame.page);
+        let whole = entry.pages[0].render_canvas(&entry.pages[0].canvases()[0]).unwrap().bounds();
+        assert!((frame.page.center().x - whole.center().x).abs() < 1e-3);
+        for (script, want) in [
+            ("let q = new_page();\nq.split(2, 2);", "name the page first"),
+            ("let q = new_page(); q.name = \"q\";\nq.split(2, 2);", "nothing drawn on it"),
+            ("p.split(0, 2);", "'columns' should be a whole number from 1 to 1000"),
+            ("p.split(#{ columns: 2, tile_width: 10 });", "give 'columns' or 'tile_width', not both"),
+            ("p.split(#{ tile_height: -1 });", "'tile_height' must be positive"),
+            ("p.split(#{ colums: 2 });", "unknown option 'colums'"),
+            ("p.split(2, 2)[0].split(2, 2);", "already a tile"),
+            ("journal_entry.add_pages([p.split(2, 2)[0], 3]);", "add_pages: item 1 is a i64"),
+        ] {
+            let err = engine().build_entry_str(&format!("{}\n{}", SPLIT, script)).expect_err(script).to_string();
+            assert!(err.contains(want), "{}: {}", want, err);
+        }
+    }
+
+    #[test]
+    fn tiles_keep_their_strokes_seeds_from_the_whole_page() {
+        let script = format!("{}\njournal_entry.add_pages(p.split(2, 2));", SPLIT);
+        let entry = engine().build_entry_str(&script).expect("script should run");
+        let whole: JournalCanvas = entry.pages[0].canvases()[0].clone().into();
+        let tile: JournalCanvas = entry.pages[4].canvases()[0].clone().into();
+        assert_eq!(whole.stroke_seeds(), tile.stroke_seeds());
+        assert!(tile.strokes().iter().all(|s| s.seed.is_some()));
     }
 
     #[test]
