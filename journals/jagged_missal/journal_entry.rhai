@@ -1,4 +1,4 @@
-// Pages in the manner of the Jagged Missal (assets/jagged_missal.pdf), set
+// Pages in the manner of the Jagged Missal, set
 // with the layouts in layouts/: a title page, an article over two-column
 // spreads with a drop cap and an illustration, and a full-page figure.
 // Each layout is given text, roles (fonts, inks and sizes) and art, and
