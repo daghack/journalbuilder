@@ -1,4 +1,4 @@
-//! Flowers modelled in 3D and drawn in outline.
+//! Flowers modelled in 3D and drawn in outline (see `solid`).
 //!
 //! Petals and sepals are curved surfaces around a receptacle: each leaves
 //! it at an angle, curls along its length and cups across it. How far, and
@@ -8,75 +8,21 @@
 //! are the petals' and sepals' edges, the folds where their surfaces turn
 //! away from the viewer, the stamens and the receptacle's rim, each drawn
 //! where nothing nearer hides it.
-//!
-//! Coordinates are the page's, x right and y down, with z towards the
-//! viewer; the view is straight down z.
 
-use std::collections::HashMap;
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
-use std::ops::{Add, Mul, Sub};
 
 use rand::rngs::StdRng;
 use rand::Rng;
 
 use super::geom::V;
-
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-struct P3 {
-    x: f64,
-    y: f64,
-    z: f64,
-}
-
-impl P3 {
-    const fn new(x: f64, y: f64, z: f64) -> Self {
-        P3 { x, y, z }
-    }
-    fn dot(self, o: P3) -> f64 {
-        self.x * o.x + self.y * o.y + self.z * o.z
-    }
-    fn cross(self, o: P3) -> P3 {
-        P3::new(self.y * o.z - self.z * o.y, self.z * o.x - self.x * o.z, self.x * o.y - self.y * o.x)
-    }
-    fn unit(self) -> P3 {
-        self * (1.0 / self.dot(self).sqrt())
-    }
-    fn lerp(self, o: P3, t: f64) -> P3 {
-        self + (o - self) * t
-    }
-    /// Where it lands on the page.
-    fn flat(self) -> V {
-        V::new(self.x, self.y)
-    }
-}
-
-impl Add for P3 {
-    type Output = P3;
-    fn add(self, o: P3) -> P3 {
-        P3::new(self.x + o.x, self.y + o.y, self.z + o.z)
-    }
-}
-
-impl Sub for P3 {
-    type Output = P3;
-    fn sub(self, o: P3) -> P3 {
-        P3::new(self.x - o.x, self.y - o.y, self.z - o.z)
-    }
-}
-
-impl Mul<f64> for P3 {
-    type Output = P3;
-    fn mul(self, s: f64) -> P3 {
-        P3::new(self.x * s, self.y * s, self.z * s)
-    }
-}
+use super::solid::{mix, Line, Model, Run, Surface, P3};
 
 /// A flower as drawn: its surfaces on the page, which hide whatever is
 /// behind it, its visible lines, and the middle of what it covers and how
 /// far it reaches from there.
 pub(super) struct Bloom {
     pub triangles: Vec<[V; 3]>,
-    pub lines: Vec<Vec<V>>,
+    pub lines: Vec<Run>,
     pub middle: V,
     pub reach: f64,
 }
@@ -97,19 +43,6 @@ pub(super) struct Pose {
 fn smooth(t: f64) -> f64 {
     let t = t.clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
-}
-
-fn mix(a: f64, b: f64, t: f64) -> f64 {
-    a + (b - a) * t
-}
-
-/// A surface over (u, v) in [0, 1] x [-1, 1], sampled on a grid; its sides
-/// (v = -1 and 1, from the base round the tip) are drawn if `edges`.
-struct Surface {
-    point: Box<dyn Fn(f64, f64) -> P3>,
-    nu: usize,
-    nv: usize,
-    edges: bool,
 }
 
 /// The flower's frame: its centre, its axis (the way it faces) and two
@@ -179,252 +112,7 @@ impl Organ {
             let (out, rise) = if k.abs() < 1e-9 { (a, 0.0) } else { ((k * a).sin() / k, (1.0 - (k * a).cos()) / k) };
             at + side * out + normal * rise
         };
-        Surface { point: Box::new(point), nu: 18, nv: 10, edges: true }
-    }
-}
-
-/// A triangle of a surface on the page, with the depth of its corners, the
-/// surface it's on and where on it.
-struct Triangle {
-    corners: [P3; 3],
-    surface: usize,
-    u: f64,
-    v: f64,
-    min: V,
-    max: V,
-}
-
-impl Triangle {
-    /// Its depth over the page point `q`, if it covers it.
-    fn depth_at(&self, q: V) -> Option<f64> {
-        if q.x < self.min.x || q.x > self.max.x || q.y < self.min.y || q.y > self.max.y {
-            return None;
-        }
-        let [a, b, c] = self.corners;
-        let det = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
-        if det.abs() < 1e-12 {
-            return None;
-        }
-        let l1 = ((b.y - c.y) * (q.x - c.x) + (c.x - b.x) * (q.y - c.y)) / det;
-        let l2 = ((c.y - a.y) * (q.x - c.x) + (a.x - c.x) * (q.y - c.y)) / det;
-        let l3 = 1.0 - l1 - l2;
-        (l1 >= -1e-9 && l2 >= -1e-9 && l3 >= -1e-9).then_some(l1 * a.z + l2 * b.z + l3 * c.z)
-    }
-}
-
-/// A point on a line to draw, and the surface (and where on it) the line
-/// runs along, if any, which doesn't hide its own line close by.
-type Tagged = (P3, Option<(usize, f64, f64)>);
-
-struct Model {
-    surfaces: Vec<Surface>,
-    triangles: Vec<Triangle>,
-    grid: HashMap<(i64, i64), Vec<usize>>,
-    cell: f64,
-    /// How much nearer a surface must be to hide a line.
-    margin: f64,
-    /// Visible stretches of line shorter than this aren't drawn.
-    speck: f64,
-}
-
-impl Model {
-    fn new(surfaces: Vec<Surface>, radius: f64) -> Self {
-        let mut triangles = Vec::new();
-        for (index, surface) in surfaces.iter().enumerate() {
-            let (nu, nv) = (surface.nu, surface.nv);
-            let grid: Vec<Vec<P3>> = (0..=nu).map(|i| (0..=nv).map(|j| {
-                (surface.point)(i as f64 / nu as f64, -1.0 + 2.0 * j as f64 / nv as f64)
-            }).collect()).collect();
-            for i in 0..nu {
-                for j in 0..nv {
-                    let (u, v) = ((i as f64 + 0.5) / nu as f64, -1.0 + 2.0 * (j as f64 + 0.5) / nv as f64);
-                    for corners in [[grid[i][j], grid[i + 1][j], grid[i + 1][j + 1]], [grid[i][j], grid[i + 1][j + 1], grid[i][j + 1]]] {
-                        let min = V::new(corners.iter().map(|p| p.x).fold(f64::INFINITY, f64::min), corners.iter().map(|p| p.y).fold(f64::INFINITY, f64::min));
-                        let max = V::new(corners.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max), corners.iter().map(|p| p.y).fold(f64::NEG_INFINITY, f64::max));
-                        triangles.push(Triangle { corners, surface: index, u, v, min, max });
-                    }
-                }
-            }
-        }
-        let cell = radius / 8.0;
-        let mut grid: HashMap<(i64, i64), Vec<usize>> = HashMap::new();
-        for (t, triangle) in triangles.iter().enumerate() {
-            let (x0, y0) = ((triangle.min.x / cell).floor() as i64, (triangle.min.y / cell).floor() as i64);
-            let (x1, y1) = ((triangle.max.x / cell).floor() as i64, (triangle.max.y / cell).floor() as i64);
-            for x in x0..=x1 {
-                for y in y0..=y1 {
-                    grid.entry((x, y)).or_default().push(t);
-                }
-            }
-        }
-        Model { surfaces, triangles, grid, cell, margin: 0.004 * radius, speck: 0.04 * radius }
-    }
-
-    /// Whether a surface nearer than `q` covers it, other than the one its
-    /// line runs along, close by.
-    fn hidden(&self, (q, on): Tagged) -> bool {
-        let key = ((q.x / self.cell).floor() as i64, (q.y / self.cell).floor() as i64);
-        let Some(near) = self.grid.get(&key) else { return false };
-        near.iter().any(|&t| {
-            let triangle = &self.triangles[t];
-            if let Some((surface, u, v)) = on {
-                let own = &self.surfaces[surface];
-                if triangle.surface == surface
-                    && (triangle.u - u).abs() < 1.6 / own.nu as f64
-                    && (triangle.v - v).abs() < 3.2 / own.nv as f64 {
-                    return false;
-                }
-            }
-            triangle.depth_at(q.flat()).is_some_and(|depth| depth > q.z + self.margin)
-        })
-    }
-
-    /// The visible stretches of a line, on the page.
-    fn visible(&self, line: &[Tagged], out: &mut Vec<Vec<V>>) {
-        let start = out.len();
-        self.stretches(line, out);
-        let speck = self.speck;
-        let mut kept = out.split_off(start);
-        kept.retain(|run| run.windows(2).map(|w| (w[1] - w[0]).len()).sum::<f64>() >= speck);
-        out.extend(kept);
-    }
-
-    fn stretches(&self, line: &[Tagged], out: &mut Vec<Vec<V>>) {
-        let hidden: Vec<bool> = line.iter().map(|&p| self.hidden(p)).collect();
-        let between = |a: Tagged, b: Tagged, t: f64| -> Tagged {
-            let on = match (a.1, b.1) {
-                (Some((s, u0, v0)), Some((_, u1, v1))) => Some((s, mix(u0, u1, t), mix(v0, v1, t))),
-                _ => a.1,
-            };
-            (a.0.lerp(b.0, t), on)
-        };
-        // Where the line between a visible point and a hidden one goes under.
-        let edge = |seen: Tagged, unseen: Tagged| {
-            let (mut lo, mut hi) = (0.0, 1.0);
-            for _ in 0..16 {
-                let mid = (lo + hi) / 2.0;
-                if self.hidden(between(seen, unseen, mid)) { hi = mid } else { lo = mid }
-            }
-            between(seen, unseen, (lo + hi) / 2.0).0.flat()
-        };
-        let mut run: Vec<V> = Vec::new();
-        for i in 0..line.len() {
-            match (i > 0 && hidden[i - 1], hidden[i]) {
-                (true, false) => {
-                    run.push(edge(line[i], line[i - 1]));
-                    run.push(line[i].0.flat());
-                }
-                (false, false) => run.push(line[i].0.flat()),
-                (false, true) => {
-                    if i > 0 {
-                        run.push(edge(line[i - 1], line[i]));
-                    }
-                    if run.len() > 1 {
-                        out.push(std::mem::take(&mut run));
-                    }
-                    run.clear();
-                }
-                (true, true) => {}
-            }
-        }
-        if run.len() > 1 {
-            out.push(run);
-        }
-    }
-
-    /// The sides of a surface, from the base round the tip and back.
-    fn edges(&self, index: usize) -> Vec<Tagged> {
-        let surface = &self.surfaces[index];
-        let n = 3 * surface.nu;
-        let side = |v: f64, k: usize| {
-            let u = k as f64 / n as f64;
-            ((surface.point)(u, v), Some((index, u, v)))
-        };
-        (0..=n).map(|k| side(-1.0, k)).chain((0..n).rev().map(|k| side(1.0, k))).collect()
-    }
-
-    /// The folds of a surface: where it turns from facing the viewer to
-    /// facing away, traced across its grid (marching squares).
-    fn folds(&self, index: usize) -> Vec<Vec<Tagged>> {
-        let surface = &self.surfaces[index];
-        let (nu, nv) = (surface.nu * 2, surface.nv * 2);
-        let at = |i: usize, j: usize| (i as f64 / nu as f64, -1.0 + 2.0 * j as f64 / nv as f64);
-        let (du, dv) = (0.25 / nu as f64, 0.5 / nv as f64);
-        let facing: Vec<Vec<f64>> = (0..=nu).map(|i| (0..=nv).map(|j| {
-            // Just inside the ends, where a surface can pinch to a point
-            // and have no facing.
-            let (u, v) = at(i, j);
-            let u = u.clamp(0.02, 0.98);
-            let p = |u: f64, v: f64| (surface.point)(u.clamp(0.0, 1.0), v.clamp(-1.0, 1.0));
-            let along = p(u + du, v) - p(u - du, v);
-            let across = p(u, v + dv) - p(u, v - dv);
-            along.cross(across).z
-        }).collect()).collect();
-        // Where the facing changes sign along each grid edge; an edge is
-        // (cell corner, whether it runs along v).
-        let crossing = |i: usize, j: usize, along_v: bool| -> Option<(f64, f64)> {
-            let (i2, j2) = if along_v { (i, j + 1) } else { (i + 1, j) };
-            let (a, b) = (facing[i][j], facing[i2][j2]);
-            if (a > 0.0) == (b > 0.0) {
-                return None;
-            }
-            let t = a / (a - b);
-            let ((u0, v0), (u1, v1)) = (at(i, j), at(i2, j2));
-            Some((mix(u0, u1, t), mix(v0, v1, t)))
-        };
-        type Edge = (usize, usize, bool);
-        let mut links: HashMap<Edge, Vec<Edge>> = HashMap::new();
-        for i in 0..nu {
-            for j in 0..nv {
-                let sides: Vec<Edge> = [(i, j, false), (i + 1, j, true), (i, j + 1, false), (i, j, true)].into_iter()
-                    .filter(|&(a, b, along_v)| crossing(a, b, along_v).is_some())
-                    .collect();
-                let pairs: Vec<(Edge, Edge)> = match sides.len() {
-                    2 => vec![(sides[0], sides[1])],
-                    // A saddle: pair them by the cell's middle.
-                    4 => {
-                        let middle = facing[i][j] + facing[i + 1][j] + facing[i][j + 1] + facing[i + 1][j + 1];
-                        if (middle > 0.0) == (facing[i][j] > 0.0) {
-                            vec![(sides[0], sides[1]), (sides[2], sides[3])]
-                        } else {
-                            vec![(sides[0], sides[3]), (sides[1], sides[2])]
-                        }
-                    }
-                    _ => vec![],
-                };
-                for (a, b) in pairs {
-                    links.entry(a).or_default().push(b);
-                    links.entry(b).or_default().push(a);
-                }
-            }
-        }
-        // Chain the crossings into lines, starting from their ends.
-        let mut keys: Vec<Edge> = links.keys().copied().collect();
-        keys.sort();
-        keys.sort_by_key(|k| links[k].len());
-        let mut used: std::collections::HashSet<Edge> = std::collections::HashSet::new();
-        let mut lines = Vec::new();
-        for start in keys {
-            if used.contains(&start) {
-                continue;
-            }
-            let mut chain = vec![start];
-            used.insert(start);
-            let mut current = start;
-            while let Some(&next) = links[&current].iter().find(|e| !used.contains(e)) {
-                used.insert(next);
-                chain.push(next);
-                current = next;
-            }
-            if chain.len() < 2 {
-                continue;
-            }
-            lines.push(chain.into_iter().map(|(i, j, along_v)| {
-                let (u, v) = crossing(i, j, along_v).expect("linked edges cross");
-                ((surface.point)(u, v), Some((index, u, v)))
-            }).collect());
-        }
-        lines
+        Surface { point: Box::new(point), nu: 18, nv: 10, edges: Surface::smooth_edges(54), lines: Vec::new(), folds: true, crease: false }
     }
 }
 
@@ -511,7 +199,10 @@ pub(super) fn bloom(pose: &Pose, rng: &mut StdRng) -> Bloom {
         }),
         nu: 4,
         nv: 16,
-        edges: false,
+        edges: None,
+        lines: Vec::new(),
+        folds: true,
+        crease: false,
     });
     surfaces.push(Surface {
         point: Box::new(move |u: f64, v: f64| {
@@ -521,29 +212,20 @@ pub(super) fn bloom(pose: &Pose, rng: &mut StdRng) -> Bloom {
         }),
         nu: 2,
         nv: 16,
-        edges: false,
+        edges: None,
+        lines: Vec::new(),
+        // Flat: its rim, drawn once it's open, is its only line.
+        folds: false,
+        crease: false,
     });
     let receptacle = surfaces.len() - 1;
 
     let model = Model::new(surfaces, radius);
     let mut lines = Vec::new();
-    for index in 0..model.surfaces.len() {
-        if model.surfaces[index].edges {
-            model.visible(&model.edges(index), &mut lines);
-        }
-        // The receptacle is flat: its rim is its only line.
-        if index != receptacle {
-            for fold in model.folds(index) {
-                model.visible(&fold, &mut lines);
-            }
-        }
-    }
+    model.draw(&mut lines);
     // The receptacle's rim, and stamens rising from it, once it's open.
     if open > 0.25 {
-        let rim: Vec<Tagged> = (0..=32).map(|k| {
-            let v = -1.0 + 2.0 * k as f64 / 32.0;
-            ((model.surfaces[receptacle].point)(1.0, v), None)
-        }).collect();
+        let rim: Line = (0..=32).map(|k| (model.on(receptacle, 1.0, -1.0 + 2.0 * k as f64 / 32.0), false)).collect();
         model.visible(&rim, &mut lines);
         let count = rng.random_range(22..32);
         for k in 0..count {
@@ -552,20 +234,20 @@ pub(super) fn bloom(pose: &Pose, rng: &mut StdRng) -> Bloom {
             let length = radius * mix(0.2, 0.34, open) * rng.random_range(0.85..1.15);
             let base = frame.center + frame.radial(angle) * (0.1 * radius) + frame.axis * (0.02 * radius);
             let out = frame.radial(angle);
-            let stamen: Vec<Tagged> = (0..=4).map(|j| {
+            let stamen: Line = (0..=4).map(|j| {
                 let t = j as f64 / 4.0;
                 let theta = rise - 0.3 * t;
-                (base + (out * theta.cos() + frame.axis * theta.sin()) * (length * t), None)
+                ((base + (out * theta.cos() + frame.axis * theta.sin()) * (length * t), None), false)
             }).collect();
-            let tip = stamen[stamen.len() - 1];
+            let tip = stamen[stamen.len() - 1].0;
             model.visible(&stamen, &mut lines);
             if !model.hidden(tip) {
                 let anther = tip.0.flat();
-                lines.push((0..=8).map(|j| anther + V::angle(TAU * j as f64 / 8.0) * (0.022 * radius)).collect());
+                lines.push((0..=8).map(|j| (anther + V::angle(TAU * j as f64 / 8.0) * (0.022 * radius), false)).collect());
             }
         }
     }
-    let triangles: Vec<[V; 3]> = model.triangles.iter().map(|t| t.corners.map(|p| p.flat())).collect();
+    let triangles = model.triangles();
     let count = 3.0 * triangles.len() as f64;
     let middle = triangles.iter().flatten().fold(V::default(), |sum, &p| sum + p) * (1.0 / count);
     let reach = triangles.iter().flatten().map(|&p| (p - middle).len()).fold(0.0, f64::max);
@@ -584,7 +266,7 @@ mod tests {
 
     /// Anthers: the small closed loops at the stamens' tips.
     fn anthers(bloom: &Bloom) -> usize {
-        bloom.lines.iter().filter(|line| line.len() == 9 && (line[0] - line[8]).len() < 1e-9).count()
+        bloom.lines.iter().filter(|line| line.len() == 9 && (line[0].0 - line[8].0).len() < 1e-9).count()
     }
 
     #[test]
@@ -596,7 +278,7 @@ mod tests {
         assert!(anthers(&open) > 15, "{} anthers", anthers(&open));
         for bloom in [&bud, &open] {
             assert!(!bloom.lines.is_empty());
-            assert!(bloom.lines.iter().flatten().chain(bloom.triangles.iter().flatten()).all(|p| p.is_finite()));
+            assert!(bloom.lines.iter().flatten().map(|p| &p.0).chain(bloom.triangles.iter().flatten()).all(|p| p.is_finite()));
         }
     }
 

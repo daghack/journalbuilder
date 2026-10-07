@@ -22,6 +22,7 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
 use super::flower::{self, Pose};
+use super::leaf;
 use super::geom::{arc_end, V};
 use super::scene::Scene;
 use crate::journal::paths::StrokePath;
@@ -320,112 +321,65 @@ impl Grower {
         true
     }
 
-    /// A compound leaf on a stalk from `s` along `stem`: an end leaflet and
-    /// a pair either side, sometimes with a second, smaller pair.
+    /// A compound leaf on a stalk from `s` along `stem`: a pair of
+    /// leaflets on short stalks either side of a node (sometimes a second,
+    /// smaller pair), and an end leaflet on a longer stalk beyond it.
     fn leaf(&mut self, stem: &Stem, s: f64, side: f64, depth: usize) -> bool {
         let size = self.size;
         let (at, heading, _) = stem.at(s);
         for _ in 0..6 {
             let dir = heading + side * self.rng.random_range(0.6..1.2);
-            let length = size * self.rng.random_range(0.35..0.7);
+            let length = size * self.rng.random_range(0.4..0.75);
             let turn = side * self.rng.random_range(-0.2..0.5);
             let bend = self.bend(length, turn, 0.0);
-            let (end, end_heading) = self.reach(at, dir, length, &bend);
+            let (node, node_heading) = self.reach(at, dir, length, &bend);
             let scale = if depth == 0 { 1.0 } else { 0.85 };
             let terminal = size * LEAFLET_LENGTH * scale * self.rng.random_range(0.8..1.0);
-            // (base, direction, length, width) of each leaflet, back to front.
-            let mut leaflets = Vec::new();
+            // (stalk heading, stalk length, leaflet length) for each pair.
+            let mut pairs = vec![(self.rng.random_range(0.75..1.1), size * self.rng.random_range(0.08..0.15), terminal * self.rng.random_range(0.72..0.85))];
             if depth == 0 && self.rng.random::<f64>() < 0.3 {
+                pairs.push((self.rng.random_range(1.6..2.0), size * self.rng.random_range(0.05..0.09), terminal * self.rng.random_range(0.5..0.6)));
+            }
+            let mut stalks = Vec::new();
+            let mut leaflets = Vec::new();
+            for &(spread, stalk, l) in pairs.iter().rev() {
                 for sign in [-1.0, 1.0] {
-                    let l = terminal * self.rng.random_range(0.5..0.6);
-                    leaflets.push((end, end_heading + sign * self.rng.random_range(1.7..2.1), l, l * self.rng.random_range(0.5..0.58)));
+                    let angle = node_heading + sign * spread;
+                    stalks.push((angle, stalk, self.bend(stalk, 0.0, 0.0)));
+                    leaflets.push(leaf::Placement {
+                        base: node + V::angle(angle) * stalk,
+                        heading: angle - sign * self.rng.random_range(0.0..0.25),
+                        length: l,
+                        width: l * self.rng.random_range(0.5..0.58),
+                    });
                 }
             }
-            for sign in [-1.0, 1.0] {
-                let l = terminal * self.rng.random_range(0.72..0.85);
-                leaflets.push((end, end_heading + sign * self.rng.random_range(0.8..1.2), l, l * self.rng.random_range(0.5..0.58)));
-            }
-            let stalklet = 0.2 * size;
-            let end_dir = end_heading + self.rng.random_range(-0.15..0.15);
-            leaflets.push((end + V::angle(end_dir) * stalklet, end_dir, terminal, terminal * self.rng.random_range(0.48..0.56)));
-            let room: Vec<(V, f64)> = leaflets.iter()
-                .map(|&(base, dir, l, w)| (base + V::angle(dir) * (l / 2.0), 0.9 * (l / 2.0).max(w / 2.0)))
-                .collect();
-            if !self.fits(&room) {
+            let rachis = size * self.rng.random_range(0.35..0.55);
+            let rachis_turn = self.rng.random_range(-0.2..0.2);
+            let rachis_bend = self.bend(rachis, rachis_turn, 0.0);
+            let rachis_heading = node_heading + self.rng.random_range(-0.1..0.1);
+            let (end, end_heading) = self.reach(node, rachis_heading, rachis, &rachis_bend);
+            stalks.push((rachis_heading, rachis, rachis_bend));
+            leaflets.push(leaf::Placement {
+                base: end,
+                heading: end_heading + self.rng.random_range(-0.15..0.15),
+                length: terminal,
+                width: terminal * self.rng.random_range(0.48..0.56),
+            });
+            let drawn = leaf::leaf(&leaflets, &mut self.rng);
+            if !self.fits(&drawn.room) {
                 continue;
             }
             let petiole = self.stalk(stem, s, dir, length, &bend);
-            // The end leaflet's own stalk, running a little way under it.
-            let straight = self.bend(stalklet, 0.0, 0.0);
-            let stalk = self.stalk(&petiole, petiole.length(), end_dir, stalklet + 0.03 * size, &straight);
-            let _ = stalk;
-            let depth = LEAF_DEPTH + self.rng.random_range(0.0..5.0);
-            for (k, &(base, dir, l, w)) in leaflets.iter().enumerate() {
-                let (outline, corners, veins) = self.leaflet(base, dir, l, w);
-                let id = self.scene.add(Part::Leaf, depth + 0.001 * k as f64, outline, corners);
-                self.scene.add_strokes(id, veins);
+            for (heading, length, bend) in stalks {
+                self.stalk(&petiole, petiole.length(), heading, length, &bend);
             }
-            self.room.extend(room);
+            let depth = LEAF_DEPTH + self.rng.random_range(0.0..5.0);
+            self.scene.add_triangles(Part::Leaf, depth, drawn.triangles, drawn.lines, size / 6.0);
+            self.room.extend(drawn.room);
             return true;
         }
         false
-    }
-
-    /// One leaflet from `base` towards `dir`: its outline, with the points
-    /// and notches of its teeth as corners, and its midrib and veins.
-    fn leaflet(&mut self, base: V, dir: f64, length: f64, width: f64) -> (Vec<V>, Vec<bool>, Vec<Vec<V>>) {
-        let bend = self.rng.random_range(-0.08..0.08);
-        let (along, across) = (V::angle(dir), V::angle(dir).perp());
-        let mid = |u: f64| base + along * (u * length) + across * (bend * length * u * u);
-        let normal = |u: f64| {
-            let slope = 2.0 * bend * u;
-            (across - along * slope) * (1.0 / (1.0 + slope * slope).sqrt())
-        };
-        // Widest a little below the middle, rounded at the base and drawn
-        // out to a point.
-        let (a, b): (f64, f64) = (0.55, 1.15);
-        let peak = (a / (a + b)).powf(a) * (b / (a + b)).powf(b);
-        let half = |u: f64| width / 2.0 * u.powf(a) * (1.0 - u).powf(b) / peak;
-        let margin = |u: f64, out: f64, side: f64| mid(u) + normal(u) * (side * (half(u) + out));
-        // Teeth pointing towards the tip, every other one smaller, fading
-        // where the leaflet narrows.
-        let teeth = self.rng.random_range(13..19);
-        let (from, to) = (0.1, 0.97);
-        let du = (to - from) / teeth as f64;
-        let tooth = 0.03 * length;
-        let fade = |u: f64| (half(u) / (0.2 * width)).min(1.0);
-        let side_of = |side: f64| -> Vec<(V, bool)> {
-            let mut points: Vec<(V, bool)> = (1..=4).map(|k| (margin(from * k as f64 / 4.0, 0.0, side), false)).collect();
-            for k in 0..teeth {
-                let u0 = from + k as f64 * du;
-                let depth = tooth * fade(u0 + 0.8 * du) * if k % 2 == 0 { 1.0 } else { 0.6 };
-                points.push((margin(u0, -0.4 * depth, side), true));
-                points.push((margin(u0 + 0.45 * du, 0.15 * depth, side), false));
-                points.push((margin(u0 + 0.8 * du, 0.6 * depth, side), true));
-            }
-            points
-        };
-        let mut points = vec![(mid(0.0), true)];
-        points.extend(side_of(1.0));
-        points.push((mid(1.0), true));
-        points.extend(side_of(-1.0).into_iter().rev());
-        let (outline, corners) = points.into_iter().unzip();
-
-        let mut veins = vec![(0..=12).map(|k| mid(0.93 * k as f64 / 12.0)).collect::<Vec<V>>()];
-        let count = teeth / 2;
-        for k in 0..count {
-            let u = 0.12 + 0.78 * k as f64 / count as f64;
-            for side in [1.0, -1.0] {
-                let u = u + 0.02 * (side + 1.0);
-                let tip = u + 0.1;
-                veins.push(vec![
-                    mid(u),
-                    mid(u + 0.04) + normal(u + 0.04) * (side * 0.4 * half(u + 0.04)),
-                    mid(tip) + normal(tip) * (side * 0.75 * half(tip)),
-                ]);
-            }
-        }
-        (outline, corners, veins)
     }
 
     /// A flower at `stage` on a stalk from `s` along `stem`, facing away

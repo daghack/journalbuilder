@@ -5,8 +5,10 @@
 mod bramble;
 mod flower;
 mod geom;
+mod leaf;
 mod scene;
 mod snake;
+mod solid;
 
 pub use bramble::{bramble, Bramble};
 pub use snake::{snake_path, snake_spine};

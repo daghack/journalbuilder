@@ -25,7 +25,8 @@ struct Shape<T> {
     /// Outline points a curve mustn't smooth over, such as the tips of
     /// teeth and thorns.
     corners: Vec<bool>,
-    strokes: Vec<Vec<V>>,
+    /// Open lines drawn on it, and which of their points are corners.
+    strokes: Vec<Run>,
     joins: Vec<Join>,
     min: V,
     max: V,
@@ -85,7 +86,7 @@ pub(super) struct Scene<T> {
 }
 
 /// A stretch of line: its points, and whether each is a corner.
-type Run = Vec<(V, bool)>;
+pub(super) type Run = Vec<(V, bool)>;
 
 impl<T: Copy + PartialEq> Scene<T> {
     pub fn new(tolerance: f64, max_gap: f64, speck: f64) -> Self {
@@ -104,18 +105,13 @@ impl<T: Copy + PartialEq> Scene<T> {
     }
 
     /// Add a shape covered by `triangles`, drawn as `strokes` alone.
-    pub fn add_triangles(&mut self, part: T, depth: f64, triangles: Vec<[V; 3]>, strokes: Vec<Vec<V>>, cell: f64) -> usize {
+    pub fn add_triangles(&mut self, part: T, depth: f64, triangles: Vec<[V; 3]>, strokes: Vec<Run>, cell: f64) -> usize {
         let corners = triangles.iter().flatten();
         let min = corners.clone().fold(V::new(f64::INFINITY, f64::INFINITY), |m, p| V::new(m.x.min(p.x), m.y.min(p.y)));
         let max = corners.fold(V::new(f64::NEG_INFINITY, f64::NEG_INFINITY), |m, p| V::new(m.x.max(p.x), m.y.max(p.y)));
         let triangles = Some(Triangles::new(triangles, cell));
         self.shapes.push(Shape { part, depth, outline: Vec::new(), triangles, corners: Vec::new(), strokes, joins: Vec::new(), min, max });
         self.shapes.len() - 1
-    }
-
-    /// Open strokes drawn on a shape, hidden by what's in front of it.
-    pub fn add_strokes(&mut self, shape: usize, strokes: impl IntoIterator<Item = Vec<V>>) {
-        self.shapes[shape].strokes.extend(strokes);
     }
 
     /// Join two shapes that grow out of each other at `at`: within `reach`
@@ -254,8 +250,8 @@ impl<T: Copy + PartialEq> Scene<T> {
                 },
             }
             for stroke in &shape.strokes {
-                let corners = vec![false; stroke.len()];
-                for run in self.runs(i, stroke, &corners, false).unwrap_or_default() {
+                let (points, corners): (Vec<V>, Vec<bool>) = stroke.iter().copied().unzip();
+                for run in self.runs(i, &points, &corners, false).unwrap_or_default() {
                     path = self.draw(path, &run);
                 }
             }
