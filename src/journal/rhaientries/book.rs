@@ -1095,7 +1095,7 @@ mod tests {
     /// Glyph strokes on each page, and where they are.
     fn glyph_centres(entry: &Entry, page: usize, color: &str) -> Vec<parry2d::math::Vec2> {
         entry.pages[page].canvases()[0].strokes.iter()
-            .filter(|s| s.style.color == color)
+            .filter(|s| s.style.color == crate::journal::canvas::StrokeColor::from(color))
             .map(|s| {
                 let points = s.path.points_within();
                 points.iter().fold(parry2d::math::Vec2::ZERO, |a, p| a + *p) / points.len() as f32

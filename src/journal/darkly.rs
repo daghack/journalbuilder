@@ -1,4 +1,5 @@
 use darkly::engine::{DarklyEngine, types::StrokeOp, ExportImageResult};
+use darkly::layer::LayerId;
 use darkly::gpu::context::GpuContext;
 use darkly::coord::CanvasRect;
 use darkly::config::ConfigValue;
@@ -6,7 +7,9 @@ use image::{ImageBuffer, Rgba};
 use parry2d::math::Vec2;
 use rayon::prelude::*;
 use crate::journal::paths::{CurveSample};
-use crate::journal::canvas::{Canvas, ColoredStroke};
+use crate::journal::canvas::{Canvas, ColoredStroke, StrokeColor};
+use crate::journal::compose::{self, Placed};
+use crate::journal::gradient::{colorize, Along, GradientKind};
 use std::collections::HashSet;
 
 pub fn new_engine(width: u32, height: u32) -> DarklyEngine {
@@ -183,38 +186,89 @@ fn downsample(src: &ImageBuffer<Rgba<u8>, Vec<u8>>, src_origin: (i64, i64), k: (
 /// pixels from `offset` on of a render of the page at `page_origin`, with
 /// `ratio` pixels per unit across and down. Strokes that can't reach it are
 /// skipped.
+///
+/// Darkly draws a stroke in one colour, so strokes with a gradient are drawn
+/// in white on a layer of their own (with any strokes next to them sharing
+/// the gradient), then coloured pixel by pixel and laid over what's below.
+/// Brushes that move ink (Smudge, Blur) don't reach across those layers.
 fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, page_origin: Vec2, offset: (f32, f32), ratio: Vec2, brush_scale: f32) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
-    let layer = engine.add_raster_layer(None);
     let (engine_canvas_width, engine_canvas_height) = engine.canvas_dimensions();
-    let (w_ratio, h_ratio) = (ratio.x, ratio.y);
-    let sample_spacing = SAMPLE_SPACING_PX / w_ratio.max(h_ratio);
-    let origin = page_origin + Vec2::new(offset.0 / w_ratio, offset.1 / h_ratio);
-    let view_max = origin + Vec2::new(engine_canvas_width as f32 / w_ratio, engine_canvas_height as f32 / h_ratio);
-
-    let strokes = canvas.strokes();
-    let mut warned_colors = HashSet::new();
-    let mut warned_saturation = HashSet::new();
-    // Only reload the brush / reset its size when they change between strokes.
-    let mut loaded_name: Option<&str> = None;
-    let mut loaded_size: Option<f32> = None;
-    let mut drawn: u32 = 0;
-    for (stroke, seed) in strokes.iter().zip(canvas.stroke_seeds()) {
-        if !Canvas::stroke_reaches(stroke, origin, view_max, 0.0) {
-            continue;
+    let origin = page_origin + Vec2::new(offset.0 / ratio.x, offset.1 / ratio.y);
+    let view_max = origin + Vec2::new(engine_canvas_width as f32 / ratio.x, engine_canvas_height as f32 / ratio.y);
+    let strokes: Vec<(&ColoredStroke, u32)> = canvas.strokes().iter().zip(canvas.stroke_seeds())
+        .filter(|(stroke, _)| Canvas::stroke_reaches(stroke, origin, view_max, 0.0))
+        .collect();
+    let mut pen = Pen { engine, page_origin, offset, ratio, brush_scale, loaded_name: None, loaded_size: None, drawn: 0, warned_colors: HashSet::new(), warned_saturation: HashSet::new() };
+    let mut rendered: Option<Placed> = None;
+    for pass in strokes.chunk_by(|a, b| a.0.style.color.gradient() == b.0.style.color.gradient()) {
+        let gradient = pass[0].0.style.color.gradient();
+        let layer = pen.engine.add_raster_layer(None);
+        let mut along = Vec::new();
+        let mut reach: f32 = 0.0;
+        for &(stroke, seed) in pass {
+            let samples = pen.draw(layer, stroke, seed, gradient.is_some());
+            if gradient.is_some_and(|g| g.kind == GradientKind::Along) {
+                along.extend(samples);
+                reach = reach.max(stroke.style.brush.as_ref().map_or(0.0, |b| b.size) * brush_scale);
+            }
         }
+        let mut image = export(pen.engine, layer);
+        if let Some(gradient) = gradient {
+            let to_canvas = |x: f32, y: f32| page_origin + Vec2::new((x + offset.0) / ratio.x, (y + offset.1) / ratio.y);
+            let along = (gradient.kind == GradientKind::Along).then(|| Along::new(along, reach));
+            colorize(&mut image, gradient, to_canvas, along.as_ref());
+        }
+        let image = Placed { image, at: (0, 0) };
+        match &mut rendered {
+            None => rendered = Some(image),
+            Some(below) => compose::draw(below, &image, compose::over),
+        }
+    }
+    match rendered {
+        Some(rendered) => rendered.image,
+        // Nothing reaches it: an empty render.
+        None => {
+            let layer = pen.engine.add_raster_layer(None);
+            export(pen.engine, layer)
+        }
+    }
+}
+
+/// Draws strokes into the engine, keeping track of the brush it has
+/// loaded and what it's warned about.
+struct Pen<'a> {
+    engine: &'a mut DarklyEngine,
+    page_origin: Vec2,
+    offset: (f32, f32),
+    ratio: Vec2,
+    brush_scale: f32,
+    /// Only reload the brush / reset its size when they change between
+    /// strokes.
+    loaded_name: Option<String>,
+    loaded_size: Option<f32>,
+    drawn: u32,
+    warned_colors: HashSet<String>,
+    warned_saturation: HashSet<(u32, String, u32)>,
+}
+
+impl Pen<'_> {
+    /// Draw a stroke on `layer`, in white if `white` (to be coloured
+    /// after), returning its points in render pixels with how far along
+    /// its subpath each is, from 0 to 1.
+    fn draw(&mut self, layer: LayerId, stroke: &ColoredStroke, seed: u32, white: bool) -> Vec<(Vec2, f32)> {
         let ColoredStroke { path, style, .. } = stroke;
         let brush = style.brush.as_ref()
             .expect("Darkly strokes need a brush (rhai stroke styles always have one)");
-        if loaded_name != Some(brush.name.as_str()) {
-            engine.brush_load(&brush.name)
+        if self.loaded_name.as_deref() != Some(brush.name.as_str()) {
+            self.engine.brush_load(&brush.name)
                 .unwrap_or_else(|e| panic!("Failed to load brush '{}': {}", brush.name, e));
-            loaded_name = Some(brush.name.as_str());
-            loaded_size = None;
+            self.loaded_name = Some(brush.name.clone());
+            self.loaded_size = None;
         }
-        let size = brush.size * brush_scale;
-        if loaded_size != Some(size) {
-            engine.brush_set_exposed_port("brush_settings", "size", size).expect("Unable to set brush size");
-            loaded_size = Some(size);
+        let size = brush.size * self.brush_scale;
+        if self.loaded_size != Some(size) {
+            self.engine.brush_set_exposed_port("brush_settings", "size", size).expect("Unable to set brush size");
+            self.loaded_size = Some(size);
         }
         let pressure_min = brush.min_pressure;
         let pressure_range = brush.max_pressure - brush.min_pressure;
@@ -222,26 +276,33 @@ fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, page_origin: Vec2, 
         // output it's a geometric width). Darkly caps pressure at 1, so
         // past that, wider strokes stop getting heavier.
         let peak_pressure = style.width * brush.max_pressure;
-        if peak_pressure > 1.0 && warned_saturation.insert((style.width.to_bits(), brush.name.as_str(), brush.max_pressure.to_bits())) {
+        if peak_pressure > 1.0 && self.warned_saturation.insert((style.width.to_bits(), brush.name.clone(), brush.max_pressure.to_bits())) {
             eprintln!(
                 "warning: width {} strokes with brush '{}' (pressure {}-{}) reach pressure {:.2}; Darkly caps pressure at 1, so their heaviest parts look the same",
                 style.width, brush.name, brush.min_pressure, brush.max_pressure, peak_pressure,
             );
         }
-        let [cr, cg, cb, ca] = style.rgba().unwrap_or_else(|err| {
-            if warned_colors.insert(style.color.clone()) {
-                eprintln!("{}; drawing in black.", err);
-            }
-            [0.0, 0.0, 0.0, 1.0]
-        });
-        let substrokes = path.to_substrokes();
-        for (i, substroke) in substrokes.iter().enumerate() {
+        let [cr, cg, cb, ca] = if white {
+            [1.0; 4]
+        } else {
+            style.rgba().unwrap_or_else(|err| {
+                if let StrokeColor::Solid(color) = &style.color
+                    && self.warned_colors.insert(color.clone()) {
+                    eprintln!("{}; drawing in black.", err);
+                }
+                [0.0, 0.0, 0.0, 1.0]
+            })
+        };
+        let (w_ratio, h_ratio) = (self.ratio.x, self.ratio.y);
+        let sample_spacing = SAMPLE_SPACING_PX / w_ratio.max(h_ratio);
+        let mut points = Vec::new();
+        for (i, substroke) in path.to_substrokes().iter().enumerate() {
             // Darkly seeds each stroke's random brush texture from the wall
             // clock by default; numbering the strokes instead makes renders
             // reproducible while keeping neighbouring strokes distinct. (A
             // tile's strokes keep their numbers from the whole page.)
-            engine.set_stroke_seed(Some(seed.wrapping_add(i as u32)));
-            drawn = drawn.wrapping_add(1);
+            self.engine.set_stroke_seed(Some(seed.wrapping_add(i as u32)));
+            self.drawn = self.drawn.wrapping_add(1);
             // One stroke_path call per substroke: Darkly stabilizes and draws
             // the whole stroke at once, instead of re-rendering and
             // committing on every point as live stroke_to does.
@@ -251,12 +312,15 @@ fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, page_origin: Vec2, 
             for (i, CurveSample { point,  .. }) in samples.into_iter().enumerate() {
                 let t_param = i as f32 / sample_count as f32;
                 let pressure = style.width * (brush.pressure_profile.at(t_param) * pressure_range + pressure_min);
+                // Where it is in the whole page's render, less the offset:
+                // a whole number, so a tile's strokes land exactly where the
+                // page's would.
+                let x = (point.x - self.page_origin.x) * w_ratio - self.offset.0;
+                let y = (point.y - self.page_origin.y) * h_ratio - self.offset.1;
+                points.push((Vec2::new(x, y), i as f32 / (sample_count - 1).max(1) as f32));
                 ops.push(StrokeOp::BrushStroke {
-                    // Where it is in the whole page's render, less the
-                    // offset: a whole number, so a tile's strokes land
-                    // exactly where the page's would.
-                    x: (point.x - page_origin.x) * w_ratio - offset.0,
-                    y: (point.y - page_origin.y) * h_ratio - offset.1,
+                    x,
+                    y,
                     pressure,
                     x_tilt: 0.0,
                     y_tilt: 0.0,
@@ -269,39 +333,36 @@ fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, page_origin: Vec2, 
                     ca,
                 });
             }
-            engine.stroke_path(layer, &ops).expect("stroke_path failed");
+            self.engine.stroke_path(layer, &ops).expect("stroke_path failed");
             // Darkly finishes each stroke's bookkeeping (its undo snapshot)
             // asynchronously, on the next frame. Offline we never draw frames
             // until the export, so without this every stroke's ~4 MB of GPU
             // readbacks piles up: journal_entry_18 peaked at 14 GB and was
             // killed. Ticking every few strokes keeps it near 250 MB.
-            if drawn.is_multiple_of(FRAME_EVERY_STROKES) {
-                engine.render(0.0);
+            if self.drawn.is_multiple_of(FRAME_EVERY_STROKES) {
+                self.engine.render(0.0);
             }
         }
+        points
     }
+}
 
+/// Composite the document and read back `layer`'s render, then remove the
+/// layer.
+fn export(engine: &mut DarklyEngine, layer: LayerId) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
     // Composite the document to the surface. Call once per frame; the arg is the
     // animation clock in seconds (drives time-based veils). Returns whether it drew.
     engine.start_export();
     loop {
         engine.render(0.0);
-        let poll = engine.poll_export_result();
-        match poll {
-            Some(export_img) => {
-                let ExportImageResult {
-                    width,
-                    height,
-                    rgba
-                } = export_img;
-                let buff : ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::from_raw(width, height, rgba)
+        match engine.poll_export_result() {
+            Some(ExportImageResult { width, height, rgba }) => {
+                let buff: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::from_raw(width, height, rgba)
                     .expect("could not build image buffer");
                 engine.remove_layer(layer).expect("Failed to remove layer");
                 return buff;
             }
-            _ => {
-                std::thread::sleep(std::time::Duration::from_millis(2));
-            }
+            None => std::thread::sleep(std::time::Duration::from_millis(2)),
         }
     }
 }

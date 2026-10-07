@@ -25,6 +25,11 @@ shapes.add_strokepath(new_rectangle(new_vec(160.0, 0.0), 100.0, 70.0), accent);
 shapes.add_strokepath(new_line(new_vec(-60.0, 90.0), new_vec(210.0, 90.0)), faint);
 shapes.add_strokepath(new_line(new_vec(-60.0, 110.0), new_vec(210.0, 110.0)), swell);
 shapes.add_strokepath(new_arc(new_vec(0.0, 170.0), 50.0, 0.0, 4.71), shade);
+// Gradients along a stroke and across the page, drawn next to each other
+// and between solid strokes.
+shapes.add_strokepath(new_arc(new_vec(0.0, 170.0), 35.0, 0.0, 4.71), new_strokestyle(2.0, new_gradient(["darkred", "gold", "#1d2a5c"]), rough));
+shapes.add_strokepath(new_rectangle(new_vec(0.0, 170.0), 40.0, 30.0).hatch(#{ spacing: 4.0, angle: [0.5, 2.1] }),
+	new_strokestyle(1.0, new_gradient(["#1d2a5c", [0.3, "darkred"], "gold"], #{ center: new_vec(0.0, 170.0), radius: 25.0 }), ink_pen));
 shapes.add_strokepath(
 	new_strokepath().move_to(new_vec(100.0, 170.0))
 		.quad_to(new_vec(150.0, 100.0), new_vec(200.0, 170.0))

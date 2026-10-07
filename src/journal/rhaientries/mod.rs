@@ -2,6 +2,7 @@ mod art;
 mod avoid;
 mod book;
 mod glyphs;
+mod gradient;
 mod layout;
 mod locks;
 mod random;
@@ -15,7 +16,7 @@ use super::symboldict::SymbolPathDict;
 use super::canvas::Canvas as JournalCanvas;
 use super::canvas::StrokeStyle as JournalStrokeStyle;
 use super::canvas::CanvasStyleOptions;
-use super::canvas::{Brush, Frame, PressureProfile};
+use super::canvas::{Brush, Frame, PressureProfile, StrokeColor};
 use super::symbol::{place_along_path, place_words_along_path, Symbol, SymbolPlacementArgs};
 use super::canvas::textbox::TextBoxLineMode;
 use super::styles::Font;
@@ -756,7 +757,9 @@ impl Stroke {
 #[rhai_type(extra = Self::build_extra)]
 pub struct StrokeStyle {
     width: f64,
-    color: ImmutableString,
+    /// A CSS colour, or a gradient.
+    #[rhai_type(skip)]
+    color: StrokeColor,
     #[rhai_type(skip)]
     brush: BrushSettings,
 }
@@ -765,7 +768,7 @@ impl From<StrokeStyle> for JournalStrokeStyle {
     fn from(val: StrokeStyle) -> Self {
         JournalStrokeStyle {
             width: val.width as f32,
-            color: val.color.to_string(),
+            color: val.color,
             brush: Some(val.brush.into()),
         }
     }
@@ -782,17 +785,30 @@ impl StrokeStyle {
     ///   Darkly caps pressure at 1, so past `width = 1 / max_pressure` a
     ///   wider stroke looks no heavier, and the render warns.
     /// - SVG (`--svg`): it's the stroke's width in canvas units.
-    pub fn new(width: f64, color: ImmutableString, brush: BrushSettings) -> Result<Self, Box<EvalAltResult>> {
-        super::canvas::parse_color(&color)?;
+    ///
+    /// `color` is a CSS colour string, or a gradient (see gradient.rs).
+    pub fn new(width: f64, color: Dynamic, brush: BrushSettings) -> Result<Self, Box<EvalAltResult>> {
         Ok(Self {
             width,
-            color,
+            color: gradient::colour_or_gradient("new_strokestyle", color)?,
             brush,
         })
+    }
+    /// `style.color`: the colour string, or the gradient.
+    fn get_color(&mut self) -> Dynamic {
+        match &self.color {
+            StrokeColor::Solid(color) => color.into(),
+            StrokeColor::Gradient(g) => Dynamic::from(g.clone()),
+        }
+    }
+    fn set_color(&mut self, color: Dynamic) -> Result<(), Box<EvalAltResult>> {
+        self.color = gradient::colour_or_gradient("style.color", color)?;
+        Ok(())
     }
     fn build_extra(builder: &mut TypeBuilder<Self>) {
         builder
             .with_fn("new_strokestyle", Self::new)
+            .with_get_set("color", Self::get_color, Self::set_color)
         ;
     }
 }
@@ -1067,6 +1083,7 @@ impl JournalEngine {
         avoid::register(&mut engine);
         book::register(&mut engine, symdict.clone(), rng.clone(), layouts_dir.into());
         glyphs::register(&mut engine, symdict.clone(), rng.clone());
+        gradient::register(&mut engine);
         layout::register(&mut engine, symdict.clone(), rng.clone());
         locks::register(&mut engine, Rc::new(LockLibrary::new(locks_dir)));
 

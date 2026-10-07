@@ -1,6 +1,7 @@
 // The showcase: everything journals can draw with, one page each.
 //
-//   pens     every Darkly brush, the pressure profiles, widths and colours
+//   pens     every Darkly brush, the pressure profiles, widths, colours
+//            and gradients
 //   fonts    every font, its alphabet and a sentence
 //   glyphs   every glyph in the symbol dictionary, by family
 //   art      shapes and paths, hatching, symbols, mazes, snakes, brambles
@@ -126,6 +127,34 @@ for (colour, i) in colours {
 }
 // A stroke built from a path and a style, then added.
 pens.add_stroke(new_stroke(new_line(new_vec(0.0, y + 110.0), new_vec(1250.0, y + 110.0)), thin_red));
+
+// Gradients, in place of a colour: along each stroke from start to end,
+// across the page from one point to another, or out from a centre.
+// Colours are spaced evenly, or placed as [position, colour].
+y += 200.0;
+pens.add_canvas(write("gradients", 0.0, y, 34.0, heading_style, heading_font));
+y += 80.0;
+let ink_brush = new_brush("Rough Ink", 0.4, 0.8, 9.0);
+pens.add_canvas(write("new_gradient(colours): along each stroke", 0.0, y, 24.0, label_style, label_font));
+pens.add_strokepath(wave(620.0, 1250.0, y, 22.0), new_strokestyle(1.0, new_gradient([red, gold, blue]), ink_brush));
+y += 90.0;
+pens.add_canvas(write("#{ from, to }: across, colours placed", 0.0, y, 24.0, label_style, label_font));
+let across = new_gradient([green, [0.7, gold], red], #{ from: new_vec(620.0, 0.0), to: new_vec(1250.0, 0.0) });
+pens.add_strokepath(new_rectangle(new_vec(935.0, y), 630.0, 56.0).hatch(#{ spacing: 8.0, angle: 1.1 }), new_strokestyle(1.0, across, pen));
+y += 90.0;
+let words = new_strokestyle(1.0, red, pen);
+words.color = new_gradient([blue, pale, red], #{ from: new_vec(620.0, 0.0), to: new_vec(1250.0, 0.0) });
+pens.add_canvas(write("style.color = a gradient", 0.0, y, 24.0, label_style, label_font));
+pens.add_canvas(write("Written in a gradient, left to right", 620.0, y, 30.0, words, label_font));
+y += 150.0;
+pens.add_canvas(write("#{ center, radius }: out from a point", 0.0, y, 24.0, label_style, label_font));
+let glow = new_gradient([pale, gold, "rgba(255, 138, 122, 0.2)"], #{ center: new_vec(935.0, y), radius: 110.0 });
+let spiral = new_strokepath().move_to(new_vec(935.0, y));
+for i in 1..240 {
+	let a = i * 0.11;
+	spiral.line_to(new_vec(935.0 + a * 4.2 * a.cos(), y + a * 4.2 * a.sin()));
+}
+pens.add_strokepath(spiral, new_strokestyle(1.0, glow, new_brush("Ink Pen", 0.4, 0.8, 3.0)));
 
 let pens_page = new_page();
 pens_page.name = "pens";

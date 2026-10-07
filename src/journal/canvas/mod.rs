@@ -1,6 +1,7 @@
 use rayon::prelude::*;
 use serde::Deserialize;
 use crate::journal::{avoid::AvoidanceTree, StrokePath};
+use crate::journal::gradient::{Gradient, GradientKind};
 use parry2d::math::{Vec2};
 use noise::{NoiseFn, Perlin};
 use rand::rngs::StdRng;
@@ -10,7 +11,55 @@ use parry2d::bounding_volume;
 pub mod textbox;
 pub mod artistic;
 
-pub type StrokeColor = String;
+/// What a stroke is drawn in: a CSS colour, or a gradient.
+#[derive(Clone, Debug, PartialEq)]
+pub enum StrokeColor {
+    Solid(String),
+    Gradient(Gradient),
+}
+
+impl StrokeColor {
+    pub fn gradient(&self) -> Option<&Gradient> {
+        match self {
+            StrokeColor::Gradient(g) => Some(g),
+            StrokeColor::Solid(_) => None,
+        }
+    }
+}
+
+impl From<&str> for StrokeColor {
+    fn from(color: &str) -> Self {
+        StrokeColor::Solid(color.to_string())
+    }
+}
+
+/// A colour as CSS, for SVG.
+fn css(c: [f32; 4]) -> String {
+    let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    format!("rgba({}, {}, {}, {})", byte(c[0]), byte(c[1]), byte(c[2]), c[3])
+}
+
+/// An SVG gradient element, `id`, for a gradient laid across the canvas.
+fn svg_gradient(gradient: &Gradient, id: &str) -> String {
+    let stops: String = gradient.stops.iter().map(|(at, c)| {
+        format!("<stop offset=\"{}\" stop-color=\"{}\" />", at, css(*c))
+    }).collect();
+    match gradient.kind {
+        GradientKind::Linear { from, to } => format!(
+            "<linearGradient id=\"{}\" gradientUnits=\"userSpaceOnUse\" x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\">{}</linearGradient>",
+            id, from.x, from.y, to.x, to.y, stops),
+        GradientKind::Radial { center, radius } => format!(
+            "<radialGradient id=\"{}\" gradientUnits=\"userSpaceOnUse\" cx=\"{}\" cy=\"{}\" r=\"{}\">{}</radialGradient>",
+            id, center.x, center.y, radius, stops),
+        GradientKind::Along => String::new(),
+    }
+}
+
+/// How long the pieces of a stroke are in SVG output, where its colour
+/// changes along it: about `ALONG_PIECES` to a stroke, at least
+/// `ALONG_PIECE_MIN` units.
+const ALONG_PIECES: f32 = 48.0;
+const ALONG_PIECE_MIN: f32 = 1.5;
 
 #[derive(Clone, Debug)]
 pub struct StrokeStyle {
@@ -77,9 +126,12 @@ impl PressureProfile {
 }
 
 impl StrokeStyle {
-    /// The stroke color as sRGB RGBA floats in 0-1.
+    /// The stroke colour as sRGB RGBA floats in 0-1: a gradient's first.
     pub fn rgba(&self) -> Result<[f32; 4], String> {
-        parse_color(&self.color)
+        match &self.color {
+            StrokeColor::Solid(color) => parse_color(color),
+            StrokeColor::Gradient(g) => Ok(g.first()),
+        }
     }
     /// How far a stroke's marks reach either side of its line: half the
     /// wider of its width (in SVG output) and its brush (in Darkly's).
@@ -95,6 +147,52 @@ pub fn parse_color(color: &str) -> Result<[f32; 4], String> {
     let c: svgtypes::Color = color.parse()
         .map_err(|e| format!("Invalid color '{}': {}", color, e))?;
     Ok([c.red, c.green, c.blue, c.alpha].map(|v| v as f32 / 255.0))
+}
+
+/// A stroke as a plain SVG path, `width` wide. `id` names its gradient,
+/// if it has one across the canvas; along a stroke, it's cut into pieces,
+/// each its own colour.
+fn plain_path(stroke: &ColoredStroke, id: &str) -> String {
+    let ColoredStroke { path, style, .. } = stroke;
+    let line = |d: &dyn std::fmt::Display, paint: &str, cap: &str| format!(
+        "<path d=\"{}\" style=\"fill:none;stroke:{};stroke-width:{};{}\" />", d, paint, style.width, cap);
+    match &style.color {
+        StrokeColor::Solid(color) => line(path, color, ""),
+        StrokeColor::Gradient(gradient) if gradient.kind == GradientKind::Along => {
+            let mut svg = String::new();
+            for (mut points, closed) in path.flattened(0.1) {
+                if closed {
+                    points.push(points[0]);
+                }
+                let lengths: Vec<f32> = std::iter::once(0.0).chain(points.windows(2).scan(0.0, |total, w| {
+                    *total += w[0].distance(w[1]);
+                    Some(*total)
+                })).collect();
+                let total = *lengths.last().expect("a subpath has a point");
+                if total <= 0.0 {
+                    continue;
+                }
+                let piece = (total / ALONG_PIECES).max(ALONG_PIECE_MIN);
+                let mut i = 0;
+                while i + 1 < points.len() {
+                    // Points up to a piece's length on, at least one.
+                    let mut end = i + 1;
+                    while end + 1 < points.len() && lengths[end] - lengths[i] < piece {
+                        end += 1;
+                    }
+                    let mut d = StrokePath::new().move_to(points[i].x, points[i].y);
+                    for p in &points[i + 1..=end] {
+                        d = d.line_to(p.x, p.y);
+                    }
+                    let colour = css(gradient.at((lengths[i] + lengths[end]) / 2.0 / total));
+                    svg.push_str(&line(&d, &colour, "stroke-linecap:round;stroke-linejoin:round;"));
+                    i = end;
+                }
+            }
+            svg
+        }
+        StrokeColor::Gradient(gradient) => format!("{}{}", svg_gradient(gradient, id), line(path, &format!("url(#{})", id), "")),
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -309,16 +407,12 @@ impl Canvas {
             if !Self::stroke_reaches(stroke, min, max, reach) {
                 continue;
             }
+            // Ids for gradients, unique in the file.
+            let id = format!("gradient_{}", stroke_seed);
             if let Some(opts) = style {
-                svg.push_str(&self.stylized_path(stroke, opts, &mut stroke_rng(seed, stroke_seed)));
+                svg.push_str(&self.stylized_path(stroke, opts, &mut stroke_rng(seed, stroke_seed), &id));
             } else {
-                let ColoredStroke { path, style, .. } = stroke;
-                svg.push_str(&format!(
-                    "<path d=\"{}\" style=\"fill:none;stroke:{};stroke-width:{};\" />",
-                    path,
-                    style.color,
-                    style.width,
-                ));
+                svg.push_str(&plain_path(stroke, &id));
             }
         }
         format!("<g>{}</g>", svg)
@@ -418,56 +512,85 @@ impl Canvas {
         }
         (svg_data, pixmap.encode_png().expect("Failed to encode PNG"))
     }
-    pub fn stylized_path(&self, stroke: &ColoredStroke, opts: &CanvasStyleOptions, rng: &mut dyn RngCore) -> String {
+    /// A stroke as SVG, roughened and tapered: each subpath an outline,
+    /// filled. `id` names its gradient, if it has one across the canvas;
+    /// along a stroke, its outline is cut into pieces, each its own colour.
+    pub fn stylized_path(&self, stroke: &ColoredStroke, opts: &CanvasStyleOptions, rng: &mut dyn RngCore, id: &str) -> String {
         let pos_roughen = opts.roughness;
         let distance = opts.point_sample_distance;
         let trail_off_percent = opts.trail_off_percent;
         let mut path = stroke.path.to_cubics();
-        let color = stroke.style.color.clone();
-        let width = stroke.style.width;
-        let halfwidth = width / 2.0;
+        let halfwidth = stroke.style.width / 2.0;
         path.adjust_by(|&cmd| {
             cmd.pos_roughen_by(pos_roughen, rng)
         });
-        let substrokes = path.to_substrokes();
-        let mut path = StrokePath::new();
-        for substroke in substrokes {
+        // Each subpath's sides: a point either side of each sample.
+        let mut outlines = Vec::new();
+        for substroke in path.to_substrokes() {
             let samples = substroke.get_point_samples(distance);
             if samples.len() < 2 {
                 continue;
             }
-            let firstpoint = samples[0].point;
-            path = path.move_to(firstpoint.x, firstpoint.y);
-            for (i, sample) in samples.iter().enumerate() {
-                let percentile = i as f32 / (samples.len() - 1) as f32;
-
-                let width = if percentile < trail_off_percent {
+            let last = (samples.len() - 1) as f32;
+            let width = |i: usize| {
+                let percentile = i as f32 / last;
+                if percentile < trail_off_percent {
                     halfwidth * (percentile / trail_off_percent)
                 } else if percentile > (1.0 - trail_off_percent) {
                     halfwidth * ((1.0 - percentile) / trail_off_percent)
                 } else {
                     halfwidth
-                };
-                let point = sample.point + width * sample.normal;
-                path = path.line_to(point.x, point.y);
-            }
-            // iterate samples in reverse order
-            for (i, sample) in samples.iter().rev().enumerate() {
-                let percentile = i as f32 / (samples.len() - 1) as f32;
-
-                let width = if percentile < trail_off_percent {
-                    halfwidth * (percentile / trail_off_percent)
-                } else if percentile > (1.0 - trail_off_percent) {
-                    halfwidth * ((1.0 - percentile) / trail_off_percent)
-                } else {
-                    halfwidth
-                };
-                let point = sample.point - width * sample.normal;
-                path = path.line_to(point.x, point.y);
-            }
-            path = path.close_path();
+                }
+            };
+            // Reversed, the right side's widths run from the other end.
+            let n = samples.len();
+            let sides: Vec<(Vec2, Vec2)> = samples.iter().enumerate()
+                .map(|(i, sample)| (sample.point + width(i) * sample.normal, sample.point - width(n - 1 - i) * sample.normal))
+                .collect();
+            outlines.push((samples[0].point, sides));
         }
-        format!("<path d=\"{}\" fill=\"{}\" stroke=\"{}\" />", path, color, color)
+        let outline = |start: Option<Vec2>, sides: &[(Vec2, Vec2)]| {
+            let mut path = StrokePath::new();
+            let first = start.unwrap_or(sides[0].0);
+            path = path.move_to(first.x, first.y);
+            for (left, _) in sides {
+                path = path.line_to(left.x, left.y);
+            }
+            for (_, right) in sides.iter().rev() {
+                path = path.line_to(right.x, right.y);
+            }
+            path.close_path()
+        };
+        match &stroke.style.color {
+            StrokeColor::Gradient(gradient) if gradient.kind == GradientKind::Along => {
+                // Pieces a few samples long, overlapping by one so they
+                // meet, each in the colour at its middle.
+                let mut svg = String::new();
+                for (_, sides) in &outlines {
+                    let last = (sides.len() - 1) as f32;
+                    let step = ((sides.len() as f32 / ALONG_PIECES).ceil() as usize).max(2);
+                    let mut i = 0;
+                    while i + 1 < sides.len() {
+                        let end = (i + step).min(sides.len() - 1);
+                        let colour = css(gradient.at((i + end) as f32 / 2.0 / last));
+                        svg.push_str(&format!("<path d=\"{}\" fill=\"{}\" stroke=\"{}\" stroke-width=\"0.3\" />", outline(None, &sides[i..=end]), colour, colour));
+                        i = end;
+                    }
+                }
+                svg
+            }
+            color => {
+                let mut path = StrokePath::new();
+                for (start, sides) in &outlines {
+                    path.append(outline(Some(*start), sides));
+                }
+                let (defs, paint) = match color {
+                    StrokeColor::Solid(c) => (String::new(), c.clone()),
+                    StrokeColor::Gradient(g) => (svg_gradient(g, id), format!("url(#{})", id)),
+                };
+                format!("{}<path d=\"{}\" fill=\"{}\" stroke=\"{}\" />", defs, path, paint, paint)
+            }
+        }
     }
     /// What keeps `clearance` away from this canvas's marks.
     pub fn avoidance(&self, clearance: f32) -> AvoidanceTree {
@@ -508,10 +631,37 @@ mod tests {
 mod svg_output_tests {
     use super::*;
 
+    fn gradient(kind: GradientKind) -> StrokeColor {
+        StrokeColor::Gradient(Gradient { stops: vec![(0.0, [1.0, 0.0, 0.0, 1.0]), (1.0, [0.0, 0.0, 1.0, 1.0])], kind })
+    }
+
+    #[test]
+    fn gradients_in_svg() {
+        let wave = StrokePath::new().move_to(0.0, 0.0).cubic_curve_to(30.0, -20.0, 60.0, 20.0, 90.0, 0.0);
+        let opts = CanvasStyleOptions { roughness: 0.5, point_sample_distance: 1.0, trail_off_percent: 0.15, noise_amplitude: 0.0 };
+        for styled in [None, Some(&opts)] {
+            // Along a stroke: pieces from red to blue.
+            let mut canvas = Canvas::new();
+            canvas.add_strokes(wave.clone(), StrokeStyle { width: 2.0, color: gradient(GradientKind::Along), brush: None });
+            let svg = canvas.to_svg(styled, 1);
+            assert!(svg.matches("<path").count() > 10, "{}", svg);
+            let reds: Vec<u8> = svg.split("rgba(").skip(1).map(|c| c.split(',').next().unwrap().parse().unwrap()).collect();
+            assert!(reds[0] > 200 && *reds.last().unwrap() < 50 && reds.windows(2).all(|w| w[0] >= w[1]), "{:?}", reds);
+            canvas.to_png(1.0, styled, 1);
+            // Across the canvas: an SVG gradient the path is painted with.
+            let mut canvas = Canvas::new();
+            let kind = GradientKind::Linear { from: Vec2::new(0.0, 0.0), to: Vec2::new(90.0, 0.0) };
+            canvas.add_strokes(wave.clone(), StrokeStyle { width: 2.0, color: gradient(kind), brush: None });
+            let svg = canvas.to_svg(styled, 1);
+            assert!(svg.contains("<linearGradient id=\"gradient_0\"") && svg.contains("url(#gradient_0)"), "{}", svg);
+            canvas.to_png(1.0, styled, 1);
+        }
+    }
+
     #[test]
     fn styled_output_follows_the_seed() {
         let mut canvas = Canvas::new();
-        let style = StrokeStyle { width: 2.0, color: "black".to_string(), brush: None };
+        let style = StrokeStyle { width: 2.0, color: "black".into(), brush: None };
         canvas.add_strokes(StrokePath::new().move_to(0.0, 0.0).cubic_curve_to(10.0, 0.0, 20.0, 10.0, 30.0, 30.0), style);
         let opts = CanvasStyleOptions { roughness: 2.0, point_sample_distance: 1.0, trail_off_percent: 0.15, noise_amplitude: 1.5 };
         assert_eq!(canvas.to_png(1.0, Some(&opts), 7), canvas.to_png(1.0, Some(&opts), 7));

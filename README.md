@@ -94,6 +94,11 @@ What to know:
   `new_strokestyle(width, color, brush)`, `width` scales the brush's
   pressure in Darkly renders, so past `1 / max_pressure` a stroke gets no
   heavier (the render warns), but it's the stroke's geometric width in SVG.
+- **Gradients.** In place of a colour, `new_gradient(["red", "gold",
+  "blue"])` runs along each stroke from start to end; with `#{ from, to }`
+  it's laid across the page between two points, and with `#{ center,
+  radius }` out from a point. Colours are spaced evenly, or placed as
+  `[position, colour]`. `style.color = gradient` works too.
 - **Shared values.** Paths, glyphs and canvases are shared: assigning one,
   passing it or looping over it gives the same value, so changes through any
   copy reach it. `.copy()` makes an independent one.
@@ -158,7 +163,8 @@ labelled with the calls that make it: render it with
 `target/release/journalbuild showcase`.
 
 The module docs in `src/journal/rhaientries/` (`glyphs.rs`, `layout.rs`,
-`avoid.rs`, `book.rs`, `random.rs`, `art.rs`, `locks/mod.rs`) cover each
+`avoid.rs`, `book.rs`, `random.rs`, `art.rs`, `gradient.rs`,
+`locks/mod.rs`) cover each
 area in more detail, and
 the journals in `journals/` and `tests/smoke_journals/smoke` use most of it.
 

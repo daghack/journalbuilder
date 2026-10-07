@@ -3,6 +3,7 @@ pub mod avoid;
 pub mod background;
 pub mod canvas;
 pub mod compose;
+pub mod gradient;
 pub mod symbol;
 pub mod paths;
 pub mod hatch;
