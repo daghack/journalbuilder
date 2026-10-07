@@ -1,6 +1,8 @@
 // The Book of Lang's script, traced from the book: lang_upper_* and
 // lang_lower_*. Page "passage" sets the book's own words (from "The Echoes
 // of Power") to compare against the scan; page "alphabet" shows every glyph.
+// The book has no capital H, J, K, Q, U, X, Y or Z; those are drawn in its
+// hand rather than traced.
 
 let font = new_fontset(["lang_upper"], ["lang_lower"]);
 // Glyphs are 0.8 units to the x-height and drawn at half their size, so at
@@ -45,7 +47,7 @@ p1.add_canvas(page_text);
 journal_entry.add_page(p1);
 
 let alphabet = new_canvas();
-alphabet.add_canvas(write_line("A B C D E F G I L M N O P R S T V W", new_vec(0.0, 0.0), size, ink, font));
+alphabet.add_canvas(write_line("A B C D E F G H I J K L M N O P Q R S T U V W X Y Z", new_vec(0.0, 0.0), size, ink, font));
 alphabet.add_canvas(write_line("a b c d e f g h i k l m n o p q r s t u v w x y z", new_vec(0.0, leading), size, ink, font));
 alphabet.add_canvas(write_line("the quick brown fox jumps over the lazy dog", new_vec(0.0, leading * 2.0), size, ink, font));
 let p2 = new_page();
