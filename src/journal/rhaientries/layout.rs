@@ -31,13 +31,32 @@
 //!     layout: "words",            // words whole, each note in one clear patch; default "flat", glyph by glyph
 //! });
 //!
-//! // Hatch the inside of a closed path.
-//! let shading = new_circle(new_vec(0.0, 0.0), 20.0).hatch(3.0, random_range(0.0, 6.28), 3.0);
+//! // Hatch the inside of a closed path: lines `spacing` apart at `angle`
+//! // (radians), their ends jittered by up to `roughness`.
+//! let shading = new_circle(new_vec(0.0, 0.0), 20.0).hatch(3.0, random_range(0.0, 6.28), 1.0);
+//! // Or with options; only `spacing` is needed.
+//! let shading = outline.hatch(#{
+//!     spacing: 4.0,
+//!     angle: [0.8, 2.4],            // a layer per angle: cross-hatching (default pi/4)
+//!     roughness: 1.0,               // ends jittered by up to this (default 0)
+//!     bow: 1.5,                     // lines bend by up to this from straight (default 0)
+//!     inset: 2.0,                   // lines stop this far inside the outline (default 0)
+//!     fill_rule: "holes",           // or "evenodd" or "nonzero"; see below
+//! });
 //! ```
+//!
+//! Every subpath of a hatched path is a closed shape (open ones close back
+//! to their start), and each line is a stroke of its own, from where it
+//! enters the shape to where it leaves. With the default fill rule,
+//! "holes", shapes inside or across others cut holes in them: two circles
+//! one inside the other hatch as a ring, and glyph outlines keep their
+//! counters. "evenodd" also leaves out where a single subpath crosses over
+//! itself (the middle of a star drawn in one line); "nonzero" merges
+//! overlapping shapes, as SVG fills do.
 //!
 //! Placement scales each glyph by `symbol_scale` and turns it to the line,
 //! on top of any scale and rotation it already has. Jagged edges and hatch
-//! roughness come from the engine's seeded generator.
+//! roughness and bows come from the engine's seeded generator.
 
 use parry2d::bounding_volume::Aabb;
 use parry2d::math::Vec2 as PVec;
@@ -53,6 +72,7 @@ use crate::journal::symboldict::SymbolPathDict;
 use crate::journal::canvas::textbox::{TextBox as CoreTextBox, TextBoxLineMode, TextBoxOptions};
 use crate::journal::canvas::Canvas as JournalCanvas;
 use crate::journal::paths::StrokePath;
+use crate::journal::hatch::{FillRule, HatchOptions};
 use crate::journal::symbol::Symbol;
 use super::avoid::{Avoid, AvoidOption};
 
@@ -203,25 +223,60 @@ fn glyphs(symbols: Vec<Symbol>) -> Array {
     symbols.into_iter().map(|s| Dynamic::from(Glyph::new(s))).collect()
 }
 
-/// Hatch the inside of each subpath with lines `spacing` apart at `angle`
-/// (radians), their ends jittered by up to `roughness`. Returns the hatching
-/// as a new path; the path itself is unchanged.
-fn hatch(path: &StrokePath, spacing: f64, angle: f64, roughness: f64, rng: &SharedRng) -> RhaiResult<StrokePath> {
-    if !(spacing > 0.0) {
-        return Err(format!("hatch: spacing must be positive, got {}", spacing).into());
-    }
-    if !(roughness >= 0.0) {
-        return Err(format!("hatch: roughness can't be negative, got {}", roughness).into());
-    }
-    let mut hatching = StrokePath::new();
-    for substroke in path.to_substrokes() {
-        // Too short to enclose anything (and ray_stroke_fill needs samples).
-        if substroke.get_point_samples(spacing as f32).len() < 3 {
-            continue;
+const HATCH_KEYS: [&str; 6] = ["spacing", "angle", "roughness", "bow", "inset", "fill_rule"];
+
+/// `path.hatch(#{ spacing, angle, roughness, bow, inset, fill_rule })`;
+/// see the module docs.
+fn hatch_options(options: &Map) -> RhaiResult<HatchOptions> {
+    const CALLER: &str = "hatch";
+    check_keys(CALLER, options, &HATCH_KEYS)?;
+    let spacing = positive(CALLER, options, "spacing")?;
+    let angles = match options.get("angle") {
+        None => vec![std::f32::consts::FRAC_PI_4],
+        Some(angle) if angle.is_array() => {
+            let angles = angle.clone().into_array().expect("checked").iter()
+                .map(|a| as_number(CALLER, "each 'angle'", a))
+                .collect::<RhaiResult<Vec<_>>>()?;
+            if angles.is_empty() {
+                return Err(format!("{}: 'angle' needs at least one angle", CALLER).into());
+            }
+            angles
         }
-        hatching.append(substroke.ray_stroke_fill(spacing as f32, angle as f32, roughness as f32, &mut *rng.borrow_mut()));
+        Some(angle) => vec![as_number(CALLER, "'angle'", angle)?],
+    };
+    let at_least_zero = |key: &str| -> RhaiResult<f32> {
+        match number(CALLER, options, key)? {
+            None => Ok(0.0),
+            Some(n) if n >= 0.0 && n.is_finite() => Ok(n),
+            Some(n) => Err(format!("{}: '{}' can't be negative, got {}", CALLER, key, n).into()),
+        }
+    };
+    let fill_rule = match options.get("fill_rule") {
+        None => FillRule::default(),
+        Some(rule) => {
+            let name = rule.to_string();
+            FillRule::from_name(&name).ok_or_else(|| -> Box<EvalAltResult> {
+                format!("{}: unknown fill_rule '{}'; expected one of {}", CALLER, name, FillRule::NAMES.join(", ")).into()
+            })?
+        }
+    };
+    Ok(HatchOptions {
+        spacing,
+        angles,
+        roughness: at_least_zero("roughness")?,
+        bow: at_least_zero("bow")?,
+        inset: at_least_zero("inset")?,
+        fill_rule,
+    })
+}
+
+/// The hatching of a path's inside, as a new path; the path itself is
+/// unchanged.
+fn hatch(path: &StrokePath, options: &HatchOptions, rng: &SharedRng) -> RhaiResult<StrokePath> {
+    if !options.angles.iter().all(|a| a.is_finite()) {
+        return Err("hatch: angles must be finite numbers".into());
     }
-    Ok(hatching)
+    Ok(crate::journal::hatch::hatch(path, options, &mut *rng.borrow_mut()))
 }
 
 const SPLAT_KEYS: [&str; 11] = ["symbol_scale", "width_range", "height_range", "rotation_jitter", "scale_jitter", "jagged_edge", "max_attempts", "spacing", "avoid", "clearance", "layout"];
@@ -321,8 +376,16 @@ pub fn register(engine: &mut Engine, symdict: Rc<SymbolPathDict>, rng: SharedRng
         splat(canvas, msgs, &font, style, options, &symdict, &r)
     });
 
+    let r = rng.clone();
     engine.register_fn("hatch", move |path: &mut Path, spacing: f64, angle: f64, roughness: f64| -> RhaiResult<Path> {
-        hatch(&path.borrow(), spacing, angle, roughness, &rng).map(Path::new)
+        let mut options = Map::new();
+        options.insert("spacing".into(), Dynamic::from(spacing));
+        options.insert("angle".into(), Dynamic::from(angle));
+        options.insert("roughness".into(), Dynamic::from(roughness));
+        hatch(&path.borrow(), &hatch_options(&options)?, &r).map(Path::new)
+    });
+    engine.register_fn("hatch", move |path: &mut Path, options: Map| -> RhaiResult<Path> {
+        hatch(&path.borrow(), &hatch_options(&options)?, &rng).map(Path::new)
     });
 }
 
@@ -437,6 +500,23 @@ mod tests {
         assert_ne!(hatching(1), hatching(2));
     }
 
+    #[test]
+    fn hatch_options_cross_hatch_and_keep_holes() {
+        let lines = |options: &str| -> usize {
+            let path: super::super::Path = eval(&format!(
+                "let ring = new_circle(new_vec(0.0, 0.0), 20.0); ring.append(new_circle(new_vec(0.0, 0.0), 10.0)); ring.hatch({})", options));
+            let hatching = path.get();
+            for (points, _) in hatching.flattened(0.1) {
+                let middle = (points[0] + *points.last().unwrap()) / 2.0;
+                assert!(middle.length() > 9.0, "a line crosses the hole");
+            }
+            hatching.to_substrokes().len()
+        };
+        let single = lines("#{ spacing: 3.0, angle: 0.3 }");
+        assert_eq!(lines("#{ spacing: 3.0, angle: [0.3, 1.9] }"), 2 * single);
+        assert_eq!(lines("3.0, 0.3, 0.0"), single);
+    }
+
     const SPLAT_SETUP: &str = r#"
         let style = new_strokestyle(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
         let base = new_canvas();
@@ -540,6 +620,17 @@ mod tests {
             assert!(err.contains(want) && err.contains("line 2"), "{}: {}", want, err);
         }
         let err = fails("let ok = 1;\nnew_circle(new_vec(0.0, 0.0), 5.0).hatch(0.0, 0.0, 1.0);");
-        assert!(err.contains("spacing must be positive") && err.contains("line 2"), "{}", err);
+        assert!(err.contains("'spacing' must be positive") && err.contains("line 2"), "{}", err);
+        for (opts, want) in [
+            ("#{ angle: 1.0 }", "missing 'spacing'"),
+            ("#{ spacing: 2, angle: [] }", "'angle' needs at least one angle"),
+            ("#{ spacing: 2, angle: [1.0, \"x\"] }", "each 'angle' should be a number"),
+            ("#{ spacing: 2, bow: -1 }", "'bow' can't be negative"),
+            ("#{ spacing: 2, fill_rule: \"winding\" }", "unknown fill_rule 'winding'"),
+            ("#{ spacing: 2, colour: 1 }", "unknown option 'colour'"),
+        ] {
+            let err = fails(&format!("let ok = 1;\nnew_circle(new_vec(0.0, 0.0), 5.0).hatch({});", opts));
+            assert!(err.contains(want) && err.contains("line 2"), "{}: {}", want, err);
+        }
     }
 }

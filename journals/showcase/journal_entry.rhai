@@ -251,7 +251,8 @@ art.add_strokepath(
 		.close()
 		.scale_by(1.0).translate_by(new_vec(10.0, 0.0)),
 	new_strokestyle(1.0, blue, pen));
-// Hatching fills a closed path's inside, at a random slant.
+// Hatching fills a closed path's inside with lines: hatch(spacing, angle,
+// roughness), here at a random slant.
 art.add_strokepath(new_circle(new_vec(740.0, 110.0), 50.0), line_style);
 art.add_strokepath(new_circle(new_vec(740.0, 110.0), 50.0).hatch(5.0, random_range(0.0, PI()), 1.0), thin_red);
 art.add_strokepath(new_rectangle(new_vec(870.0, 110.0), 90.0, 90.0).hatch(6.0, random() * PI(), 0.5), new_strokestyle(1.0, gold, pen));
@@ -286,6 +287,39 @@ art.add_strokepath(along.vines, new_strokestyle(1.0, bark, pen));
 art.add_strokepath(along.leaves, new_strokestyle(1.0, green, pen));
 art.add_strokepath(along.flowers, line_style);
 art.add_strokepath(art::snake_along(maze_lines.copy().translate_by(new_vec(700.0, 1150.0)), 30.0, 2), line_style);
+
+// Hatching with options. Each line is a stroke of its own, inside the
+// shape: a ring (two circles appended into one path) keeps its hole, and
+// lines can cross, bow and stop short of the outline. Fill rules decide
+// what's inside where shapes overlap: "holes" (the default) leaves the
+// overlap out, "nonzero" merges them, and "evenodd" also leaves out where
+// one line crosses itself, like the middle of a star.
+art.add_canvas(write("hatch with options: a ring, angles, roughness, bow, inset, and fill rules", 0.0, 1580.0, 24.0, thin_red, label_font));
+let ring = new_circle(new_vec(90.0, 1730.0), 80.0).append(new_circle(new_vec(90.0, 1730.0), 40.0));
+art.add_strokepath(ring, line_style);
+art.add_strokepath(ring.hatch(#{ spacing: 9.0, angle: [0.6, 2.2], roughness: 1.0 }), thin_red);
+fn discs(x, y) {
+	new_circle(new_vec(x - 35.0, y), 60.0).append(new_circle(new_vec(x + 35.0, y), 60.0))
+}
+let star = new_strokepath();
+for i in 0..5 {
+	let a = -PI() / 2.0 + i * 4.0 * PI() / 5.0;
+	let p = new_vec(800.0 + 85.0 * a.cos(), 1735.0 + 85.0 * a.sin());
+	if i == 0 { star.move_to(p); } else { star.line_to(p); }
+}
+star.close();
+for shape in [
+	[discs(330.0, 1730.0), "holes", 0.9, 300.0],
+	[discs(570.0, 1730.0), "nonzero", 0.9, 520.0],
+	[star, "evenodd", -0.4, 760.0],
+] {
+	art.add_strokepath(shape[0], line_style);
+	art.add_strokepath(shape[0].hatch(#{ spacing: 8.0, angle: shape[2], fill_rule: shape[1], inset: 2.0 }), new_strokestyle(1.0, gold, pen));
+	art.add_canvas(write(shape[1], shape[3], 1850.0, 20.0, label_style, label_font));
+}
+let coiled = art::snake_path(new_vec(1000.0, 1660.0), 0.0, new_vec(1230.0, 1800.0), 620.0, 50.0, 5);
+art.add_strokepath(coiled, line_style);
+art.add_strokepath(coiled.hatch(#{ spacing: 7.0, angle: 1.2, bow: 2.5, inset: 2.0 }), new_strokestyle(1.0, green, pen));
 
 let art_page = new_page();
 art_page.name = "art";

@@ -921,6 +921,14 @@ impl JournalEngine {
             .register_fn("close", |path: &mut Path| -> Path {
                 update_path(path, |p| p.close_path())
             })
+            // `path.append(other)`: other's subpaths added to this path (a
+            // copy of them), so several shapes are one path, e.g. to hatch
+            // a shape with holes.
+            .register_fn("append", |path: &mut Path, other: Path| -> Path {
+                // Copy first: `p.append(p)` shares one value.
+                let other = other.get();
+                path.update(|p| p.append(other))
+            })
             .register_fn("new_circle", |center: Vec2, radius: f64| -> Path {
                 Path::new(StrokePath::circle(center.into(), radius as f32))
             })

@@ -107,6 +107,12 @@ What to know:
   outline; `add_region(path)` keeps out of a closed shape. Trees are
   shared, so `avoid.add(placed)` keeps later text off what's just been
   placed.
+- **Hatching.** `path.hatch(spacing, angle, roughness)` shades a closed
+  path's inside with lines, each a stroke of its own; shapes inside or
+  across others in the same path (`ring.append(hole)`) cut holes in it.
+  `path.hatch(#{ spacing, angle: [a, b], roughness, bow, inset,
+  fill_rule })` cross-hatches, bends lines, keeps them off the outline, and
+  picks how overlaps fill.
 - **Procedural art.** The `art` module draws shapes from a few
   parameters and a seed: `art::snake_path(head_center, head_angle,
   tail_end, snake_length, max_width, random_seed)` is the outline of a

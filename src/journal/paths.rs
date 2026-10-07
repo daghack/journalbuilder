@@ -1,5 +1,4 @@
 use parry2d::math::{Vec2, Rot2};
-use parry2d::query::RayCast;
 use std::ops::Add;
 use std::cell::Cell;
 use rand::{Rng, RngCore, SeedableRng};
@@ -17,12 +16,6 @@ pub enum PathCmd {
     CubicCurveTo(f32, f32, f32, f32, f32, f32),
     QuadraticCurveTo(f32, f32, f32, f32),
     ClosePath,
-}
-
-fn roughen_point(point: Vec2, r: f32, rng: &mut dyn RngCore) -> Vec2 {
-    let random_theta = rng.random::<f32>() * std::f32::consts::PI * 2.0;
-    let random_magnitude = (rng.random::<f32>() - 0.5) * 2.0 * r;
-    point + Vec2::new(random_magnitude * random_theta.cos(), random_magnitude * random_theta.sin())
 }
 
 impl PathCmd {
@@ -906,77 +899,6 @@ impl SubstrokePath {
     pub fn get_point_samples(&self, distance_interval: f32) -> Vec<CurveSample> {
         let mut stepper = SubstrokeStepper::new(self, 50);
         stepper.generate_equidistant_samples(distance_interval)
-    }
-    pub fn ray_stroke_fill(&self, step_distance: f32, stroke_angle: f32, roughness: f32, rng: &mut dyn RngCore) -> StrokePath {
-        let samples = self
-            .get_point_samples(step_distance)
-            .into_iter()
-            .map(|sample| { sample.point })
-            .collect::<Vec<Vec2>>();
-        let ray_direction = Vec2::new(stroke_angle.cos(), stroke_angle.sin());
-        let ray_normal = Vec2::new(-ray_direction.y, ray_direction.x).normalize();
-        // find the point farthest along the ray normal in one direction
-        let mut min_projection = f32::MAX;
-        let mut min_point = Vec2::new(0.0, 0.0);
-        let mut max_projection = f32::MIN;
-        for point in &samples {
-            // project point onto ray normal
-            let projection = point.dot(ray_normal);
-            if projection < min_projection {
-                min_point = *point;
-                min_projection = projection;
-            }
-            if projection > max_projection {
-                max_projection = projection;
-            }
-        }
-        let mut line_segments : Vec<parry2d::shape::Segment> = samples.windows(2).map(|w| {
-            parry2d::shape::Segment::new(w[0], w[1])
-        }).collect();
-        line_segments.push(parry2d::shape::Segment::new(samples[samples.len() - 1], samples[0]));
-        let distance_to_walk = max_projection - min_projection;
-        let mut current_distance_along_norm = 0.0;
-        let mut fill_path = StrokePath::new().move_to(min_point.x, min_point.y);
-        while current_distance_along_norm < distance_to_walk {
-            let current_point_on_norm =
-                min_point + ray_normal * current_distance_along_norm;
-            let ray_origin = current_point_on_norm - ray_direction * 1000.0;
-            let ray = parry2d::query::Ray::new(ray_origin, ray_direction);
-            let transform = parry2d::math::Pose2::IDENTITY;
-            let mut intersections: Vec<(Vec2, f32)> = Vec::new();
-            for segment in &line_segments {
-                let intersection = segment.cast_ray(
-                    &transform, &ray, f32::MAX, true,
-                );
-                if let Some(intersection) = intersection {
-                    let int_point = ray.origin + ray.dir * intersection;
-                    let dist_along_ray = ray_origin.distance(int_point);
-                    intersections.push((int_point, dist_along_ray));
-                }
-                //sort by distance along ray, from nearest to farthest
-            }
-            intersections.sort_by(|a, b| a.1.total_cmp(&b.1));
-            let mut kept_intersections = Vec::new();
-            let mut last_dist = f32::MIN;
-            for inter in intersections {
-                if inter.1 - last_dist > step_distance {
-                    kept_intersections.push(inter);
-                    last_dist = inter.1;
-                }
-            }
-            if kept_intersections.len() % 2 != 0 {
-                kept_intersections.pop();
-            }
-            for i in (0..kept_intersections.len()).step_by(2) {
-                let entry_point = roughen_point(kept_intersections[i].0, roughness, rng);
-                let exit_point = roughen_point(kept_intersections[i + 1].0, roughness, rng);
-                fill_path = fill_path
-                    .line_to(entry_point.x, entry_point.y)
-                    .line_to(exit_point.x, exit_point.y);
-            }
-            current_distance_along_norm += step_distance;
-        }
-        fill_path
     }
 }
 

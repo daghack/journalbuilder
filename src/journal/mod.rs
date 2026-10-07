@@ -3,6 +3,7 @@ pub mod avoid;
 pub mod canvas;
 pub mod symbol;
 pub mod paths;
+pub mod hatch;
 pub mod styles;
 pub mod symboldict;
 pub mod typeset;
