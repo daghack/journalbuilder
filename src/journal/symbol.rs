@@ -151,6 +151,9 @@ impl Symbol {
 pub struct SymbolPlacementArgs<'kd> {
     pub avoid_kdtree: Option<&'kd AvoidanceKdTree>,
     pub symbol_scale: f32,
+    /// Extra space between glyphs, as a fraction of `symbol_scale`; 0 sets
+    /// them at their widths.
+    pub spacing: f32,
 }
 
 // A wrapper around a k-d tree for avoidance purposes
@@ -158,13 +161,35 @@ pub struct SymbolPlacementArgs<'kd> {
 pub struct AvoidanceKdTree {
     pub kdtree: kdtree::KdTree<f32, (f32, f32), [f32; 2]>,
     pub scale: f32,
+    /// Glyphs just placed, with how far along the text they were: the next
+    /// glyph's neighbours, which it may sit right against. They join the
+    /// tree once the text has moved on, so only text a path loops back
+    /// over counts as a collision.
+    recent: VecDeque<(Vec2, f32)>,
+    travelled: f32,
 }
 impl AvoidanceKdTree {
     pub fn new(kdtree: kdtree::KdTree<f32, (f32, f32), [f32; 2]>, scale: f32) -> Self {
-        Self { kdtree, scale }
+        Self { kdtree, scale, recent: VecDeque::new(), travelled: 0.0 }
     }
     pub fn empty(scale: f32) -> Self {
-        Self { kdtree: KdTree::new(2), scale }
+        Self::new(KdTree::new(2), scale)
+    }
+    /// Record a glyph just placed at `point`; see `recent`.
+    fn add_recent(&mut self, point: Vec2) {
+        self.recent.push_back((point, self.travelled));
+    }
+    /// The text has moved `distance` further along: glyphs now well behind
+    /// it become obstacles.
+    fn advance(&mut self, distance: f32) {
+        self.travelled += distance;
+        while let Some(&(point, at)) = self.recent.front() {
+            if self.travelled - at <= 2.0 * self.scale {
+                break;
+            }
+            self.add_point(point);
+            self.recent.pop_front();
+        }
     }
     pub fn add_point(&mut self, point: Vec2) {
         if !point.is_finite() {
@@ -248,11 +273,12 @@ fn gift_wrap(points: &[Vec2]) -> Vec<Vec2> {
     hull
 }
 
-pub fn place_symbols_along_stepper<'a, SymIter, Stepper>(stepper: &mut Stepper, symbols: &mut Peekable<SymIter>, symbol_avoidtree: &mut AvoidanceKdTree, external_avoidtree: Option<&AvoidanceKdTree>, update_symbols: bool) -> usize where
+pub fn place_symbols_along_stepper<'a, SymIter, Stepper>(stepper: &mut Stepper, symbols: &mut Peekable<SymIter>, symbol_avoidtree: &mut AvoidanceKdTree, external_avoidtree: Option<&AvoidanceKdTree>, update_symbols: bool, spacing: f32) -> usize where
     SymIter: Iterator<Item=&'a mut Symbol>,
     Stepper: CurveStepper,
 {
     let scale = symbol_avoidtree.scale * 2.0;
+    let gap = spacing * scale;
     let mut placed_count = 0;
     while let Some(current_symbol) = symbols.peek_mut() {
         let aabb = current_symbol.hull_aabb();
@@ -267,6 +293,7 @@ pub fn place_symbols_along_stepper<'a, SymIter, Stepper>(stepper: &mut Stepper, 
             };
             if skip {
                 stepper.step(step_size);
+                symbol_avoidtree.advance(step_size);
             } else {
                 let current_symbol = symbols.next().unwrap();
                 if update_symbols {
@@ -274,9 +301,10 @@ pub fn place_symbols_along_stepper<'a, SymIter, Stepper>(stepper: &mut Stepper, 
                     current_symbol.rotate_rad_by(l.normal.y.atan2(l.normal.x) - std::f32::consts::FRAC_PI_2);
                     current_symbol.scale_by(scale);
                 }
-                symbol_avoidtree.add_point(center);
+                symbol_avoidtree.add_recent(center);
                 placed_count += 1;
-                stepper.step(width);
+                stepper.step(width + gap);
+                symbol_avoidtree.advance(width + gap);
             }
         } else {
             break;
@@ -285,9 +313,9 @@ pub fn place_symbols_along_stepper<'a, SymIter, Stepper>(stepper: &mut Stepper, 
     placed_count
 }
 
-pub fn place_symbols_along<'a, SymIter: Iterator<Item=&'a mut Symbol>>(substroke: &SubstrokePath, symbols: &mut Peekable<SymIter>, symbol_avoidtree: &mut AvoidanceKdTree, external_avoidtree: Option<&AvoidanceKdTree>) -> usize {
+pub fn place_symbols_along<'a, SymIter: Iterator<Item=&'a mut Symbol>>(substroke: &SubstrokePath, symbols: &mut Peekable<SymIter>, symbol_avoidtree: &mut AvoidanceKdTree, external_avoidtree: Option<&AvoidanceKdTree>, spacing: f32) -> usize {
     let mut stepper = SubstrokeStepper::new(substroke, 20);
-    place_symbols_along_stepper(&mut stepper, symbols, symbol_avoidtree, external_avoidtree, true)
+    place_symbols_along_stepper(&mut stepper, symbols, symbol_avoidtree, external_avoidtree, true, spacing)
 }
 
 pub fn place_along_path<'kd>(mut symbols: Vec<Symbol>, path: &StrokePath, args: &SymbolPlacementArgs<'kd>) -> (Vec<Symbol>, Vec<Symbol>) {
@@ -295,12 +323,13 @@ pub fn place_along_path<'kd>(mut symbols: Vec<Symbol>, path: &StrokePath, args: 
     let SymbolPlacementArgs {
         avoid_kdtree: external_avoidtree,
         symbol_scale,
+        spacing,
     } = args;
     let mut symbol_avoidtree = AvoidanceKdTree::empty(*symbol_scale / 2.0);
     let mut placed_symbols = 0;
     let mut sym_iter = symbols.iter_mut().peekable();
     for substroke in &substrokes {
-        placed_symbols += place_symbols_along(substroke, &mut sym_iter, &mut symbol_avoidtree, *external_avoidtree);
+        placed_symbols += place_symbols_along(substroke, &mut sym_iter, &mut symbol_avoidtree, *external_avoidtree, *spacing);
     }
     // copy the last n placed symbols into a new vec,
     // then return the original vector, now truncated, and the new vec
@@ -313,6 +342,7 @@ pub fn place_words_along_path<'kd>(symbols: Vec<Symbol>, path: &StrokePath, args
     let SymbolPlacementArgs {
         avoid_kdtree: external_avoidtree,
         symbol_scale,
+        spacing,
     } = args;
 
     let mut symbol_avoidtree = AvoidanceKdTree::empty(*symbol_scale / 2.0);
@@ -359,7 +389,7 @@ pub fn place_words_along_path<'kd>(symbols: Vec<Symbol>, path: &StrokePath, args
         let placed = place_symbols_along_stepper(
             &mut child_stepper, &mut word_sym_iter,
             &mut avoidtree_clone, *external_avoidtree,
-            false,
+            false, *spacing,
         );
 
         if word_sym_iter.peek().is_some() {
@@ -378,7 +408,7 @@ pub fn place_words_along_path<'kd>(symbols: Vec<Symbol>, path: &StrokePath, args
                 place_symbols_along_stepper(
                     stepper, &mut word_sym_iter,
                     &mut symbol_avoidtree, *external_avoidtree,
-                    true,
+                    true, *spacing,
                 );
                 for symbol in current {
                     placed_symbols.push(symbol);
@@ -397,7 +427,7 @@ pub fn place_words_along_path<'kd>(symbols: Vec<Symbol>, path: &StrokePath, args
             place_symbols_along_stepper(
                 stepper, &mut word_sym_iter,
                 &mut symbol_avoidtree, *external_avoidtree,
-                true,
+                true, *spacing,
             );
             let placed_word = current_word.take().unwrap();
             for symbol in placed_word {

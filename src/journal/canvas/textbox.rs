@@ -14,6 +14,8 @@ pub struct TextBoxOptions<'kd> {
     pub bounds: bounding_volume::Aabb,
     pub symbol_scale: f32,
     pub avoid_tree: Option<&'kd AvoidanceKdTree>,
+    /// Extra space between glyphs, as a fraction of `symbol_scale`.
+    pub spacing: f32,
 }
 
 
@@ -29,6 +31,7 @@ pub struct TextBox<'kd> {
     bounds: bounding_volume::Aabb,
     symbol_scale: f32,
     avoid_tree: Option<&'kd AvoidanceKdTree>,
+    spacing: f32,
 }
 
 impl<'kd> TextBox<'kd> {
@@ -39,6 +42,7 @@ impl<'kd> TextBox<'kd> {
             avoid_tree: options.avoid_tree,
             bounds: options.bounds,
             symbol_scale: options.symbol_scale,
+            spacing: options.spacing,
         }
     }
     pub fn fill_line_with(&self, symbols: Vec<Symbol>, y_pos: f32, rng: &mut dyn RngCore) -> (Vec<Symbol>, Vec<Symbol>) {
@@ -51,12 +55,14 @@ impl<'kd> TextBox<'kd> {
                 place_along_path(symbols, &stroke, &SymbolPlacementArgs {
                     avoid_kdtree: self.avoid_tree,
                     symbol_scale: self.symbol_scale,
+                    spacing: self.spacing,
                 })
             },
             TextBoxLineMode::WordsByBlankSymbol => {
                 place_words_along_path(symbols, &stroke, &SymbolPlacementArgs {
                     avoid_kdtree: self.avoid_tree,
                     symbol_scale: self.symbol_scale,
+                    spacing: self.spacing,
                 })
             },
         }

@@ -47,6 +47,8 @@ pub struct SplatOptions {
     pub jagged_edge: f32,
     /// Boxes to try for each message before backing off.
     pub max_attempts: usize,
+    /// Extra space between glyphs, as a fraction of `symbol_scale`.
+    pub spacing: f32,
 }
 
 /// Give up after backing off this many times in one splat.
@@ -63,6 +65,7 @@ fn splat_one(working: &Canvas, symbols: &[Symbol], opts: &SplatOptions, rng: &mu
             bounds: random_bounding_box(working, opts.width_range, opts.height_range, rng),
             symbol_scale: opts.symbol_scale,
             avoid_tree: Some(&avoid_tree),
+            spacing: opts.spacing,
         });
         // Place copies, so a failed attempt leaves the symbols untouched.
         let (placed, unplaced) = textbox.fill_bounds_with(symbols.to_vec(), rng);

@@ -11,6 +11,7 @@
 //!     jagged_edge: 0.0,             // random line indent, in symbol scales
 //!     avoid: canvas,                // optional
 //!     avoid_radius: 26.0,           // default: symbol_scale / 2
+//!     spacing: 0.1,                 // extra space between glyphs, in symbol scales (default 0)
 //! });
 //! let res = tb.fill(font.glyphs(msg));   // #{ placed: [..], unplaced: [..] }
 //! let blocks = tb.place_all(glyphs);     // one array per filled box
@@ -24,6 +25,7 @@
 //!     scale_jitter: 0.15,         // fraction either way (default 0.15)
 //!     jagged_edge: 0.1,           // default 0.1
 //!     max_attempts: 100,          // boxes per message before backing off
+//!     spacing: 0.0,               // extra space between glyphs, in symbol scales
 //! });
 //!
 //! // Hatch the inside of a closed path.
@@ -81,9 +83,21 @@ pub struct TextBox {
     jagged_edge: f32,
     layout: TextBoxLineMode,
     avoid: Option<Rc<AvoidanceKdTree>>,
+    spacing: f32,
 }
 
-const TEXTBOX_KEYS: [&str; 8] = ["center", "width", "height", "symbol_scale", "layout", "jagged_edge", "avoid", "avoid_radius"];
+const TEXTBOX_KEYS: [&str; 9] = ["center", "width", "height", "symbol_scale", "layout", "jagged_edge", "avoid", "avoid_radius", "spacing"];
+
+/// The `spacing` option: extra space between glyphs, as a fraction of the
+/// symbol scale. Negative tightens, down to glyphs touching their
+/// neighbours' centres.
+pub(super) fn spacing(caller: &str, options: &Map) -> RhaiResult<f32> {
+    match number(caller, options, "spacing")? {
+        None => Ok(0.0),
+        Some(s) if s.is_finite() && s > -0.5 => Ok(s),
+        Some(s) => Err(format!("{}: 'spacing' must be a number above -0.5, got {}", caller, s).into()),
+    }
+}
 
 pub(super) fn check_keys(caller: &str, options: &Map, known: &[&str]) -> RhaiResult<()> {
     match options.keys().find(|k| !known.contains(&k.as_str())) {
@@ -166,6 +180,7 @@ impl TextBox {
             jagged_edge,
             layout,
             avoid,
+            spacing: spacing(CALLER, &options)?,
         })
     }
     fn core(&self) -> CoreTextBox<'_> {
@@ -175,6 +190,7 @@ impl TextBox {
             bounds: self.bounds,
             symbol_scale: self.symbol_scale,
             avoid_tree: self.avoid.as_deref(),
+            spacing: self.spacing,
         })
     }
 }
@@ -208,7 +224,7 @@ fn hatch(path: &StrokePath, spacing: f64, angle: f64, roughness: f64, rng: &Shar
     Ok(hatching)
 }
 
-const SPLAT_KEYS: [&str; 7] = ["symbol_scale", "width_range", "height_range", "rotation_jitter", "scale_jitter", "jagged_edge", "max_attempts"];
+const SPLAT_KEYS: [&str; 8] = ["symbol_scale", "width_range", "height_range", "rotation_jitter", "scale_jitter", "jagged_edge", "max_attempts", "spacing"];
 
 fn splat(canvas: &Canvas, msgs: Array, font: &Font, style: StrokeStyle, options: Map, symdict: &SymbolPathDict, rng: &SharedRng) -> RhaiResult<Canvas> {
     const CALLER: &str = "splat_msgs";
@@ -230,6 +246,7 @@ fn splat(canvas: &Canvas, msgs: Array, font: &Font, style: StrokeStyle, options:
         height_range: range(CALLER, &options, "height_range")?,
         jagged_edge: number(CALLER, &options, "jagged_edge")?.unwrap_or(0.1),
         max_attempts,
+        spacing: spacing(CALLER, &options)?,
     };
     let rotation_jitter = number(CALLER, &options, "rotation_jitter")?.unwrap_or(std::f32::consts::PI / 16.0);
     let scale_jitter = number(CALLER, &options, "scale_jitter")?.unwrap_or(0.15);

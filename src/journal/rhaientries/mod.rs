@@ -5,7 +5,7 @@ mod random;
 
 pub use locks::{LockLibrary, DEFAULT_LOCKS_DIR};
 
-use rhai::{Engine, EvalAltResult, ImmutableString, Dynamic, CustomType, TypeBuilder, Scope};
+use rhai::{Engine, EvalAltResult, ImmutableString, Dynamic, CustomType, TypeBuilder, Scope, Map};
 use super::paths::StrokePath;
 use super::symboldict::SymbolPathDict;
 use super::canvas::Canvas as JournalCanvas;
@@ -595,6 +595,87 @@ impl StrokeStyle {
     }
 }
 
+/// Where text's glyphs come from: the symbol dictionary, and the generator
+/// that picks glyph variants.
+type TextSource = (Rc<SymbolPathDict>, random::SharedRng);
+
+/// `path.fill_with_msg(style, font, size, msg[, #{ spacing }])`: the message
+/// along as many copies of the path as it takes, one canvas per copy. Glyphs
+/// sit at their widths, plus `spacing` (a fraction of the font size).
+fn fill_with_msg(path: &mut Path, style: StrokeStyle, font: Font, fontsize: f64, msg: &str, options: Map, (symdict, rng): &TextSource) -> Result<Vec<Dynamic>, Box<EvalAltResult>> {
+    layout::check_keys("fill_with_msg", &options, &["spacing"])?;
+    if !(fontsize > 0.0) {
+        return Err(format!("fill_with_msg: font size must be positive, got {}", fontsize).into());
+    }
+    let builder = font.builder(symdict);
+    let args = SymbolPlacementArgs{
+        avoid_kdtree: None,
+        symbol_scale: fontsize as f32,
+        spacing: layout::spacing("fill_with_msg", &options)?,
+    };
+
+    let mut all_canvases = Vec::new();
+    let mut symbols = builder.build(msg, &mut *rng.borrow_mut());
+    let path = path.get();
+    let total = symbols.len();
+    while !symbols.is_empty() {
+        let (placed, unplaced) = place_along_path(std::mem::take(&mut symbols), &path, &args);
+        if placed.is_empty() {
+            // Another copy of the path wouldn't fit it either.
+            return Err(format!(
+                "fill_with_msg: glyph {} of {} doesn't fit on the path at font size {}; use a longer path or a smaller font",
+                total - unplaced.len() + 1, total, fontsize,
+            ).into());
+        }
+        let mut canvas = CanvasData::default();
+        for symbol in placed {
+            canvas.add_strokepath(symbol.placed_strokepath(), style.clone());
+        }
+        all_canvases.push(Dynamic::from(Canvas::new(canvas)));
+        symbols = unplaced;
+    }
+    Ok(all_canvases)
+}
+
+/// `path.fit_msg_to(style, font, msg[, #{ spacing }])`: the message along
+/// the path at the largest font size that fits it.
+fn fit_msg_to(path: &mut Path, style: StrokeStyle, font: Font, msg: &str, options: Map, (symdict, rng): &TextSource) -> Result<Canvas, Box<EvalAltResult>> {
+    layout::check_keys("fit_msg_to", &options, &["spacing"])?;
+    let path = &path.get();
+    let mut canvas = CanvasData::default();
+    let builder = font.builder(symdict);
+    let symbols = builder.build(msg, &mut *rng.borrow_mut());
+    let mut args = SymbolPlacementArgs{
+        avoid_kdtree: None,
+        symbol_scale: 20.0,
+        spacing: layout::spacing("fit_msg_to", &options)?,
+    };
+    let mut window_min = 0.1;
+    let mut window_max = 1000.0;
+    while window_max - window_min > 0.005 {
+        let current_scale = (window_max + window_min) / 2.0;
+        args.symbol_scale = current_scale;
+        let (_, unplaced) = place_along_path(symbols.clone(), path, &args);
+        if !unplaced.is_empty() {
+            window_max = current_scale;
+        } else {
+            window_min = current_scale;
+        }
+    }
+    args.symbol_scale = window_min;
+    let (placed, unplaced) = place_along_path(symbols, path, &args);
+    if !unplaced.is_empty() {
+        return Err(format!(
+            "fit_msg_to: the message doesn't fit on the path even at font size {}: {} of {} glyphs left over",
+            window_min, unplaced.len(), placed.len() + unplaced.len(),
+        ).into());
+    }
+    for symbol in placed {
+        canvas.add_strokepath(symbol.placed_strokepath(), style.clone());
+    }
+    Ok(Canvas::new(canvas))
+}
+
 /// Apply a by-value StrokePath builder method to a path in place, returning
 /// the same path.
 fn update_path(path: &mut Path, f: impl FnOnce(StrokePath) -> StrokePath) -> Path {
@@ -615,10 +696,8 @@ impl JournalEngine {
     pub fn with_locks_dir(symdict: Rc<SymbolPathDict>, locks_dir: impl Into<std::path::PathBuf>) -> Self {
         let mut engine = Engine::new();
         let rng = random::register(&mut engine);
-        let fit_msg_symdict = symdict.clone();
-        let fill_msg_symdict = symdict.clone();
-        let fill_msg_rng = rng.clone();
-        let fit_msg_rng = rng.clone();
+        let text: TextSource = (symdict.clone(), rng.clone());
+        let (t1, t2, t3, t4) = (text.clone(), text.clone(), text.clone(), text);
 
         register_canvas(&mut engine);
         engine.register_type_with_name::<Path>("StrokePath")
@@ -634,74 +713,17 @@ impl JournalEngine {
             .register_fn("line_to", |path: &mut Path, pos: Vec2| -> Path {
                 update_path(path, |p| p.line_to(pos.x as f32, pos.y as f32))
             })
-            // The message along as many copies of the path as it takes, one
-            // canvas per copy.
-            .register_fn("fill_with_msg", move |path: &mut Path, style: StrokeStyle, font: Font, fontsize: f64, msg: &str| -> Result<Vec<Dynamic>, Box<EvalAltResult>> {
-                if !(fontsize > 0.0) {
-                    return Err(format!("fill_with_msg: font size must be positive, got {}", fontsize).into());
-                }
-                let builder = font.builder(&fill_msg_symdict);
-                let args = SymbolPlacementArgs{
-                    avoid_kdtree: None, 
-                    symbol_scale: fontsize as f32,
-                };
-
-                let mut all_canvases = Vec::new();
-                let mut symbols = builder.build(msg, &mut *fill_msg_rng.borrow_mut());
-                let path = path.get();
-                let total = symbols.len();
-                while !symbols.is_empty() {
-                    let (placed, unplaced) = place_along_path(std::mem::take(&mut symbols), &path, &args);
-                    if placed.is_empty() {
-                        // Another copy of the path wouldn't fit it either.
-                        return Err(format!(
-                            "fill_with_msg: glyph {} of {} doesn't fit on the path at font size {}; use a longer path or a smaller font",
-                            total - unplaced.len() + 1, total, fontsize,
-                        ).into());
-                    }
-                    let mut canvas = CanvasData::default();
-                    for symbol in placed {
-                        canvas.add_strokepath(symbol.placed_strokepath(), style.clone());
-                    }
-                    all_canvases.push(Dynamic::from(Canvas::new(canvas)));
-                    symbols = unplaced;
-                }
-                Ok(all_canvases)
+            .register_fn("fill_with_msg", move |path: &mut Path, style: StrokeStyle, font: Font, fontsize: f64, msg: &str| {
+                fill_with_msg(path, style, font, fontsize, msg, Map::new(), &t1)
             })
-            .register_fn("fit_msg_to",
-                move |path: &mut Path, style: StrokeStyle, font: Font, msg: &str| -> Result<Canvas, Box<EvalAltResult>> {
-                let path = &path.get();
-                let mut canvas = CanvasData::default();
-                let builder = font.builder(&fit_msg_symdict);
-                let symbols = builder.build(msg, &mut *fit_msg_rng.borrow_mut());
-                let mut args = SymbolPlacementArgs{
-                    avoid_kdtree: None,
-                    symbol_scale: 20.0,
-                };
-                let mut window_min = 0.1;
-                let mut window_max = 1000.0;
-                while window_max - window_min > 0.005 {
-                    let current_scale = (window_max + window_min) / 2.0;
-                    args.symbol_scale = current_scale;
-                    let (_, unplaced) = place_along_path(symbols.clone(), path, &args);
-                    if !unplaced.is_empty() {
-                        window_max = current_scale;
-                    } else {
-                        window_min = current_scale;
-                    }
-                }
-                args.symbol_scale = window_min;
-                let (placed, unplaced) = place_along_path(symbols, path, &args);
-                if !unplaced.is_empty() {
-                    return Err(format!(
-                        "fit_msg_to: the message doesn't fit on the path even at font size {}: {} of {} glyphs left over",
-                        window_min, unplaced.len(), placed.len() + unplaced.len(),
-                    ).into());
-                }
-                for symbol in placed {
-                    canvas.add_strokepath(symbol.placed_strokepath(), style.clone());
-                }
-                Ok(Canvas::new(canvas))
+            .register_fn("fill_with_msg", move |path: &mut Path, style: StrokeStyle, font: Font, fontsize: f64, msg: &str, options: Map| {
+                fill_with_msg(path, style, font, fontsize, msg, options, &t2)
+            })
+            .register_fn("fit_msg_to", move |path: &mut Path, style: StrokeStyle, font: Font, msg: &str| {
+                fit_msg_to(path, style, font, msg, Map::new(), &t3)
+            })
+            .register_fn("fit_msg_to", move |path: &mut Path, style: StrokeStyle, font: Font, msg: &str, options: Map| {
+                fit_msg_to(path, style, font, msg, options, &t4)
             })
             .register_fn("scale_by", |path: &mut Path, scale: f64| -> Path {
                 path.update(|p| p.scale_by(scale as f32))
@@ -1074,8 +1096,61 @@ mod tests {
             assert!(err.contains(want), "{}: {}", want, err);
         }
         // A path that fits a few glyphs at a time still gets the whole message.
-        let parts: rhai::Array = engine().engine.eval(&format!("{}\nnew_line(new_vec(0.0, 0.0), new_vec(60.0, 0.0)).fill_with_msg(s, font, 10.0, \"abcdefghij\")", setup)).unwrap();
+        let parts: rhai::Array = engine().engine.eval(&format!("{}\nnew_line(new_vec(0.0, 0.0), new_vec(60.0, 0.0)).fill_with_msg(s, font, 10.0, \"abcdefghijklmnopqrstuvwxyz\")", setup)).unwrap();
         assert!(parts.len() > 1);
+    }
+
+    /// Where each glyph of `msg` lands along a straight line, at font size
+    /// 20, with `options`.
+    fn glyph_xs(msg: &str, options: &str) -> Vec<f32> {
+        let script = format!(r#"
+            let s = new_strokestyle(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
+            let font = lowercase_font("loche_upper");
+            let line = new_line(new_vec(0.0, 0.0), new_vec(2000.0, 0.0));
+            let page = new_page();
+            for c in line.fill_with_msg(s, font, 20.0, "{}"{}) {{ page.add_canvas(c); }}
+            journal_entry.add_page(page);
+        "#, msg, options);
+        let entry = engine().build_entry_str(&script).expect("script should run");
+        entry.pages[0].canvases()[0].strokes.iter().map(|stroke| {
+            let xs: Vec<f32> = stroke.path.points_within().iter().map(|p| p.x).collect();
+            xs.iter().sum::<f32>() / xs.len() as f32
+        }).collect()
+    }
+
+    #[test]
+    fn text_sits_at_glyph_widths_plus_spacing() {
+        // Narrow glyphs used to be pushed a whole glyph unit apart, however
+        // narrow they were.
+        let tight = glyph_xs("iiii", "");
+        let gaps: Vec<f32> = tight.windows(2).map(|w| w[1] - w[0]).collect();
+        let i_width = {
+            let symd = SymbolPathDict::from_file(crate::journal::symboldict::DEFAULT_SYMBOLS).unwrap();
+            let sym = symd.get_symbol_base("loche_upper_i").unwrap();
+            crate::journal::symbol::Symbol::new_default_from_base_rc(sym).hull_aabb().extents().x * 20.0 / 2.0
+        };
+        assert!(gaps.iter().all(|g| (g - i_width).abs() < 0.5), "gaps {:?}, i is {} wide", gaps, i_width);
+        // spacing adds a fraction of the font size between glyphs.
+        let spaced = glyph_xs("iiii", ", #{ spacing: 0.5 }");
+        let spaced_gaps: Vec<f32> = spaced.windows(2).map(|w| w[1] - w[0]).collect();
+        assert!(spaced_gaps.iter().zip(&gaps).all(|(s, g)| (s - g - 10.0).abs() < 0.5), "{:?} vs {:?}", spaced_gaps, gaps);
+        let err = engine().build_entry_str("new_line(new_vec(0.0, 0.0), new_vec(9.0, 0.0)).fill_with_msg(new_strokestyle(1.0, \"black\", new_brush(\"Ink Pen\", 0.3, 0.7, 1.0)), lowercase_font(\"loche_upper\"), 2.0, \"a\", #{ spacng: 1 });")
+            .expect_err("unknown option").to_string();
+        assert!(err.contains("unknown option 'spacng'"), "{}", err);
+    }
+
+    #[test]
+    fn text_on_a_looping_path_still_avoids_itself() {
+        // A small circle can't hold the message twice over: glyphs coming
+        // round again must not land on the first ones.
+        let script = r#"
+            let s = new_strokestyle(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
+            let font = lowercase_font("loche_upper");
+            let ring = new_circle(new_vec(0.0, 0.0), 30.0);
+            ring.fill_with_msg(s, font, 20.0, "abcdefghijklmnopqrstuvwxyz").len()
+        "#;
+        let copies: i64 = engine().engine.eval(script).expect("should run");
+        assert!(copies > 1, "the circle should need more than one copy, got {}", copies);
     }
 
     #[test]
