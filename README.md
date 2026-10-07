@@ -51,7 +51,8 @@ Useful flags (`journalbuild` with no arguments lists them all):
 | `locks/` | lock types, one rhai file each; see [locks/README.md](locks/README.md) |
 | `layouts/` | page layouts, one rhai file each; see [layouts/README.md](layouts/README.md) |
 | `config/symbols.json` | the symbol dictionary: every glyph's SVG path, by name, with optional `bearing` (room either side when text is set) or `blank` (a space this wide, such as a font's own `{font}_ `) |
-| `src/journal/` | canvases, paths, glyph placement, and Darkly and SVG rendering |
+| `src/journal/` | canvases, paths, glyph placement, fonts, hatching, gradients, paper, and Darkly and SVG rendering |
+| `src/journal/publish.rs` | writing an entry out: images per canvas or page, PDFs, SVGs |
 | `src/journal/art/` | procedural path art: snakes and brambles, free or along a path |
 | `src/journal/rhaientries/` | the rhai API journals and lock files use |
 | `src/lockbuilder/` | runs lock chains forward (lock) and backward (unlock) |
@@ -167,11 +168,12 @@ What to know:
 labelled with the calls that make it: render it with
 `target/release/journalbuild showcase`.
 
-The module docs in `src/journal/rhaientries/` (`glyphs.rs`, `layout.rs`,
-`avoid.rs`, `book.rs`, `random.rs`, `art.rs`, `gradient.rs`,
-`locks/mod.rs`) cover each
-area in more detail, and
-the journals in `journals/` and `tests/smoke_journals/smoke` use most of it.
+The module docs in `src/journal/rhaientries/` cover each area in more
+detail: `path.rs` (paths, hatching, text along paths), `text.rs` (text
+boxes, scattered notes), `glyphs.rs` (glyphs and fonts), `avoid.rs`,
+`layout.rs` (page layouts), `gradient.rs`, `random.rs`, `art.rs` and
+`locks/mod.rs`. The journals in `journals/` and
+`tests/smoke_journals/smoke` use most of it.
 
 ## Locks
 

@@ -42,7 +42,7 @@ impl PdfWriter {
             self.offsets.resize(index + 1, 0);
         }
         self.offsets[index] = at;
-        write!(self.out, "{} 0 obj\n", number)
+        writeln!(self.out, "{} 0 obj", number)
     }
 
     fn next_object(&self) -> u32 {
@@ -111,7 +111,7 @@ impl PdfWriter {
         let xref = self.out.stream_position()?;
         write!(self.out, "xref\n0 {}\n0000000000 65535 f \n", self.offsets.len() + 1)?;
         for offset in &self.offsets {
-            write!(self.out, "{:010} 00000 n \n", offset)?;
+            writeln!(self.out, "{:010} 00000 n ", offset)?;
         }
         write!(self.out, "trailer\n<< /Size {} /Root {} 0 R /Info {} 0 R >>\nstartxref\n{}\n%%EOF\n",
             self.offsets.len() + 1, CATALOG, INFO, xref)?;

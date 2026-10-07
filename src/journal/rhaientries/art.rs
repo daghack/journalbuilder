@@ -64,7 +64,7 @@ use rhai::{Dynamic, Engine, EvalAltResult, Map, Module, NativeCallContext};
 use super::{Path, Vec2};
 use crate::journal::art;
 
-type RhaiResult<T> = Result<T, Box<EvalAltResult>>;
+use super::RhaiResult;
 
 /// An error at the script line of the call: rhai doesn't add it for
 /// functions called through a module, as it does for global ones.

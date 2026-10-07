@@ -317,7 +317,7 @@ pub fn fitting_size(rect: Aabb, style: &TextStyle, glyphs: &[Symbol], chars: &[c
 mod tests {
     use super::*;
     use crate::journal::symboldict::{SymbolPathDict, DEFAULT_SYMBOLS};
-    use crate::journal::styles::lowercase_builder;
+    use crate::journal::fonts::Font;
     use rand::SeedableRng;
 
     /// Jagged edges are off in these tests, so the generator is unused.
@@ -327,7 +327,7 @@ mod tests {
 
     fn text(s: &str) -> (Vec<Symbol>, Vec<char>) {
         let symd = SymbolPathDict::from_file(DEFAULT_SYMBOLS).unwrap();
-        let glyphs = lowercase_builder(&symd, "loche_upper").build(s, &mut rng());
+        let glyphs = Font::lowercase("loche_upper").builder(&symd).build(s, &mut rng());
         (glyphs, s.chars().collect())
     }
 

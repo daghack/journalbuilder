@@ -23,12 +23,12 @@
 
 use rhai::{Array, Dynamic, Engine, EvalAltResult, Map};
 
-use super::layout::{check_keys, number};
+use super::options::{check_keys, number};
 use super::Vec2;
 use crate::journal::canvas::parse_color;
 use crate::journal::gradient::{Gradient, GradientKind};
 
-type RhaiResult<T> = Result<T, Box<EvalAltResult>>;
+use super::RhaiResult;
 
 const CALLER: &str = "new_gradient";
 

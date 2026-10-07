@@ -76,27 +76,6 @@ pub fn ternary_builder<'sd>(symdict: &'sd SymbolPathDict, prefix: &str) -> Symbo
     })
 }
 
-pub fn lowercase_builder<'sd>(symdict: &'sd SymbolPathDict, prefix: &str) -> SymbolStringBuilder<'sd> {
-    let prefix = prefix.to_string();
-    SymbolStringBuilder::<'sd>::new(symdict, move |symd, original, rng| {
-        let c = original.to_lowercase().next().unwrap_or(' ');
-        if c.is_whitespace() {
-            whitespace_symbol(symd, original, &[prefix.as_str()])
-        } else {
-            let mut key = format!("{}_{}", prefix, c);
-            let possible_keys = symd.symbols_with_prefix(key.as_str());
-            if !possible_keys.is_empty() {
-                // choose a random key from possible_keys
-                key = possible_keys[rng.random_range(0..possible_keys.len())].clone();
-            }
-            match symd.get_symbol_base(&key) {
-                Some(sym_base) => Symbol::new_default_from_base_rc(sym_base),
-                None => symd.fallback_symbol(original, &[key]),
-            }
-        }
-    })
-}
-
 #[derive(Clone, Debug)]
 pub struct FontSet {
     upper_fonts: Vec<String>,
@@ -129,9 +108,13 @@ impl FontSet {
                 } else {
                     (upper_fonts, lower_fonts)
                 };
-                let mut tried = Vec::new();
+                let mut tried: Vec<String> = Vec::new();
                 for prefix in first.iter().chain(then) {
                     let key = format!("{}_{}", prefix, prefix_c);
+                    // A font in both lists is looked in once.
+                    if tried.contains(&key) {
+                        continue;
+                    }
                     tried.push(key.clone());
                     let poss_keys = symd.symbols_with_prefix(key.as_str());
                     if !poss_keys.is_empty() {
@@ -163,25 +146,30 @@ pub enum Font {
     /// Base-27 balanced-ternary glyphs, `{prefix}_-13` to `{prefix}_13`
     /// (see `balanced_base27_symbol`).
     Ternary(String),
-    /// Glyphs from one font, `{prefix}_{c}` for each character lowercased,
-    /// picking among the font's variants of it at random.
-    Lowercase(String),
 }
 
 impl Font {
+    /// Glyphs from one font, `{prefix}_{c}` for each character lowercased,
+    /// picking among the font's variants of it at random: a set with the
+    /// one font for both cases.
+    pub fn lowercase(prefix: &str) -> Self {
+        Font::Set(FontSet::new(vec![prefix.to_string()], vec![prefix.to_string()]))
+    }
     pub fn builder<'sd>(&self, symdict: &'sd SymbolPathDict) -> SymbolStringBuilder<'sd> {
         match self {
             Font::Set(set) => set.clone().into_symbol_string_builder(symdict),
             Font::Ternary(prefix) => ternary_builder(symdict, prefix),
-            Font::Lowercase(prefix) => lowercase_builder(symdict, prefix),
         }
     }
-    /// The font prefixes this font draws from.
+    /// The font prefixes this font draws from, each once.
     pub fn prefixes(&self) -> Vec<&str> {
-        match self {
+        let mut prefixes = match self {
             Font::Set(set) => set.prefixes().collect(),
-            Font::Ternary(prefix) | Font::Lowercase(prefix) => vec![prefix.as_str()],
-        }
+            Font::Ternary(prefix) => vec![prefix.as_str()],
+        };
+        let mut seen = std::collections::HashSet::new();
+        prefixes.retain(|p| seen.insert(*p));
+        prefixes
     }
 }
 

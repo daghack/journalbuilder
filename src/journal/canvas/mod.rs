@@ -1,5 +1,4 @@
 use rayon::prelude::*;
-use serde::Deserialize;
 use crate::journal::{avoid::AvoidanceTree, StrokePath};
 use crate::journal::gradient::{Gradient, GradientKind};
 use parry2d::math::{Vec2};
@@ -206,23 +205,25 @@ pub struct ColoredStroke {
     pub seed: Option<u32>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
-pub struct CanvasStyleOptions {
+/// How the SVG output draws strokes: roughened, sampled every
+/// `point_sample_distance` units, tapered over `trail_off_percent` of each
+/// end, and with noise in the rasterised image's opacity.
+#[derive(Clone, Debug)]
+pub struct SvgStyle {
     pub roughness: f32,
     pub point_sample_distance: f32,
     pub trail_off_percent: f32,
     pub noise_amplitude: f32,
 }
 
-impl Default for CanvasStyleOptions {
-    fn default() -> Self {
-        CanvasStyleOptions {
-            roughness: 0.0,
-            point_sample_distance: 2.0,
-            trail_off_percent: 0.1,
-            noise_amplitude: 0.0,
-        }
-    }
+impl SvgStyle {
+    /// How a page's SVG output is drawn unless its script says otherwise.
+    pub const DEFAULT: SvgStyle = SvgStyle {
+        roughness: 1.0,
+        point_sample_distance: 1.0,
+        trail_off_percent: 0.15,
+        noise_amplitude: 0.3,
+    };
 }
 
 /// One tile of a page split into a grid: a fixed region to render, rather
@@ -400,7 +401,7 @@ impl Canvas {
     /// style) by a generator seeded from `seed` and the stroke's own seed,
     /// so a stroke looks the same whichever tile it's drawn in. Strokes that
     /// can't reach the box from `min` to `max` are left out.
-    fn to_svg_group(&self, style: Option<&CanvasStyleOptions>, seed: u64, min: Vec2, max: Vec2) -> String {
+    fn to_svg_group(&self, style: Option<&SvgStyle>, seed: u64, min: Vec2, max: Vec2) -> String {
         let mut svg = String::new();
         let reach = style.map_or(0.0, |s| s.roughness) + 1.0;
         for (stroke, stroke_seed) in self.strokes.iter().zip(self.stroke_seeds()) {
@@ -419,21 +420,19 @@ impl Canvas {
     }
     /// The canvas as SVG. With a style, strokes are roughened and tapered
     /// using generators seeded with `seed`, so the result is reproducible.
-    pub fn to_svg(&self, stylized: Option<&CanvasStyleOptions>, seed: u64) -> String {
+    pub fn to_svg(&self, stylized: Option<&SvgStyle>, seed: u64) -> String {
         self.to_svg_at(stylized, seed, 1.0).0
     }
     /// The canvas as SVG, and where its render at `scale` pixels per unit
     /// falls: the size of the image, and the page pixel of its top-left
     /// corner (only a tile's isn't 0, 0).
-    fn to_svg_at(&self, stylized: Option<&CanvasStyleOptions>, seed: u64, scale: f32) -> (String, (u32, u32), (u32, u32)) {
+    fn to_svg_at(&self, stylized: Option<&SvgStyle>, seed: u64, scale: f32) -> (String, (u32, u32), (u32, u32)) {
         let (min, max) = (self.bounds.mins, self.bounds.maxs);
         let invalid_bounds = min.x > max.x || min.y > max.y;
         let (width, height, viewbox, pixels, offset) = if let Some(frame) = &self.frame {
             // The tile's pixels of the whole page's render, and the part of
             // the page they show.
-            let extents = frame.page_extents();
-            let page_size = (((extents.x * scale) as u32).max(1), ((extents.y * scale) as u32).max(1));
-            let [x0, y0, x1, y1] = frame.pixels(page_size);
+            let [x0, y0, x1, y1] = frame.pixels(frame.page_pixels(scale));
             let origin = frame.page.mins + Vec2::new(x0 as f32, y0 as f32) / scale;
             let size = Vec2::new((x1 - x0) as f32, (y1 - y0) as f32) / scale;
             let viewbox = format!("{} {} {} {}", origin.x, origin.y, size.x, size.y);
@@ -458,7 +457,7 @@ impl Canvas {
     }
     /// Vary the opacity of a render with Perlin noise seeded by `seed`, read
     /// at page pixel `offset` plus each pixel's, so tiles' noise lines up.
-    pub fn stylize_pixmap(pixmap: &mut tiny_skia::Pixmap, stylized: &CanvasStyleOptions, seed: u64, offset: (u32, u32)) {
+    pub fn stylize_pixmap(pixmap: &mut tiny_skia::Pixmap, stylized: &SvgStyle, seed: u64, offset: (u32, u32)) {
         if stylized.noise_amplitude > 0.0 {
             let perlin = Perlin::new((seed ^ (seed >> 32)) as u32);
             let width = pixmap.width();
@@ -489,12 +488,12 @@ impl Canvas {
         }
     }
     /// The canvas as a PNG; see `to_svg` for `seed`.
-    pub fn to_png(&self, scale: f32, stylized: Option<&CanvasStyleOptions>, seed: u64) -> Vec<u8> {
+    pub fn to_png(&self, scale: f32, stylized: Option<&SvgStyle>, seed: u64) -> Vec<u8> {
         self.to_svg_and_png(scale, stylized, seed).1
     }
     /// The canvas as SVG and that SVG rasterised at `scale` pixels per unit
     /// (with the style's noise added); see `to_svg` for `seed`.
-    pub fn to_svg_and_png(&self, scale: f32, stylized: Option<&CanvasStyleOptions>, seed: u64) -> (String, Vec<u8>) {
+    pub fn to_svg_and_png(&self, scale: f32, stylized: Option<&SvgStyle>, seed: u64) -> (String, Vec<u8>) {
         let (svg_data, (width, height), offset) = self.to_svg_at(stylized, seed, scale);
         let svg_tree = usvg::Tree::from_str(&svg_data, &usvg::Options::default()).expect("Failed to parse SVG");
         // A tile is drawn with a border of extra pixels and cut out of it,
@@ -515,7 +514,7 @@ impl Canvas {
     /// A stroke as SVG, roughened and tapered: each subpath an outline,
     /// filled. `id` names its gradient, if it has one across the canvas;
     /// along a stroke, its outline is cut into pieces, each its own colour.
-    pub fn stylized_path(&self, stroke: &ColoredStroke, opts: &CanvasStyleOptions, rng: &mut dyn RngCore, id: &str) -> String {
+    pub fn stylized_path(&self, stroke: &ColoredStroke, opts: &SvgStyle, rng: &mut dyn RngCore, id: &str) -> String {
         let pos_roughen = opts.roughness;
         let distance = opts.point_sample_distance;
         let trail_off_percent = opts.trail_off_percent;
@@ -638,7 +637,7 @@ mod svg_output_tests {
     #[test]
     fn gradients_in_svg() {
         let wave = StrokePath::new().move_to(0.0, 0.0).cubic_curve_to(30.0, -20.0, 60.0, 20.0, 90.0, 0.0);
-        let opts = CanvasStyleOptions { roughness: 0.5, point_sample_distance: 1.0, trail_off_percent: 0.15, noise_amplitude: 0.0 };
+        let opts = SvgStyle { roughness: 0.5, point_sample_distance: 1.0, trail_off_percent: 0.15, noise_amplitude: 0.0 };
         for styled in [None, Some(&opts)] {
             // Along a stroke: pieces from red to blue.
             let mut canvas = Canvas::new();
@@ -663,7 +662,7 @@ mod svg_output_tests {
         let mut canvas = Canvas::new();
         let style = StrokeStyle { width: 2.0, color: "black".into(), brush: None };
         canvas.add_strokes(StrokePath::new().move_to(0.0, 0.0).cubic_curve_to(10.0, 0.0, 20.0, 10.0, 30.0, 30.0), style);
-        let opts = CanvasStyleOptions { roughness: 2.0, point_sample_distance: 1.0, trail_off_percent: 0.15, noise_amplitude: 1.5 };
+        let opts = SvgStyle { roughness: 2.0, point_sample_distance: 1.0, trail_off_percent: 0.15, noise_amplitude: 1.5 };
         assert_eq!(canvas.to_png(1.0, Some(&opts), 7), canvas.to_png(1.0, Some(&opts), 7));
         assert_ne!(canvas.to_png(1.0, Some(&opts), 7), canvas.to_png(1.0, Some(&opts), 8));
         assert_eq!(canvas.to_svg(Some(&opts), 7), canvas.to_svg(Some(&opts), 7));

@@ -187,7 +187,7 @@ mod tests {
         image.put_pixel(9, 0, image::Rgba([128, 128, 128, 100]));
         image.put_pixel(4, 0, image::Rgba([255, 255, 255, 0]));
         let g = red_to_blue(GradientKind::Linear { from: Vec2::new(0.5, 0.0), to: Vec2::new(9.5, 0.0) });
-        colorize(&mut image, &g, |x, y| Vec2::new(x, y), None);
+        colorize(&mut image, &g, Vec2::new, None);
         assert_eq!(image.get_pixel(0, 0).0, [255, 0, 0, 255]);
         assert_eq!(image.get_pixel(9, 0).0, [0, 0, 128, 50]);
         assert_eq!(image.get_pixel(4, 0).0, [255, 255, 255, 0], "untouched where nothing is drawn");

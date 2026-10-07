@@ -1,221 +1,37 @@
 mod art;
 mod avoid;
-mod book;
+mod canvas;
+mod entry;
 mod glyphs;
 mod gradient;
 mod layout;
 mod locks;
+mod options;
+mod path;
 mod random;
+mod style;
+mod text;
+mod vec;
 
-pub use book::DEFAULT_LAYOUTS_DIR;
+pub use layout::DEFAULT_LAYOUTS_DIR;
 pub use locks::{LockLibrary, DEFAULT_LOCKS_DIR};
+pub use canvas::{CanvasData, Stroke};
+pub use entry::{Entry, Page};
+pub use style::{BrushSettings, StrokeStyle};
+pub use vec::Vec2;
+use entry::check_name;
+use path::TextSource;
 
-use rhai::{Engine, EvalAltResult, ImmutableString, Dynamic, CustomType, TypeBuilder, Scope, Map};
+use rhai::{Dynamic, Engine, EvalAltResult, Scope};
+
+/// What rhai functions return: a value, or an error for the script.
+pub(super) type RhaiResult<T> = Result<T, Box<EvalAltResult>>;
+use super::background::Paper;
 use super::paths::StrokePath;
 use super::symboldict::SymbolPathDict;
-use super::canvas::Canvas as JournalCanvas;
-use super::canvas::StrokeStyle as JournalStrokeStyle;
-use super::canvas::CanvasStyleOptions;
-use super::canvas::{Brush, Frame, PressureProfile, StrokeColor};
-use super::symbol::{place_along_path, place_words_along_path, Symbol, SymbolPlacementArgs};
-use super::canvas::textbox::TextBoxLineMode;
-use super::styles::Font;
-use super::darkly;
-use super::background::{self, Paper, Sheet};
-use super::compose::{self, Placed};
-use super::pdf::PdfWriter;
-use ::darkly::engine::DarklyEngine;
-use image::RgbaImage;
-use parry2d::math::Vec2 as PVec;
 
 use std::cell::RefCell;
 use std::rc::Rc;
-
-#[derive(Debug, Default, Clone, CustomType)]
-#[rhai_type(extra = Self::build_extra)]
-pub struct Entry {
-    pages: Vec<Page>,
-}
-
-impl Entry {
-    fn add_page(&mut self, page: Page) -> Result<(), Box<EvalAltResult>> {
-        let label = page.label(self.pages.len());
-        if self.pages.iter().enumerate().any(|(i, p)| p.label(i) == label) {
-            return Err(format!("add_page: the entry already has a page named '{}'", label).into());
-        }
-        self.pages.push(page);
-        Ok(())
-    }
-    /// `journal_entry.add_pages(pages)`, such as a split page's tiles.
-    fn add_pages(&mut self, pages: rhai::Array) -> Result<(), Box<EvalAltResult>> {
-        for (i, page) in pages.into_iter().enumerate() {
-            let type_name = page.type_name();
-            let page = page.try_cast::<Page>()
-                .ok_or_else(|| format!("add_pages: item {} is a {}, not a page", i, type_name))?;
-            self.add_page(page)?;
-        }
-        Ok(())
-    }
-    fn build_extra(builder: &mut TypeBuilder<Self>) {
-        builder
-            .with_fn("add_page", Self::add_page)
-            .with_fn("add_pages", Self::add_pages);
-    }
-    pub fn page_count(&self) -> usize {
-        self.pages.len()
-    }
-    /// `page/canvas` labels of the canvases that have nothing on them, which
-    /// publishing skips.
-    pub fn empty_canvases(&self) -> Vec<String> {
-        self.pages.iter().enumerate().flat_map(|(i, page)| {
-            page.canvases.iter().enumerate()
-                .filter(|(_, canvas)| canvas.strokes.is_empty() && canvas.frame.is_none())
-                .map(move |(c, canvas)| format!("{}/{}", page.label(i), canvas.label(c)))
-        }).collect()
-    }
-    /// The index of a page given by index or by name (its output label).
-    pub fn page_index(&self, page: &str) -> Result<usize, String> {
-        let labels: Vec<String> = self.pages.iter().enumerate().map(|(i, p)| p.label(i)).collect();
-        let found = match page.parse::<usize>() {
-            Ok(index) => Some(index).filter(|&i| i < labels.len()),
-            Err(_) => labels.iter().position(|label| label == page),
-        };
-        found.ok_or_else(|| match labels.len() {
-            0 => format!("page '{}' doesn't exist; the journal has no pages", page),
-            n => format!("page '{}' doesn't exist; pages are 0-{}: {}", page, n - 1, labels.join(", ")),
-        })
-    }
-    /// Pages to publish with their original indices: all of them, or only
-    /// those listed in `only`.
-    fn selected_pages<'a>(&'a self, only: Option<&'a [usize]>) -> impl Iterator<Item = (usize, &'a Page)> + 'a {
-        self.pages.iter().enumerate()
-            .filter(move |(i, _)| only.is_none_or(|pages| pages.contains(i)))
-    }
-    pub fn darkly_publish_pngs(&self, engine: &mut DarklyEngine, dirname: &str, scale: f32, supersample: f32, only: Option<&[usize]>) -> Result<(), String> {
-        for (i, page) in self.selected_pages(only) {
-            for (canvas_i, canvas) in page.canvases().iter().enumerate() {
-                let filename = format!("{}/darkly_{}_{}.png", dirname, page.label(i), canvas.label(canvas_i));
-                let Some(canvas) = page.render_canvas(canvas) else {
-                    continue; // journalbuild warns about these (see empty_canvases)
-                };
-                // Canvas units are pixels at scale 1, so brushes scale with
-                // the render.
-                let buff = darkly::render(&canvas, engine, scale, supersample);
-                buff.save(&filename).map_err(|e| format!("couldn't write {}: {}", filename, e))?;
-            }
-        }
-        Ok(())
-    }
-    /// Darkly renders a page at a time, each page's canvases layered into
-    /// one image on `paper` (see `Page::darkly_render`), written as
-    /// `darkly_{page}.png`.
-    pub fn darkly_publish_pages(&self, engine: &mut DarklyEngine, dirname: &str, scale: f32, supersample: f32, only: Option<&[usize]>, paper: Option<Paper>) -> Result<(), String> {
-        for (i, page) in self.selected_pages(only) {
-            let label = page.label(i);
-            let Some(image) = page.darkly_render(engine, &label, scale, supersample, paper) else {
-                continue; // journalbuild warns about empty canvases
-            };
-            let filename = format!("{}/darkly_{}.png", dirname, label);
-            image.save(&filename).map_err(|e| format!("couldn't write {}: {}", filename, e))?;
-        }
-        Ok(())
-    }
-    /// Darkly renders of the pages, each one image (see
-    /// `Page::darkly_render`), as the pages of one PDF at `path`, titled
-    /// `title`. A page's size is its size in canvas units at
-    /// `UNITS_PER_INCH`, whatever the scale.
-    pub fn darkly_publish_pdf(&self, engine: &mut DarklyEngine, path: &str, title: &str, scale: f32, supersample: f32, only: Option<&[usize]>, paper: Option<Paper>) -> Result<(), String> {
-        let io_error = |e: std::io::Error| format!("couldn't write {}: {}", path, e);
-        let mut pdf = PdfWriter::create(path).map_err(io_error)?;
-        for (i, page) in self.selected_pages(only) {
-            let Some(image) = page.darkly_render(engine, &page.label(i), scale, supersample, paper) else {
-                continue; // journalbuild warns about empty canvases
-            };
-            let points = 72.0 / UNITS_PER_INCH / scale;
-            pdf.add_page(&image, image.width() as f32 * points, image.height() as f32 * points).map_err(io_error)?;
-        }
-        if pdf.page_count() == 0 {
-            return Err(format!("nothing to put in {}: every page is empty", path));
-        }
-        pdf.finish(title).map_err(io_error)
-    }
-    /// SVG renders, one per canvas like the Darkly ones, each written as
-    /// `{page}_{canvas}.svg` and rasterised to `{page}_{canvas}.png`. Here a
-    /// style's width is the stroke's geometric width; in Darkly it scales
-    /// the brush's pressure instead (see `new_strokestyle`).
-    pub fn publish_svgs(&self, dirname: &str, scale: f32, only: Option<&[usize]>) -> Result<(), String> {
-        println!("Publishing SVGs:");
-        for (i, page) in self.selected_pages(only) {
-            for (canvas_i, canvas) in page.canvases().iter().enumerate() {
-                let name = format!("{}_{}", page.label(i), canvas.label(canvas_i));
-                let svg_file = format!("{}/{}.svg", dirname, name);
-                let filename = format!("{}/{}.png", dirname, name);
-                let Some(canvas) = page.render_canvas(canvas) else {
-                    continue;
-                };
-                // Seeded by the file's name: the same every run, but each
-                // canvas roughened differently. Tiles use the whole page's.
-                let seed = canvas.frame().map_or_else(|| stable_hash(&name), |frame| frame.svg_seed);
-                let (svg, png) = canvas.to_svg_and_png(2.0 * scale, page.svg_style.as_ref(), seed);
-                println!("\t - {}", svg_file);
-                std::fs::write(&svg_file, svg).map_err(|e| format!("couldn't write {}: {}", svg_file, e))?;
-                std::fs::write(&filename, png).map_err(|e| format!("couldn't write {}: {}", filename, e))?;
-            }
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug, Default, Clone, CustomType)]
-#[rhai_type(extra = Self::build_extra)]
-pub struct BrushSettings {
-    brush_style: ImmutableString,
-    min_pressure: f64,
-    max_pressure: f64,
-    size: f64,
-    #[rhai_type(skip)]
-    pressure_profile: PressureProfile,
-}
-
-impl BrushSettings {
-    /// `new_brush` is registered in `JournalEngine::new`, which checks the
-    /// name against Darkly's brush library.
-    pub fn new_brush(brush_style: &str, min_pressure: f64, max_pressure: f64, size: f64) -> Self {
-        Self {
-            brush_style: brush_style.into(),
-            min_pressure,
-            max_pressure,
-            size,
-            pressure_profile: PressureProfile::default(),
-        }
-    }
-    fn get_pressure_profile(&mut self) -> String {
-        self.pressure_profile.name().to_string()
-    }
-    /// `brush.pressure_profile = "taper"`: "ramp" (min to max, the default),
-    /// "taper" (min to max at the middle and back) or "constant" (max).
-    fn set_pressure_profile(&mut self, name: String) -> Result<(), Box<EvalAltResult>> {
-        self.pressure_profile = PressureProfile::from_name(&name).ok_or_else(|| -> Box<EvalAltResult> {
-            format!("brush.pressure_profile: unknown profile '{}'; expected one of {}", name, PressureProfile::NAMES.join(", ")).into()
-        })?;
-        Ok(())
-    }
-    fn build_extra(builder: &mut TypeBuilder<Self>) {
-        builder.with_get_set("pressure_profile", Self::get_pressure_profile, Self::set_pressure_profile);
-    }
-}
-
-impl From<BrushSettings> for Brush {
-    fn from(bs: BrushSettings) -> Brush {
-        Brush {
-            name: bs.brush_style.to_string(),
-            size: bs.size as f32,
-            min_pressure: bs.min_pressure as f32,
-            max_pressure: bs.max_pressure as f32,
-            pressure_profile: bs.pressure_profile,
-        }
-    }
-}
 
 /// Fail if a path has an infinite or NaN coordinate. Scaling or dividing
 /// by zero in a script makes them, and they'd otherwise break the render's
@@ -225,382 +41,6 @@ pub(super) fn check_finite(caller: &str, path: &StrokePath) -> Result<(), Box<Ev
         Ok(())
     } else {
         Err(format!("{}: the path has a non-finite (infinite or NaN) coordinate", caller).into())
-    }
-}
-
-/// FNV-1a: a string hash that, unlike std's, is guaranteed stable across
-/// Rust versions.
-fn stable_hash(text: &str) -> u64 {
-    text.bytes().fold(0xcbf29ce484222325, |hash, byte| (hash ^ byte as u64).wrapping_mul(0x100000001b3))
-}
-
-/// Names become file names, so they're limited to letters, digits, `_`,
-/// `-` and `.` (not leading).
-fn check_name(caller: &str, name: Dynamic) -> Result<String, Box<EvalAltResult>> {
-    let name = name.into_immutable_string()
-        .map_err(|type_name| -> Box<EvalAltResult> { format!("{}: a name must be a string, got {}", caller, type_name).into() })?;
-    let ok = !name.is_empty() && !name.starts_with('.')
-        && name.chars().all(|c| c.is_ascii_alphanumeric() || "_-.".contains(c));
-    if ok {
-        Ok(name.to_string())
-    } else {
-        Err(format!("{}: invalid name '{}'; use letters, digits, '_', '-' and '.' (not first)", caller, name).into())
-    }
-}
-
-/// Canvas units to an inch in PDF output: a page 1100 units across is
-/// about 7.3 inches.
-pub const UNITS_PER_INCH: f32 = 150.0;
-
-/// Paper round a page's strokes, as a fraction of its larger side, and at
-/// least this many units.
-const PAPER_BORDER: f32 = 0.06;
-const PAPER_BORDER_MIN: f32 = 20.0;
-
-/// How a page's SVG output (`--svg`) is drawn, unless the script sets
-/// `page.svg_style`.
-const DEFAULT_SVG_STYLE: CanvasStyleOptions = CanvasStyleOptions {
-    roughness: 1.0,
-    point_sample_distance: 1.0,
-    trail_off_percent: 0.15,
-    noise_amplitude: 0.3,
-};
-
-const SVG_STYLE_KEYS: [&str; 4] = ["roughness", "point_sample_distance", "trail_off_percent", "noise_amplitude"];
-
-#[derive(Debug, Clone, CustomType)]
-#[rhai_type(extra = Self::build_extra)]
-pub struct Page {
-    canvases: Vec<CanvasData>,
-    /// Output files are named after this, or `page_{index}` without one.
-    #[rhai_type(skip)]
-    name: Option<String>,
-    /// `None` draws the SVG output as simple strokes.
-    #[rhai_type(skip)]
-    svg_style: Option<CanvasStyleOptions>,
-    /// Space around each canvas's strokes, in canvas units; `None` for the
-    /// default (see `margin_for`).
-    #[rhai_type(skip)]
-    margin: Option<f64>,
-}
-
-impl Default for Page {
-    fn default() -> Self {
-        Page {
-            canvases: Vec::new(),
-            name: None,
-            svg_style: Some(DEFAULT_SVG_STYLE),
-            margin: None,
-        }
-    }
-}
-
-impl Page {
-    /// `page.add_canvas(canvas)` adds a copy of the canvas as it is now.
-    pub fn add_canvas(&mut self, canvas: Canvas) -> Result<(), Box<EvalAltResult>> {
-        let canvas = canvas.get();
-        let label = canvas.label(self.canvases.len());
-        if self.canvases.iter().enumerate().any(|(i, c)| c.label(i) == label) {
-            return Err(format!("add_canvas: the page already has a canvas named '{}'", label).into());
-        }
-        self.canvases.push(canvas);
-        Ok(())
-    }
-    pub fn canvases(&self) -> &Vec<CanvasData> {
-        &self.canvases
-    }
-    /// `canvas` as it's rendered: padded by its margin, or a tile's frame.
-    /// `None` if there's nothing to render.
-    pub fn render_canvas(&self, canvas: &CanvasData) -> Option<JournalCanvas> {
-        let mut rendered: JournalCanvas = canvas.into();
-        if rendered.frame().is_none() {
-            if !rendered.has_strokes() {
-                return None;
-            }
-            rendered.pad(self.margin_for(canvas));
-        }
-        Some(rendered)
-    }
-    /// The page rendered with Darkly as one image, `label` being its name
-    /// in output: its canvases layered in order, each where it is on the
-    /// page, on `paper` if given. On paper, a page that isn't a tile (or
-    /// typeset) gets a border of paper round its strokes; each tile of a
-    /// split page is a sheet of its own, like a big drawing spread over
-    /// several pages. `None` if nothing is drawn.
-    pub fn darkly_render(&self, engine: &mut DarklyEngine, label: &str, scale: f32, supersample: f32, paper: Option<Paper>) -> Option<RgbaImage> {
-        let mut layers = Vec::new();
-        let mut frame = None;
-        for canvas in &self.canvases {
-            let Some(canvas) = self.render_canvas(canvas) else { continue };
-            frame = frame.or(canvas.frame().copied());
-            layers.push(Placed { at: canvas.render_origin(scale), image: darkly::render(&canvas, engine, scale, supersample) });
-        }
-        let ink = compose::flatten(layers)?;
-        let Some(paper) = paper else { return Some(ink.image) };
-        // A tile or typeset page is a sheet as big as its frame; other pages
-        // get a border of paper round their strokes.
-        let (corner, size) = match frame {
-            Some(frame) => {
-                let [x0, y0, x1, y1] = frame.pixels(frame.page_pixels(scale)).map(|v| v as i64);
-                let page = ((frame.page.mins.x * scale).round() as i64, (frame.page.mins.y * scale).round() as i64);
-                ((page.0 + x0, page.1 + y0), ((x1 - x0) as u32, (y1 - y0) as u32))
-            }
-            None => {
-                let (w, h) = ink.image.dimensions();
-                let border = (w.max(h) as f32 * PAPER_BORDER).max(PAPER_BORDER_MIN * scale).round() as u32;
-                ((ink.at.0 - border as i64, ink.at.1 - border as i64), (w + 2 * border, h + 2 * border))
-            }
-        };
-        let sheet = Sheet { corner, size, scale, seed: stable_hash(label) };
-        let at = corner;
-        let mut sheet = Placed { image: background::paint(paper, &sheet), at };
-        compose::draw(&mut sheet, &ink, compose::ink_on_paper);
-        Some(sheet.image)
-    }
-    /// The margin rendered around `canvas`: the page's `margin`, or by
-    /// default half the largest brush size on the canvas, the least that
-    /// keeps brush marks at the edges from being cut off. (The bounds
-    /// already include the strokes' widths.)
-    pub fn margin_for(&self, canvas: &CanvasData) -> f32 {
-        match self.margin {
-            Some(margin) => margin as f32,
-            None => canvas.strokes.iter().map(|s| s.style.brush.size as f32 / 2.0).fold(0.0, f32::max),
-        }
-    }
-    fn get_margin(&mut self) -> Dynamic {
-        self.margin.map_or(Dynamic::UNIT, Dynamic::from)
-    }
-    /// `page.margin = 20.0` (canvas units, 0 for none), or `()` for the
-    /// default.
-    fn set_margin(&mut self, margin: Dynamic) -> Result<(), Box<EvalAltResult>> {
-        if margin.is_unit() {
-            self.margin = None;
-            return Ok(());
-        }
-        let value = margin.as_float().or_else(|_| margin.as_int().map(|i| i as f64))
-            .map_err(|t| -> Box<EvalAltResult> { format!("page.margin: expected a number or (), got {}", t).into() })?;
-        if !(value >= 0.0) || !value.is_finite() {
-            return Err(format!("page.margin: must be a finite number of at least 0, got {}", value).into());
-        }
-        self.margin = Some(value);
-        Ok(())
-    }
-    /// The page's name in output files, given its index in the entry.
-    pub fn label(&self, index: usize) -> String {
-        self.name.clone().unwrap_or_else(|| format!("page_{}", index))
-    }
-    fn get_name(&mut self) -> Dynamic {
-        self.name.clone().map_or(Dynamic::UNIT, Dynamic::from)
-    }
-    fn set_name(&mut self, name: Dynamic) -> Result<(), Box<EvalAltResult>> {
-        self.name = Some(check_name("page.name", name)?);
-        Ok(())
-    }
-    fn get_svg_style(&mut self) -> Dynamic {
-        match &self.svg_style {
-            None => Dynamic::UNIT,
-            Some(style) => {
-                let mut map = rhai::Map::new();
-                for (key, value) in SVG_STYLE_KEYS.iter().zip([style.roughness, style.point_sample_distance, style.trail_off_percent, style.noise_amplitude]) {
-                    // Via the shortest decimal form, so 0.3 reads back as 0.3
-                    // rather than 0.30000001192092896.
-                    let value: f64 = value.to_string().parse().expect("a float's string form parses");
-                    map.insert((*key).into(), Dynamic::from(value));
-                }
-                Dynamic::from_map(map)
-            }
-        }
-    }
-    /// `()` for simple strokes, or a map of options; any left out keep their
-    /// defaults.
-    fn set_svg_style(&mut self, style: Dynamic) -> Result<(), Box<EvalAltResult>> {
-        const CALLER: &str = "page.svg_style";
-        if style.is_unit() {
-            self.svg_style = None;
-            return Ok(());
-        }
-        let type_name = style.type_name();
-        let options = style.try_cast::<rhai::Map>()
-            .ok_or_else(|| -> Box<EvalAltResult> { format!("{}: expected a map of options or (), got {}", CALLER, type_name).into() })?;
-        layout::check_keys(CALLER, &options, &SVG_STYLE_KEYS)?;
-        let get = |key: &str, default: f32| -> Result<f32, Box<EvalAltResult>> {
-            match layout::number(CALLER, &options, key)? {
-                Some(n) if n >= 0.0 => Ok(n),
-                Some(n) => Err(format!("{}: '{}' can't be negative, got {}", CALLER, key, n).into()),
-                None => Ok(default),
-            }
-        };
-        let d = DEFAULT_SVG_STYLE;
-        let point_sample_distance = get("point_sample_distance", d.point_sample_distance)?;
-        if point_sample_distance == 0.0 {
-            return Err(format!("{}: 'point_sample_distance' must be positive", CALLER).into());
-        }
-        self.svg_style = Some(CanvasStyleOptions {
-            roughness: get("roughness", d.roughness)?,
-            point_sample_distance,
-            trail_off_percent: get("trail_off_percent", d.trail_off_percent)?,
-            noise_amplitude: get("noise_amplitude", d.noise_amplitude)?,
-        });
-        Ok(())
-    }
-    /// `page.split(columns, rows)`: the page cut into a grid of tiles, each
-    /// a page of its own, row by row. See `split_with`.
-    fn split(&mut self, columns: i64, rows: i64) -> Result<rhai::Array, Box<EvalAltResult>> {
-        let mut options = Map::new();
-        options.insert("columns".into(), Dynamic::from(columns));
-        options.insert("rows".into(), Dynamic::from(rows));
-        self.split_with(options)
-    }
-    /// `page.split(#{ columns, rows })`, or `#{ tile_width, tile_height }`
-    /// for tiles of a given size (in canvas units; the grid grows evenly
-    /// round the page to a whole number of them), or a mix: one option
-    /// across and one down, each 1 tile by default.
-    ///
-    /// The page is everything its renders cover, every canvas with its
-    /// margin, and the tiles divide it evenly. Each tile page has a part of
-    /// each canvas, named as the canvas was, rendering exactly its share of
-    /// the pixels the whole canvas's render would have: placed side by side
-    /// in order, a canvas's tiles make that render (over the whole page, so
-    /// canvases' tiles line up with each other too). Strokes crossing a
-    /// seam are drawn whole in each tile they reach and cut off at its
-    /// edges, with the same brush texture, so they carry on unbroken.
-    ///
-    /// Tiles are named `{name}_{row}_{column}`, counting from 0, so the page
-    /// needs a name. Their `tile` property gives their place in the grid.
-    fn split_with(&mut self, options: Map) -> Result<rhai::Array, Box<EvalAltResult>> {
-        const CALLER: &str = "page.split";
-        layout::check_keys(CALLER, &options, &["columns", "rows", "tile_width", "tile_height"])?;
-        let name = self.name.clone()
-            .ok_or_else(|| format!("{}: name the page first; its tiles are named after it ({{name}}_{{row}}_{{column}})", CALLER))?;
-        // Typeset pages are framed to the whole page: they split by it.
-        let whole = |frame: &Frame| frame.columns == 1 && frame.rows == 1;
-        if self.canvases.iter().any(|canvas| canvas.frame.is_some_and(|f| !whole(&f))) {
-            return Err(format!("{}: the page is already a tile; split the page it came from instead", CALLER).into());
-        }
-        let canvases: Vec<(usize, &CanvasData)> = self.canvases.iter().enumerate()
-            .filter(|(_, canvas)| !canvas.strokes.is_empty() || canvas.frame.is_some()).collect();
-        let mut region = parry2d::bounding_volume::Aabb::new_invalid();
-        for (_, canvas) in &canvases {
-            let bounds = match canvas.frame {
-                Some(frame) => frame.page,
-                None => self.render_canvas(canvas).expect("the canvas has strokes").bounds(),
-            };
-            region.take_point(bounds.mins);
-            region.take_point(bounds.maxs);
-        }
-        if canvases.is_empty() {
-            return Err(format!("{}: the page has nothing drawn on it to split", CALLER).into());
-        }
-        // How many tiles across and down, growing the region to a whole
-        // number of tiles where they have a set size.
-        let mut grid = |count_key: &str, size_key: &str, axis: usize| -> Result<u32, Box<EvalAltResult>> {
-            let extent = region.extents()[axis].max(1.0);
-            match (options.get(count_key), layout::number(CALLER, &options, size_key)?) {
-                (Some(_), Some(_)) => Err(format!("{}: give '{}' or '{}', not both", CALLER, count_key, size_key).into()),
-                (Some(count), None) => match count.as_int() {
-                    Ok(n) if (1..=1000).contains(&n) => Ok(n as u32),
-                    _ => Err(format!("{}: '{}' should be a whole number from 1 to 1000, got {}", CALLER, count_key, count).into()),
-                },
-                (None, Some(size)) if size > 0.0 && size.is_finite() => {
-                    let count = (extent / size).ceil().clamp(1.0, 1000.0);
-                    let grow = (count * size - extent) / 2.0;
-                    region.mins[axis] -= grow;
-                    region.maxs[axis] = region.mins[axis] + count * size;
-                    Ok(count as u32)
-                }
-                (None, Some(size)) => Err(format!("{}: '{}' must be positive, got {}", CALLER, size_key, size).into()),
-                (None, None) => Ok(1),
-            }
-        };
-        let columns = grid("columns", "tile_width", 0)?;
-        let rows = grid("rows", "tile_height", 1)?;
-        // Every stroke keeps its texture's seed from the whole canvas.
-        let seeded: Vec<(usize, CanvasData)> = canvases.iter().map(|(i, canvas)| {
-            let seeds = JournalCanvas::from(*canvas).stroke_seeds();
-            let mut canvas = (*canvas).clone();
-            for (stroke, seed) in canvas.strokes.iter_mut().zip(seeds) {
-                stroke.seed = Some(seed);
-            }
-            (*i, canvas)
-        }).collect();
-        let mut tiles = rhai::Array::new();
-        for row in 0..rows {
-            for column in 0..columns {
-                let mut tile = Page {
-                    canvases: Vec::new(),
-                    name: Some(format!("{}_{}_{}", name, row, column)),
-                    svg_style: self.svg_style.clone(),
-                    margin: self.margin,
-                };
-                for (i, canvas) in &seeded {
-                    let mut part = canvas.clone();
-                    part.frame = Some(Frame {
-                        page: region,
-                        column, columns, row, rows,
-                        svg_seed: stable_hash(&format!("{}_{}", name, canvas.label(*i))),
-                    });
-                    // Named as it was, since its index might change.
-                    part.name = Some(canvas.label(*i));
-                    tile.canvases.push(part);
-                }
-                tiles.push(Dynamic::from(tile));
-            }
-        }
-        Ok(tiles)
-    }
-    /// A tile's place in its page's grid, or `()`.
-    fn get_tile(&mut self) -> Dynamic {
-        let Some(frame) = self.canvases.iter().find_map(|c| c.frame) else { return Dynamic::UNIT };
-        let mut map = Map::new();
-        for (key, value) in [("row", frame.row), ("column", frame.column), ("rows", frame.rows), ("columns", frame.columns)] {
-            map.insert(key.into(), Dynamic::from(value as i64));
-        }
-        Dynamic::from_map(map)
-    }
-    fn build_extra(builder: &mut TypeBuilder<Self>) {
-        builder
-            .with_fn("add_canvas", Self::add_canvas)
-            .with_fn("new_page", Self::default)
-            .with_get_set("name", Self::get_name, Self::set_name)
-            .with_get_set("svg_style", Self::get_svg_style, Self::set_svg_style)
-            .with_get_set("margin", Self::get_margin, Self::set_margin)
-            .with_fn("split", Self::split)
-            .with_fn("split", Self::split_with)
-            .with_get("tile", Self::get_tile)
-        ;
-    }
-}
-
-#[derive(Debug, Default, Clone)]
-#[derive(CustomType)]
-#[rhai_type(extra = Self::build_extra)]
-pub struct Vec2 {
-    pub x: f64,
-    pub y: f64,
-}
-
-impl Vec2 {
-    pub fn new(x: f64, y: f64) -> Self {
-        Vec2{ x, y }
-    }
-    /// `new_vec(x, y)`, refusing infinite and NaN coordinates (from a
-    /// division by zero, say), which would otherwise surface far away.
-    fn checked(x: f64, y: f64) -> Result<Self, Box<EvalAltResult>> {
-        if !(x.is_finite() && y.is_finite()) {
-            return Err(format!("new_vec: coordinates must be finite numbers, got ({}, {})", x, y).into());
-        }
-        Ok(Vec2 { x, y })
-    }
-    fn build_extra(builder: &mut TypeBuilder<Self>) {
-        builder
-            .with_fn("new_vec", Self::checked)
-        ;
-    }
-}
-
-impl From<Vec2> for PVec {
-    fn from(val: Vec2) -> Self {
-        PVec::new(val.x as f32, val.y as f32)
     }
 }
 
@@ -650,304 +90,6 @@ pub type Path = Shared<StrokePath>;
 /// canvases added to them.
 pub type Canvas = Shared<CanvasData>;
 
-#[derive(Debug, Default, Clone)]
-pub struct CanvasData {
-    pub strokes: Vec<Stroke>,
-    /// Its output files are named after this, or its index on the page.
-    name: Option<String>,
-    /// For a tile of a split page, the part of the page it renders.
-    frame: Option<Frame>,
-}
-
-impl CanvasData {
-    /// The canvas's name in output files, given its index on its page.
-    pub fn label(&self, index: usize) -> String {
-        self.name.clone().unwrap_or_else(|| index.to_string())
-    }
-    pub fn add_stroke(&mut self, stroke: Stroke) {
-        self.strokes.push(stroke)
-    }
-    pub fn add_strokepath(&mut self, path: StrokePath, style: StrokeStyle) {
-        self.strokes.push(Stroke { path, style, seed: None });
-    }
-    fn transform(&mut self, f: impl Fn(&mut StrokePath)) {
-        for stroke in &mut self.strokes {
-            f(&mut stroke.path);
-        }
-    }
-}
-
-/// The canvas functions scripts call. Like the path functions, transforms
-/// change the canvas and return it, so they chain.
-fn register_canvas(engine: &mut Engine) {
-    engine.register_type_with_name::<Canvas>("Canvas")
-        .register_fn("new_canvas", || Canvas::new(CanvasData::default()))
-        .register_fn("copy", Canvas::copy)
-        .register_get_set("name",
-            |c: &mut Canvas| c.borrow().name.clone().map_or(Dynamic::UNIT, Dynamic::from),
-            |c: &mut Canvas, name: Dynamic| -> Result<(), Box<EvalAltResult>> {
-                c.borrow_mut().name = Some(check_name("canvas.name", name)?);
-                Ok(())
-            })
-        // Adding copies the stroke, so later changes to the path don't reach
-        // the canvas. Paths with non-finite points are refused (see
-        // `check_finite`).
-        .register_fn("add_stroke", |c: &mut Canvas, stroke: Stroke| -> Result<(), Box<EvalAltResult>> {
-            check_finite("add_stroke", &stroke.path)?;
-            c.borrow_mut().add_stroke(stroke);
-            Ok(())
-        })
-        .register_fn("add_strokepath", |c: &mut Canvas, path: Path, style: StrokeStyle| -> Result<(), Box<EvalAltResult>> {
-            let path = path.get();
-            check_finite("add_strokepath", &path)?;
-            c.borrow_mut().add_strokepath(path, style);
-            Ok(())
-        })
-        .register_fn("add_canvas", |c: &mut Canvas, other: Canvas| {
-            // Copy first: `c.add_canvas(c)` shares one value.
-            let strokes = other.borrow().strokes.clone();
-            c.borrow_mut().strokes.extend(strokes);
-        })
-        .register_fn("translate", |c: &mut Canvas, v: Vec2| -> Canvas {
-            let v = v.into();
-            c.update(|data| data.transform(|p| p.translate_by(v)))
-        })
-        .register_fn("scale", |c: &mut Canvas, scale: f64| -> Canvas {
-            c.update(|data| data.transform(|p| p.scale_by(scale as f32)))
-        })
-        .register_fn("rotate_around", |c: &mut Canvas, point: Vec2, rad: f64| -> Canvas {
-            let point = point.into();
-            c.update(|data| data.transform(|p| p.rotate_around(point, rad as f32)))
-        });
-}
-
-impl From<CanvasData> for JournalCanvas {
-    fn from(val: CanvasData) -> Self {
-        let mut canvas = JournalCanvas::new();
-        for Stroke { path, style, seed } in val.strokes {
-            canvas.add_seeded_stroke(path, style.into(), seed);
-        }
-        canvas.set_frame(val.frame);
-        canvas
-    }
-}
-
-impl From<&CanvasData> for JournalCanvas {
-    fn from(val: &CanvasData) -> Self {
-        let mut canvas = JournalCanvas::new();
-        for Stroke { path, style, seed } in val.strokes.iter() {
-            canvas.add_seeded_stroke(path.clone(), style.clone().into(), *seed);
-        }
-        canvas.set_frame(val.frame);
-        canvas
-    }
-}
-
-impl From<&Canvas> for JournalCanvas {
-    fn from(val: &Canvas) -> Self {
-        (&*val.borrow()).into()
-    }
-}
-
-#[derive(Debug, Clone, CustomType)]
-#[rhai_type(extra = Self::build_extra)]
-pub struct Stroke {
-    #[rhai_type(skip)]
-    path: StrokePath,
-    style: StrokeStyle,
-    /// Its texture's seed, kept from the whole page in a tile (see
-    /// `ColoredStroke::seed`).
-    #[rhai_type(skip)]
-    seed: Option<u32>,
-}
-
-impl Stroke {
-    /// `new_stroke(path, style)`, with a copy of the path.
-    pub fn new(path: Path, style: StrokeStyle) -> Self {
-        Self {
-            path: path.get(),
-            style,
-            seed: None,
-        }
-    }
-    fn build_extra(builder: &mut TypeBuilder<Self>) {
-        builder
-            .with_fn("new_stroke", Self::new)
-        ;
-    }
-}
-
-#[derive(Debug, Clone, CustomType)]
-#[rhai_type(extra = Self::build_extra)]
-pub struct StrokeStyle {
-    width: f64,
-    /// A CSS colour, or a gradient.
-    #[rhai_type(skip)]
-    color: StrokeColor,
-    #[rhai_type(skip)]
-    brush: BrushSettings,
-}
-
-impl From<StrokeStyle> for JournalStrokeStyle {
-    fn from(val: StrokeStyle) -> Self {
-        JournalStrokeStyle {
-            width: val.width as f32,
-            color: val.color,
-            brush: Some(val.brush.into()),
-        }
-    }
-}
-
-impl StrokeStyle {
-    /// `new_strokestyle(width, color, brush)`.
-    ///
-    /// `width` means different things in the two outputs:
-    /// - Darkly (the default render): it multiplies the brush's pressure,
-    ///   so pressure runs from `width * min_pressure` to
-    ///   `width * max_pressure`. The brush's `size` sets how wide its marks
-    ///   are; pressure makes them heavier (how much depends on the brush).
-    ///   Darkly caps pressure at 1, so past `width = 1 / max_pressure` a
-    ///   wider stroke looks no heavier, and the render warns.
-    /// - SVG (`--svg`): it's the stroke's width in canvas units.
-    ///
-    /// `color` is a CSS colour string, or a gradient (see gradient.rs).
-    pub fn new(width: f64, color: Dynamic, brush: BrushSettings) -> Result<Self, Box<EvalAltResult>> {
-        Ok(Self {
-            width,
-            color: gradient::colour_or_gradient("new_strokestyle", color)?,
-            brush,
-        })
-    }
-    /// `style.color`: the colour string, or the gradient.
-    fn get_color(&mut self) -> Dynamic {
-        match &self.color {
-            StrokeColor::Solid(color) => color.into(),
-            StrokeColor::Gradient(g) => Dynamic::from(g.clone()),
-        }
-    }
-    fn set_color(&mut self, color: Dynamic) -> Result<(), Box<EvalAltResult>> {
-        self.color = gradient::colour_or_gradient("style.color", color)?;
-        Ok(())
-    }
-    fn build_extra(builder: &mut TypeBuilder<Self>) {
-        builder
-            .with_fn("new_strokestyle", Self::new)
-            .with_get_set("color", Self::get_color, Self::set_color)
-        ;
-    }
-}
-
-/// Where text's glyphs come from: the symbol dictionary, and the generator
-/// that picks glyph variants.
-type TextSource = (Rc<SymbolPathDict>, random::SharedRng);
-
-/// Options for text along a path.
-const PATH_TEXT_KEYS: [&str; 4] = ["spacing", "avoid", "clearance", "layout"];
-
-/// Text along a path: glyph by glyph, or keeping words together on a
-/// subpath ("words" layout).
-fn place_text(symbols: Vec<Symbol>, path: &StrokePath, args: &SymbolPlacementArgs, mode: &TextBoxLineMode) -> (Vec<Symbol>, Vec<Symbol>) {
-    match mode {
-        TextBoxLineMode::Flat => place_along_path(symbols, path, args),
-        TextBoxLineMode::WordsByBlankSymbol => place_words_along_path(symbols, path, args),
-    }
-}
-
-/// `path.fill_with_msg(style, font, size, msg[, #{ spacing, avoid, clearance, layout }])`:
-/// the message along as many copies of the path as it takes, one canvas per
-/// copy. Glyphs sit at their widths, plus `spacing` (a fraction of the font
-/// size), and keep clear of `avoid` (see avoid.rs). With `layout: "words"`,
-/// words aren't split around what's avoided or between subpaths.
-fn fill_with_msg(path: &mut Path, style: StrokeStyle, font: Font, fontsize: f64, msg: &str, options: Map, (symdict, rng): &TextSource) -> Result<Vec<Dynamic>, Box<EvalAltResult>> {
-    layout::check_keys("fill_with_msg", &options, &PATH_TEXT_KEYS)?;
-    if !(fontsize > 0.0) {
-        return Err(format!("fill_with_msg: font size must be positive, got {}", fontsize).into());
-    }
-    let builder = font.builder(symdict);
-    let mode = layout::line_mode("fill_with_msg", &options)?;
-    let avoid = avoid::AvoidOption::parse("fill_with_msg", &options, false)?;
-    let tree = avoid.tree.as_ref().map(|a| a.borrow());
-    let args = SymbolPlacementArgs {
-        avoid: tree.as_deref(),
-        padding: avoid.padding(fontsize as f32),
-        spacing: layout::spacing("fill_with_msg", &options)?,
-        ..SymbolPlacementArgs::new(fontsize as f32)
-    };
-
-    let mut all_canvases = Vec::new();
-    let mut symbols = builder.build(msg, &mut *rng.borrow_mut());
-    let path = path.get();
-    let total = symbols.len();
-    while !symbols.is_empty() {
-        let (placed, unplaced) = place_text(std::mem::take(&mut symbols), &path, &args, &mode);
-        if placed.is_empty() {
-            // Another copy of the path wouldn't fit it either.
-            return Err(format!(
-                "fill_with_msg: glyph {} of {} doesn't fit on the path at font size {}; use a longer path or a smaller font{}",
-                total - unplaced.len() + 1, total, fontsize,
-                if avoid.tree.is_some() { ", or avoid less" } else { "" },
-            ).into());
-        }
-        let mut canvas = CanvasData::default();
-        for symbol in placed {
-            canvas.add_strokepath(symbol.placed_strokepath(), style.clone());
-        }
-        all_canvases.push(Dynamic::from(Canvas::new(canvas)));
-        symbols = unplaced;
-    }
-    Ok(all_canvases)
-}
-
-/// `path.fit_msg_to(style, font, msg[, #{ spacing, avoid, clearance, layout }])`:
-/// the message along the path at the largest font size that fits it.
-fn fit_msg_to(path: &mut Path, style: StrokeStyle, font: Font, msg: &str, options: Map, (symdict, rng): &TextSource) -> Result<Canvas, Box<EvalAltResult>> {
-    layout::check_keys("fit_msg_to", &options, &PATH_TEXT_KEYS)?;
-    let path = &path.get();
-    let mut canvas = CanvasData::default();
-    let builder = font.builder(symdict);
-    let symbols = builder.build(msg, &mut *rng.borrow_mut());
-    let mode = layout::line_mode("fit_msg_to", &options)?;
-    let avoid = avoid::AvoidOption::parse("fit_msg_to", &options, false)?;
-    let tree = avoid.tree.as_ref().map(|a| a.borrow());
-    let mut args = SymbolPlacementArgs {
-        avoid: tree.as_deref(),
-        spacing: layout::spacing("fit_msg_to", &options)?,
-        ..SymbolPlacementArgs::new(20.0)
-    };
-    let mut window_min = 0.1;
-    let mut window_max = 1000.0;
-    while window_max - window_min > 0.005 {
-        let current_scale = (window_max + window_min) / 2.0;
-        args.symbol_scale = current_scale;
-        args.padding = avoid.padding(current_scale);
-        let (_, unplaced) = place_text(symbols.clone(), path, &args, &mode);
-        if !unplaced.is_empty() {
-            window_max = current_scale;
-        } else {
-            window_min = current_scale;
-        }
-    }
-    args.symbol_scale = window_min;
-    args.padding = avoid.padding(window_min);
-    let (placed, unplaced) = place_text(symbols, path, &args, &mode);
-    if !unplaced.is_empty() {
-        return Err(format!(
-            "fit_msg_to: the message doesn't fit on the path even at font size {}: {} of {} glyphs left over",
-            window_min, unplaced.len(), placed.len() + unplaced.len(),
-        ).into());
-    }
-    for symbol in placed {
-        canvas.add_strokepath(symbol.placed_strokepath(), style.clone());
-    }
-    Ok(Canvas::new(canvas))
-}
-
-/// Apply a by-value StrokePath builder method to a path in place, returning
-/// the same path.
-fn update_path(path: &mut Path, f: impl FnOnce(StrokePath) -> StrokePath) -> Path {
-    path.update(|p| *p = f(std::mem::take(p)))
-}
-
 pub struct JournalEngine {
     engine: Engine,
     warnings: Rc<RefCell<Vec<String>>>,
@@ -970,77 +112,12 @@ impl JournalEngine {
         let mut engine = Engine::new();
         let rng = random::register(&mut engine);
         let text: TextSource = (symdict.clone(), rng.clone());
-        let (t1, t2, t3, t4) = (text.clone(), text.clone(), text.clone(), text);
 
-        register_canvas(&mut engine);
-        engine.register_type_with_name::<Path>("StrokePath")
-            // Every path function changes the path and returns that same
-            // (shared) path, so statements, assignments and chains all work:
-            // `p.move_to(a).line_to(b);` draws both segments into `p`.
-            .register_fn("copy", Path::copy)
-            .register_fn("to_string", |p: &mut Path| p.borrow().to_string())
-            .register_fn("to_debug", |p: &mut Path| p.borrow().to_string())
-            .register_fn("move_to", |path: &mut Path, pos: Vec2| -> Path {
-                update_path(path, |p| p.move_to(pos.x as f32, pos.y as f32))
-            })
-            .register_fn("line_to", |path: &mut Path, pos: Vec2| -> Path {
-                update_path(path, |p| p.line_to(pos.x as f32, pos.y as f32))
-            })
-            .register_fn("fill_with_msg", move |path: &mut Path, style: StrokeStyle, font: Font, fontsize: f64, msg: &str| {
-                fill_with_msg(path, style, font, fontsize, msg, Map::new(), &t1)
-            })
-            .register_fn("fill_with_msg", move |path: &mut Path, style: StrokeStyle, font: Font, fontsize: f64, msg: &str, options: Map| {
-                fill_with_msg(path, style, font, fontsize, msg, options, &t2)
-            })
-            .register_fn("fit_msg_to", move |path: &mut Path, style: StrokeStyle, font: Font, msg: &str| {
-                fit_msg_to(path, style, font, msg, Map::new(), &t3)
-            })
-            .register_fn("fit_msg_to", move |path: &mut Path, style: StrokeStyle, font: Font, msg: &str, options: Map| {
-                fit_msg_to(path, style, font, msg, options, &t4)
-            })
-            .register_fn("scale_by", |path: &mut Path, scale: f64| -> Path {
-                path.update(|p| p.scale_by(scale as f32))
-            })
-            .register_fn("translate_by", |path: &mut Path, translate: Vec2| -> Path {
-                path.update(|p| p.translate_by(translate.into()))
-            })
-            .register_fn("rotate_around", |path: &mut Path, rot_point: Vec2, rot: f64| -> Path {
-                path.update(|p| p.rotate_around(rot_point.into(), rot as f32))
-            })
-            .register_fn("new_strokepath", || Path::new(StrokePath::new()))
-            .register_fn("cubic_to", |path: &mut Path, c1: Vec2, c2: Vec2, end: Vec2| -> Path {
-                update_path(path, |p| p.cubic_curve_to(
-                    c1.x as f32, c1.y as f32, c2.x as f32, c2.y as f32, end.x as f32, end.y as f32,
-                ))
-            })
-            .register_fn("quad_to", |path: &mut Path, control: Vec2, end: Vec2| -> Path {
-                update_path(path, |p| p.quadratic_curve_to(
-                    control.x as f32, control.y as f32, end.x as f32, end.y as f32,
-                ))
-            })
-            .register_fn("close", |path: &mut Path| -> Path {
-                update_path(path, |p| p.close_path())
-            })
-            // `path.append(other)`: other's subpaths added to this path (a
-            // copy of them), so several shapes are one path, e.g. to hatch
-            // a shape with holes.
-            .register_fn("append", |path: &mut Path, other: Path| -> Path {
-                // Copy first: `p.append(p)` shares one value.
-                let other = other.get();
-                path.update(|p| p.append(other))
-            })
-            .register_fn("new_circle", |center: Vec2, radius: f64| -> Path {
-                Path::new(StrokePath::circle(center.into(), radius as f32))
-            })
-            .register_fn("new_rectangle", |center: Vec2, width: f64, height: f64| -> Path {
-                Path::new(StrokePath::rectangle(center.into(), width as f32, height as f32))
-            })
-            .register_fn("new_line", |start: Vec2, end: Vec2| -> Path {
-                Path::new(StrokePath::line(start.into(), end.into()))
-            })
-            .register_fn("new_arc", |center: Vec2, radius: f64, start_rad: f64, end_rad: f64| -> Path {
-                Path::new(StrokePath::arc(center.into(), radius as f32, start_rad as f32, end_rad as f32))
-            });
+        canvas::register(&mut engine);
+        path::register(&mut engine, text);
+        style::register(&mut engine);
+        vec::register(&mut engine);
+        entry::register(&mut engine);
 
         // warn("...") reports a problem without stopping the script: it goes
         // to stderr, marked with the script line, like journalbuild's own
@@ -1074,37 +151,6 @@ impl JournalEngine {
                 .ok_or_else(|| format!("load_symbol: unknown symbol '{}'", symname).into())
         });
 
-        // Validate brush names when the script runs, rather than failing
-        // mid-render when Darkly can't find the brush.
-        let brush_names: Vec<String> = ::darkly::brush::builtin_brushes::all()
-            .into_iter()
-            .map(|brush| brush.metadata.name)
-            .collect();
-        // The names new_brush takes, sorted.
-        let listed: rhai::Array = {
-            let mut names = brush_names.clone();
-            names.sort();
-            names.into_iter().map(Dynamic::from).collect()
-        };
-        engine.register_fn("brush_names", move || listed.clone());
-        engine.register_fn("new_brush", move |name: &str, min_pressure: f64, max_pressure: f64, size: f64| -> Result<BrushSettings, Box<EvalAltResult>> {
-            if !brush_names.iter().any(|known| known == name) {
-                return Err(format!("new_brush: unknown brush '{}'; available: {}", name, brush_names.join(", ")).into());
-            }
-            // Darkly pressure runs from 0 to 1 (see also the width warning
-            // in darkly.rs).
-            if !(0.0..=1.0).contains(&min_pressure) || !(0.0..=1.0).contains(&max_pressure) || min_pressure > max_pressure {
-                return Err(format!(
-                    "new_brush: pressures must satisfy 0 <= min <= max <= 1, got min {} and max {}",
-                    min_pressure, max_pressure,
-                ).into());
-            }
-            if !(size > 0.0) {
-                return Err(format!("new_brush: size must be positive, got {}", size).into());
-            }
-            Ok(BrushSettings::new_brush(name, min_pressure, max_pressure, size))
-        });
-
         // `background()`: the paper pages are rendered on ("parchment"),
         // or () for none, so a journal can pick inks that show on it:
         // dark on paper, light on a transparent render.
@@ -1116,19 +162,11 @@ impl JournalEngine {
 
         art::register(&mut engine);
         avoid::register(&mut engine);
-        book::register(&mut engine, symdict.clone(), rng.clone(), layouts_dir.into());
+        layout::register(&mut engine, symdict.clone(), rng.clone(), layouts_dir.into());
         glyphs::register(&mut engine, symdict.clone(), rng.clone());
         gradient::register(&mut engine);
-        layout::register(&mut engine, symdict.clone(), rng.clone());
+        text::register(&mut engine, symdict.clone(), rng.clone());
         locks::register(&mut engine, Rc::new(LockLibrary::new(locks_dir)));
-
-        engine
-            .build_type::<Vec2>()
-            .build_type::<Entry>()
-            .build_type::<Page>()
-            .build_type::<BrushSettings>()
-            .build_type::<StrokeStyle>()
-            .build_type::<Stroke>();
 
         JournalEngine {
             engine,
@@ -1175,6 +213,9 @@ impl JournalEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::journal::canvas::Canvas as JournalCanvas;
+    use crate::journal::canvas::PressureProfile;
+    use crate::journal::publish;
 
     fn engine() -> JournalEngine {
         let symd = SymbolPathDict::from_file(crate::journal::symboldict::DEFAULT_SYMBOLS).expect("Failed to load symbols.json");
@@ -1412,7 +453,7 @@ mod tests {
 
         let dir = std::env::temp_dir().join(format!("journal_names_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        entry.publish_svgs(dir.to_str().unwrap(), 0.1, Some(&[1])).expect("publish should succeed");
+        publish::svgs(&entry, dir.to_str().unwrap(), 0.1, Some(&[1])).expect("publish should succeed");
         assert!(dir.join("maze_ring.png").is_file() && dir.join("maze_1.png").is_file());
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -1564,7 +605,7 @@ mod tests {
 
         let dir = std::env::temp_dir().join(format!("journal_split_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        entry.publish_svgs(dir.to_str().unwrap(), 0.75, None).expect("publish should succeed");
+        publish::svgs(&entry, dir.to_str().unwrap(), 0.75, None).expect("publish should succeed");
         let whole = png_pixels(&dir.join("big_0.png"));
         let tiles: Vec<image::RgbaImage> = (0..6).map(|i| png_pixels(&dir.join(format!("big_{}_{}_0.png", i / 3, i % 3)))).collect();
         // Side by side, in order, they make the whole canvas's render.
@@ -1653,7 +694,7 @@ mod tests {
         assert_eq!((line.render_extents().x, line.render_extents().y), (1.0, 100.0));
         let dir = std::env::temp_dir().join(format!("journal_degenerate_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        entry.publish_svgs(dir.to_str().unwrap(), 1.0, None).expect("publish should succeed");
+        publish::svgs(&entry, dir.to_str().unwrap(), 1.0, None).expect("publish should succeed");
         assert!(dir.join("page_0_0.png").is_file() && !dir.join("page_0_1.png").exists());
         std::fs::remove_dir_all(&dir).unwrap();
     }

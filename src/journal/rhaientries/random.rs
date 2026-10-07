@@ -13,7 +13,7 @@
 //! Native helpers that make random choices (glyph variants, text layout,
 //! hatching) draw from the same generator, so `seed` fixes those too.
 
-use rhai::{Engine, EvalAltResult};
+use rhai::Engine;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use std::cell::RefCell;
@@ -22,7 +22,7 @@ use std::rc::Rc;
 /// The seed every engine starts from.
 pub const DEFAULT_SEED: u64 = 0;
 
-type RhaiResult<T> = Result<T, Box<EvalAltResult>>;
+use super::RhaiResult;
 
 /// An engine's generator, shared between the script functions and the
 /// native helpers.

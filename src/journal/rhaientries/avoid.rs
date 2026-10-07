@@ -37,14 +37,14 @@
 use rhai::{Array, Dynamic, Engine, EvalAltResult, Map};
 
 use super::glyphs::Glyph;
-use super::layout::number;
+use super::options::number;
 use super::{Canvas, Path, Shared, Vec2};
 use crate::journal::avoid::AvoidanceTree;
 use crate::journal::canvas::Canvas as JournalCanvas;
 use crate::journal::paths::StrokePath;
 use parry2d::math::Vec2 as PVec;
 
-type RhaiResult<T> = Result<T, Box<EvalAltResult>>;
+use super::RhaiResult;
 
 /// An avoidance tree as scripts see it (see `Shared`).
 pub type Avoid = Shared<AvoidanceTree>;

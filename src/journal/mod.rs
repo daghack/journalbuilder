@@ -3,15 +3,22 @@ pub mod avoid;
 pub mod background;
 pub mod canvas;
 pub mod compose;
+pub mod fonts;
 pub mod gradient;
 pub mod symbol;
 pub mod paths;
 pub mod pdf;
+pub mod publish;
 pub mod hatch;
-pub mod styles;
 pub mod symboldict;
 pub mod typeset;
 pub mod rhaientries;
 pub mod darkly;
 
 pub use paths::StrokePath;
+
+/// FNV-1a: a string hash that, unlike std's, is guaranteed stable across
+/// Rust versions, for seeds made from names.
+pub fn stable_hash(text: &str) -> u64 {
+    text.bytes().fold(0xcbf29ce484222325, |hash, byte| (hash ^ byte as u64).wrapping_mul(0x100000001b3))
+}

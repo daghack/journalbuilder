@@ -27,16 +27,16 @@
 //!
 //! Variant picks come from the engine's seeded generator.
 
-use rhai::{Array, Dynamic, Engine, EvalAltResult};
+use rhai::{Array, Dynamic, Engine};
 use std::rc::Rc;
 
 use super::random::SharedRng;
 use super::{Canvas, CanvasData, Path, Shared, StrokeStyle, Vec2};
-use crate::journal::styles::{Font, FontSet};
+use crate::journal::fonts::{Font, FontSet};
 use crate::journal::symbol::Symbol;
 use crate::journal::symboldict::SymbolPathDict;
 
-type RhaiResult<T> = Result<T, Box<EvalAltResult>>;
+use super::RhaiResult;
 
 /// One placed glyph: a symbol with a position, scale and rotation (radians,
 /// around its own centre). Shared like paths and canvases (see `Shared`).
@@ -117,7 +117,7 @@ pub fn register(engine: &mut Engine, symdict: Rc<SymbolPathDict>, rng: SharedRng
     });
     let sd = symdict.clone();
     engine.register_fn("lowercase_font", move |prefix: &str| -> RhaiResult<Font> {
-        checked(&sd, "lowercase_font", Font::Lowercase(prefix.to_string()))
+        checked(&sd, "lowercase_font", Font::lowercase(prefix))
     });
 
     let sd = symdict.clone();

@@ -1,0 +1,368 @@
+//! Paths for rhai scripts: building them from lines and curves, moving
+//! them, and writing text along them.
+//!
+//! Every path function changes the path and returns that same (shared)
+//! path, so statements, assignments and chains all work:
+//! `p.move_to(a).line_to(b);` draws both segments into `p`.
+//!
+//! ```rhai
+//! // Hatch the inside of a closed path: lines `spacing` apart at `angle`
+//! // (radians), their ends jittered by up to `roughness`.
+//! let shading = new_circle(new_vec(0.0, 0.0), 20.0).hatch(3.0, random_range(0.0, 6.28), 1.0);
+//! // Or with options; only `spacing` is needed.
+//! let shading = outline.hatch(#{
+//!     spacing: 4.0,
+//!     angle: [0.8, 2.4],            // a layer per angle: cross-hatching (default pi/4)
+//!     roughness: 1.0,               // ends jittered by up to this (default 0)
+//!     bow: 1.5,                     // lines bend by up to this from straight (default 0)
+//!     inset: 2.0,                   // lines stop this far inside the outline (default 0)
+//!     fill_rule: "holes",           // or "evenodd" or "nonzero"; see below
+//! });
+//! ```
+//!
+//! Every subpath of a hatched path is a closed shape (open ones close back
+//! to their start), and each line is a stroke of its own, from where it
+//! enters the shape to where it leaves. With the default fill rule,
+//! "holes", shapes inside or across others cut holes in them: two circles
+//! one inside the other hatch as a ring, and glyph outlines keep their
+//! counters. "evenodd" also leaves out where a single subpath crosses over
+//! itself (the middle of a star drawn in one line); "nonzero" merges
+//! overlapping shapes, as SVG fills do.
+
+use rhai::{Dynamic, Engine, EvalAltResult, Map};
+use super::RhaiResult;
+use std::rc::Rc;
+
+use super::options::{as_number, check_keys, number, positive};
+use super::text::{line_mode, spacing};
+use super::random::SharedRng;
+use super::{avoid, random, Canvas, CanvasData, Path, StrokeStyle, Vec2};
+use crate::journal::hatch::{FillRule, HatchOptions};
+use crate::journal::canvas::textbox::TextBoxLineMode;
+use crate::journal::paths::StrokePath;
+use crate::journal::fonts::Font;
+use crate::journal::symbol::{place_along_path, place_words_along_path, Symbol, SymbolPlacementArgs};
+use crate::journal::symboldict::SymbolPathDict;
+
+/// Where text's glyphs come from: the symbol dictionary, and the generator
+/// that picks glyph variants.
+pub(super) type TextSource = (Rc<SymbolPathDict>, random::SharedRng);
+
+/// Options for text along a path.
+const PATH_TEXT_KEYS: [&str; 4] = ["spacing", "avoid", "clearance", "layout"];
+
+/// Text along a path: glyph by glyph, or keeping words together on a
+/// subpath ("words" layout).
+fn place_text(symbols: Vec<Symbol>, path: &StrokePath, args: &SymbolPlacementArgs, mode: &TextBoxLineMode) -> (Vec<Symbol>, Vec<Symbol>) {
+    match mode {
+        TextBoxLineMode::Flat => place_along_path(symbols, path, args),
+        TextBoxLineMode::WordsByBlankSymbol => place_words_along_path(symbols, path, args),
+    }
+}
+
+/// `path.fill_with_msg(style, font, size, msg[, #{ spacing, avoid, clearance, layout }])`:
+/// the message along as many copies of the path as it takes, one canvas per
+/// copy. Glyphs sit at their widths, plus `spacing` (a fraction of the font
+/// size), and keep clear of `avoid` (see avoid.rs). With `layout: "words"`,
+/// words aren't split around what's avoided or between subpaths.
+fn fill_with_msg(path: &mut Path, style: StrokeStyle, font: Font, fontsize: f64, msg: &str, options: Map, (symdict, rng): &TextSource) -> Result<Vec<Dynamic>, Box<EvalAltResult>> {
+    check_keys("fill_with_msg", &options, &PATH_TEXT_KEYS)?;
+    if !(fontsize > 0.0) {
+        return Err(format!("fill_with_msg: font size must be positive, got {}", fontsize).into());
+    }
+    let builder = font.builder(symdict);
+    let mode = line_mode("fill_with_msg", &options)?;
+    let avoid = avoid::AvoidOption::parse("fill_with_msg", &options, false)?;
+    let tree = avoid.tree.as_ref().map(|a| a.borrow());
+    let args = SymbolPlacementArgs {
+        avoid: tree.as_deref(),
+        padding: avoid.padding(fontsize as f32),
+        spacing: spacing("fill_with_msg", &options)?,
+        ..SymbolPlacementArgs::new(fontsize as f32)
+    };
+
+    let mut all_canvases = Vec::new();
+    let mut symbols = builder.build(msg, &mut *rng.borrow_mut());
+    let path = path.get();
+    let total = symbols.len();
+    while !symbols.is_empty() {
+        let (placed, unplaced) = place_text(std::mem::take(&mut symbols), &path, &args, &mode);
+        if placed.is_empty() {
+            // Another copy of the path wouldn't fit it either.
+            return Err(format!(
+                "fill_with_msg: glyph {} of {} doesn't fit on the path at font size {}; use a longer path or a smaller font{}",
+                total - unplaced.len() + 1, total, fontsize,
+                if avoid.tree.is_some() { ", or avoid less" } else { "" },
+            ).into());
+        }
+        let mut canvas = CanvasData::default();
+        for symbol in placed {
+            canvas.add_strokepath(symbol.placed_strokepath(), style.clone());
+        }
+        all_canvases.push(Dynamic::from(Canvas::new(canvas)));
+        symbols = unplaced;
+    }
+    Ok(all_canvases)
+}
+
+/// `path.fit_msg_to(style, font, msg[, #{ spacing, avoid, clearance, layout }])`:
+/// the message along the path at the largest font size that fits it.
+fn fit_msg_to(path: &mut Path, style: StrokeStyle, font: Font, msg: &str, options: Map, (symdict, rng): &TextSource) -> Result<Canvas, Box<EvalAltResult>> {
+    check_keys("fit_msg_to", &options, &PATH_TEXT_KEYS)?;
+    let path = &path.get();
+    let mut canvas = CanvasData::default();
+    let builder = font.builder(symdict);
+    let symbols = builder.build(msg, &mut *rng.borrow_mut());
+    let mode = line_mode("fit_msg_to", &options)?;
+    let avoid = avoid::AvoidOption::parse("fit_msg_to", &options, false)?;
+    let tree = avoid.tree.as_ref().map(|a| a.borrow());
+    let mut args = SymbolPlacementArgs {
+        avoid: tree.as_deref(),
+        spacing: spacing("fit_msg_to", &options)?,
+        ..SymbolPlacementArgs::new(20.0)
+    };
+    let mut window_min = 0.1;
+    let mut window_max = 1000.0;
+    while window_max - window_min > 0.005 {
+        let current_scale = (window_max + window_min) / 2.0;
+        args.symbol_scale = current_scale;
+        args.padding = avoid.padding(current_scale);
+        let (_, unplaced) = place_text(symbols.clone(), path, &args, &mode);
+        if !unplaced.is_empty() {
+            window_max = current_scale;
+        } else {
+            window_min = current_scale;
+        }
+    }
+    args.symbol_scale = window_min;
+    args.padding = avoid.padding(window_min);
+    let (placed, unplaced) = place_text(symbols, path, &args, &mode);
+    if !unplaced.is_empty() {
+        return Err(format!(
+            "fit_msg_to: the message doesn't fit on the path even at font size {}: {} of {} glyphs left over",
+            window_min, unplaced.len(), placed.len() + unplaced.len(),
+        ).into());
+    }
+    for symbol in placed {
+        canvas.add_strokepath(symbol.placed_strokepath(), style.clone());
+    }
+    Ok(Canvas::new(canvas))
+}
+
+/// Apply a by-value StrokePath builder method to a path in place, returning
+/// the same path.
+fn update_path(path: &mut Path, f: impl FnOnce(StrokePath) -> StrokePath) -> Path {
+    path.update(|p| *p = f(std::mem::take(p)))
+}
+
+pub(super) fn register(engine: &mut Engine, text: TextSource) {
+    let rng = text.1.clone();
+    let r = rng.clone();
+    engine.register_fn("hatch", move |path: &mut Path, spacing: f64, angle: f64, roughness: f64| -> RhaiResult<Path> {
+        let mut options = Map::new();
+        options.insert("spacing".into(), Dynamic::from(spacing));
+        options.insert("angle".into(), Dynamic::from(angle));
+        options.insert("roughness".into(), Dynamic::from(roughness));
+        hatch(&path.borrow(), &hatch_options(&options)?, &r).map(Path::new)
+    });
+    engine.register_fn("hatch", move |path: &mut Path, options: Map| -> RhaiResult<Path> {
+        hatch(&path.borrow(), &hatch_options(&options)?, &rng).map(Path::new)
+    });
+
+let (t1, t2, t3, t4) = (text.clone(), text.clone(), text.clone(), text);
+engine.register_type_with_name::<Path>("StrokePath")
+        // Every path function changes the path and returns that same
+        // (shared) path, so statements, assignments and chains all work:
+        // `p.move_to(a).line_to(b);` draws both segments into `p`.
+        .register_fn("copy", Path::copy)
+        .register_fn("to_string", |p: &mut Path| p.borrow().to_string())
+        .register_fn("to_debug", |p: &mut Path| p.borrow().to_string())
+        .register_fn("move_to", |path: &mut Path, pos: Vec2| -> Path {
+            update_path(path, |p| p.move_to(pos.x as f32, pos.y as f32))
+        })
+        .register_fn("line_to", |path: &mut Path, pos: Vec2| -> Path {
+            update_path(path, |p| p.line_to(pos.x as f32, pos.y as f32))
+        })
+        .register_fn("fill_with_msg", move |path: &mut Path, style: StrokeStyle, font: Font, fontsize: f64, msg: &str| {
+            fill_with_msg(path, style, font, fontsize, msg, Map::new(), &t1)
+        })
+        .register_fn("fill_with_msg", move |path: &mut Path, style: StrokeStyle, font: Font, fontsize: f64, msg: &str, options: Map| {
+            fill_with_msg(path, style, font, fontsize, msg, options, &t2)
+        })
+        .register_fn("fit_msg_to", move |path: &mut Path, style: StrokeStyle, font: Font, msg: &str| {
+            fit_msg_to(path, style, font, msg, Map::new(), &t3)
+        })
+        .register_fn("fit_msg_to", move |path: &mut Path, style: StrokeStyle, font: Font, msg: &str, options: Map| {
+            fit_msg_to(path, style, font, msg, options, &t4)
+        })
+        .register_fn("scale_by", |path: &mut Path, scale: f64| -> Path {
+            path.update(|p| p.scale_by(scale as f32))
+        })
+        .register_fn("translate_by", |path: &mut Path, translate: Vec2| -> Path {
+            path.update(|p| p.translate_by(translate.into()))
+        })
+        .register_fn("rotate_around", |path: &mut Path, rot_point: Vec2, rot: f64| -> Path {
+            path.update(|p| p.rotate_around(rot_point.into(), rot as f32))
+        })
+        .register_fn("new_strokepath", || Path::new(StrokePath::new()))
+        .register_fn("cubic_to", |path: &mut Path, c1: Vec2, c2: Vec2, end: Vec2| -> Path {
+            update_path(path, |p| p.cubic_curve_to(
+                c1.x as f32, c1.y as f32, c2.x as f32, c2.y as f32, end.x as f32, end.y as f32,
+            ))
+        })
+        .register_fn("quad_to", |path: &mut Path, control: Vec2, end: Vec2| -> Path {
+            update_path(path, |p| p.quadratic_curve_to(
+                control.x as f32, control.y as f32, end.x as f32, end.y as f32,
+            ))
+        })
+        .register_fn("close", |path: &mut Path| -> Path {
+            update_path(path, |p| p.close_path())
+        })
+        // `path.append(other)`: other's subpaths added to this path (a
+        // copy of them), so several shapes are one path, e.g. to hatch
+        // a shape with holes.
+        .register_fn("append", |path: &mut Path, other: Path| -> Path {
+            // Copy first: `p.append(p)` shares one value.
+            let other = other.get();
+            path.update(|p| p.append(other))
+        })
+        .register_fn("new_circle", |center: Vec2, radius: f64| -> Path {
+            Path::new(StrokePath::circle(center.into(), radius as f32))
+        })
+        .register_fn("new_rectangle", |center: Vec2, width: f64, height: f64| -> Path {
+            Path::new(StrokePath::rectangle(center.into(), width as f32, height as f32))
+        })
+        .register_fn("new_line", |start: Vec2, end: Vec2| -> Path {
+            Path::new(StrokePath::line(start.into(), end.into()))
+        })
+        .register_fn("new_arc", |center: Vec2, radius: f64, start_rad: f64, end_rad: f64| -> Path {
+            Path::new(StrokePath::arc(center.into(), radius as f32, start_rad as f32, end_rad as f32))
+        });
+}
+
+const HATCH_KEYS: [&str; 6] = ["spacing", "angle", "roughness", "bow", "inset", "fill_rule"];
+
+/// `path.hatch(#{ spacing, angle, roughness, bow, inset, fill_rule })`;
+/// see the module docs.
+fn hatch_options(options: &Map) -> RhaiResult<HatchOptions> {
+    const CALLER: &str = "hatch";
+    check_keys(CALLER, options, &HATCH_KEYS)?;
+    let spacing = positive(CALLER, options, "spacing")?;
+    let angles = match options.get("angle") {
+        None => vec![std::f32::consts::FRAC_PI_4],
+        Some(angle) if angle.is_array() => {
+            let angles = angle.clone().into_array().expect("checked").iter()
+                .map(|a| as_number(CALLER, "each 'angle'", a))
+                .collect::<RhaiResult<Vec<_>>>()?;
+            if angles.is_empty() {
+                return Err(format!("{}: 'angle' needs at least one angle", CALLER).into());
+            }
+            angles
+        }
+        Some(angle) => vec![as_number(CALLER, "'angle'", angle)?],
+    };
+    let at_least_zero = |key: &str| -> RhaiResult<f32> {
+        match number(CALLER, options, key)? {
+            None => Ok(0.0),
+            Some(n) if n >= 0.0 && n.is_finite() => Ok(n),
+            Some(n) => Err(format!("{}: '{}' can't be negative, got {}", CALLER, key, n).into()),
+        }
+    };
+    let fill_rule = match options.get("fill_rule") {
+        None => FillRule::default(),
+        Some(rule) => {
+            let name = rule.to_string();
+            FillRule::from_name(&name).ok_or_else(|| -> Box<EvalAltResult> {
+                format!("{}: unknown fill_rule '{}'; expected one of {}", CALLER, name, FillRule::NAMES.join(", ")).into()
+            })?
+        }
+    };
+    Ok(HatchOptions {
+        spacing,
+        angles,
+        roughness: at_least_zero("roughness")?,
+        bow: at_least_zero("bow")?,
+        inset: at_least_zero("inset")?,
+        fill_rule,
+    })
+}
+
+/// The hatching of a path's inside, as a new path; the path itself is
+/// unchanged.
+fn hatch(path: &StrokePath, options: &HatchOptions, rng: &SharedRng) -> RhaiResult<StrokePath> {
+    if !options.angles.iter().all(|a| a.is_finite()) {
+        return Err("hatch: angles must be finite numbers".into());
+    }
+    Ok(crate::journal::hatch::hatch(path, options, &mut *rng.borrow_mut()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::JournalEngine;
+    use crate::journal::symboldict::SymbolPathDict;
+    use std::rc::Rc;
+
+    fn engine() -> JournalEngine {
+        let symd = SymbolPathDict::from_file(crate::journal::symboldict::DEFAULT_SYMBOLS).expect("Failed to load symbols.json");
+        JournalEngine::new(Rc::new(symd))
+    }
+
+    fn eval<T: Clone + 'static>(script: &str) -> T {
+        let setup = r#"let style = new_strokestyle(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));"#;
+        engine().engine.eval::<T>(&format!("{}\n{}", setup, script)).expect("script should evaluate")
+    }
+
+    fn fails(script: &str) -> String {
+        engine().engine.run(script).expect_err("script should fail").to_string()
+    }
+
+    #[test]
+    fn hatch_fills_inside_the_path_and_follows_the_seed() {
+        let hatching = |seed: i64| -> String {
+            let path: super::super::Path = eval(&format!(
+                "seed({}); new_circle(new_vec(0.0, 0.0), 20.0).hatch(3.0, 0.7, 1.0)", seed));
+            let path = path.get();
+            for p in path.points_within() {
+                assert!(p.length() < 22.0, "hatch point {:?} outside the circle", p);
+            }
+            path.to_string()
+        };
+        assert!(!hatching(1).is_empty());
+        assert_eq!(hatching(1), hatching(1));
+        assert_ne!(hatching(1), hatching(2));
+    }
+
+    #[test]
+    fn hatch_options_cross_hatch_and_keep_holes() {
+        let lines = |options: &str| -> usize {
+            let path: super::super::Path = eval(&format!(
+                "let ring = new_circle(new_vec(0.0, 0.0), 20.0); ring.append(new_circle(new_vec(0.0, 0.0), 10.0)); ring.hatch({})", options));
+            let hatching = path.get();
+            for (points, _) in hatching.flattened(0.1) {
+                let middle = (points[0] + *points.last().unwrap()) / 2.0;
+                assert!(middle.length() > 9.0, "a line crosses the hole");
+            }
+            hatching.to_substrokes().len()
+        };
+        let single = lines("#{ spacing: 3.0, angle: 0.3 }");
+        assert_eq!(lines("#{ spacing: 3.0, angle: [0.3, 1.9] }"), 2 * single);
+        assert_eq!(lines("3.0, 0.3, 0.0"), single);
+    }
+
+    #[test]
+    fn bad_hatch_options_fail_at_their_line() {
+        let err = fails("let ok = 1;\nnew_circle(new_vec(0.0, 0.0), 5.0).hatch(0.0, 0.0, 1.0);");
+        assert!(err.contains("'spacing' must be positive") && err.contains("line 2"), "{}", err);
+        for (opts, want) in [
+            ("#{ angle: 1.0 }", "missing 'spacing'"),
+            ("#{ spacing: 2, angle: [] }", "'angle' needs at least one angle"),
+            ("#{ spacing: 2, angle: [1.0, \"x\"] }", "each 'angle' should be a number"),
+            ("#{ spacing: 2, bow: -1 }", "'bow' can't be negative"),
+            ("#{ spacing: 2, fill_rule: \"winding\" }", "unknown fill_rule 'winding'"),
+            ("#{ spacing: 2, colour: 1 }", "unknown option 'colour'"),
+        ] {
+            let err = fails(&format!("let ok = 1;\nnew_circle(new_vec(0.0, 0.0), 5.0).hatch({});", opts));
+            assert!(err.contains(want) && err.contains("line 2"), "{}: {}", want, err);
+        }
+    }
+}

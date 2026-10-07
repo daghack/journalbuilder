@@ -1,5 +1,5 @@
 use scribe::journal::rhaientries::{JournalEngine, LockLibrary, DEFAULT_LAYOUTS_DIR, DEFAULT_LOCKS_DIR};
-use scribe::journal::{symboldict, darkly};
+use scribe::journal::{symboldict, darkly, publish};
 use scribe::journal::background::Paper;
 
 use std::rc::Rc;
@@ -227,20 +227,21 @@ fn run(args: &Args) -> Result<(), String> {
     }
     let only = pages.as_deref();
     if args.svg {
-        entry.publish_svgs(&output_dir, args.scale, only)?;
+        publish::svgs(&entry, &output_dir, args.scale, only)?;
     }
     // One Darkly engine for the whole run; canvases resize it as needed.
     let mut darkly_engine = darkly::new_engine(1, 1);
+    let render = publish::Render { scale: args.scale, supersample: args.supersample, paper: args.background };
     if args.pdf {
         let path = format!("{}/{}.pdf", output_dir, journal_name);
-        entry.darkly_publish_pdf(&mut darkly_engine, &path, journal_name, args.scale, args.supersample, only, args.background)?;
+        publish::pdf(&entry, &mut darkly_engine, &path, journal_name, &render, only)?;
         println!("Wrote {}", path);
-        return Ok(());
+    } else if render.paper.is_some() {
+        publish::page_images(&entry, &mut darkly_engine, &output_dir, &render, only)?;
+    } else {
+        publish::canvas_images(&entry, &mut darkly_engine, &output_dir, &render, only)?;
     }
-    match args.background {
-        Some(paper) => entry.darkly_publish_pages(&mut darkly_engine, &output_dir, args.scale, args.supersample, only, Some(paper)),
-        None => entry.darkly_publish_pngs(&mut darkly_engine, &output_dir, args.scale, args.supersample, only),
-    }
+    Ok(())
 }
 
 /// Run every lock file's examples, listing each lock type's result.

@@ -14,8 +14,6 @@ const SHOWCASE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/journals/showcase/j
 const NOT_SHOWN: &[(&str, &str)] = &[
     ("to_string", "printing"),
     ("to_debug", "printing"),
-    ("canvases", "the fields rhai makes for a page's canvases"),
-    ("pages", "the fields rhai makes for an entry's pages"),
 ];
 
 fn showcase() -> String {
