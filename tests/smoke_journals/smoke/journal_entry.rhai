@@ -178,3 +178,38 @@ journal_entry.add_page(page_four);
 // The same page as a 2 x 2 grid of tiles, art_0_0 to art_1_1, which fit
 // together into it.
 journal_entry.add_pages(page_four.split(2, 2));
+
+// ---- page five: a typeset page ----
+// A layout (here inline; usually a file in layouts/) given text, roles and
+// art: a heading, a drop cap the text wraps around, two columns with a band
+// between them, and a figure. The text runs on to a second page.
+fn smoke_page(n, info) {
+	column(#{ padding: 20, gap: 8 }, [
+		if n == 0 { flow("title", #{ role: "heading", height: 34, fit: true }) } else { spacer(#{ height: 34 }) },
+		row(#{ grow: 1, gap: 12 }, [
+			column(#{ grow: 1 }, [
+				if n == 0 { initial("body", #{ position: "absolute", top: 0, left: 0, width: 30, height: 30 }) } else { spacer() },
+				flow("body", #{ grow: 1 }),
+			]),
+			band("dot", #{ width: 8 }),
+			column(#{ grow: 1 }, [
+				if n == 0 { figure("eye", #{ height: 60, border: "frame" }) } else { spacer() },
+				flow("body", #{ grow: 1 }),
+			]),
+		]),
+	])
+}
+let words = "every path leads back here and every lock opens in the end ";
+journal_entry.add_pages(new_layout("book", Fn("smoke_page")).typeset(#{
+	width: 360, height: 260,
+	flows: #{ title: "the smoke book", body: words + words + words + "\n\n" + words + words + words + words + words + words + words + words + words },
+	roles: #{
+		body: #{ font: lowercase_font("loche_upper"), style: text, size: 11.0, align: "justify", indent: 1.0 },
+		heading: #{ font: font, style: accent, size: 28.0, align: "center" },
+		initial: #{ font: font, style: accent },
+		dot: #{ style: faint },
+		eye: #{ style: outline },
+		frame: #{ style: faint },
+	},
+	art: #{ dot: new_circle(new_vec(0.0, 0.0), 2.0), eye: load_symbol("basic_eye") },
+}));

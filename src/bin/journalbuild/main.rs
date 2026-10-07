@@ -1,4 +1,4 @@
-use scribe::journal::rhaientries::{JournalEngine, LockLibrary, DEFAULT_LOCKS_DIR};
+use scribe::journal::rhaientries::{JournalEngine, LockLibrary, DEFAULT_LAYOUTS_DIR, DEFAULT_LOCKS_DIR};
 use scribe::journal::{symboldict, darkly};
 
 use std::rc::Rc;
@@ -41,7 +41,7 @@ const DEFAULT_SUPERSAMPLE: f32 = 1.2;
 const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--svg]
                     [--scale S] [--supersample K] [--strict-glyphs]
                     [--journals-dir DIR] [--output-dir DIR] [--symbols FILE]
-                    [--locks-dir DIR]
+                    [--locks-dir DIR] [--layouts-dir DIR]
        journalbuild --check-locks [--locks-dir DIR]
 
   --page P,...        Render only these pages, by index (0-based) or by
@@ -68,6 +68,8 @@ const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--svg
                       (except with --page); other files are kept.
   --locks-dir DIR     Directory of lock files, one per lock type (default:
                       the repository's locks/).
+  --layouts-dir DIR   Directory of page layout files, for layout(name)
+                      (default: the repository's layouts/).
   --check-locks       Run every lock file's examples through lock and
                       unlock, instead of building a journal.";
 
@@ -83,6 +85,7 @@ struct Args {
     output_dir: Option<String>,
     symbols: String,
     locks_dir: String,
+    layouts_dir: String,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -101,6 +104,7 @@ fn parse_args() -> Result<Args, String> {
     let mut journals_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/journals").to_string();
     let mut symbols = symboldict::DEFAULT_SYMBOLS.to_string();
     let mut locks_dir = DEFAULT_LOCKS_DIR.to_string();
+    let mut layouts_dir = DEFAULT_LAYOUTS_DIR.to_string();
     let mut output_dir = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -127,6 +131,9 @@ fn parse_args() -> Result<Args, String> {
             "--locks-dir" => {
                 locks_dir = args.next().ok_or("--locks-dir needs a directory")?;
             }
+            "--layouts-dir" => {
+                layouts_dir = args.next().ok_or("--layouts-dir needs a directory")?;
+            }
             "--output-dir" => {
                 output_dir = Some(args.next().ok_or("--output-dir needs a directory")?);
             }
@@ -148,7 +155,7 @@ fn parse_args() -> Result<Args, String> {
         (Some(_), true) => return Err("--check-locks checks lock files, so it takes no journal name".to_string()),
         (None, false) => return Err("missing journal name".to_string()),
     };
-    Ok(Args { strict_glyphs, check_locks, journal_name, journals_dir, pages, svg, scale, supersample, output_dir, symbols, locks_dir })
+    Ok(Args { strict_glyphs, check_locks, journal_name, journals_dir, pages, svg, scale, supersample, output_dir, symbols, locks_dir, layouts_dir })
 }
 
 fn main() {
@@ -172,7 +179,7 @@ fn run(args: &Args) -> Result<(), String> {
     let journal_path = format!("{}/{}/journal_entry.rhai", args.journals_dir, journal_name);
     let output_dir = args.output_dir.clone()
         .unwrap_or_else(|| format!("{}/{}/output", args.journals_dir, journal_name));
-    let entry = JournalEngine::with_locks_dir(symd.clone(), &args.locks_dir).build_entry_file(&journal_path)?;
+    let entry = JournalEngine::with_dirs(symd.clone(), &args.locks_dir, &args.layouts_dir).build_entry_file(&journal_path)?;
     check_missing_glyphs(&symd, args.strict_glyphs)?;
     if entry.page_count() == 0 {
         return Err(format!("{} produced no pages; add them with journal_entry.add_page(page)", journal_path));

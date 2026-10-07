@@ -26,8 +26,9 @@ Useful flags (`journalbuild` with no arguments lists them all):
 - `--svg`: also render each canvas as an SVG, and that SVG as a PNG.
 - `--strict-glyphs`: fail if any character has no glyph, instead of
   drawing an X and warning.
-- `--journals-dir`, `--output-dir`, `--symbols`, `--locks-dir`: read or
-  write somewhere other than the repository's defaults.
+- `--journals-dir`, `--output-dir`, `--symbols`, `--locks-dir`,
+  `--layouts-dir`: read or write somewhere other than the repository's
+  defaults.
 - `--check-locks`: run every lock file's examples instead of building a
   journal.
 
@@ -38,6 +39,7 @@ Useful flags (`journalbuild` with no arguments lists them all):
 | `journals/<name>/journal_entry.rhai` | one journal per directory |
 | `journals/showcase` | a page each of every brush, font, glyph, art tool, text layout and lock type, with the calls that make them |
 | `locks/` | lock types, one rhai file each; see [locks/README.md](locks/README.md) |
+| `layouts/` | page layouts, one rhai file each; see [layouts/README.md](layouts/README.md) |
 | `config/symbols.json` | the symbol dictionary: every glyph's SVG path, by name |
 | `src/journal/` | canvases, paths, glyph placement, and Darkly and SVG rendering |
 | `src/journal/art/` | procedural path art: snakes and brambles, free or along a path |
@@ -128,6 +130,12 @@ What to know:
   ```
 
   `journal_entry.add_pages(page.split(2, 2))` adds them all.
+- **Page layouts.** A layout lays out pages as trees of flexbox boxes, and
+  `typeset` pours text, art and ornaments into their slots, chaining the
+  text through columns and pages until it runs out:
+  `journal_entry.add_pages(layout("missal_spread").typeset(#{ flows,
+  roles, art }))`. Layouts are rhai files in `layouts/`; see
+  [layouts/README.md](layouts/README.md).
 - **Problems.** `warn("...")` reports something without stopping the
   script. Errors give the script line.
 
@@ -136,8 +144,8 @@ labelled with the calls that make it: render it with
 `target/release/journalbuild showcase`.
 
 The module docs in `src/journal/rhaientries/` (`glyphs.rs`, `layout.rs`,
-`avoid.rs`, `random.rs`, `art.rs`, `locks/mod.rs`) cover each area in more
-detail, and
+`avoid.rs`, `book.rs`, `random.rs`, `art.rs`, `locks/mod.rs`) cover each
+area in more detail, and
 the journals in `journals/` and `tests/smoke_journals/smoke` use most of it.
 
 ## Locks

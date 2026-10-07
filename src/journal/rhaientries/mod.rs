@@ -1,10 +1,12 @@
 mod art;
 mod avoid;
+mod book;
 mod glyphs;
 mod layout;
 mod locks;
 mod random;
 
+pub use book::DEFAULT_LAYOUTS_DIR;
 pub use locks::{LockLibrary, DEFAULT_LOCKS_DIR};
 
 use rhai::{Engine, EvalAltResult, ImmutableString, Dynamic, CustomType, TypeBuilder, Scope, Map};
@@ -387,14 +389,19 @@ impl Page {
         layout::check_keys(CALLER, &options, &["columns", "rows", "tile_width", "tile_height"])?;
         let name = self.name.clone()
             .ok_or_else(|| format!("{}: name the page first; its tiles are named after it ({{name}}_{{row}}_{{column}})", CALLER))?;
-        let canvases: Vec<(usize, &CanvasData)> = self.canvases.iter().enumerate()
-            .filter(|(_, canvas)| !canvas.strokes.is_empty()).collect();
-        if self.canvases.iter().any(|canvas| canvas.frame.is_some()) {
+        // Typeset pages are framed to the whole page: they split by it.
+        let whole = |frame: &Frame| frame.columns == 1 && frame.rows == 1;
+        if self.canvases.iter().any(|canvas| canvas.frame.is_some_and(|f| !whole(&f))) {
             return Err(format!("{}: the page is already a tile; split the page it came from instead", CALLER).into());
         }
+        let canvases: Vec<(usize, &CanvasData)> = self.canvases.iter().enumerate()
+            .filter(|(_, canvas)| !canvas.strokes.is_empty() || canvas.frame.is_some()).collect();
         let mut region = parry2d::bounding_volume::Aabb::new_invalid();
         for (_, canvas) in &canvases {
-            let bounds = self.render_canvas(canvas).expect("the canvas has strokes").bounds();
+            let bounds = match canvas.frame {
+                Some(frame) => frame.page,
+                None => self.render_canvas(canvas).expect("the canvas has strokes").bounds(),
+            };
             region.take_point(bounds.mins);
             region.take_point(bounds.maxs);
         }
@@ -855,6 +862,11 @@ impl JournalEngine {
     }
     /// An engine whose lock types are the lock files in `locks_dir`.
     pub fn with_locks_dir(symdict: Rc<SymbolPathDict>, locks_dir: impl Into<std::path::PathBuf>) -> Self {
+        Self::with_dirs(symdict, locks_dir, DEFAULT_LAYOUTS_DIR)
+    }
+    /// An engine with the lock files in `locks_dir` and the layout files
+    /// in `layouts_dir`.
+    pub fn with_dirs(symdict: Rc<SymbolPathDict>, locks_dir: impl Into<std::path::PathBuf>, layouts_dir: impl Into<std::path::PathBuf>) -> Self {
         let mut engine = Engine::new();
         let rng = random::register(&mut engine);
         let text: TextSource = (symdict.clone(), rng.clone());
@@ -987,6 +999,7 @@ impl JournalEngine {
 
         art::register(&mut engine);
         avoid::register(&mut engine);
+        book::register(&mut engine, symdict.clone(), rng.clone(), layouts_dir.into());
         glyphs::register(&mut engine, symdict.clone(), rng.clone());
         layout::register(&mut engine, symdict.clone(), rng.clone());
         locks::register(&mut engine, Rc::new(LockLibrary::new(locks_dir)));

@@ -5,6 +5,7 @@ pub mod symbol;
 pub mod paths;
 pub mod styles;
 pub mod symboldict;
+pub mod typeset;
 pub mod rhaientries;
 pub mod darkly;
 
