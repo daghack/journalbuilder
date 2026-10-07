@@ -137,6 +137,18 @@ pub fn snake_path(head_center: Vec2, head_angle: f32, tail_end: Vec2, length: f3
     Ok(body.outline())
 }
 
+/// The centre line of the snake `snake_path` draws with the same arguments,
+/// from the back of its head (where the neck is narrowest) to the tip of
+/// its tail: a line to write or draw along its back.
+pub fn snake_spine(head_center: Vec2, head_angle: f32, tail_end: Vec2, length: f32, max_width: f32, seed: u64) -> Result<StrokePath, String> {
+    let (spine, body) = fit(head_center.into(), head_angle as f64, tail_end.into(), length as f64, max_width as f64, seed)?;
+    let neck = spine.joints()[0].0;
+    let points: Vec<V> = std::iter::once(neck)
+        .chain(body.sections.iter().filter(|section| section.s > spine.head).map(|section| section.at))
+        .collect();
+    Ok(spline(StrokePath::new(), &simplify(&points, 0.005 * body.width, 0.6 * body.width), false))
+}
+
 /// The spine and body `snake_path` outlines.
 fn fit(head_center: V, angle: f64, tail_end: V, length: f64, width: f64, seed: u64) -> Result<(Spine, Body), String> {
     if !(head_center.is_finite() && tail_end.is_finite() && angle.is_finite() && length.is_finite() && width.is_finite()) {
@@ -760,12 +772,14 @@ impl Body {
     }
 
     /// Points around the outline, each with its section: from the tail's
-    /// tip up the right side, round the snout, and back down the left side.
-    /// The snout's and the tail's tips are on both sides, so appear once.
+    /// tip up the left side, round the snout, and back down the right side,
+    /// the way round that has text set along the outline stand on it with
+    /// its tops outward. The snout's and the tail's tips are on both sides,
+    /// so appear once.
     fn outline_points(&self) -> Vec<(V, usize)> {
         let last = self.sections.len() - 1;
-        let mut points: Vec<(V, usize)> = (0..=last).rev().map(|k| (self.sections[k].right_edge(), k)).collect();
-        points.extend((1..last).map(|k| (self.sections[k].left_edge(), k)));
+        let mut points: Vec<(V, usize)> = (0..=last).rev().map(|k| (self.sections[k].left_edge(), k)).collect();
+        points.extend((1..last).map(|k| (self.sections[k].right_edge(), k)));
         points
     }
 
@@ -1015,6 +1029,23 @@ mod tests {
             crossings += body.crossings.len();
         }
         assert!(crossings > 0, "coiled snakes should cross themselves");
+    }
+
+    #[test]
+    fn the_spine_runs_from_the_neck_to_the_tail_end_inside_the_outline() {
+        let (head_center, angle, tail_end) = (Vec2::new(0.0, 0.0), 0.3, Vec2::new(-60.0, 400.0));
+        let spine = snake_spine(head_center, angle, tail_end, 1200.0, 30.0, 2).unwrap();
+        let points = spine.points_within();
+        let neck = head_center - Vec2::new(angle.cos(), angle.sin()) * (HEAD_LENGTH * WIDTH / 2.0) as f32;
+        assert!((points[0] - neck).length() < 1e-3 && (points[points.len() - 1] - tail_end).length() < 1e-2);
+        assert_eq!(spine.to_string().matches('M').count(), 1);
+        // Along the middle of the body that snake_path outlines.
+        let (_, body) = snake(V::new(0.0, 0.0), angle as f64, V::new(-60.0, 400.0), 1200.0, 2);
+        for sample in spine.sample_points_along(5.0) {
+            let q = V::from(sample.point);
+            let nearest = body.sections.iter().map(|section| (q - section.at).len()).fold(f64::INFINITY, f64::min);
+            assert!(nearest < 0.05 * WIDTH, "{:?} is {} from the spine", q, nearest);
+        }
     }
 
     #[test]

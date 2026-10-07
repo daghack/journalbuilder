@@ -4,4 +4,4 @@
 
 mod snake;
 
-pub use snake::snake_path;
+pub use snake::{snake_path, snake_spine};

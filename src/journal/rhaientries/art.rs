@@ -14,6 +14,14 @@
 //! (the head always goes over), so the path is several strokes. The same
 //! seed gives the same snake; it doesn't use or change the script's
 //! generator (`seed`, `random`).
+//!
+//! `snake_spine`, with the same arguments, gives the same snake's centre
+//! line from the back of its head to the tip of its tail, to write along:
+//!
+//! ```rhai
+//! let back = art::snake_spine(new_vec(0.0, 0.0), -PI() / 2.0, new_vec(40.0, 400.0), 900.0, 36.0, 7);
+//! canvas.add_canvas(back.fill_with_msg(ink, font, 30.0, "a snake")[0]);
+//! ```
 
 use rhai::{Engine, EvalAltResult, Module, NativeCallContext};
 
@@ -35,6 +43,11 @@ pub fn register(engine: &mut Engine) {
             .map(Path::new)
             .map_err(|err| error(&ctx, format!("art::snake_path: {}", err)))
     });
+    module.set_native_fn("snake_spine", |ctx: NativeCallContext, head_center: Vec2, head_angle: f64, tail_end: Vec2, snake_length: f64, max_width: f64, random_seed: i64| -> RhaiResult<Path> {
+        art::snake_spine(head_center.into(), head_angle as f32, tail_end.into(), snake_length as f32, max_width as f32, random_seed as u64)
+            .map(Path::new)
+            .map_err(|err| error(&ctx, format!("art::snake_spine: {}", err)))
+    });
     engine.register_static_module("art", module.into());
 }
 
@@ -55,6 +68,8 @@ mod tests {
             let snake = draw.call(7);
             if snake.to_string() != draw.call(7).to_string() { throw "the same seed should draw the same snake"; }
             if snake.to_string() == draw.call(8).to_string() { throw "another seed should draw another snake"; }
+            let spine = art::snake_spine(new_vec(0.0, 0.0), -PI() / 2.0, new_vec(20.0, 300.0), 900.0, 30.0, 7);
+            if spine.to_string() == snake.to_string() { throw "the spine should be another path"; }
             let c = new_canvas();
             c.add_strokepath(snake, new_strokestyle(1.0, "#f2ead8", new_brush("Ink Pen", 0.3, 0.7, 1.0)));
             // The tail's tip reaches the tail end (the outline's bounds include
