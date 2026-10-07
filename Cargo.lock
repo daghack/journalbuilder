@@ -263,7 +263,7 @@ dependencies = [
  "num-traits",
  "pastey",
  "rayon",
- "thiserror 2.0.19",
+ "thiserror",
  "v_frame",
  "y4m",
 ]
@@ -555,7 +555,7 @@ dependencies = [
  "slotmap",
  "smallvec",
  "syn 3.0.3",
- "thiserror 2.0.19",
+ "thiserror",
  "vello",
  "web-time",
  "wgpu",
@@ -1008,7 +1008,7 @@ dependencies = [
  "hashbrown 0.16.1",
  "log",
  "presser",
- "thiserror 2.0.19",
+ "thiserror",
  "windows",
 ]
 
@@ -1363,7 +1363,6 @@ version = "0.1.0"
 dependencies = [
  "darkly",
  "image",
- "kdtree",
  "noise",
  "parry2d",
  "petgraph",
@@ -1389,16 +1388,6 @@ dependencies = [
  "cfg-if",
  "futures-util",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "kdtree"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f0a0e9f770b65bac9aad00f97a67ab5c5319effed07f6da385da3c2115e47ba"
-dependencies = [
- "num-traits",
- "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -1599,7 +1588,7 @@ dependencies = [
  "once_cell",
  "rustc-hash",
  "spirv",
- "thiserror 2.0.19",
+ "thiserror",
  "unicode-ident",
 ]
 
@@ -1889,7 +1878,7 @@ dependencies = [
  "slab",
  "smallvec",
  "spade",
- "thiserror 2.0.19",
+ "thiserror",
 ]
 
 [[package]]
@@ -2237,7 +2226,7 @@ dependencies = [
  "rand 0.9.5",
  "rand_chacha",
  "simd_helpers",
- "thiserror 2.0.19",
+ "thiserror",
  "v_frame",
  "wasm-bindgen",
 ]
@@ -2770,31 +2759,11 @@ checksum = "79def32ffcd477db1ff26f76dab9e3a91f0bd42a85ca96577089b24623056f9d"
 
 [[package]]
 name = "thiserror"
-version = "1.0.69"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6aaf5339b578ea85b50e080feb250a3e8ae8cfcdff9a461c9ec2904bc923f52"
-dependencies = [
- "thiserror-impl 1.0.69",
-]
-
-[[package]]
-name = "thiserror"
 version = "2.0.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09a43598840e33d5b0331f38c5e30d13bb11c11210a4b58f0d9b18a5a5eefcd9"
 dependencies = [
- "thiserror-impl 2.0.19",
-]
-
-[[package]]
-name = "thiserror-impl"
-version = "1.0.69"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4fee6c4efc90059e10f81e6d42c60a18f76588c3d74cb83a0b242a2b6c7504c1"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
+ "thiserror-impl",
 ]
 
 [[package]]
@@ -3009,7 +2978,7 @@ dependencies = [
  "png 0.18.1",
  "skrifa",
  "static_assertions",
- "thiserror 2.0.19",
+ "thiserror",
  "vello_encoding",
  "vello_shaders",
  "wgpu",
@@ -3037,7 +3006,7 @@ dependencies = [
  "bytemuck",
  "log",
  "naga",
- "thiserror 2.0.19",
+ "thiserror",
  "vello_encoding",
 ]
 
@@ -3209,7 +3178,7 @@ dependencies = [
  "raw-window-handle",
  "rustc-hash",
  "smallvec",
- "thiserror 2.0.19",
+ "thiserror",
  "wgpu-core-deps-apple",
  "wgpu-core-deps-emscripten",
  "wgpu-core-deps-windows-linux-android",
@@ -3288,7 +3257,7 @@ dependencies = [
  "raw-window-metal",
  "renderdoc-sys",
  "smallvec",
- "thiserror 2.0.19",
+ "thiserror",
  "wasm-bindgen",
  "wayland-sys",
  "web-sys",

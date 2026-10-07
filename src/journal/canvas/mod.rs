@@ -1,6 +1,6 @@
 use rayon::prelude::*;
 use serde::Deserialize;
-use crate::journal::{symbol::AvoidanceKdTree, StrokePath, img::pixmap_from_svg_tree};
+use crate::journal::{avoid::AvoidanceTree, StrokePath, img::pixmap_from_svg_tree};
 use parry2d::math::{Vec2};
 use noise::{NoiseFn, Perlin};
 use rand::rngs::StdRng;
@@ -80,6 +80,12 @@ impl StrokeStyle {
     /// The stroke color as sRGB RGBA floats in 0-1.
     pub fn rgba(&self) -> Result<[f32; 4], String> {
         parse_color(&self.color)
+    }
+    /// How far a stroke's marks reach either side of its line: half the
+    /// wider of its width (in SVG output) and its brush (in Darkly's).
+    pub fn reach(&self) -> f32 {
+        let brush = self.brush.as_ref().map_or(0.0, |b| b.size);
+        self.width.max(brush).max(0.0) / 2.0
     }
 }
 
@@ -338,10 +344,11 @@ impl Canvas {
         }
         format!("<path d=\"{}\" fill=\"{}\" stroke=\"{}\" />", path, color, color)
     }
-    pub fn get_avoid_tree(&self, avoid_radius: f32) -> AvoidanceKdTree {
-        let stroke_path: StrokePath = self.into();
-        let avoid_tree = stroke_path.build_kdtree(avoid_radius, None);
-        AvoidanceKdTree::new(avoid_tree, avoid_radius)
+    /// What keeps `clearance` away from this canvas's marks.
+    pub fn avoidance(&self, clearance: f32) -> AvoidanceTree {
+        let mut tree = AvoidanceTree::new();
+        tree.add_canvas(self, clearance);
+        tree
     }
 }
 

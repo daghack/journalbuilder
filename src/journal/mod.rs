@@ -1,4 +1,5 @@
 pub mod art;
+pub mod avoid;
 pub mod canvas;
 pub mod symbol;
 pub mod paths;

@@ -1,6 +1,7 @@
 use parry2d::math::{Vec2};
 
-use crate::journal::canvas::{Canvas, StrokeStyle, textbox::{TextBox, TextBoxOptions, TextBoxLineMode}};
+use crate::journal::avoid::AvoidanceTree;
+use crate::journal::canvas::{Canvas, textbox::{TextBox, TextBoxOptions, TextBoxLineMode}};
 use crate::journal::symbol::Symbol;
 use crate::journal::paths::StrokePath;
 
@@ -49,22 +50,24 @@ pub struct SplatOptions {
     pub max_attempts: usize,
     /// Extra space between glyphs, as a fraction of `symbol_scale`.
     pub spacing: f32,
+    /// How far messages keep from the canvas's strokes and from each other.
+    pub clearance: f32,
 }
 
 /// Give up after backing off this many times in one splat.
 const MAX_SPLAT_BACKOFFS: usize = 100;
 
-/// Try random boxes over `working` until `symbols` fit in one, clear of
-/// everything already drawn.
-fn splat_one(working: &Canvas, symbols: &[Symbol], opts: &SplatOptions, rng: &mut dyn RngCore) -> Option<Vec<Symbol>> {
-    let avoid_tree = working.get_avoid_tree(opts.symbol_scale / 2.0);
+/// Try random boxes over `bounds` until `symbols` fit in one, clear of
+/// `avoid`.
+fn splat_one(bounds: &Canvas, avoid: &AvoidanceTree, symbols: &[Symbol], opts: &SplatOptions, rng: &mut dyn RngCore) -> Option<Vec<Symbol>> {
     for _ in 0..opts.max_attempts {
         let textbox = TextBox::new(TextBoxOptions {
             jagged_edge: opts.jagged_edge,
             layout: TextBoxLineMode::Flat,
-            bounds: random_bounding_box(working, opts.width_range, opts.height_range, rng),
+            bounds: random_bounding_box(bounds, opts.width_range, opts.height_range, rng),
             symbol_scale: opts.symbol_scale,
-            avoid_tree: Some(&avoid_tree),
+            avoid: Some(avoid),
+            padding: opts.clearance,
             spacing: opts.spacing,
         });
         // Place copies, so a failed attempt leaves the symbols untouched.
@@ -77,18 +80,31 @@ fn splat_one(working: &Canvas, symbols: &[Symbol], opts: &SplatOptions, rng: &mu
 }
 
 /// Scatter messages over `canvas` in randomly sized boxes, each clear of the
-/// canvas and of the messages before it, returning each message's placed
-/// symbols in order. `style` is only used to account for stroke width while
-/// placing. When a message won't fit, the most recent messages are taken
-/// back (more of them the more often it happens) and placed again.
-pub fn splat_msgs(canvas: &Canvas, msgs: &[Vec<Symbol>], opts: &SplatOptions, style: &StrokeStyle, rng: &mut dyn RngCore) -> Result<Vec<Vec<Symbol>>, String> {
+/// canvas, of `avoid` and of the messages before it, returning each
+/// message's placed symbols in order. When a message won't fit, the most
+/// recent messages are taken back (more of them the more often it happens)
+/// and placed again.
+pub fn splat_msgs(canvas: &Canvas, avoid: Option<&AvoidanceTree>, msgs: &[Vec<Symbol>], opts: &SplatOptions, rng: &mut dyn RngCore) -> Result<Vec<Vec<Symbol>>, String> {
+    let mut base = canvas.avoidance(0.0);
+    if let Some(avoid) = avoid {
+        base.merge(avoid);
+    }
+    let with_messages = |placed: &[Vec<Symbol>]| {
+        let mut tree = base.clone();
+        for symbol in placed.iter().flatten() {
+            tree.add_symbol(symbol, 0.0);
+        }
+        tree
+    };
     let mut placed: Vec<Vec<Symbol>> = Vec::new();
-    let mut working = canvas.clone();
+    let mut working = base.clone();
     let mut backoffs = 0;
     while placed.len() < msgs.len() {
         let next = placed.len();
-        if let Some(symbols) = splat_one(&working, &msgs[next], opts, rng) {
-            working.add_strokes(symbols.clone(), style.clone());
+        if let Some(symbols) = splat_one(canvas, &working, &msgs[next], opts, rng) {
+            for symbol in &symbols {
+                working.add_symbol(symbol, 0.0);
+            }
             placed.push(symbols);
             continue;
         }
@@ -100,10 +116,7 @@ pub fn splat_msgs(canvas: &Canvas, msgs: &[Vec<Symbol>], opts: &SplatOptions, st
             return Err(format!("gave up after taking messages back {} times; message {} still doesn't fit", MAX_SPLAT_BACKOFFS, next));
         }
         placed.truncate(placed.len().saturating_sub(backoffs / 3 + 1));
-        working = canvas.clone();
-        for symbols in &placed {
-            working.add_strokes(symbols.clone(), style.clone());
-        }
+        working = with_messages(&placed);
     }
     Ok(placed)
 }

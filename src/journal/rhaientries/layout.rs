@@ -9,8 +9,8 @@
 //!     symbol_scale: 52.0,
 //!     layout: "flat",               // or "words": wrap at blanks (spaces)
 //!     jagged_edge: 0.0,             // random line indent, in symbol scales
-//!     avoid: canvas,                // optional
-//!     avoid_radius: 26.0,           // default: symbol_scale / 2
+//!     avoid: canvas,                // optional: see avoid.rs
+//!     clearance: 6.0,               // how far from it; default: symbol_scale / 8
 //!     spacing: 0.1,                 // extra space between glyphs, in symbol scales (default 0)
 //! });
 //! let res = tb.fill(font.glyphs(msg));   // #{ placed: [..], unplaced: [..] }
@@ -26,6 +26,8 @@
 //!     jagged_edge: 0.1,           // default 0.1
 //!     max_attempts: 100,          // boxes per message before backing off
 //!     spacing: 0.0,               // extra space between glyphs, in symbol scales
+//!     avoid: other,               // more to keep clear of (see avoid.rs)
+//!     clearance: 3.0,             // from the canvas, `avoid` and other messages; default symbol_scale / 8
 //! });
 //!
 //! // Hatch the inside of a closed path.
@@ -45,13 +47,13 @@ use super::glyphs::{add_glyph, glyph_array, Glyph};
 use super::random::SharedRng;
 use super::{Canvas, CanvasData, Path, StrokeStyle, Vec2};
 use crate::journal::canvas::artistic::{jitter_symbols, splat_msgs, SplatOptions};
-use crate::journal::canvas::StrokeStyle as JournalStrokeStyle;
 use crate::journal::styles::Font;
 use crate::journal::symboldict::SymbolPathDict;
 use crate::journal::canvas::textbox::{TextBox as CoreTextBox, TextBoxLineMode, TextBoxOptions};
 use crate::journal::canvas::Canvas as JournalCanvas;
 use crate::journal::paths::StrokePath;
-use crate::journal::symbol::{AvoidanceKdTree, Symbol};
+use crate::journal::symbol::Symbol;
+use super::avoid::{Avoid, AvoidOption};
 
 type RhaiResult<T> = Result<T, Box<EvalAltResult>>;
 
@@ -82,11 +84,12 @@ pub struct TextBox {
     symbol_scale: f32,
     jagged_edge: f32,
     layout: TextBoxLineMode,
-    avoid: Option<Rc<AvoidanceKdTree>>,
+    avoid: Option<Avoid>,
+    padding: f32,
     spacing: f32,
 }
 
-const TEXTBOX_KEYS: [&str; 9] = ["center", "width", "height", "symbol_scale", "layout", "jagged_edge", "avoid", "avoid_radius", "spacing"];
+const TEXTBOX_KEYS: [&str; 9] = ["center", "width", "height", "symbol_scale", "layout", "jagged_edge", "avoid", "clearance", "spacing"];
 
 /// The `spacing` option: extra space between glyphs, as a fraction of the
 /// symbol scale. Negative tightens, down to glyphs touching their
@@ -96,6 +99,16 @@ pub(super) fn spacing(caller: &str, options: &Map) -> RhaiResult<f32> {
         None => Ok(0.0),
         Some(s) if s.is_finite() && s > -0.5 => Ok(s),
         Some(s) => Err(format!("{}: 'spacing' must be a number above -0.5, got {}", caller, s).into()),
+    }
+}
+
+/// The `layout` option: "flat" (the default) places glyph by glyph, and
+/// "words" keeps words together, wrapping at blanks.
+pub(super) fn line_mode(caller: &str, options: &Map) -> RhaiResult<TextBoxLineMode> {
+    match options.get("layout").map(|l| l.to_string()).as_deref() {
+        None | Some("flat") => Ok(TextBoxLineMode::Flat),
+        Some("words") => Ok(TextBoxLineMode::WordsByBlankSymbol),
+        Some(other) => Err(format!("{}: unknown layout '{}'; expected \"flat\" or \"words\"", caller, other).into()),
     }
 }
 
@@ -153,45 +166,31 @@ impl TextBox {
         let half = PVec::new(positive(CALLER, &options, "width")?, positive(CALLER, &options, "height")?) / 2.0;
         let symbol_scale = positive(CALLER, &options, "symbol_scale")?;
         let jagged_edge = number(CALLER, &options, "jagged_edge")?.unwrap_or(0.0);
-        let layout = match options.get("layout").map(|l| l.to_string()).as_deref() {
-            None | Some("flat") => TextBoxLineMode::Flat,
-            Some("words") => TextBoxLineMode::WordsByBlankSymbol,
-            Some(other) => return Err(format!("new_textbox: unknown layout '{}'; expected \"flat\" or \"words\"", other).into()),
-        };
-        let avoid = match options.get("avoid") {
-            None => None,
-            Some(canvas) => {
-                let canvas = canvas.clone().try_cast::<Canvas>().ok_or("new_textbox: 'avoid' should be a canvas")?;
-                let radius = match number(CALLER, &options, "avoid_radius")? {
-                    Some(r) if r > 0.0 => r,
-                    Some(r) => return Err(format!("new_textbox: 'avoid_radius' must be positive, got {}", r).into()),
-                    None => symbol_scale / 2.0,
-                };
-                let jc: JournalCanvas = (&canvas).into();
-                Some(Rc::new(jc.get_avoid_tree(radius)))
-            }
-        };
-        if avoid.is_none() && options.contains_key("avoid_radius") {
-            return Err("new_textbox: 'avoid_radius' needs 'avoid'".into());
-        }
+        let layout = line_mode(CALLER, &options)?;
+        let avoid = AvoidOption::parse(CALLER, &options, false)?;
         Ok(TextBox {
             bounds: Aabb::new(center - half, center + half),
             symbol_scale,
             jagged_edge,
             layout,
-            avoid,
+            padding: avoid.padding(symbol_scale),
+            avoid: avoid.tree,
             spacing: spacing(CALLER, &options)?,
         })
     }
-    fn core(&self) -> CoreTextBox<'_> {
-        CoreTextBox::new(TextBoxOptions {
+    /// Run `f` with the text box, avoiding what its tree holds now.
+    fn with_core<R>(&self, f: impl FnOnce(&CoreTextBox) -> R) -> R {
+        let tree = self.avoid.as_ref().map(|a| a.borrow());
+        let core = CoreTextBox::new(TextBoxOptions {
             jagged_edge: self.jagged_edge,
             layout: self.layout.clone(),
             bounds: self.bounds,
             symbol_scale: self.symbol_scale,
-            avoid_tree: self.avoid.as_deref(),
+            avoid: tree.as_deref(),
+            padding: self.padding,
             spacing: self.spacing,
-        })
+        });
+        f(&core)
     }
 }
 
@@ -224,7 +223,7 @@ fn hatch(path: &StrokePath, spacing: f64, angle: f64, roughness: f64, rng: &Shar
     Ok(hatching)
 }
 
-const SPLAT_KEYS: [&str; 8] = ["symbol_scale", "width_range", "height_range", "rotation_jitter", "scale_jitter", "jagged_edge", "max_attempts", "spacing"];
+const SPLAT_KEYS: [&str; 10] = ["symbol_scale", "width_range", "height_range", "rotation_jitter", "scale_jitter", "jagged_edge", "max_attempts", "spacing", "avoid", "clearance"];
 
 fn splat(canvas: &Canvas, msgs: Array, font: &Font, style: StrokeStyle, options: Map, symdict: &SymbolPathDict, rng: &SharedRng) -> RhaiResult<Canvas> {
     const CALLER: &str = "splat_msgs";
@@ -240,8 +239,11 @@ fn splat(canvas: &Canvas, msgs: Array, font: &Font, style: StrokeStyle, options:
             _ => return Err(format!("{}: 'max_attempts' should be a whole number of at least 1, got {}", CALLER, n).into()),
         },
     };
+    let symbol_scale = positive(CALLER, &options, "symbol_scale")?;
+    let avoid = AvoidOption::parse(CALLER, &options, true)?;
     let opts = SplatOptions {
-        symbol_scale: positive(CALLER, &options, "symbol_scale")?,
+        symbol_scale,
+        clearance: avoid.padding(symbol_scale),
         width_range: range(CALLER, &options, "width_range")?,
         height_range: range(CALLER, &options, "height_range")?,
         jagged_edge: number(CALLER, &options, "jagged_edge")?.unwrap_or(0.1),
@@ -266,8 +268,8 @@ fn splat(canvas: &Canvas, msgs: Array, font: &Font, style: StrokeStyle, options:
         symbols
     }).collect();
     let journal_canvas: JournalCanvas = canvas.into();
-    let journal_style: JournalStrokeStyle = style.clone().into();
-    let placed = splat_msgs(&journal_canvas, &symbol_msgs, &opts, &journal_style, &mut *rng)
+    let tree = avoid.tree.as_ref().map(|a| a.borrow());
+    let placed = splat_msgs(&journal_canvas, tree.as_deref(), &symbol_msgs, &opts, &mut *rng)
         .map_err(|err| format!("{}: {}", CALLER, err))?;
 
     let mut splatted = CanvasData::default();
@@ -284,7 +286,8 @@ pub fn register(engine: &mut Engine, symdict: Rc<SymbolPathDict>, rng: SharedRng
 
     let r = rng.clone();
     engine.register_fn("fill", move |tb: &mut TextBox, glyphs_in: Array| -> RhaiResult<Map> {
-        let (placed, unplaced) = tb.core().fill_bounds_with(symbols("fill", glyphs_in)?, &mut *r.borrow_mut());
+        let glyphs_in = symbols("fill", glyphs_in)?;
+        let (placed, unplaced) = tb.with_core(|core| core.fill_bounds_with(glyphs_in, &mut *r.borrow_mut()));
         let mut result = Map::new();
         result.insert("placed".into(), Dynamic::from_array(glyphs(placed)));
         result.insert("unplaced".into(), Dynamic::from_array(glyphs(unplaced)));
@@ -294,20 +297,21 @@ pub fn register(engine: &mut Engine, symdict: Rc<SymbolPathDict>, rng: SharedRng
     let r = rng.clone();
     engine.register_fn("place_all", move |tb: &mut TextBox, glyphs_in: Array| -> RhaiResult<Array> {
         let mut to_place = symbols("place_all", glyphs_in)?;
-        let core = tb.core();
         let mut blocks = Array::new();
         let mut rng = r.borrow_mut();
-        // Like TextBox::place_all_symbols, but a glyph that doesn't fit
-        // even in an empty box is an error rather than silently dropped.
-        while !to_place.is_empty() {
-            let (placed, rest) = core.fill_bounds_with(to_place, &mut *rng);
-            if placed.is_empty() {
-                return Err(format!("place_all: {} glyph(s) don't fit in the text box even when it's empty", rest.len()).into());
+        // A glyph that doesn't fit even in an empty box is an error rather
+        // than silently dropped.
+        tb.with_core(|core| {
+            while !to_place.is_empty() {
+                let (placed, rest) = core.fill_bounds_with(std::mem::take(&mut to_place), &mut *rng);
+                if placed.is_empty() {
+                    return Err(format!("place_all: {} glyph(s) don't fit in the text box even when it's empty", rest.len()).into());
+                }
+                blocks.push(Dynamic::from_array(glyphs(placed)));
+                to_place = rest;
             }
-            blocks.push(Dynamic::from_array(glyphs(placed)));
-            to_place = rest;
-        }
-        Ok(blocks)
+            Ok(blocks)
+        })
     });
 
     let r = rng.clone();
@@ -402,9 +406,12 @@ mod tests {
             let opts = #{ center: new_vec(0.0, 0.0), width: 100, height: 100, symbol_scale: 10.0 };
             let free = new_textbox(opts).fill(font.glyphs(text)).placed;
             opts.avoid = blot;
+            opts.clearance = 0.0;
             let avoiding = new_textbox(opts).fill(font.glyphs(text)).placed;
             for g in avoiding {
-                if g.position.x.abs() < 30.0 && g.position.y.abs() < 30.0 { throw "placed on the blot: " + g.position; }
+                // Spaces take no room, so they may land anywhere.
+                let p = g.position;
+                if !g.is_blank && p.x * p.x + p.y * p.y < 36.0 * 36.0 { throw "placed on the blot: " + p.x + ", " + p.y; }
             }
             [free.len(), avoiding.len()]
         "#);
@@ -508,7 +515,8 @@ mod tests {
             (format!("#{{ center: {}, width: 0, height: 10, symbol_scale: 2 }}", c), "'width' must be positive"),
             (format!("#{{ center: {}, width: 10, height: 10 }}", c), "missing 'symbol_scale'"),
             (format!("#{{ center: {}, width: 10, height: 10, symbol_scale: 2, layout: \"zigzag\" }}", c), "unknown layout 'zigzag'"),
-            (format!("#{{ center: {}, width: 10, height: 10, symbol_scale: 2, avoid_radius: 3 }}", c), "'avoid_radius' needs 'avoid'"),
+            (format!("#{{ center: {}, width: 10, height: 10, symbol_scale: 2, clearance: 3 }}", c), "'clearance' needs 'avoid'"),
+            (format!("#{{ center: {}, width: 10, height: 10, symbol_scale: 2, avoid: new_canvas(), clearance: -3 }}", c), "'clearance' must be a finite number"),
         ] {
             let err = fails(&format!("let ok = 1;\nnew_textbox({});", opts));
             assert!(err.contains(want) && err.contains("line 2"), "{}: {}", want, err);

@@ -1,13 +1,8 @@
-use super::paths::{
-    CurveStepper,
-    StrokePath, SubstrokePath, SubstrokeStepper,
-};
+use super::avoid::{shapes_within, AvoidanceTree};
+use super::paths::{StrokePath, Walk};
 use parry2d::math::Vec2;
-use kdtree::KdTree;
-use kdtree::distance::squared_euclidean;
 
 use std::rc::Rc;
-use std::iter::Peekable;
 use std::collections::VecDeque;
 
 #[derive(Debug, Clone)]
@@ -21,6 +16,8 @@ pub struct SymbolBase {
     symbol_type: SymbolType,
     /// The hull's bounding box, which text layout reads for every glyph.
     hull_aabb: parry2d::bounding_volume::Aabb,
+    /// The convex hull of its strokes, unplaced: what text keeps clear of.
+    hull: Vec<Vec2>,
 }
 
 impl SymbolBase {
@@ -28,6 +25,7 @@ impl SymbolBase {
         let hull = SymbolBase::generate_hull(&symbol_type);
         SymbolBase {
             hull_aabb: hull.local_aabb(),
+            hull: hull.points().to_vec(),
             symbol_type,
         }
     }
@@ -128,6 +126,11 @@ impl Symbol {
     pub fn hull_aabb(&self) -> parry2d::bounding_volume::Aabb {
         self.base.hull_aabb
     }
+    /// The convex hull of the glyph's strokes as placed: the room it takes.
+    pub fn footprint(&self) -> Vec<Vec2> {
+        let rotation = parry2d::math::Rot2::new(self.rotation_rad);
+        self.base.hull.iter().map(|p| rotation * *p * (self.scale / 2.0) + self.position).collect()
+    }
 
     pub fn rotation_rad(&self) -> f32 {
         self.rotation_rad
@@ -144,71 +147,6 @@ impl Symbol {
     }
     pub fn is_blank(&self) -> bool {
         self.base.is_blank()
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct SymbolPlacementArgs<'kd> {
-    pub avoid_kdtree: Option<&'kd AvoidanceKdTree>,
-    pub symbol_scale: f32,
-    /// Extra space between glyphs, as a fraction of `symbol_scale`; 0 sets
-    /// them at their widths.
-    pub spacing: f32,
-}
-
-// A wrapper around a k-d tree for avoidance purposes
-#[derive(Debug, Clone)]
-pub struct AvoidanceKdTree {
-    pub kdtree: kdtree::KdTree<f32, (f32, f32), [f32; 2]>,
-    pub scale: f32,
-    /// Glyphs just placed, with how far along the text they were: the next
-    /// glyph's neighbours, which it may sit right against. They join the
-    /// tree once the text has moved on, so only text a path loops back
-    /// over counts as a collision.
-    recent: VecDeque<(Vec2, f32)>,
-    travelled: f32,
-}
-impl AvoidanceKdTree {
-    pub fn new(kdtree: kdtree::KdTree<f32, (f32, f32), [f32; 2]>, scale: f32) -> Self {
-        Self { kdtree, scale, recent: VecDeque::new(), travelled: 0.0 }
-    }
-    pub fn empty(scale: f32) -> Self {
-        Self::new(KdTree::new(2), scale)
-    }
-    /// Record a glyph just placed at `point`; see `recent`.
-    fn add_recent(&mut self, point: Vec2) {
-        self.recent.push_back((point, self.travelled));
-    }
-    /// The text has moved `distance` further along: glyphs now well behind
-    /// it become obstacles.
-    fn advance(&mut self, distance: f32) {
-        self.travelled += distance;
-        while let Some(&(point, at)) = self.recent.front() {
-            if self.travelled - at <= 2.0 * self.scale {
-                break;
-            }
-            self.add_point(point);
-            self.recent.pop_front();
-        }
-    }
-    pub fn add_point(&mut self, point: Vec2) {
-        if !point.is_finite() {
-            return
-        }
-        self.kdtree.add([point.x, point.y], (point.x, point.y)).unwrap();
-    }
-    pub fn contained_within(&self, point: Vec2) -> bool {
-        let query_point = [point.x, point.y];
-        let scale = self.scale;
-        self.kdtree
-            .nearest(&query_point, 1, &squared_euclidean)
-            .is_ok_and(|results| {
-                if let Some((dist, _)) = results.first() {
-                    *dist < scale * scale
-                } else {
-                    false
-                }
-            })
     }
 }
 
@@ -273,175 +211,270 @@ fn gift_wrap(points: &[Vec2]) -> Vec<Vec2> {
     hull
 }
 
-pub fn place_symbols_along_stepper<'a, SymIter, Stepper>(stepper: &mut Stepper, symbols: &mut Peekable<SymIter>, symbol_avoidtree: &mut AvoidanceKdTree, external_avoidtree: Option<&AvoidanceKdTree>, update_symbols: bool, spacing: f32) -> usize where
-    SymIter: Iterator<Item=&'a mut Symbol>,
-    Stepper: CurveStepper,
-{
-    let scale = symbol_avoidtree.scale * 2.0;
-    let gap = spacing * scale;
-    let mut placed_count = 0;
-    while let Some(current_symbol) = symbols.peek_mut() {
-        let aabb = current_symbol.hull_aabb();
-        let width = aabb.extents().x * scale / 2.0;
-        let step_size = width / 3.0;
-        if let (Some(l), Some(r)) = (stepper.prospective_step(0.0), stepper.prospective_step(width)) {
-            let center = l.point + (r.point - l.point) * 0.5;
-            let mut skip = symbol_avoidtree.contained_within(center);
-            skip |= match external_avoidtree {
-                Some(tree) => tree.contained_within(center),
-                None => false,
-            };
-            if skip {
-                stepper.step(step_size);
-                symbol_avoidtree.advance(step_size);
-            } else {
-                let current_symbol = symbols.next().unwrap();
-                if update_symbols {
-                    current_symbol.set_position(center);
-                    current_symbol.rotate_rad_by(l.normal.y.atan2(l.normal.x) - std::f32::consts::FRAC_PI_2);
-                    current_symbol.scale_by(scale);
-                }
-                symbol_avoidtree.add_recent(center);
-                placed_count += 1;
-                stepper.step(width + gap);
-                symbol_avoidtree.advance(width + gap);
+/// Where and how glyphs go along a path.
+#[derive(Debug, Clone)]
+pub struct SymbolPlacementArgs<'a> {
+    /// What the glyphs keep clear of, besides each other, and how much
+    /// further than its own clearances they keep from it.
+    pub avoid: Option<&'a AvoidanceTree>,
+    pub padding: f32,
+    pub symbol_scale: f32,
+    /// Extra space between glyphs, as a fraction of `symbol_scale`; 0 sets
+    /// them at their widths.
+    pub spacing: f32,
+    /// How far below the path each glyph's centre sits, as a fraction of
+    /// its height: "below" being the glyph's own down, along the path's
+    /// normal.
+    pub baseline_shift: f32,
+}
+
+impl SymbolPlacementArgs<'_> {
+    pub fn new(symbol_scale: f32) -> Self {
+        SymbolPlacementArgs { avoid: None, padding: 0.0, symbol_scale, spacing: 0.0, baseline_shift: 0.0 }
+    }
+}
+
+/// Samples per curve when measuring a path to place glyphs along it.
+const SAMPLES_PER_CURVE: usize = 20;
+/// When a glyph is blocked, how far on to try next, as a fraction of the
+/// symbol scale; then how many halvings close in on the first clear spot.
+const SEARCH_STEP: f32 = 0.25;
+const REFINE_STEPS: usize = 4;
+
+/// Places glyphs along walks, clear of the avoidance tree and of each
+/// other.
+struct Placer<'a> {
+    args: &'a SymbolPlacementArgs<'a>,
+    /// Glyphs placed so far, once the text has moved on from them.
+    placed: AvoidanceTree,
+    /// The latest glyphs' footprints, with how far along the text each
+    /// ends. They're the next glyphs' neighbours, which may touch them (on a
+    /// bend, overlap them), so they only join `placed` once the text is a
+    /// glyph further on: only text that a path loops back over collides.
+    recent: VecDeque<(Vec<Vec2>, f32)>,
+    /// How far along the text the current walk starts.
+    offset: f32,
+}
+
+/// Glyphs placed one after another, and where each starts and ends along
+/// its walk.
+type Run = (Vec<Symbol>, Vec<(f32, f32)>);
+
+impl<'a> Placer<'a> {
+    fn new(args: &'a SymbolPlacementArgs<'a>) -> Self {
+        Placer { args, placed: AvoidanceTree::new(), recent: VecDeque::new(), offset: 0.0 }
+    }
+
+    /// A glyph's width along the path.
+    fn width(&self, symbol: &Symbol) -> f32 {
+        symbol.hull_aabb().extents().x * self.args.symbol_scale / 2.0
+    }
+
+    fn gap(&self) -> f32 {
+        self.args.spacing * self.args.symbol_scale
+    }
+
+    /// `symbol` placed to start `start` along `walk`, or `None` if it would
+    /// run off the end: centred between its ends, turned to the path where
+    /// it starts, and scaled up by the symbol scale.
+    fn spot(&self, walk: &Walk, start: f32, symbol: &Symbol) -> Option<Symbol> {
+        let (l, r) = (walk.at(start)?, walk.at(start + self.width(symbol))?);
+        let height = symbol.hull_aabb().extents().y * self.args.symbol_scale / 2.0;
+        let mut placed = symbol.clone();
+        placed.set_position(l.point.lerp(r.point, 0.5) + l.normal * (self.args.baseline_shift * height));
+        placed.rotate_rad_by(l.normal.y.atan2(l.normal.x) - std::f32::consts::FRAC_PI_2);
+        placed.scale_by(self.args.symbol_scale);
+        Some(placed)
+    }
+
+    /// Like `spot`, but a glyph that would run off the end goes at the end.
+    /// For spaces, which needn't fit.
+    fn spot_or_end(&self, walk: &Walk, start: f32, symbol: &Symbol) -> Symbol {
+        self.spot(walk, start, symbol)
+            .or_else(|| self.spot(walk, (walk.length() - self.width(symbol)).max(0.0), symbol))
+            .unwrap_or_else(|| {
+                let mut placed = symbol.clone();
+                placed.scale_by(self.args.symbol_scale);
+                placed
+            })
+    }
+
+    /// Whether a glyph placed starting `start` along the current walk hits
+    /// anything.
+    fn blocked(&self, placed: &Symbol, start: f32) -> bool {
+        if placed.is_blank() {
+            return false;
+        }
+        let footprint = placed.footprint();
+        let at = self.offset + start;
+        self.args.avoid.is_some_and(|tree| tree.blocks(&footprint, self.args.padding))
+            || self.placed.blocks(&footprint, 0.0)
+            || self.recent.iter().any(|(other, end)| at - end > self.args.symbol_scale && shapes_within(&footprint, other, 0.0))
+    }
+
+    /// `run` glyph after glyph from `start`: `Some(Err(()))` if one is
+    /// blocked, `None` if they run off the end.
+    fn try_run(&self, walk: &Walk, start: f32, run: &[Symbol]) -> Option<Result<Run, ()>> {
+        let (mut placed, mut spans) = (Vec::new(), Vec::new());
+        let mut at = start;
+        for symbol in run {
+            let glyph = self.spot(walk, at, symbol)?;
+            if self.blocked(&glyph, at) {
+                return Some(Err(()));
             }
-        } else {
+            let end = at + self.width(symbol);
+            placed.push(glyph);
+            spans.push((at, end));
+            at = end + self.gap();
+        }
+        Some(Ok((placed, spans)))
+    }
+
+    /// `run` placed glyph after glyph from the first spot at or after
+    /// `from` where it's all clear, or `None` if it runs off the end first.
+    fn fit_run(&self, walk: &Walk, from: f32, run: &[Symbol]) -> Option<Run> {
+        let step = (self.args.symbol_scale * SEARCH_STEP).max(1e-3);
+        let mut start = from;
+        let mut blocked_at = None;
+        loop {
+            match self.try_run(walk, start, run)? {
+                Ok(found) => {
+                    let Some(mut low) = blocked_at else { return Some(found) };
+                    // Close in on where the obstacle ends.
+                    let (mut high, mut best) = (start, found);
+                    for _ in 0..REFINE_STEPS {
+                        let mid = (low + high) / 2.0;
+                        match self.try_run(walk, mid, run) {
+                            Some(Ok(closer)) => (high, best) = (mid, closer),
+                            _ => low = mid,
+                        }
+                    }
+                    return Some(best);
+                }
+                Err(()) => {
+                    blocked_at = Some(start);
+                    start += step;
+                }
+            }
+        }
+    }
+
+    /// Keep a glyph placed from `start` to `end` along the current walk.
+    fn commit(&mut self, placed: &Symbol, start: f32, end: f32) {
+        let at = self.offset + start;
+        while self.recent.front().is_some_and(|(_, e)| at - e > self.args.symbol_scale) {
+            let (footprint, _) = self.recent.pop_front().expect("checked");
+            self.placed.add_polygon(&footprint, 0.0);
+        }
+        if !placed.is_blank() {
+            self.recent.push_back((placed.footprint(), self.offset + end));
+        }
+    }
+
+    /// Done with a walk. The next one starts somewhere else, so every glyph
+    /// so far is an obstacle to it.
+    fn finish_walk(&mut self, walk: &Walk) {
+        for (footprint, _) in self.recent.drain(..) {
+            self.placed.add_polygon(&footprint, 0.0);
+        }
+        self.offset += walk.length();
+    }
+}
+
+/// Place glyphs one by one along a path's subpaths, each at the first spot
+/// clear of `args.avoid` and of the glyphs before it, until the path runs
+/// out. Returns the glyphs placed and those left over.
+pub fn place_along_path(mut symbols: Vec<Symbol>, path: &StrokePath, args: &SymbolPlacementArgs) -> (Vec<Symbol>, Vec<Symbol>) {
+    let mut placer = Placer::new(args);
+    let mut next = 0;
+    for substroke in path.to_substrokes() {
+        if next == symbols.len() {
             break;
         }
+        let walk = Walk::new(&substroke, SAMPLES_PER_CURVE);
+        let mut cursor = 0.0;
+        while next < symbols.len() {
+            let Some((mut placed, spans)) = placer.fit_run(&walk, cursor, &symbols[next..=next]) else { break };
+            let ((start, end), glyph) = (spans[0], placed.pop().expect("one glyph"));
+            placer.commit(&glyph, start, end);
+            symbols[next] = glyph;
+            cursor = end + placer.gap();
+            next += 1;
+        }
+        placer.finish_walk(&walk);
     }
-    placed_count
+    let unplaced = symbols.split_off(next);
+    (symbols, unplaced)
 }
 
-pub fn place_symbols_along<'a, SymIter: Iterator<Item=&'a mut Symbol>>(substroke: &SubstrokePath, symbols: &mut Peekable<SymIter>, symbol_avoidtree: &mut AvoidanceKdTree, external_avoidtree: Option<&AvoidanceKdTree>, spacing: f32) -> usize {
-    let mut stepper = SubstrokeStepper::new(substroke, 20);
-    place_symbols_along_stepper(&mut stepper, symbols, symbol_avoidtree, external_avoidtree, true, spacing)
-}
-
-pub fn place_along_path<'kd>(mut symbols: Vec<Symbol>, path: &StrokePath, args: &SymbolPlacementArgs<'kd>) -> (Vec<Symbol>, Vec<Symbol>) {
-    let substrokes = path.to_substrokes();
-    let SymbolPlacementArgs {
-        avoid_kdtree: external_avoidtree,
-        symbol_scale,
-        spacing,
-    } = args;
-    let mut symbol_avoidtree = AvoidanceKdTree::empty(*symbol_scale / 2.0);
-    let mut placed_symbols = 0;
-    let mut sym_iter = symbols.iter_mut().peekable();
-    for substroke in &substrokes {
-        placed_symbols += place_symbols_along(substroke, &mut sym_iter, &mut symbol_avoidtree, *external_avoidtree, *spacing);
+/// Like `place_along_path`, but word by word: a word (the glyphs up to a
+/// blank, which goes with it) is kept together on one subpath, the subpaths
+/// being lines. A word longer than a whole line is split over lines.
+pub fn place_words_along_path(symbols: Vec<Symbol>, path: &StrokePath, args: &SymbolPlacementArgs) -> (Vec<Symbol>, Vec<Symbol>) {
+    let mut words: VecDeque<Vec<Symbol>> = VecDeque::new();
+    let mut word = Vec::new();
+    for symbol in symbols {
+        let blank = symbol.is_blank();
+        word.push(symbol);
+        if blank {
+            words.push_back(std::mem::take(&mut word));
+        }
     }
-    // copy the last n placed symbols into a new vec,
-    // then return the original vector, now truncated, and the new vec
-    let unplaced_symbols = symbols.split_off(placed_symbols);
-    (symbols, unplaced_symbols)
-}
-
-pub fn place_words_along_path<'kd>(symbols: Vec<Symbol>, path: &StrokePath, args: &SymbolPlacementArgs<'kd>) -> (Vec<Symbol>, Vec<Symbol>) {
-    let substrokes = path.to_substrokes();
-    let SymbolPlacementArgs {
-        avoid_kdtree: external_avoidtree,
-        symbol_scale,
-        spacing,
-    } = args;
-
-    let mut symbol_avoidtree = AvoidanceKdTree::empty(*symbol_scale / 2.0);
-    let sym_iter = symbols.into_iter();
-    let mut words: Vec<VecDeque<Symbol>> = Vec::new();
-    let mut current_word: VecDeque<Symbol> = VecDeque::new();
-    for symbol in sym_iter {
-        let symbol_blank = symbol.is_blank();
-        current_word.push_back(symbol);
-        if symbol_blank
-            && !current_word.is_empty() {
-                words.push(current_word);
-                current_word = VecDeque::new();
-            }
-    }
-    if !current_word.is_empty() {
-        words.push(current_word);
+    if !word.is_empty() {
+        words.push_back(word);
     }
 
-    let mut stepper_iter = substrokes.iter().map(|s| SubstrokeStepper::new(s, 20));
-    let mut words_iter = words.into_iter();
-
-    let mut current_word = None;
-    let mut current_stepper : Option<SubstrokeStepper> = None;
-
-    let mut placed_symbols = Vec::new();
-    let mut unplaced_symbols = Vec::new();
-
-    loop {
-        let mut new_stepper = false;
-        current_word = current_word.or_else(|| words_iter.next());
-        current_stepper = current_stepper.or_else(|| {new_stepper = true; stepper_iter.next()});
-
-        if current_word.is_none() || current_stepper.is_none() {
+    let mut placer = Placer::new(args);
+    let mut placed = Vec::new();
+    for substroke in path.to_substrokes() {
+        if words.is_empty() {
             break;
         }
-
-        let word = current_word.as_mut().unwrap();
-        let stepper = current_stepper.as_mut().unwrap();
-
-        let mut child_stepper = stepper.new_child();
-        let mut word_sym_iter = word.iter_mut().peekable();
-        let mut avoidtree_clone = symbol_avoidtree.clone();
-        let placed = place_symbols_along_stepper(
-            &mut child_stepper, &mut word_sym_iter,
-            &mut avoidtree_clone, *external_avoidtree,
-            false, *spacing,
-        );
-
-        if word_sym_iter.peek().is_some() {
-            if new_stepper {
-                // We just started a new line, so if we can't place
-                // the word here, it means it won't fit anywhere.
-                // So, in this case, we allow a partial placement of
-                // the word, and then remove the first N symbols
-                // from the word vector.
-                let mut current = current_word.take().unwrap();
-                let next = current.split_off(placed);
-                if !next.is_empty() && !next[0].is_blank() {
-                    current_word = Some(next);
+        let walk = Walk::new(&substroke, SAMPLES_PER_CURVE);
+        let mut cursor = 0.0;
+        let mut line_used = false;
+        while let Some(word) = words.front_mut() {
+            // Blanks after the word go wherever the word ends, even past
+            // the end of the line.
+            let letters = word.len() - word.iter().rev().take_while(|s| s.is_blank()).count();
+            let fitted = if letters == 0 { Some((Vec::new(), Vec::new())) } else { placer.fit_run(&walk, cursor, &word[..letters]) };
+            match fitted {
+                Some((glyphs, spans)) => {
+                    for (glyph, (start, end)) in glyphs.iter().zip(&spans) {
+                        placer.commit(glyph, *start, *end);
+                    }
+                    if let Some((_, end)) = spans.last() {
+                        cursor = end + placer.gap();
+                    }
+                    placed.extend(glyphs);
+                    for blank in &word[letters..] {
+                        placed.push(placer.spot_or_end(&walk, cursor, blank));
+                        cursor += placer.width(blank) + placer.gap();
+                    }
+                    words.pop_front();
+                    line_used = true;
                 }
-                let mut word_sym_iter = current.iter_mut().peekable();
-                place_symbols_along_stepper(
-                    stepper, &mut word_sym_iter,
-                    &mut symbol_avoidtree, *external_avoidtree,
-                    true, *spacing,
-                );
-                for symbol in current {
-                    placed_symbols.push(symbol);
+                None => {
+                    let width: f32 = word[..letters].iter().map(|s| placer.width(s) + placer.gap()).sum::<f32>() - placer.gap();
+                    if !line_used && width > walk.length() {
+                        // Too long for any line: as much as fits here, and
+                        // the rest on the next.
+                        let mut fitted = 0;
+                        while fitted < letters {
+                            let Some((mut glyphs, spans)) = placer.fit_run(&walk, cursor, &word[fitted..=fitted]) else { break };
+                            let ((start, end), glyph) = (spans[0], glyphs.pop().expect("one glyph"));
+                            placer.commit(&glyph, start, end);
+                            placed.push(glyph);
+                            cursor = end + placer.gap();
+                            fitted += 1;
+                        }
+                        word.drain(..fitted);
+                    }
+                    break;
                 }
-            } else {
-                // word did not fully fit, so we need discard our
-                // stepper and substroke and try again on with the
-                // next stepper.
-                current_stepper = None;
-            }
-        } else {
-            // the word was able to fully be placed, so we can move on
-            // to the next word, and keep our progress on this substroke
-            // by re-inserting the cloned stepper.
-            let mut word_sym_iter = word.iter_mut().peekable();
-            place_symbols_along_stepper(
-                stepper, &mut word_sym_iter,
-                &mut symbol_avoidtree, *external_avoidtree,
-                true, *spacing,
-            );
-            let placed_word = current_word.take().unwrap();
-            for symbol in placed_word {
-                placed_symbols.push(symbol);
             }
         }
+        placer.finish_walk(&walk);
     }
-    for symbol in current_word.into_iter().flatten() {
-        unplaced_symbols.push(symbol);
-    }
-    for word in words_iter {
-        for symbol in word {
-            unplaced_symbols.push(symbol);
-        }
-    }
-    (placed_symbols, unplaced_symbols)
+    (placed, words.into_iter().flatten().collect())
 }

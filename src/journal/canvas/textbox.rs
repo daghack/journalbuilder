@@ -1,11 +1,11 @@
 use parry2d::bounding_volume;
-use crate::journal::symbol::{Symbol, SymbolPlacementArgs, AvoidanceKdTree, place_along_path, place_words_along_path};
+use crate::journal::avoid::AvoidanceTree;
+use crate::journal::symbol::{Symbol, SymbolPlacementArgs, place_along_path, place_words_along_path};
 use crate::journal::paths::StrokePath;
-use parry2d::math::{Vec2};
 use rand::{Rng, RngCore};
 
 #[derive(Clone)]
-pub struct TextBoxOptions<'kd> {
+pub struct TextBoxOptions<'a> {
     // jagged edge controls the amount (in terms of symbol scale) of jaggedness on the edges of the
     // textbox. A value of 0.0 means flat edges, and a value of 1.0 means that the left hand edge
     // will be offset by up to 1.0 x symbol_scale amount randomly.
@@ -13,7 +13,10 @@ pub struct TextBoxOptions<'kd> {
     pub layout: TextBoxLineMode,
     pub bounds: bounding_volume::Aabb,
     pub symbol_scale: f32,
-    pub avoid_tree: Option<&'kd AvoidanceKdTree>,
+    /// What the text keeps clear of, and how much further than the tree's
+    /// own clearances it keeps.
+    pub avoid: Option<&'a AvoidanceTree>,
+    pub padding: f32,
     /// Extra space between glyphs, as a fraction of `symbol_scale`.
     pub spacing: f32,
 }
@@ -25,21 +28,26 @@ pub enum TextBoxLineMode {
     WordsByBlankSymbol,
 }
 
-pub struct TextBox<'kd> {
+/// Glyphs sit a quarter of their height below each line.
+const BASELINE_SHIFT: f32 = 0.25;
+
+pub struct TextBox<'a> {
     layout: TextBoxLineMode,
     jagged_edge: f32,
     bounds: bounding_volume::Aabb,
     symbol_scale: f32,
-    avoid_tree: Option<&'kd AvoidanceKdTree>,
+    avoid: Option<&'a AvoidanceTree>,
+    padding: f32,
     spacing: f32,
 }
 
-impl<'kd> TextBox<'kd> {
-    pub fn new(options: TextBoxOptions) -> TextBox {
+impl<'a> TextBox<'a> {
+    pub fn new(options: TextBoxOptions<'a>) -> TextBox<'a> {
         TextBox {
             jagged_edge: options.jagged_edge,
             layout: options.layout,
-            avoid_tree: options.avoid_tree,
+            avoid: options.avoid,
+            padding: options.padding,
             bounds: options.bounds,
             symbol_scale: options.symbol_scale,
             spacing: options.spacing,
@@ -48,23 +56,18 @@ impl<'kd> TextBox<'kd> {
     pub fn fill_line_with(&self, symbols: Vec<Symbol>, y_pos: f32, rng: &mut dyn RngCore) -> (Vec<Symbol>, Vec<Symbol>) {
         let offset_x = rng.random::<f32>() * self.jagged_edge * self.symbol_scale;
         let current_x = self.bounds.mins.x + offset_x;
-        let width = (self.bounds.extents().x * 1.05) - offset_x;
+        let width = self.bounds.extents().x - offset_x;
         let stroke = StrokePath::new().move_to(current_x, y_pos).line_to(current_x + width, y_pos);
+        let args = SymbolPlacementArgs {
+            avoid: self.avoid,
+            padding: self.padding,
+            symbol_scale: self.symbol_scale,
+            spacing: self.spacing,
+            baseline_shift: BASELINE_SHIFT,
+        };
         match self.layout {
-            TextBoxLineMode::Flat => {
-                place_along_path(symbols, &stroke, &SymbolPlacementArgs {
-                    avoid_kdtree: self.avoid_tree,
-                    symbol_scale: self.symbol_scale,
-                    spacing: self.spacing,
-                })
-            },
-            TextBoxLineMode::WordsByBlankSymbol => {
-                place_words_along_path(symbols, &stroke, &SymbolPlacementArgs {
-                    avoid_kdtree: self.avoid_tree,
-                    symbol_scale: self.symbol_scale,
-                    spacing: self.spacing,
-                })
-            },
+            TextBoxLineMode::Flat => place_along_path(symbols, &stroke, &args),
+            TextBoxLineMode::WordsByBlankSymbol => place_words_along_path(symbols, &stroke, &args),
         }
     }
     pub fn fill_bounds_with(&self, mut to_place: Vec<Symbol>, rng: &mut dyn RngCore) -> (Vec<Symbol>, Vec<Symbol>) {
@@ -73,21 +76,13 @@ impl<'kd> TextBox<'kd> {
         let height = self.bounds.extents().y;
         let mut placed_symbols = Vec::new();
         while current_y - min_y < height {
-            let (mut placed_line, not_placed) = self.fill_line_with(to_place, current_y, rng);
+            let (placed_line, not_placed) = self.fill_line_with(to_place, current_y, rng);
             to_place = not_placed;
-            let mut max_height: f32 = 0.0;
-            for symbol in &mut placed_line {
-                let height = symbol.hull_aabb().extents().y * self.symbol_scale / 2.0;
-                max_height =  max_height.max(height);
-                let symbol_center = symbol.position();
-                let new_pos = symbol_center + Vec2::new(0.0, height / 4.0);
-                symbol.set_position(new_pos);
-            }
+            let max_height = placed_line.iter()
+                .map(|symbol| symbol.hull_aabb().extents().y * self.symbol_scale / 2.0)
+                .fold(0.0, f32::max);
             placed_symbols.extend(placed_line);
-            if max_height == 0.0 {
-                max_height = self.symbol_scale;
-            }
-            current_y += max_height;
+            current_y += if max_height > 0.0 { max_height } else { self.symbol_scale };
             if to_place.is_empty() {
                break;
             }

@@ -156,26 +156,6 @@ pub struct StrokePath {
 }
 
 impl StrokePath {
-    pub fn build_kdtree(&self, avoid_scale: f32, expected_stroke_width: Option<f32>) -> kdtree::KdTree<f32, (f32, f32), [f32; 2]> {
-        let mut min_vec = Vec2::new(0.0, 0.0);
-        min_vec.y += avoid_scale / 2.0;
-        let sw_vec = match expected_stroke_width {
-            Some(sw) => Vec2::new(sw, sw),
-            None => Vec2::new(0.0, 0.0),
-        };
-        let mut avoid_tree: kdtree::KdTree<f32, (f32, f32), [f32; 2]> = kdtree::KdTree::new(2);
-        let sample_points =
-            self.sample_points_along(avoid_scale * 1.0)
-            .into_iter().map(|sample| sample.point - min_vec);
-        // The k-d tree rejects non-finite points; they can't be avoided
-        // anyway.
-        for point in sample_points.filter(|p| p.is_finite()) {
-            for side in [point - sw_vec, point + sw_vec] {
-                avoid_tree.add([side.x, side.y], (side.x, side.y)).expect("finite points are accepted");
-            }
-        }
-        avoid_tree
-    }
     pub fn points_within(&self) -> Vec<Vec2> {
         let mut points = Vec::new();
         for cmd in &self.commands {
@@ -433,6 +413,55 @@ impl StrokePath {
         lines.retain(|line| line.len() > 1);
         lines
     }
+    /// Each subpath as a polyline within `tolerance` of its curves, and
+    /// whether it was closed (its last point then joins its first).
+    /// Straight segments stay one piece however long they are; a subpath
+    /// that's a single point gives one point.
+    pub fn flattened(&self, tolerance: f32) -> Vec<(Vec<Vec2>, bool)> {
+        let mut lines: Vec<(Vec<Vec2>, bool)> = Vec::new();
+        let (mut current, mut start) = (Vec2::ZERO, Vec2::ZERO);
+        for cmd in &self.commands {
+            if let PathCmd::MoveTo(x, y) = *cmd {
+                current = Vec2::new(x, y);
+                start = current;
+                lines.push((vec![current], false));
+                continue;
+            }
+            // Drawing on after a close starts a new subpath at the start.
+            if lines.last().is_none_or(|line| line.1) {
+                lines.push((vec![current], false));
+            }
+            // Pieces enough that a chord strays at most `tolerance` from the
+            // curve: a curve's distance from its chords is at most an eighth
+            // of its largest second derivative over pieces squared.
+            let second = |p0: Vec2, p1: Vec2, p2: Vec2| (p0 - 2.0 * p1 + p2).length();
+            let bend = match *cmd {
+                PathCmd::CubicCurveTo(x1, y1, x2, y2, x, y) => {
+                    let (c1, c2, end) = (Vec2::new(x1, y1), Vec2::new(x2, y2), Vec2::new(x, y));
+                    6.0 * second(current, c1, c2).max(second(c1, c2, end))
+                }
+                PathCmd::QuadraticCurveTo(x1, y1, x, y) => 2.0 * second(current, Vec2::new(x1, y1), Vec2::new(x, y)),
+                _ => 0.0,
+            };
+            let pieces = if bend > 0.0 {
+                ((bend / (8.0 * tolerance.max(1e-4))).sqrt().ceil() as usize).clamp(1, 1000)
+            } else {
+                1
+            };
+            let line = lines.last_mut().expect("a subpath was started");
+            for k in 1..=pieces {
+                if let Some(p) = cmd.interpolate(start, current, k as f32 / pieces as f32) {
+                    line.0.push(p);
+                }
+            }
+            if let PathCmd::ClosePath = cmd {
+                line.1 = true;
+                line.0.pop(); // the start again
+            }
+            current = cmd.ending_point().unwrap_or(start);
+        }
+        lines
+    }
 }
 
 impl Default for StrokePath {
@@ -661,7 +690,7 @@ pub fn curve_samples(cmd: &PathCmd, start: Vec2, current: Vec2, sample_count: us
             Vec2::new(-tangent.y, tangent.x)
         };
         let added_distance = left_point.distance(point);
-        if !added_distance.is_nan() || !added_distance.is_infinite() {
+        if added_distance.is_finite() {
             distance += added_distance;
         }
         samples.push(CurveSample {
@@ -679,20 +708,71 @@ pub fn curve_samples(cmd: &PathCmd, start: Vec2, current: Vec2, sample_count: us
         t: 0.0,
     };
     let sample_count = samples.len();
+    let end = curve(1.0);
+    let last_step = samples[sample_count - 1].point.distance(end);
+    // The whole curve's length, so that distances along a path reach each
+    // curve's end (they used to stop a sample short of it).
+    let length = distance + if last_step.is_finite() { last_step } else { 0.0 };
     let last_sample = CurveSample {
-        point: curve(1.0),
+        point: end,
         normal: samples[sample_count - 1].normal + (samples[sample_count - 1].normal - samples[sample_count - 2].normal),
-        distance: samples[sample_count - 1].distance + (samples[sample_count - 1].distance - samples[sample_count - 2].distance),
+        distance: length,
         t: 1.0,
     };
     samples.insert(0, first_sample);
     samples.push(last_sample);
-    (samples, distance)
+    (samples, length)
 }
 
-pub trait CurveStepper {
-    fn step(&mut self, distance: f32) -> Option<CurveSample>;
-    fn prospective_step(&self, distance: f32) -> Option<CurveSample>;
+/// A subpath measured along its length: the point and normal at any
+/// distance from its start. Curves are sampled `samples_per_curve` times and
+/// interpolated between.
+pub struct Walk {
+    /// Every curve's samples in turn, with distances from the subpath's
+    /// start. Where curves meet, both ends are kept.
+    samples: Vec<CurveSample>,
+    length: f32,
+}
+
+impl Walk {
+    pub fn new(substroke: &SubstrokePath, samples_per_curve: usize) -> Self {
+        let mut samples = Vec::new();
+        let mut current = Vec2::ZERO;
+        let mut start = None;
+        let mut length = 0.0;
+        for cmd in &substroke.commands {
+            if let PathCmd::MoveTo(x, y) = cmd {
+                current = Vec2::new(*x, *y);
+                start = Some(current);
+                continue;
+            }
+            let (curve, curve_length) = curve_samples(cmd, start.unwrap_or(current), current, samples_per_curve);
+            samples.extend(curve.into_iter().map(|s| CurveSample { distance: s.distance + length, ..s }));
+            length += curve_length;
+            current = cmd.ending_point().unwrap_or(current);
+        }
+        Walk { samples, length }
+    }
+    pub fn length(&self) -> f32 {
+        self.length
+    }
+    /// The point `distance` along, or `None` past either end.
+    pub fn at(&self, distance: f32) -> Option<CurveSample> {
+        if !(0.0..=self.length).contains(&distance) || self.samples.len() < 2 {
+            return None;
+        }
+        // The first sample at or past `distance`, and the one before it.
+        let right = self.samples.partition_point(|s| s.distance < distance).clamp(1, self.samples.len() - 1);
+        let (l, r) = (&self.samples[right - 1], &self.samples[right]);
+        let span = r.distance - l.distance;
+        let t = if span > 0.0 { ((distance - l.distance) / span).clamp(0.0, 1.0) } else { 0.0 };
+        Some(CurveSample {
+            point: l.point.lerp(r.point, t),
+            normal: l.normal.lerp(r.normal, t).normalize(),
+            distance,
+            t: l.t + (r.t - l.t) * t,
+        })
+    }
 }
 
 type CurveIndex = usize;
@@ -706,8 +786,8 @@ pub struct SubstrokeStepper {
     samples: Vec<AugCurveSampleInfo>,
 }
 
-impl CurveStepper for SubstrokeStepper {
-    fn step(&mut self, distance: f32) -> Option<CurveSample> {
+impl SubstrokeStepper {
+    pub fn step(&mut self, distance: f32) -> Option<CurveSample> {
         if distance < 0.0 {
             return None;
         }
@@ -720,24 +800,6 @@ impl CurveStepper for SubstrokeStepper {
                 self.last_index.set((c, s));
                 sample
             })
-    }
-    fn prospective_step(&self, distance: f32) -> Option<CurveSample> {
-        if distance < 0.0 {
-            return None;
-        }
-
-        let target_distance = self.current_along + distance;
-        SubstrokeStepper::forward_seek(None, target_distance, &self.samples)
-            .map(|(_, _, sample)| sample)
-    }
-}
-
-impl SubstrokeStepper {
-    pub fn new_child(&self) -> ChildStepper<'_> {
-        ChildStepper {
-            current_along: 0.0,
-            parent_samples: &self.samples,
-        }
     }
     pub fn new(substroke: &SubstrokePath, sample_count: usize) -> Self {
         let mut samples = Vec::new();
@@ -825,29 +887,6 @@ impl SubstrokeStepper {
 }
 
 
-pub struct ChildStepper<'parent>{
-    current_along: f32,
-    parent_samples: &'parent Vec<AugCurveSampleInfo>,
-}
-
-impl<'parent> CurveStepper for ChildStepper<'parent> {
-    fn step(&mut self, distance: f32) -> Option<CurveSample> {
-        self.prospective_step(distance).inspect(|_sample| {
-            self.current_along += distance;
-        })
-    }
-    fn prospective_step(&self, distance: f32) -> Option<CurveSample> {
-        // Right now this steps along the whole substroke path every
-        // single step, which is horribly inefficient, but simpler to implement.
-        if distance < 0.0 {
-            return None;
-        }
-
-        let target_distance = self.current_along + distance;
-        SubstrokeStepper::forward_seek(None, target_distance, self.parent_samples)
-            .map(|(_, _, sample)| sample)
-    }
-}
 #[derive(Debug, Clone)]
 pub struct SubstrokePath {
     commands: Vec<PathCmd>,

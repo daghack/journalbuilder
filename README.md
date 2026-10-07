@@ -96,6 +96,14 @@ What to know:
   glyphs. Text layout: `new_textbox` flows glyphs into a box,
   `canvas.splat_msgs` scatters messages across a canvas, and
   `path.fill_with_msg` / `fit_msg_to` write along a path.
+- **Keeping text clear.** Every text layout takes `avoid` (a path, canvas,
+  glyph, or an array of them) and `clearance`, and keeps each glyph's
+  whole outline that far from it. For more control, build an avoidance
+  tree: `new_avoidance_tree().add(border, 8.0).add_hull(drawing, 4.0)`
+  keeps 8 from the border's lines and 4 from anywhere inside the drawing's
+  outline; `add_region(path)` keeps out of a closed shape. Trees are
+  shared, so `avoid.add(placed)` keeps later text off what's just been
+  placed.
 - **Procedural art.** The `art` module draws shapes from a few
   parameters and a seed: `art::snake_path(head_center, head_angle,
   tail_end, snake_length, max_width, random_seed)` is the outline of a
@@ -110,7 +118,8 @@ What to know:
   script. Errors give the script line.
 
 The module docs in `src/journal/rhaientries/` (`glyphs.rs`, `layout.rs`,
-`random.rs`, `art.rs`, `locks/mod.rs`) cover each area in more detail, and
+`avoid.rs`, `random.rs`, `art.rs`, `locks/mod.rs`) cover each area in more
+detail, and
 the journals in `journals/` and `tests/smoke_journals/smoke` use most of it.
 
 ## Locks

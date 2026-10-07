@@ -1,4 +1,5 @@
 mod art;
+mod avoid;
 mod glyphs;
 mod layout;
 mod locks;
@@ -13,7 +14,8 @@ use super::canvas::Canvas as JournalCanvas;
 use super::canvas::StrokeStyle as JournalStrokeStyle;
 use super::canvas::CanvasStyleOptions;
 use super::canvas::{Brush, PressureProfile};
-use super::symbol::{place_along_path, SymbolPlacementArgs};
+use super::symbol::{place_along_path, place_words_along_path, Symbol, SymbolPlacementArgs};
+use super::canvas::textbox::TextBoxLineMode;
 use super::styles::Font;
 use super::darkly;
 use ::darkly::engine::DarklyEngine;
@@ -600,19 +602,37 @@ impl StrokeStyle {
 /// that picks glyph variants.
 type TextSource = (Rc<SymbolPathDict>, random::SharedRng);
 
-/// `path.fill_with_msg(style, font, size, msg[, #{ spacing }])`: the message
-/// along as many copies of the path as it takes, one canvas per copy. Glyphs
-/// sit at their widths, plus `spacing` (a fraction of the font size).
+/// Options for text along a path.
+const PATH_TEXT_KEYS: [&str; 4] = ["spacing", "avoid", "clearance", "layout"];
+
+/// Text along a path: glyph by glyph, or keeping words together on a
+/// subpath ("words" layout).
+fn place_text(symbols: Vec<Symbol>, path: &StrokePath, args: &SymbolPlacementArgs, mode: &TextBoxLineMode) -> (Vec<Symbol>, Vec<Symbol>) {
+    match mode {
+        TextBoxLineMode::Flat => place_along_path(symbols, path, args),
+        TextBoxLineMode::WordsByBlankSymbol => place_words_along_path(symbols, path, args),
+    }
+}
+
+/// `path.fill_with_msg(style, font, size, msg[, #{ spacing, avoid, clearance, layout }])`:
+/// the message along as many copies of the path as it takes, one canvas per
+/// copy. Glyphs sit at their widths, plus `spacing` (a fraction of the font
+/// size), and keep clear of `avoid` (see avoid.rs). With `layout: "words"`,
+/// words aren't split around what's avoided or between subpaths.
 fn fill_with_msg(path: &mut Path, style: StrokeStyle, font: Font, fontsize: f64, msg: &str, options: Map, (symdict, rng): &TextSource) -> Result<Vec<Dynamic>, Box<EvalAltResult>> {
-    layout::check_keys("fill_with_msg", &options, &["spacing"])?;
+    layout::check_keys("fill_with_msg", &options, &PATH_TEXT_KEYS)?;
     if !(fontsize > 0.0) {
         return Err(format!("fill_with_msg: font size must be positive, got {}", fontsize).into());
     }
     let builder = font.builder(symdict);
-    let args = SymbolPlacementArgs{
-        avoid_kdtree: None,
-        symbol_scale: fontsize as f32,
+    let mode = layout::line_mode("fill_with_msg", &options)?;
+    let avoid = avoid::AvoidOption::parse("fill_with_msg", &options, false)?;
+    let tree = avoid.tree.as_ref().map(|a| a.borrow());
+    let args = SymbolPlacementArgs {
+        avoid: tree.as_deref(),
+        padding: avoid.padding(fontsize as f32),
         spacing: layout::spacing("fill_with_msg", &options)?,
+        ..SymbolPlacementArgs::new(fontsize as f32)
     };
 
     let mut all_canvases = Vec::new();
@@ -620,12 +640,13 @@ fn fill_with_msg(path: &mut Path, style: StrokeStyle, font: Font, fontsize: f64,
     let path = path.get();
     let total = symbols.len();
     while !symbols.is_empty() {
-        let (placed, unplaced) = place_along_path(std::mem::take(&mut symbols), &path, &args);
+        let (placed, unplaced) = place_text(std::mem::take(&mut symbols), &path, &args, &mode);
         if placed.is_empty() {
             // Another copy of the path wouldn't fit it either.
             return Err(format!(
-                "fill_with_msg: glyph {} of {} doesn't fit on the path at font size {}; use a longer path or a smaller font",
+                "fill_with_msg: glyph {} of {} doesn't fit on the path at font size {}; use a longer path or a smaller font{}",
                 total - unplaced.len() + 1, total, fontsize,
+                if avoid.tree.is_some() { ", or avoid less" } else { "" },
             ).into());
         }
         let mut canvas = CanvasData::default();
@@ -638,25 +659,29 @@ fn fill_with_msg(path: &mut Path, style: StrokeStyle, font: Font, fontsize: f64,
     Ok(all_canvases)
 }
 
-/// `path.fit_msg_to(style, font, msg[, #{ spacing }])`: the message along
-/// the path at the largest font size that fits it.
+/// `path.fit_msg_to(style, font, msg[, #{ spacing, avoid, clearance, layout }])`:
+/// the message along the path at the largest font size that fits it.
 fn fit_msg_to(path: &mut Path, style: StrokeStyle, font: Font, msg: &str, options: Map, (symdict, rng): &TextSource) -> Result<Canvas, Box<EvalAltResult>> {
-    layout::check_keys("fit_msg_to", &options, &["spacing"])?;
+    layout::check_keys("fit_msg_to", &options, &PATH_TEXT_KEYS)?;
     let path = &path.get();
     let mut canvas = CanvasData::default();
     let builder = font.builder(symdict);
     let symbols = builder.build(msg, &mut *rng.borrow_mut());
-    let mut args = SymbolPlacementArgs{
-        avoid_kdtree: None,
-        symbol_scale: 20.0,
+    let mode = layout::line_mode("fit_msg_to", &options)?;
+    let avoid = avoid::AvoidOption::parse("fit_msg_to", &options, false)?;
+    let tree = avoid.tree.as_ref().map(|a| a.borrow());
+    let mut args = SymbolPlacementArgs {
+        avoid: tree.as_deref(),
         spacing: layout::spacing("fit_msg_to", &options)?,
+        ..SymbolPlacementArgs::new(20.0)
     };
     let mut window_min = 0.1;
     let mut window_max = 1000.0;
     while window_max - window_min > 0.005 {
         let current_scale = (window_max + window_min) / 2.0;
         args.symbol_scale = current_scale;
-        let (_, unplaced) = place_along_path(symbols.clone(), path, &args);
+        args.padding = avoid.padding(current_scale);
+        let (_, unplaced) = place_text(symbols.clone(), path, &args, &mode);
         if !unplaced.is_empty() {
             window_max = current_scale;
         } else {
@@ -664,7 +689,8 @@ fn fit_msg_to(path: &mut Path, style: StrokeStyle, font: Font, msg: &str, option
         }
     }
     args.symbol_scale = window_min;
-    let (placed, unplaced) = place_along_path(symbols, path, &args);
+    args.padding = avoid.padding(window_min);
+    let (placed, unplaced) = place_text(symbols, path, &args, &mode);
     if !unplaced.is_empty() {
         return Err(format!(
             "fit_msg_to: the message doesn't fit on the path even at font size {}: {} of {} glyphs left over",
@@ -819,6 +845,7 @@ impl JournalEngine {
         });
 
         art::register(&mut engine);
+        avoid::register(&mut engine);
         glyphs::register(&mut engine, symdict.clone(), rng.clone());
         layout::register(&mut engine, symdict.clone(), rng.clone());
         locks::register(&mut engine, Rc::new(LockLibrary::new(locks_dir)));
@@ -1153,6 +1180,44 @@ mod tests {
         "#;
         let copies: i64 = engine().engine.eval(script).expect("should run");
         assert!(copies > 1, "the circle should need more than one copy, got {}", copies);
+    }
+
+    #[test]
+    fn text_along_a_path_keeps_clear_of_what_it_avoids() {
+        // A line of text crossed by a post at x = 300: no glyph's outline
+        // comes within the clearance (2) of it, and with the words layout no
+        // word is split around it.
+        let script = |layout: &str| format!(r#"
+            let s = new_strokestyle(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
+            let font = lowercase_font("loche_upper");
+            let post = new_line(new_vec(300.0, -100.0), new_vec(300.0, 100.0));
+            let line = new_line(new_vec(0.0, 0.0), new_vec(2000.0, 0.0));
+            let page = new_page();
+            page.add_canvas(line.fill_with_msg(s, font, 20.0, "abcdefghijklmnopqrstuvwxyz the quick brown fox jumps over the lazy dog",
+                #{{ avoid: post, clearance: 2.0, layout: "{}" }})[0]);
+            journal_entry.add_page(page);
+        "#, layout);
+        for layout in ["flat", "words"] {
+            let entry = engine().build_entry_str(&script(layout)).expect("script should run");
+            let strokes = &entry.pages[0].canvases()[0].strokes;
+            // Strokes are drawn with their hulls inside the glyph's, so check
+            // stroke points: the closest may be just under 2 from the hull.
+            let mut left = 0;
+            for stroke in strokes {
+                let xs: Vec<f32> = stroke.path.points_within().iter().map(|p| p.x).collect();
+                let (min, max) = xs.iter().fold((f32::MAX, f32::MIN), |(a, b), x| (a.min(*x), b.max(*x)));
+                assert!(max < 298.5 || min > 301.5, "{}: a glyph spans {}..{}, over the post", layout, min, max);
+                if max < 300.0 { left += 1; }
+            }
+            assert!(left > 0 && left < strokes.len(), "{}: text should be on both sides of the post", layout);
+        }
+        // "words" moves the whole word that would straddle the post.
+        let words = engine().build_entry_str(&script("words")).unwrap();
+        let flat = engine().build_entry_str(&script("flat")).unwrap();
+        let first_after = |entry: &Entry| entry.pages[0].canvases()[0].strokes.iter()
+            .map(|s| s.path.points_within().iter().map(|p| p.x).fold(f32::MAX, f32::min))
+            .find(|x| *x > 300.0).unwrap();
+        assert!(first_after(&words) >= first_after(&flat));
     }
 
     #[test]
