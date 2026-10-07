@@ -42,6 +42,9 @@ pub fn jitter_symbols(symbols: &mut [Symbol], rotation: f32, scale: f32, rng: &m
 #[derive(Clone, Debug)]
 pub struct SplatOptions {
     pub symbol_scale: f32,
+    /// Glyph by glyph, or keeping words together and each message in one
+    /// piece.
+    pub layout: TextBoxLineMode,
     /// Range of message box widths and heights to try.
     pub width_range: (f32, f32),
     pub height_range: (f32, f32),
@@ -58,12 +61,13 @@ pub struct SplatOptions {
 const MAX_SPLAT_BACKOFFS: usize = 100;
 
 /// Try random boxes over `bounds` until `symbols` fit in one, clear of
-/// `avoid`.
+/// `avoid`. Keeping words whole, the message must also be in one piece:
+/// nothing to avoid inside its outline.
 fn splat_one(bounds: &Canvas, avoid: &AvoidanceTree, symbols: &[Symbol], opts: &SplatOptions, rng: &mut dyn RngCore) -> Option<Vec<Symbol>> {
     for _ in 0..opts.max_attempts {
         let textbox = TextBox::new(TextBoxOptions {
             jagged_edge: opts.jagged_edge,
-            layout: TextBoxLineMode::Flat,
+            layout: opts.layout.clone(),
             bounds: random_bounding_box(bounds, opts.width_range, opts.height_range, rng),
             symbol_scale: opts.symbol_scale,
             avoid: Some(avoid),
@@ -72,9 +76,17 @@ fn splat_one(bounds: &Canvas, avoid: &AvoidanceTree, symbols: &[Symbol], opts: &
         });
         // Place copies, so a failed attempt leaves the symbols untouched.
         let (placed, unplaced) = textbox.fill_bounds_with(symbols.to_vec(), rng);
-        if unplaced.is_empty() {
-            return Some(placed);
+        if !unplaced.is_empty() {
+            continue;
         }
+        if let TextBoxLineMode::WordsByBlankSymbol = opts.layout {
+            let points: Vec<Vec2> = placed.iter().filter(|s| !s.is_blank()).flat_map(|s| s.footprint()).collect();
+            let outline = parry2d::transformation::convex_hull(&points);
+            if outline.len() >= 3 && avoid.blocks(&outline, opts.clearance) {
+                continue;
+            }
+        }
+        return Some(placed);
     }
     None
 }

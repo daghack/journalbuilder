@@ -14,6 +14,7 @@
 //!     canvas.add_glyph(g, style);
 //! }
 //! canvas.add_glyph(glyph("basic_eye").scale_by(50.0), style);
+//! glyph_names("archangel_");    // every glyph whose name starts so, sorted
 //!
 //! // Glyphs, like paths and canvases, are shared: every copy of one (a
 //! // variable, an array element, a loop variable) is the same glyph, so
@@ -127,6 +128,11 @@ pub fn register(engine: &mut Engine, symdict: Rc<SymbolPathDict>, rng: SharedRng
             .map(|symbol| Dynamic::from(Glyph::new(symbol)))
             .collect()
     });
+    // Every glyph name starting with `prefix`, sorted ("" for all of them).
+    let sd = symdict.clone();
+    engine.register_fn("glyph_names", move |prefix: &str| -> Array {
+        sd.symbols_with_prefix(prefix).into_iter().map(Dynamic::from).collect()
+    });
     let sd = symdict;
     engine.register_fn("glyph", move |name: &str| -> RhaiResult<Glyph> {
         sd.get_symbol_base(name)
@@ -176,6 +182,15 @@ mod tests {
             same
         "#);
         assert!(ok);
+    }
+
+    #[test]
+    fn glyph_names_lists_the_dictionary() {
+        let names: Array = eval(r#"glyph_names("archangel_")"#);
+        let names: Vec<String> = names.into_iter().map(|n| n.into_string().unwrap()).collect();
+        assert_eq!(names, (0..7).map(|i| format!("archangel_{}", i)).collect::<Vec<_>>());
+        let all: Array = eval(r#"glyph_names("")"#);
+        assert!(all.len() > 300);
     }
 
     #[test]

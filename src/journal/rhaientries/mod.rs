@@ -960,6 +960,13 @@ impl JournalEngine {
             .into_iter()
             .map(|brush| brush.metadata.name)
             .collect();
+        // The names new_brush takes, sorted.
+        let listed: rhai::Array = {
+            let mut names = brush_names.clone();
+            names.sort();
+            names.into_iter().map(Dynamic::from).collect()
+        };
+        engine.register_fn("brush_names", move || listed.clone());
         engine.register_fn("new_brush", move |name: &str, min_pressure: f64, max_pressure: f64, size: f64| -> Result<BrushSettings, Box<EvalAltResult>> {
             if !brush_names.iter().any(|known| known == name) {
                 return Err(format!("new_brush: unknown brush '{}'; available: {}", name, brush_names.join(", ")).into());
@@ -996,6 +1003,17 @@ impl JournalEngine {
             engine,
             warnings,
         }
+    }
+    /// The name of every function scripts can call that this crate
+    /// registers (not rhai's standard library), with `module::` for those
+    /// in a module like `art`. Properties are `get$name` and `set$name`.
+    pub fn function_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.engine.gen_fn_signatures(false).into_iter()
+            .map(|signature| signature.split('(').next().unwrap_or_default().to_string())
+            .collect();
+        names.sort();
+        names.dedup();
+        names
     }
     /// Everything scripts have passed to `warn` so far.
     pub fn warnings(&self) -> Vec<String> {
@@ -1060,6 +1078,17 @@ mod tests {
         assert!(err.contains("unknown brush 'Crayon'"), "{}", err);
         assert!(err.contains("Calligraphy"), "error should list available brushes: {}", err);
         assert!(err.contains("line 2"), "{}", err);
+    }
+
+    #[test]
+    fn brush_names_lists_what_new_brush_takes() {
+        let names: rhai::Array = engine().engine.eval("brush_names()").unwrap();
+        let names: Vec<String> = names.into_iter().map(|n| n.into_string().unwrap()).collect();
+        assert!(names.contains(&"Calligraphy".to_string()) && names.contains(&"Ink Pen".to_string()), "{:?}", names);
+        assert!(names.windows(2).all(|w| w[0] < w[1]));
+        for name in &names {
+            engine().engine.run(&format!("new_brush({:?}, 0.2, 0.5, 1.0);", name)).unwrap();
+        }
     }
 
     #[test]

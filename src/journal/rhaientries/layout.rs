@@ -28,6 +28,7 @@
 //!     spacing: 0.0,               // extra space between glyphs, in symbol scales
 //!     avoid: other,               // more to keep clear of (see avoid.rs)
 //!     clearance: 3.0,             // from the canvas, `avoid` and other messages; default symbol_scale / 8
+//!     layout: "words",            // words whole, each note in one clear patch; default "flat", glyph by glyph
 //! });
 //!
 //! // Hatch the inside of a closed path.
@@ -223,7 +224,7 @@ fn hatch(path: &StrokePath, spacing: f64, angle: f64, roughness: f64, rng: &Shar
     Ok(hatching)
 }
 
-const SPLAT_KEYS: [&str; 10] = ["symbol_scale", "width_range", "height_range", "rotation_jitter", "scale_jitter", "jagged_edge", "max_attempts", "spacing", "avoid", "clearance"];
+const SPLAT_KEYS: [&str; 11] = ["symbol_scale", "width_range", "height_range", "rotation_jitter", "scale_jitter", "jagged_edge", "max_attempts", "spacing", "avoid", "clearance", "layout"];
 
 fn splat(canvas: &Canvas, msgs: Array, font: &Font, style: StrokeStyle, options: Map, symdict: &SymbolPathDict, rng: &SharedRng) -> RhaiResult<Canvas> {
     const CALLER: &str = "splat_msgs";
@@ -243,6 +244,7 @@ fn splat(canvas: &Canvas, msgs: Array, font: &Font, style: StrokeStyle, options:
     let avoid = AvoidOption::parse(CALLER, &options, true)?;
     let opts = SplatOptions {
         symbol_scale,
+        layout: line_mode(CALLER, &options)?,
         clearance: avoid.padding(symbol_scale),
         width_range: range(CALLER, &options, "width_range")?,
         height_range: range(CALLER, &options, "height_range")?,
@@ -473,6 +475,22 @@ mod tests {
         }
         assert_eq!(glyphs, splat_glyph_positions(5));
         assert_ne!(glyphs, splat_glyph_positions(6));
+    }
+
+    #[test]
+    fn splat_can_keep_words_whole() {
+        let script = format!(r#"{}
+            seed(5);
+            opts.layout = "words";
+            let notes = base.splat_msgs(msgs, lowercase_font("loche_upper"), style, opts);
+            let page = new_page();
+            page.add_canvas(notes);
+            journal_entry.add_page(page);
+        "#, SPLAT_SETUP);
+        let entry = engine().build_entry_str(&script).expect("script should run");
+        assert_eq!(entry.pages[0].canvases()[0].strokes.len(), 30);
+        let err = fails(&format!("{}\nopts.layout = \"zigzag\";\nbase.splat_msgs(msgs, lowercase_font(\"loche_upper\"), style, opts);", SPLAT_SETUP));
+        assert!(err.contains("splat_msgs: unknown layout 'zigzag'"), "{}", err);
     }
 
     #[test]

@@ -36,6 +36,7 @@ Useful flags (`journalbuild` with no arguments lists them all):
 | path | what's there |
 |---|---|
 | `journals/<name>/journal_entry.rhai` | one journal per directory |
+| `journals/showcase` | a page each of every brush, font, glyph, art tool, text layout and lock type, with the calls that make them |
 | `locks/` | lock types, one rhai file each; see [locks/README.md](locks/README.md) |
 | `config/symbols.json` | the symbol dictionary: every glyph's SVG path, by name |
 | `src/journal/` | canvases, paths, glyph placement, and Darkly and SVG rendering |
@@ -129,6 +130,10 @@ What to know:
   `journal_entry.add_pages(page.split(2, 2))` adds them all.
 - **Problems.** `warn("...")` reports something without stopping the
   script. Errors give the script line.
+
+`journals/showcase` shows everything there is to draw with, each example
+labelled with the calls that make it: render it with
+`target/release/journalbuild showcase`.
 
 The module docs in `src/journal/rhaientries/` (`glyphs.rs`, `layout.rs`,
 `avoid.rs`, `random.rs`, `art.rs`, `locks/mod.rs`) cover each area in more
