@@ -39,6 +39,7 @@ Useful flags (`journalbuild` with no arguments lists them all):
 | `locks/` | lock types, one rhai file each; see [locks/README.md](locks/README.md) |
 | `config/symbols.json` | the symbol dictionary: every glyph's SVG path, by name |
 | `src/journal/` | canvases, paths, glyph placement, and Darkly and SVG rendering |
+| `src/journal/art/` | procedural path art, such as snakes |
 | `src/journal/rhaientries/` | the rhai API journals and lock files use |
 | `src/lockbuilder/` | runs lock chains forward (lock) and backward (unlock) |
 | `src/bin/journalbuild/` | the command line |
@@ -95,12 +96,17 @@ What to know:
   glyphs. Text layout: `new_textbox` flows glyphs into a box,
   `canvas.splat_msgs` scatters messages across a canvas, and
   `path.fill_with_msg` / `fit_msg_to` write along a path.
+- **Procedural art.** The `art` module draws shapes from a few
+  parameters and a seed: `art::snake_path(head_center, head_angle,
+  tail_end, snake_length, max_width, random_seed)` is the outline of a
+  snake seen from above, winding from its head to the tip of its tail and
+  passing over and under itself.
 - **Problems.** `warn("...")` reports something without stopping the
   script. Errors give the script line.
 
 The module docs in `src/journal/rhaientries/` (`glyphs.rs`, `layout.rs`,
-`random.rs`, `locks/mod.rs`) cover each area in more detail, and the
-journals in `journals/` and `tests/smoke_journals/smoke` use most of it.
+`random.rs`, `art.rs`, `locks/mod.rs`) cover each area in more detail, and
+the journals in `journals/` and `tests/smoke_journals/smoke` use most of it.
 
 ## Locks
 

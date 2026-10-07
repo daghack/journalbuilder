@@ -139,3 +139,14 @@ page_three.name = "lock";
 page_three.svg_style = #{ roughness: 2.0, noise_amplitude: 1.5 };
 page_three.add_canvas(maze_canvas);
 journal_entry.add_page(page_three);
+
+// ---- page four: procedural art ----
+// Two snakes: one with too little slack to loop, one coiled over itself.
+let pale = new_strokestyle(1.4, "#f2ead8", ink_pen);
+let snakes = new_canvas();
+snakes.add_strokepath(art::snake_path(new_vec(0.0, 0.0), -PI() / 2.0, new_vec(10.0, 200.0), 260.0, 14.0, 4), pale);
+snakes.add_strokepath(art::snake_path(new_vec(140.0, 0.0), -PI() / 2.0, new_vec(150.0, 30.0), 480.0, 14.0, 4), pale);
+let page_four = new_page();
+page_four.name = "art";
+page_four.add_canvas(snakes);
+journal_entry.add_page(page_four);

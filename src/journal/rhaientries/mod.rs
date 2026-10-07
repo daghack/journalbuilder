@@ -1,3 +1,4 @@
+mod art;
 mod glyphs;
 mod layout;
 mod locks;
@@ -817,6 +818,7 @@ impl JournalEngine {
             Ok(BrushSettings::new_brush(name, min_pressure, max_pressure, size))
         });
 
+        art::register(&mut engine);
         glyphs::register(&mut engine, symdict.clone(), rng.clone());
         layout::register(&mut engine, symdict.clone(), rng.clone());
         locks::register(&mut engine, Rc::new(LockLibrary::new(locks_dir)));
