@@ -5,10 +5,13 @@
 mod bramble;
 mod flower;
 mod geom;
+mod hydra;
 mod leaf;
 mod scene;
 mod snake;
 mod solid;
+mod trail;
 
-pub use bramble::{bramble, Bramble};
+pub use bramble::{bramble, bramble_along, Bramble};
+pub use hydra::snake_along;
 pub use snake::{snake_path, snake_spine};

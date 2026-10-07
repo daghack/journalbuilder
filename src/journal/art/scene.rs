@@ -8,6 +8,7 @@
 //! Each shape belongs to a part, and a part's visible lines come out as one
 //! path, so parts can be stroked differently.
 
+use std::cell::OnceCell;
 use std::collections::HashMap;
 
 use super::geom::{simplify, spline, spline_closed, V};
@@ -83,6 +84,9 @@ pub(super) struct Scene<T> {
     max_gap: f64,
     /// Visible stretches of line shorter than this aren't drawn.
     speck: f64,
+    /// The shapes bucketed by where they reach on the page, built when
+    /// first needed (after the shapes are all added).
+    index: OnceCell<HashMap<(i64, i64), Vec<usize>>>,
 }
 
 /// A stretch of line: its points, and whether each is a corner.
@@ -90,7 +94,7 @@ pub(super) type Run = Vec<(V, bool)>;
 
 impl<T: Copy + PartialEq> Scene<T> {
     pub fn new(tolerance: f64, max_gap: f64, speck: f64) -> Self {
-        Scene { shapes: Vec::new(), tolerance, max_gap, speck }
+        Scene { shapes: Vec::new(), tolerance, max_gap, speck, index: OnceCell::new() }
     }
 
     /// Add a shape: its closed outline (not repeating the first point),
@@ -101,6 +105,7 @@ impl<T: Copy + PartialEq> Scene<T> {
         let min = outline.iter().fold(V::new(f64::INFINITY, f64::INFINITY), |m, p| V::new(m.x.min(p.x), m.y.min(p.y)));
         let max = outline.iter().fold(V::new(f64::NEG_INFINITY, f64::NEG_INFINITY), |m, p| V::new(m.x.max(p.x), m.y.max(p.y)));
         self.shapes.push(Shape { part, depth, outline, triangles: None, corners, strokes: Vec::new(), joins: Vec::new(), min, max });
+        self.index = OnceCell::new();
         self.shapes.len() - 1
     }
 
@@ -111,6 +116,7 @@ impl<T: Copy + PartialEq> Scene<T> {
         let max = corners.fold(V::new(f64::NEG_INFINITY, f64::NEG_INFINITY), |m, p| V::new(m.x.max(p.x), m.y.max(p.y)));
         let triangles = Some(Triangles::new(triangles, cell));
         self.shapes.push(Shape { part, depth, outline: Vec::new(), triangles, corners: Vec::new(), strokes, joins: Vec::new(), min, max });
+        self.index = OnceCell::new();
         self.shapes.len() - 1
     }
 
@@ -147,7 +153,21 @@ impl<T: Copy + PartialEq> Scene<T> {
     /// shape in front of it, or one joined to it near the join.
     fn hidden(&self, owner: usize, q: V) -> bool {
         let own = &self.shapes[owner];
-        (0..self.shapes.len()).any(|other| {
+        let cell = 4.0 * self.max_gap;
+        let key = |p: V| ((p.x / cell).floor() as i64, (p.y / cell).floor() as i64);
+        let index = self.index.get_or_init(|| {
+            let mut index: HashMap<(i64, i64), Vec<usize>> = HashMap::new();
+            for (i, shape) in self.shapes.iter().enumerate() {
+                let ((x0, y0), (x1, y1)) = (key(shape.min), key(shape.max));
+                for x in x0..=x1 {
+                    for y in y0..=y1 {
+                        index.entry((x, y)).or_default().push(i);
+                    }
+                }
+            }
+            index
+        });
+        index.get(&key(q)).into_iter().flatten().any(|&other| {
             other != owner
                 && (self.shapes[other].depth > own.depth
                     || own.joins.iter().any(|join| join.shape == other && (q - join.at).len() < join.reach))

@@ -35,9 +35,29 @@
 //! canvas.add_strokepath(plant.flowers, white);  // flowers, buds and sepals
 //! ```
 //!
-//! Flowers, from closed buds to full blooms, are modelled in 3D and seen
-//! from all sides. Flowers lie over leaves and leaves over the vines, and
-//! each part's lines stop where something in front covers them.
+//! Flowers, from closed buds to full blooms, and leaves are modelled in 3D
+//! and seen from all sides. Flowers lie over leaves and leaves over the
+//! vines, and each part's lines stop where something in front covers them.
+//!
+//! `bramble_along` grows one along a path instead: a maze's, say. Vines
+//! follow its lines, wandering a little off them, carrying straight on
+//! through junctions with branches up the other ways, and flower at its dead
+//! ends; leaves and flowers keep clear of the other vines. Lines that don't
+//! touch grow separate vines.
+//!
+//! ```rhai
+//! let path = new_maze(7, 9, 7).path().scale_by(70.0);
+//! let plant = art::bramble_along(path, 38.0, 3);   // flowers 38 across
+//! ```
+//!
+//! `snake_along` does the same for a snake, making a many-headed serpent:
+//! its body follows the path, slithering a little off it and forking where
+//! it forks, with its tail at the dead end nearest where the path starts
+//! and a head at every other dead end.
+//!
+//! ```rhai
+//! canvas.add_strokepath(art::snake_along(path, 30.0, 2), ink);   // 30 wide
+//! ```
 
 use rhai::{Dynamic, Engine, EvalAltResult, Map, Module, NativeCallContext};
 
@@ -50,6 +70,15 @@ type RhaiResult<T> = Result<T, Box<EvalAltResult>>;
 /// functions called through a module, as it does for global ones.
 fn error(ctx: &NativeCallContext, message: String) -> Box<EvalAltResult> {
     EvalAltResult::ErrorRuntime(message.into(), ctx.call_position()).into()
+}
+
+/// A bramble's parts, by name.
+fn parts(bramble: art::Bramble) -> Map {
+    let mut parts = Map::new();
+    for (name, path) in [("vines", bramble.vines), ("leaves", bramble.leaves), ("flowers", bramble.flowers)] {
+        parts.insert(name.into(), Dynamic::from(Path::new(path)));
+    }
+    parts
 }
 
 pub fn register(engine: &mut Engine) {
@@ -67,11 +96,17 @@ pub fn register(engine: &mut Engine) {
     module.set_native_fn("bramble", |ctx: NativeCallContext, base: Vec2, angle: f64, length: f64, flower_size: f64, random_seed: i64| -> RhaiResult<Map> {
         let bramble = art::bramble(base.into(), angle as f32, length as f32, flower_size as f32, random_seed as u64)
             .map_err(|err| error(&ctx, format!("art::bramble: {}", err)))?;
-        let mut parts = Map::new();
-        for (name, path) in [("vines", bramble.vines), ("leaves", bramble.leaves), ("flowers", bramble.flowers)] {
-            parts.insert(name.into(), Dynamic::from(Path::new(path)));
-        }
-        Ok(parts)
+        Ok(parts(bramble))
+    });
+    module.set_native_fn("bramble_along", |ctx: NativeCallContext, path: Path, flower_size: f64, random_seed: i64| -> RhaiResult<Map> {
+        let bramble = art::bramble_along(&path.borrow(), flower_size as f32, random_seed as u64)
+            .map_err(|err| error(&ctx, format!("art::bramble_along: {}", err)))?;
+        Ok(parts(bramble))
+    });
+    module.set_native_fn("snake_along", |ctx: NativeCallContext, path: Path, max_width: f64, random_seed: i64| -> RhaiResult<Path> {
+        art::snake_along(&path.borrow(), max_width as f32, random_seed as u64)
+            .map(Path::new)
+            .map_err(|err| error(&ctx, format!("art::snake_along: {}", err)))
     });
     engine.register_static_module("art", module.into());
 }
@@ -131,6 +166,46 @@ mod tests {
         let err = engine().build_entry_str("let ok = 1;\nart::bramble(new_vec(0.0, 0.0), 0.0, 100.0, 150.0, 1);")
             .expect_err("too short a cane should fail").to_string();
         assert!(err.contains("art::bramble: length must be at least") && err.contains("line 2"), "{}", err);
+    }
+
+    #[test]
+    fn bramble_along_follows_a_path() {
+        let script = r##"
+            let path = new_maze(2, 3, 2).path().scale_by(70.0);
+            let plant = art::bramble_along(path, 40.0, 1);
+            let pen = new_brush("Ink Pen", 0.3, 0.7, 1.0);
+            let c = new_canvas();
+            c.add_strokepath(plant.vines, new_strokestyle(1.0, "#c8a27a", pen));
+            c.add_strokepath(plant.leaves, new_strokestyle(1.0, "#a8d68a", pen));
+            c.add_strokepath(plant.flowers, new_strokestyle(1.0, "#f2ead8", pen));
+            // The vines span the maze: 2 nodes across, 140 apart.
+            let b = c.bounds();
+            if b.width < 140.0 { throw "the vines should cross the maze: " + b; }
+            let p = new_page();
+            p.add_canvas(c);
+            journal_entry.add_page(p);
+        "##;
+        engine().build_entry_str(script).expect("script should run");
+        let err = engine().build_entry_str("let ok = 1;\nart::bramble_along(new_strokepath(), 40.0, 1);")
+            .expect_err("an empty path should fail").to_string();
+        assert!(err.contains("art::bramble_along: the path has no lines to follow") && err.contains("line 2"), "{}", err);
+    }
+
+    #[test]
+    fn snake_along_follows_a_path() {
+        let script = r##"
+            let path = new_maze(2, 3, 2).path().scale_by(70.0);
+            let c = new_canvas();
+            c.add_strokepath(art::snake_along(path, 30.0, 1), new_strokestyle(1.0, "#f2ead8", new_brush("Ink Pen", 0.3, 0.7, 1.0)));
+            if c.bounds().width < 140.0 { throw "the serpent should cross the maze: " + c.bounds(); }
+            let p = new_page();
+            p.add_canvas(c);
+            journal_entry.add_page(p);
+        "##;
+        engine().build_entry_str(script).expect("script should run");
+        let err = engine().build_entry_str("let ok = 1;\nart::snake_along(new_line(new_vec(0.0, 0.0), new_vec(100.0, 0.0)), 0.0, 1);")
+            .expect_err("a zero width should fail").to_string();
+        assert!(err.contains("art::snake_along: max_width must be a positive number") && err.contains("line 2"), "{}", err);
     }
 
     #[test]

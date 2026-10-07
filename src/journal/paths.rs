@@ -401,6 +401,38 @@ impl StrokePath {
         self.commands.extend(other.commands.clone());
         self
     }
+    /// Each subpath as points at most `step` apart, keeping every
+    /// command's end point (so corners and the points subpaths start from
+    /// are among them); curves are flattened.
+    pub fn polylines(&self, step: f32) -> Vec<Vec<Vec2>> {
+        let mut lines: Vec<Vec<Vec2>> = Vec::new();
+        let (mut current, mut start) = (Vec2::ZERO, Vec2::ZERO);
+        for cmd in &self.commands {
+            if let PathCmd::MoveTo(x, y) = *cmd {
+                current = Vec2::new(x, y);
+                start = current;
+                lines.push(vec![current]);
+                continue;
+            }
+            if lines.is_empty() {
+                lines.push(vec![current]);
+            }
+            // Enough pieces that none is longer than `step`, judged by the
+            // control polygon, which is never shorter than the curve.
+            let reach = cmd.points_within().iter().fold((current, 0.0), |(at, sum), &p| (p, sum + at.distance(p))).1
+                .max(current.distance(start));
+            let pieces = ((reach / step).ceil() as usize).clamp(1, 10_000);
+            let line = lines.last_mut().expect("a subpath was started");
+            for k in 1..=pieces {
+                if let Some(p) = cmd.interpolate(start, current, k as f32 / pieces as f32) {
+                    line.push(p);
+                }
+            }
+            current = cmd.ending_point().unwrap_or(start);
+        }
+        lines.retain(|line| line.len() > 1);
+        lines
+    }
 }
 
 impl Default for StrokePath {

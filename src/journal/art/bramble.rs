@@ -25,6 +25,7 @@ use super::flower::{self, Pose};
 use super::leaf;
 use super::geom::{arc_end, V};
 use super::scene::Scene;
+use super::trail;
 use crate::journal::paths::StrokePath;
 
 /// A bramble's parts as paths, to stroke separately.
@@ -99,19 +100,76 @@ pub fn bramble(base: Vec2, angle: f32, length: f32, flower_size: f32, seed: u64)
     if !(length >= MIN_LENGTH * size) {
         return Err(format!("length must be at least {} times flower_size ({}), got {}", MIN_LENGTH, MIN_LENGTH * size, length));
     }
-    let mut grower = Grower {
-        rng: StdRng::seed_from_u64(seed),
-        size,
-        scene: Scene::new(0.004 * size, 0.25 * size, 0.02 * size),
-        room: Vec::new(),
-    };
+    let mut grower = Grower::new(size, seed);
     let turn = grower.rng.random_range(0.5..1.1) * grower.sign();
     let bend = grower.bend(length, turn, 0.3);
     let halves = (CANE_HALF_WIDTH.0 * size, CANE_HALF_WIDTH.1 * size);
     let cane = grower.stem((base, angle), length, halves, &bend, VINE_DEPTH + 2.5, true);
-    grower.grow(&cane, 0);
-    let scene = grower.scene;
-    Ok(Bramble { vines: scene.path(Part::Vine), leaves: scene.path(Part::Leaf), flowers: scene.path(Part::Flower) })
+    grower.grow(&cane, 0, Growth::Free);
+    Ok(grower.parts())
+}
+
+/// A bramble grown along `path` (a maze's, say): vines follow its lines,
+/// wandering a little off them, carrying straight on through its junctions
+/// with branches up the other ways, with leaves and flowers along them,
+/// keeping clear of the other vines, and a flower or bud at each dead end.
+/// Lines that don't touch grow separate vines. Sizes are as `bramble`'s.
+pub fn bramble_along(path: &StrokePath, flower_size: f32, seed: u64) -> Result<Bramble, String> {
+    let size = flower_size as f64;
+    if !(size > 0.0) || !size.is_finite() {
+        return Err(format!("flower_size must be a positive number, got {}", size));
+    }
+    if !path.points_within().iter().all(|p| p.is_finite()) {
+        return Err("the path has a non-finite (infinite or NaN) coordinate".into());
+    }
+    let chains = trail::chains(path, size / 12.0, size / 24.0);
+    if chains.is_empty() {
+        return Err("the path has no lines to follow".into());
+    }
+    let mut grower = Grower::new(size, seed);
+    let mut stems: Vec<Stem> = Vec::new();
+    for chain in &chains {
+        let mut points = trail::wander(&chain.points, size / 12.0, 0.35 * size, 0.12 * size, 2.0 * size, &mut grower.rng);
+        let depth = VINE_DEPTH + grower.rng.random_range(0.0..5.0);
+        let stem = match chain.parent {
+            None => grower.stem_through(&points, (CANE_HALF_WIDTH.0 * size, CANE_HALF_WIDTH.1 * size), depth),
+            Some((parent, _)) => {
+                // Start on the parent vine where it passes the junction,
+                // easing onto this vine's own line.
+                let parent = &stems[parent];
+                let junction = chain.points[0];
+                let (attach, half) = parent.nearest(junction);
+                let blend = 0.6 * size;
+                let mut s = 0.0;
+                for k in 0..points.len() {
+                    if k > 0 {
+                        s += (points[k] - points[k - 1]).len();
+                    }
+                    let t = (1.0 - s / blend).max(0.0);
+                    points[k] = points[k] + (attach - points[0]) * (t * t);
+                }
+                let halves = ((0.8 * half).max(0.7 * CANE_HALF_WIDTH.1 * size), 0.8 * CANE_HALF_WIDTH.1 * size);
+                let stem = grower.stem_through(&points, halves, depth);
+                grower.scene.join(parent.shape, stem.shape, attach, 8.0 * half);
+                stem
+            }
+        };
+        grower.keep_clear_of(&stem);
+        stems.push(stem);
+    }
+    for (chain, stem) in chains.iter().zip(&stems) {
+        let depth = if chain.parent.is_none() { 0 } else { 1 };
+        grower.grow(stem, depth, Growth::Along { dead_end: chain.dead_end });
+    }
+    Ok(grower.parts())
+}
+
+/// How a cane or branch grows: freely, branching as it goes, or along a
+/// path that sets its branches, flowering at its tip only at a dead end.
+#[derive(Clone, Copy)]
+enum Growth {
+    Free,
+    Along { dead_end: bool },
 }
 
 /// How a stem curves along its length: an arch that tightens towards the
@@ -150,6 +208,11 @@ impl Stem {
     fn end(&self) -> (V, f64) {
         (self.points[self.points.len() - 1], self.headings[self.headings.len() - 1])
     }
+    /// The point on its spine nearest `q`, and its half width there.
+    fn nearest(&self, q: V) -> (V, f64) {
+        let i = (0..self.points.len()).min_by(|&a, &b| (self.points[a] - q).len().total_cmp(&(self.points[b] - q).len())).expect("a stem has points");
+        (self.points[i], self.halves[i])
+    }
     /// The point, heading and half width `s` along.
     fn at(&self, s: f64) -> (V, f64, f64) {
         let x = (s / self.step).clamp(0.0, (self.points.len() - 1) as f64);
@@ -167,9 +230,35 @@ struct Grower {
     scene: Scene<Part>,
     /// The room leaves, flowers and buds take up, as discs.
     room: Vec<(V, f64)>,
+    /// Vines that leaves and flowers keep clear of (other than the one
+    /// they grow from), as discs along them and the stem they're on.
+    vines: Vec<(V, f64, usize)>,
 }
 
 impl Grower {
+    fn new(size: f64, seed: u64) -> Self {
+        Grower {
+            rng: StdRng::seed_from_u64(seed),
+            size,
+            scene: Scene::new(0.004 * size, 0.25 * size, 0.02 * size),
+            room: Vec::new(),
+            vines: Vec::new(),
+        }
+    }
+
+    fn parts(self) -> Bramble {
+        let scene = self.scene;
+        Bramble { vines: scene.path(Part::Vine), leaves: scene.path(Part::Leaf), flowers: scene.path(Part::Flower) }
+    }
+
+    /// Have leaves and flowers keep clear of `stem`.
+    fn keep_clear_of(&mut self, stem: &Stem) {
+        let every = ((0.25 * self.size / stem.step) as usize).max(1);
+        for i in (0..stem.points.len()).step_by(every) {
+            self.vines.push((stem.points[i], stem.halves[i] + 0.04 * self.size, stem.shape));
+        }
+    }
+
     fn sign(&mut self) -> f64 {
         if self.rng.random::<bool>() { 1.0 } else { -1.0 }
     }
@@ -207,7 +296,32 @@ impl Grower {
     /// flower) if not.
     fn stem(&mut self, from: (V, f64), length: f64, halves: (f64, f64), bend: &Bend, depth: f64, pointed: bool) -> Stem {
         let (points, headings, step) = self.spine(from.0, from.1, length, bend);
+        self.shape_stem(points, headings, step, halves, depth, pointed)
+    }
+
+    /// Add a stem through `points`, tapering to a point at the end.
+    fn stem_through(&mut self, points: &[V], halves: (f64, f64), depth: f64) -> Stem {
+        let points = trail::resample(points, self.size / 40.0);
+        let n = points.len();
+        let step = (0..n - 1).map(|i| (points[i + 1] - points[i]).len()).sum::<f64>() / (n - 1) as f64;
+        // Headings, unwrapped so they change smoothly.
+        let mut headings: Vec<f64> = Vec::with_capacity(n);
+        for i in 0..n {
+            let d = points[(i + 1).min(n - 1)] - points[i.saturating_sub(1)];
+            let raw = d.y.atan2(d.x);
+            let heading = match headings.last() {
+                Some(&last) => last + (raw - last + PI).rem_euclid(TAU) - PI,
+                None => raw,
+            };
+            headings.push(heading);
+        }
+        self.shape_stem(points, headings, step, halves, depth, true)
+    }
+
+    /// Add the shape of a stem along an evenly sampled spine.
+    fn shape_stem(&mut self, points: Vec<V>, headings: Vec<f64>, step: f64, halves: (f64, f64), depth: f64, pointed: bool) -> Stem {
         let n = points.len() - 1;
+        let length = step * n as f64;
         let taper = 4.0 * halves.1;
         let halves: Vec<f64> = (0..=n).map(|i| {
             let s = i as f64 * step;
@@ -244,17 +358,24 @@ impl Grower {
         stalk
     }
 
-    /// Whether these discs have room: none crowds what's already grown.
-    fn fits(&self, discs: &[(V, f64)]) -> bool {
-        discs.iter().all(|&(c, r)| self.room.iter().all(|&(c2, r2)| (c - c2).len() > 0.75 * (r + r2)))
+    /// Whether these discs, of something growing from `stem`, have room:
+    /// none crowds what's already grown, or a vine other than `stem`.
+    fn fits(&self, discs: &[(V, f64)], stem: usize) -> bool {
+        discs.iter().all(|&(c, r)| {
+            self.room.iter().all(|&(c2, r2)| (c - c2).len() > 0.75 * (r + r2))
+                && self.vines.iter().all(|&(c2, r2, owner)| owner == stem || (c - c2).len() > r + r2)
+        })
     }
 
     /// Grow a cane or branch: nodes along it, a flower or bud at its tip,
     /// and thorns between.
-    fn grow(&mut self, stem: &Stem, depth: usize) {
+    fn grow(&mut self, stem: &Stem, depth: usize, growth: Growth) {
         let size = self.size;
         let length = stem.length();
-        let mut s = length * self.rng.random_range(0.12..0.22);
+        let mut s = match growth {
+            Growth::Free => length * self.rng.random_range(0.12..0.22),
+            Growth::Along { .. } => size * self.rng.random_range(0.3..0.6),
+        };
         let mut side = self.sign();
         let mut nodes = Vec::new();
         while s < length - 0.3 * size {
@@ -264,7 +385,20 @@ impl Grower {
             // Sparse leaves (and some bare stretches) low down, then flowers
             // and buds, with the odd leaf among them.
             let leafy = t < if depth == 0 { 0.45 } else { 0.3 };
-            let placed = if leafy {
+            let placed = if let Growth::Along { .. } = growth {
+                // Along a path: leaves and flowers all the way.
+                if roll < 0.5 {
+                    self.leaf(stem, s, side, depth)
+                } else if roll < 0.65 {
+                    self.flower(stem, s, side, Stage::Open)
+                } else if roll < 0.77 {
+                    self.flower(stem, s, side, Stage::Opening)
+                } else if roll < 0.92 {
+                    self.flower(stem, s, side, Stage::Bud)
+                } else {
+                    false
+                }
+            } else if leafy {
                 if can_branch && roll < 0.2 {
                     self.branch(stem, s, side, depth)
                 } else if roll < 0.8 {
@@ -289,17 +423,23 @@ impl Grower {
             } else if self.rng.random::<bool>() {
                 side = -side;
             }
-            s += size * if leafy { self.rng.random_range(0.8..1.2) } else { self.rng.random_range(0.3..0.5) };
+            s += size * match growth {
+                Growth::Along { .. } => self.rng.random_range(0.45..0.8),
+                Growth::Free if leafy => self.rng.random_range(0.8..1.2),
+                Growth::Free => self.rng.random_range(0.3..0.5),
+            };
         }
         // A flower at the tip, or a bud if there's no room for more.
-        let (end, heading) = stem.end();
-        let roll = self.rng.random::<f64>();
-        let stage = if roll < 0.5 { Stage::Open } else if roll < 0.8 { Stage::Opening } else { Stage::Bud };
-        for stage in [stage, Stage::Bud] {
-            let pose = self.pose(end, heading, stage);
-            if self.fits(&[stage.room(&pose)]) {
-                self.blossom(&pose);
-                break;
+        if !matches!(growth, Growth::Along { dead_end: false }) {
+            let (end, heading) = stem.end();
+            let roll = self.rng.random::<f64>();
+            let stage = if roll < 0.5 { Stage::Open } else if roll < 0.8 { Stage::Opening } else { Stage::Bud };
+            for stage in [stage, Stage::Bud] {
+                let pose = self.pose(end, heading, stage);
+                if self.fits(&[stage.room(&pose)], stem.shape) {
+                    self.blossom(&pose);
+                    break;
+                }
             }
         }
         self.thorns(stem, &nodes);
@@ -317,7 +457,7 @@ impl Grower {
         let halves = (0.8 * half, 0.8 * CANE_HALF_WIDTH.1 * self.size);
         let branch = self.stem((at, heading), length, halves, &bend, depth_in_drawing, true);
         self.scene.join(stem.shape, branch.shape, at, 8.0 * half);
-        self.grow(&branch, depth + 1);
+        self.grow(&branch, depth + 1, Growth::Free);
         true
     }
 
@@ -366,8 +506,13 @@ impl Grower {
                 length: terminal,
                 width: terminal * self.rng.random_range(0.48..0.56),
             });
+            // A quick look for room before modelling it.
+            let roughly: Vec<(V, f64)> = leaflets.iter().map(|l| (l.base + V::angle(l.heading) * (l.length / 2.0), 0.4 * l.length)).collect();
+            if !self.fits(&roughly, stem.shape) {
+                continue;
+            }
             let drawn = leaf::leaf(&leaflets, &mut self.rng);
-            if !self.fits(&drawn.room) {
+            if !self.fits(&drawn.room, stem.shape) {
                 continue;
             }
             let petiole = self.stalk(stem, s, dir, length, &bend);
@@ -396,7 +541,7 @@ impl Grower {
             let bend = self.bend(length, turn, 0.0);
             let (end, end_heading) = self.reach(at, dir, length, &bend);
             let pose = self.pose(end, end_heading, stage);
-            if !self.fits(&[stage.room(&pose)]) {
+            if !self.fits(&[stage.room(&pose)], stem.shape) {
                 continue;
             }
             self.stalk(stem, s, dir, length, &bend);
@@ -486,7 +631,7 @@ mod tests {
     #[test]
     fn thorns_hook_towards_the_tip() {
         let size = 100.0;
-        let mut grower = Grower { rng: StdRng::seed_from_u64(1), size, scene: Scene::new(0.4, 25.0, 2.0), room: Vec::new() };
+        let mut grower = Grower::new(size, 1);
         let straight = grower.bend(500.0, 0.0, 0.0);
         // A cane growing up the page.
         let cane = grower.stem((V::new(0.0, 0.0), -PI / 2.0), 500.0, (3.0, 1.5), &straight, 0.0, true);

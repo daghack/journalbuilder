@@ -224,6 +224,36 @@ fn head_side(along: f64) -> f64 {
     point((lo + hi) / 2.0).1
 }
 
+/// The straight part of a head `width` across at its jaws: from the snout's
+/// tip to its neck.
+pub(super) fn head_length(width: f64) -> f64 {
+    HEAD_LENGTH * width
+}
+
+/// The half width `s` back from the snout of a head `width` across at its
+/// jaws, easing out behind its neck into a body `body` half wide.
+pub(super) fn head_half_width(s: f64, width: f64, body: f64) -> f64 {
+    let (jaw, head, neck_end) = (JAW * width, HEAD_LENGTH * width, (HEAD_LENGTH + 2.5) * width);
+    if s <= 0.0 {
+        0.0
+    } else if s < jaw {
+        head_side(s / width) * width
+    } else if s < head {
+        ease(JAW_HALF_WIDTH, NECK_HALF_WIDTH, (s - jaw) / (head - jaw)) * width
+    } else if s < neck_end {
+        ease(NECK_HALF_WIDTH * width, body, (s - head) / (neck_end - head))
+    } else {
+        body
+    }
+}
+
+/// The half width `s` from the tip of a tail tapering over `length` from a
+/// body `body` half wide: level where the taper starts, and pointed.
+pub(super) fn tail_half_width(s: f64, length: f64, body: f64) -> f64 {
+    let u = 1.0 - (s / length).clamp(0.0, 1.0);
+    body * (1.0 - u).powf(TAIL_TAPER) * (1.0 + TAIL_TAPER * u)
+}
+
 /// From `a` to `b` as `t` runs from 0 to 1, level at both ends.
 fn ease(a: f64, b: f64, t: f64) -> f64 {
     a + (b - a) * (1.0 - (PI * t).cos()) / 2.0
