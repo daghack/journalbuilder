@@ -1362,6 +1362,7 @@ name = "journalbuilder"
 version = "0.1.0"
 dependencies = [
  "darkly",
+ "flate2",
  "image",
  "noise",
  "parry2d",

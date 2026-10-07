@@ -23,6 +23,7 @@ use super::styles::Font;
 use super::darkly;
 use super::background::{self, Paper, Sheet};
 use super::compose::{self, Placed};
+use super::pdf::PdfWriter;
 use ::darkly::engine::DarklyEngine;
 use image::RgbaImage;
 use parry2d::math::Vec2 as PVec;
@@ -118,6 +119,25 @@ impl Entry {
             image.save(&filename).map_err(|e| format!("couldn't write {}: {}", filename, e))?;
         }
         Ok(())
+    }
+    /// Darkly renders of the pages, each one image (see
+    /// `Page::darkly_render`), as the pages of one PDF at `path`, titled
+    /// `title`. A page's size is its size in canvas units at
+    /// `UNITS_PER_INCH`, whatever the scale.
+    pub fn darkly_publish_pdf(&self, engine: &mut DarklyEngine, path: &str, title: &str, scale: f32, supersample: f32, only: Option<&[usize]>, paper: Option<Paper>) -> Result<(), String> {
+        let io_error = |e: std::io::Error| format!("couldn't write {}: {}", path, e);
+        let mut pdf = PdfWriter::create(path).map_err(io_error)?;
+        for (i, page) in self.selected_pages(only) {
+            let Some(image) = page.darkly_render(engine, &page.label(i), scale, supersample, paper) else {
+                continue; // journalbuild warns about empty canvases
+            };
+            let points = 72.0 / UNITS_PER_INCH / scale;
+            pdf.add_page(&image, image.width() as f32 * points, image.height() as f32 * points).map_err(io_error)?;
+        }
+        if pdf.page_count() == 0 {
+            return Err(format!("nothing to put in {}: every page is empty", path));
+        }
+        pdf.finish(title).map_err(io_error)
     }
     /// SVG renders, one per canvas like the Darkly ones, each written as
     /// `{page}_{canvas}.svg` and rasterised to `{page}_{canvas}.png`. Here a
@@ -227,6 +247,10 @@ fn check_name(caller: &str, name: Dynamic) -> Result<String, Box<EvalAltResult>>
         Err(format!("{}: invalid name '{}'; use letters, digits, '_', '-' and '.' (not first)", caller, name).into())
     }
 }
+
+/// Canvas units to an inch in PDF output: a page 1100 units across is
+/// about 7.3 inches.
+pub const UNITS_PER_INCH: f32 = 150.0;
 
 /// Paper round a page's strokes, as a fraction of its larger side, and at
 /// least this many units.

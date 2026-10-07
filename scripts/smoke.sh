@@ -4,8 +4,8 @@
 #   1. Runs `cargo test`, which evaluates every rhai journal script.
 #   2. Runs every lock file's examples with `journalbuild --check-locks`.
 #   3. Renders the small fixture in tests/smoke_journals at full scale, one
-#      page of it supersampled, and all of it on paper at reduced scale,
-#      and every page of journals/showcase at reduced scale.
+#      page of it supersampled, and all of it on paper and as a PDF at
+#      reduced scale, and every page of journals/showcase at reduced scale.
 #   4. Renders page 0 of every journal in journals/ at reduced scale, Darkly
 #      output only.
 #
@@ -96,6 +96,8 @@ render fixture-supersampled darkly_page_0_0.png \
 # Pages on paper: one image per page, split and typeset pages included.
 render fixture-paper darkly_page_0.png darkly_page_1.png darkly_art_0_0.png darkly_book_0.png \
 	-- smoke --journals-dir tests/smoke_journals --background parchment --scale 0.5
+render fixture-pdf smoke.pdf \
+	-- smoke --journals-dir tests/smoke_journals --pdf --scale 0.25
 # Every page of the showcase, every character with a glyph.
 render showcase darkly_pens_brushes.png darkly_fonts_0.png darkly_glyphs_0.png darkly_art_0.png darkly_text_0.png darkly_locks_ciphers.png \
 	darkly_layout_0_0.png darkly_layout_1_0.png darkly_title_0_0.png \

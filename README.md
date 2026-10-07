@@ -31,6 +31,9 @@ Useful flags (`journalbuild` with no arguments lists them all):
   toward ragged edges. Pages get a border of paper round their strokes;
   typeset pages are a sheet the size of the page, and each tile of a split
   page a sheet of its own. Dark inks show best.
+- `--pdf`: put the pages in one PDF, `{journal}.pdf`, instead of images:
+  each page's canvases layered into one image (on paper, with
+  `--background`), at 150 canvas units to the inch whatever the scale.
 - `--journals-dir`, `--output-dir`, `--symbols`, `--locks-dir`,
   `--layouts-dir`: read or write somewhere other than the repository's
   defaults.

@@ -4,16 +4,16 @@ use scribe::journal::background::Paper;
 
 use std::rc::Rc;
 
-/// Create the output directory, or clear out the renders (`.png` and `.svg`
-/// files) of earlier runs, so renamed or removed pages don't linger. Other
-/// files are left alone.
+/// Create the output directory, or clear out the renders (`.png`, `.svg`
+/// and `.pdf` files) of earlier runs, so renamed or removed pages don't
+/// linger. Other files are left alone.
 fn prepare_output_dir(dir: &str) -> Result<(), String> {
     let io_error = |what: &str, e: std::io::Error| format!("couldn't {} {}: {}", what, dir, e);
     std::fs::create_dir_all(dir).map_err(|e| io_error("create", e))?;
     let mut cleared = 0;
     for entry in std::fs::read_dir(dir).map_err(|e| io_error("read", e))? {
         let path = entry.map_err(|e| io_error("read", e))?.path();
-        let is_render = path.extension().is_some_and(|ext| ext == "png" || ext == "svg");
+        let is_render = path.extension().is_some_and(|ext| ext == "png" || ext == "svg" || ext == "pdf");
         if path.is_file() && is_render {
             std::fs::remove_file(&path).map_err(|e| format!("couldn't remove the earlier render {}: {}", path.display(), e))?;
             cleared += 1;
@@ -41,7 +41,7 @@ const DEFAULT_SUPERSAMPLE: f32 = 1.2;
 
 const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--svg]
                     [--scale S] [--supersample K] [--strict-glyphs]
-                    [--background PAPER]
+                    [--background PAPER] [--pdf]
                     [--journals-dir DIR] [--output-dir DIR] [--symbols FILE]
                     [--locks-dir DIR] [--layouts-dir DIR]
        journalbuild --check-locks [--locks-dir DIR]
@@ -58,6 +58,10 @@ const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--svg
                       toward its edges. Pages get a border of paper round
                       their strokes; each tile of a split page is a sheet
                       of its own.
+  --pdf               Put the pages in one PDF, {journal}.pdf, a page per
+                      page, rather than writing images: each page's
+                      canvases layered into one image (on paper, with
+                      --background), 150 canvas units to the inch.
   --strict-glyphs     Fail before rendering if any character had no glyph
                       (by default they're drawn as X and listed as a warning).
   --scale S           Scale output images (default 1.0), brushes included.
@@ -72,7 +76,7 @@ const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--svg
   --symbols FILE      Symbol dictionary (default: the repository's
                       config/symbols.json).
   --output-dir DIR    Where to write renders (default: <journal>/output).
-                      Earlier .png/.svg renders there are cleared first
+                      Earlier .png/.svg/.pdf renders there are cleared first
                       (except with --page); other files are kept.
   --locks-dir DIR     Directory of lock files, one per lock type (default:
                       the repository's locks/).
@@ -95,12 +99,14 @@ struct Args {
     locks_dir: String,
     layouts_dir: String,
     background: Option<Paper>,
+    pdf: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
     let mut journal_name = None;
     let mut pages: Option<Vec<String>> = None;
     let mut svg = false;
+    let mut pdf = false;
     let mut strict_glyphs = false;
     let mut check_locks = false;
     let mut scale = 1.0;
@@ -120,6 +126,7 @@ fn parse_args() -> Result<Args, String> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--svg" => svg = true,
+            "--pdf" => pdf = true,
             "--strict-glyphs" => strict_glyphs = true,
             "--check-locks" => check_locks = true,
             "--scale" => {
@@ -170,7 +177,7 @@ fn parse_args() -> Result<Args, String> {
         (Some(_), true) => return Err("--check-locks checks lock files, so it takes no journal name".to_string()),
         (None, false) => return Err("missing journal name".to_string()),
     };
-    Ok(Args { strict_glyphs, check_locks, journal_name, journals_dir, pages, svg, scale, supersample, output_dir, symbols, locks_dir, layouts_dir, background })
+    Ok(Args { strict_glyphs, check_locks, journal_name, journals_dir, pages, svg, scale, supersample, output_dir, symbols, locks_dir, layouts_dir, background, pdf })
 }
 
 fn main() {
@@ -221,6 +228,12 @@ fn run(args: &Args) -> Result<(), String> {
     }
     // One Darkly engine for the whole run; canvases resize it as needed.
     let mut darkly_engine = darkly::new_engine(1, 1);
+    if args.pdf {
+        let path = format!("{}/{}.pdf", output_dir, journal_name);
+        entry.darkly_publish_pdf(&mut darkly_engine, &path, journal_name, args.scale, args.supersample, only, args.background)?;
+        println!("Wrote {}", path);
+        return Ok(());
+    }
     match args.background {
         Some(paper) => entry.darkly_publish_pages(&mut darkly_engine, &output_dir, args.scale, args.supersample, only, Some(paper)),
         None => entry.darkly_publish_pngs(&mut darkly_engine, &output_dir, args.scale, args.supersample, only),
