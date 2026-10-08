@@ -101,7 +101,7 @@ render fixture-pdf smoke.pdf \
 # Every page of the showcase, every character with a glyph.
 render showcase darkly_01_title_0.png darkly_02_contents_0.png darkly_03_pens_brushes.png darkly_05_fonts_0.png darkly_08_glyphs_0.png \
 	darkly_10_art_0.png darkly_13_text_0.png darkly_15_text_0.png darkly_16_locks_ciphers.png darkly_17_spread_0.png darkly_18_spread_0.png \
-	darkly_19_layouts_0.png darkly_23_visions_0.png darkly_24_visions_0.png \
+	darkly_19_layouts_0.png \
 	-- showcase --strict-glyphs --scale 0.25
 
 for journal in journals/*/; do
