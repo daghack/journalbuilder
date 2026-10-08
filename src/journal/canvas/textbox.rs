@@ -1,6 +1,6 @@
 use parry2d::bounding_volume;
 use crate::journal::avoid::AvoidanceTree;
-use crate::journal::symbol::{Symbol, SymbolPlacementArgs, place_along_path, place_words_along_path};
+use crate::journal::symbol::{Symbol, SymbolPlacementArgs, WordSplit, place_along_path, place_words_along_path};
 use crate::journal::paths::StrokePath;
 use rand::{Rng, RngCore};
 
@@ -25,7 +25,9 @@ pub struct TextBoxOptions<'a> {
 #[derive(Debug, Clone)]
 pub enum TextBoxLineMode {
     Flat,
-    WordsByBlankSymbol,
+    /// Words kept whole, wrapping at blanks, unless broken round what they
+    /// avoid.
+    WordsByBlankSymbol(Option<WordSplit>),
 }
 
 /// Glyphs sit a quarter of their height below each line.
@@ -67,7 +69,7 @@ impl<'a> TextBox<'a> {
         };
         match self.layout {
             TextBoxLineMode::Flat => place_along_path(symbols, &stroke, &args),
-            TextBoxLineMode::WordsByBlankSymbol => place_words_along_path(symbols, &stroke, &args),
+            TextBoxLineMode::WordsByBlankSymbol(split) => place_words_along_path(symbols, &stroke, &args, split),
         }
     }
     pub fn fill_bounds_with(&self, mut to_place: Vec<Symbol>, rng: &mut dyn RngCore) -> (Vec<Symbol>, Vec<Symbol>) {

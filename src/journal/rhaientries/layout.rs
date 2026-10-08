@@ -76,7 +76,11 @@
 //! paragraph's first line, in sizes), `paragraph_gap` (in lines, default
 //! 0.5), `spacing` (between glyphs, in sizes), `jagged` (random line
 //! starts, in sizes), `clearance` (from what text wraps around, in units,
-//! default size / 4) and `fit` (shrink the text until all of it fits).
+//! default size / 4), `split_words` (break a word round what text wraps
+//! around rather than moving it past whole: `true`, or the fewest letters a
+//! piece may have; `true` is 2), `split_padding` (how much further the
+//! pieces keep from it, in sizes) and `fit` (shrink the text until all of
+//! it fits).
 //! Art, bands and rules only need a `style`. A slot can override any of
 //! these in its own style: `flow("body", #{ grow: 1, align: "center" })`.
 //!
@@ -110,6 +114,7 @@ use stretch::style::{AlignContent, AlignItems, AlignSelf, Dimension, FlexDirecti
 use super::glyphs::Glyph;
 use super::options::{check_keys, number};
 use super::random::SharedRng;
+use super::text::word_split;
 use super::{check_finite, CanvasData, Canvas, Page, Path, Stroke, StrokeStyle};
 use crate::journal::avoid::AvoidanceTree;
 use crate::journal::canvas::Frame;
@@ -200,8 +205,8 @@ const BOX_KEYS: [&str; 20] = [
 ];
 const CONTAINER_KEYS: [&str; 4] = ["gap", "justify", "align", "align_content"];
 /// Role settings, which roles and slots take.
-const ROLE_KEYS: [&str; 13] = [
-    "font", "style", "size", "line_height", "align", "valign", "indent", "paragraph_gap", "spacing", "clearance", "jagged", "fit", "role",
+const ROLE_KEYS: [&str; 15] = [
+    "font", "style", "size", "line_height", "align", "valign", "indent", "paragraph_gap", "spacing", "clearance", "jagged", "fit", "split_words", "split_padding", "role",
 ];
 
 fn dimension(caller: &str, key: &str, value: &Dynamic) -> RhaiResult<Dimension> {
@@ -275,6 +280,8 @@ fn check_role_setting(caller: &str, key: &str, value: &Dynamic) -> RhaiResult<()
         "align" => choice(caller, key, value, &[("left", ()), ("center", ()), ("right", ()), ("justify", ())]),
         "valign" => choice(caller, key, value, &[("top", ()), ("center", ()), ("bottom", ())]),
         "fit" if !value.is_bool() => Err(format!("{}: 'fit' should be true or false, got {}", caller, value).into()),
+        // Checked with each other once a slot's settings are merged.
+        "split_words" | "split_padding" => word_split(caller, &Map::from_iter([(key.into(), value.clone()), ("split_words".into(), true.into())])).map(|_| ()),
         "role" => string(caller, key, value).map(|_| ()),
         _ => Ok(()),
     }
@@ -538,6 +545,7 @@ impl Content {
                 text.spacing = get("spacing")?.unwrap_or(0.0);
                 text.clearance = get("clearance")?.unwrap_or(text.clearance);
                 text.jagged = get("jagged")?.unwrap_or(0.0);
+                text.split = word_split(&caller, &settings)?;
                 if let Some(align) = settings.get("align") {
                     text.align = Align::from_name(&align.to_string()).expect("checked when given");
                 }

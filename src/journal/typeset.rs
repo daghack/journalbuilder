@@ -14,7 +14,7 @@ use parry2d::math::Vec2;
 use rand::{Rng, RngCore};
 
 use super::avoid::AvoidanceTree;
-use super::symbol::Symbol;
+use super::symbol::{Symbol, WordSplit};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Align {
@@ -57,6 +57,10 @@ pub struct TextStyle {
     pub clearance: f32,
     /// Lines start up to this much further in, at random.
     pub jagged: f32,
+    /// Whether a word that doesn't fit before something the text avoids
+    /// may break round it, going on past it on the same line (see
+    /// `WordSplit`; its padding is in sizes too).
+    pub split: Option<WordSplit>,
 }
 
 impl TextStyle {
@@ -70,6 +74,7 @@ impl TextStyle {
             spacing: 0.0,
             clearance: size / 4.0,
             jagged: 0.0,
+            split: None,
         }
     }
 }
@@ -182,9 +187,13 @@ pub fn set_text(rect: Aabb, style: &TextStyle, glyphs: &[Symbol], chars: &[char]
         let mut line_items: Vec<(Vec<Item>, (f32, f32))> = Vec::new();
         let mut ended_by_break = false;
         let line_start = i;
-        for &(start, end) in &spans {
+        let split_pad = style.split.map_or(0.0, |split| split.padding * size);
+        // Whether the stretch before broke a word, which goes on here.
+        let mut broke_word = false;
+        for (span, &(start, end)) in spans.iter().enumerate() {
             let mut items = Vec::new();
-            let mut x = start;
+            let mut x = if broke_word { (start + split_pad).min(end) } else { start };
+            broke_word = false;
             let mut line_done = false;
             while i < n {
                 if is_break(i) {
@@ -236,6 +245,31 @@ pub fn set_text(rect: Aabb, style: &TextStyle, glyphs: &[Symbol], chars: &[char]
                     line_done = true;
                     break;
                 } else {
+                    // With split words, as much of the word as fits here
+                    // (a piece of at least `min_piece` either side), the
+                    // rest past what's in the way.
+                    if let Some(split) = style.split.filter(|_| span + 1 < spans.len()) {
+                        let min = split.min_piece.max(1);
+                        let mut head = 0;
+                        let mut right = x;
+                        while i + head < j && j - (i + head) > min {
+                            let (w, _) = glyph_width(&glyphs[i + head], size);
+                            if right + w > end - split_pad + 1e-3 {
+                                break;
+                            }
+                            right += w + gap;
+                            head += 1;
+                        }
+                        if head >= min {
+                            for k in i..i + head {
+                                let (w, offset) = glyph_width(&glyphs[k], size);
+                                items.push(Item { index: k, x, width: w, offset });
+                                x += w + gap;
+                            }
+                            i += head;
+                            broke_word = true;
+                        }
+                    }
                     break;
                 }
             }
@@ -397,6 +431,28 @@ mod tests {
             assert!(last_x(*y) > 140.0, "line at {} ends at {}", y, last_x(*y));
         }
         assert!(last_x(ys[ys.len() - 1]) < 140.0);
+    }
+
+    #[test]
+    fn split_words_break_round_what_text_avoids() {
+        let (g, c) = text("abcdefghijklmnop");
+        let mut avoid = AvoidanceTree::new();
+        avoid.add_polygon(&[Vec2::new(60.0, -50.0), Vec2::new(70.0, -50.0), Vec2::new(70.0, 50.0), Vec2::new(60.0, 50.0)], 0.0);
+        let set = |split| {
+            let style = TextStyle { split, ..TextStyle::new(10.0) };
+            set_text(rect(400.0, 20.0), &style, &g, &c, false, Some(&avoid), &mut rng())
+        };
+        let whole = set(None);
+        assert!(whole.placed[0].position().x > 70.0, "a whole word goes past it");
+        let split = set(Some(WordSplit { min_piece: 2, padding: 0.0 }));
+        assert_eq!(split.placed.len(), 16);
+        assert!(split.placed[0].position().x < 60.0 && split.placed[15].position().x > 70.0, "a split one goes either side");
+        assert_eq!(lines(&split).len(), 1);
+        let before = |s: &Setting| s.placed.iter().filter(|g| g.position().x < 60.0).count();
+        let padded = set(Some(WordSplit { min_piece: 2, padding: 1.5 }));
+        assert!(before(&padded) < before(&split) && padded.placed.len() == 16, "padding keeps pieces further off");
+        let long = set(Some(WordSplit { min_piece: 20, padding: 0.0 }));
+        assert!(long.placed[0].position().x > 70.0, "too short to split");
     }
 
     #[test]

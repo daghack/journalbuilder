@@ -179,6 +179,14 @@ impl JournalEngine {
         scope.get_value("journal_entry")
             .ok_or_else(|| "the script replaced journal_entry with something that isn't an entry".to_string())
     }
+    /// Call `f` as a script runs, with how many operations it's done so
+    /// far: to show that it's working.
+    pub fn on_progress(&mut self, f: impl Fn(u64) + 'static) {
+        self.engine.on_progress(move |ops| {
+            f(ops);
+            None
+        });
+    }
     pub fn build_entry_file(&mut self, rhai_filename: &str) -> Result<Entry, String> {
         let file_contents = std::fs::read_to_string(rhai_filename)
             .map_err(|err| format!("couldn't read {}: {}", rhai_filename, err))?;

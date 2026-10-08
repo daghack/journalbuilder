@@ -17,7 +17,11 @@ target/release/journalbuild journal_entry_17
 ```
 
 Renders go to `journals/journal_entry_17/output/`. Rendering needs a GPU
-that wgpu can use (Metal on macOS).
+that wgpu can use (Metal on macOS). While it runs, one line of the
+terminal shows its progress: a spinner while the script runs, then a bar
+of the pages rendered, the page it's on and the time left
+(`NO_PROGRESS=1` turns it off; it's off anyway when output isn't a
+terminal).
 
 Useful flags (`journalbuild` with no arguments lists them all):
 
@@ -137,7 +141,10 @@ What to know:
   keeps 8 from the border's lines and 4 from anywhere inside the drawing's
   outline; `add_region(path)` keeps out of a closed shape. Trees are
   shared, so `avoid.add(placed)` keeps later text off what's just been
-  placed.
+  placed. With `layout: "words"`, a word that runs into something moves
+  past it whole; `split_words: true` breaks it round it instead, for a
+  tighter fit (or `split_words: 3`: no piece shorter than 3 letters), and
+  `split_padding` (in symbol scales) keeps the pieces further off it.
 - **Hatching.** `path.hatch(spacing, angle, roughness)` shades a closed
   path's inside with lines, each a stroke of its own; shapes inside or
   across others in the same path (`ring.append(hole)`) cut holes in it.
@@ -173,10 +180,8 @@ What to know:
   `journal_entry.add_pages(page.split(2, 2))` adds them all.
 - **Page layouts.** A layout lays out pages as trees of flexbox boxes, and
   `typeset` pours text, art and ornaments into their slots, chaining the
-  text through columns and pages until it runs out:
-  `journal_entry.add_pages(layout("two_column_article").typeset(#{ flows,
-  roles, art }))`. Layouts are rhai files in `layouts/`; see
-  [layouts/README.md](layouts/README.md).
+  text through columns and pages until it runs out; see
+  [Using layouts](#using-layouts) below.
 - **Problems.** `warn("...")` reports something without stopping the
   script. Errors give the script line.
 
@@ -190,6 +195,124 @@ boxes, scattered notes), `glyphs.rs` (glyphs and fonts), `avoid.rs`,
 `layout.rs` (page layouts), `gradient.rs`, `random.rs`, `art.rs` and
 `locks/mod.rs`. The journals in `journals/` and
 `tests/smoke_journals/smoke` use most of it.
+
+## Using layouts
+
+Text boxes and text along paths place glyphs where you say. For pages of
+running text (articles, title pages, captioned plates) a layout does the
+placing: it describes a page as boxes, and `typeset` pours the text into
+them, column after column and page after page, until it runs out.
+
+### Typesetting with a layout file
+
+The layouts in `layouts/` are ready to use:
+
+| layout | flows | art |
+|---|---|---|
+| `two_column_article` | `title`, `body`, `caption` | `divider` (a band's motif), `illustration` (optional) |
+| `bordered_title` | `title`, `subtitle`, `credits` | `border`, `corner`, `flourish` |
+| `captioned_figure` | `caption` | `figure` |
+
+Give one the text (**flows**), how each kind of text and stroke looks
+(**roles**) and the drawings (**art**), and add the pages it returns:
+
+```rhai
+let ink = new_style(1.0, "rgba(30, 20, 20, 0.9)", new_brush("Ink Pen", 0.4, 0.9, 3.0));
+let red = new_style(1.0, "darkred", new_brush("Ink Pen", 0.4, 0.9, 3.0));
+
+journal_entry.add_pages(layout("two_column_article").typeset(#{
+	name: "lunar",                   // pages lunar_0, lunar_1, ...
+	flows: #{
+		title: "Lunar Influence",
+		body: "First paragraph...\n\nSecond paragraph...",
+		caption: "the moon at its third quarter",
+	},
+	roles: #{
+		body: #{ font: font("plain"), style: ink, size: 24.0, align: "justify", indent: 1.5 },
+		heading: #{ font: font("loche_upper"), style: red, size: 80.0 },
+		caption: #{ font: font("plain"), style: red, size: 20.0, align: "center" },
+		initial: #{ font: font("loche_upper"), style: red },
+		folio: #{ font: font("plain"), style: red, size: 20.0 },
+		rule: #{ style: red },
+		divider: #{ style: red },
+	},
+	art: #{ divider: new_circle(new_vec(0, 0), 10), illustration: moon_canvas },
+}));
+```
+
+- **Flows** are strings. `"\n"` breaks a line and a blank line starts a
+  paragraph. A flow that doesn't fit its box carries on in the next box
+  of the same name, then onto the next page.
+- **Roles** are maps of settings, by name. Text roles need `font`,
+  `style` and `size` (the symbol scale, in canvas units); the rest are
+  optional: `line_height`, `align`, `valign`, `indent`, `paragraph_gap`,
+  `spacing`, `jagged`, `clearance`, `split_words`, `split_padding` and
+  `fit`. Art, rules and bands need only a `style`. Each layout file's
+  header comment lists the roles it uses.
+- **Art** is a canvas (drawn in its own styles), a path or glyph (drawn in
+  the role's style), or a function given its box,
+  `#{ x, y, width, height, center }`, that returns a canvas or path made
+  to measure.
+
+The pages come out exactly the layout's `page_size()` (or the `width` and
+`height` you give in the map), so they line up, and they render, split
+and go into PDFs like any other page. Typesetting fails, naming the flow,
+if a page sets none of what's left of the text.
+
+### Writing a layout
+
+A layout is a function from a page number to that page's tree of boxes.
+For a one-off, write it in the journal:
+
+```rhai
+fn two_up(n, info) {
+	column(#{ padding: 60, gap: 30 }, [
+		if n == 0 { flow("title", #{ role: "heading", height: 80, fit: true, align: "center" }) } else { spacer() },
+		row(#{ grow: 1, gap: 40 }, [
+			flow("body", #{ grow: 1 }),
+			rule(#{ width: 4 }),
+			flow("body", #{ grow: 1 }),
+		]),
+		label(`${n + 1}`, #{ role: "folio", height: 30, align: "center" }),
+	])
+}
+let pages = new_layout("two_up", Fn("two_up")).typeset(#{ width: 1200, height: 1600, flows: flows, roles: roles });
+```
+
+To reuse it, put `page(n, info)` (and, optionally, `page_size()`) in
+`layouts/<name>.rhai` and load it with `layout("<name>")`; no rebuild is
+needed. Rows and columns lay out their children with flexbox rules:
+`grow` shares out the space left, `width`/`height` take units or
+`"40%"`, and `gap`, `padding`, `margin`, `justify` and `align` work as in
+CSS. The leaves are `flow`, `label`, `initial` (a drop cap), `figure`,
+`band` (art repeated as an ornamental strip), `rule` and `spacer`. Any box
+can override its role's settings: `flow("body", #{ grow: 1, align:
+"center" })`. `info.flows` says how much of each flow is left, so a layout
+can change as the text runs out (a closing page, say), and `info.art`
+which art it was given.
+
+### Wrapping text round art
+
+A box placed with `position: "absolute"` is taken out of the flow, and
+text in its parent wraps round it: round its box (`wrap: "box"`, the
+default), round the outline of what's drawn in it (`wrap: "hull"`), or
+not at all (`wrap: "none"`).
+
+```rhai
+column(#{ grow: 1 }, [
+	figure("sigil", #{ position: "absolute", top: 200, left: 150, width: 300, height: 300, wrap: "hull" }),
+	flow("body", #{ grow: 1, clearance: 12, split_words: true, split_padding: 0.4 }),
+])
+```
+
+`clearance` is how far text keeps from what it wraps round. By default a
+word that doesn't fit before it goes on after it, whole; `split_words`
+breaks it round the figure instead, so lines hug the outline more
+tightly, and `split_padding` (in sizes) adds room at the breaks. An
+`initial` placed the same way is a drop cap the text wraps round.
+
+[layouts/README.md](layouts/README.md) has every box, style key and role
+setting; `journals/showcase` uses each layout, and an inline one.
 
 ## Locks
 

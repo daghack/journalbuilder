@@ -79,7 +79,7 @@ fn scatter_one(bounds: &Canvas, avoid: &AvoidanceTree, symbols: &[Symbol], opts:
         if !unplaced.is_empty() {
             continue;
         }
-        if let TextBoxLineMode::WordsByBlankSymbol = opts.layout {
+        if let TextBoxLineMode::WordsByBlankSymbol(_) = opts.layout {
             let points: Vec<Vec2> = placed.iter().filter(|s| !s.is_blank()).flat_map(|s| s.footprint()).collect();
             let outline = parry2d::transformation::convex_hull(&points);
             if outline.len() >= 3 && avoid.blocks(&outline, opts.clearance) {

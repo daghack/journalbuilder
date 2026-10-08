@@ -7,6 +7,7 @@
 //! seed(1043);
 //! let jitter = random_range(-0.5, 0.5);   // float in [-0.5, 0.5)
 //! let pick = random_range(0, 4);           // integer in 0..4
+//! let size = random_range(1.5, 6);        // float, if either end is
 //! if random() < 0.25 { ... }               // float in [0, 1)
 //! ```
 //!
@@ -49,12 +50,18 @@ pub fn register(engine: &mut Engine) -> SharedRng {
     });
 
     let r = rng.clone();
-    engine.register_fn("random_range", move |low: f64, high: f64| -> RhaiResult<f64> {
+    let float_range = move |low: f64, high: f64| -> RhaiResult<f64> {
         if !(low < high) {
             return Err(format!("random_range: empty range {}..{}; the low end must be below the high end", low, high).into());
         }
         Ok(r.borrow_mut().random_range(low..high))
-    });
+    };
+    // A float if either end is.
+    let f = float_range.clone();
+    engine.register_fn("random_range", move |low: f64, high: i64| f(low, high as f64));
+    let f = float_range.clone();
+    engine.register_fn("random_range", move |low: i64, high: f64| f(low as f64, high));
+    engine.register_fn("random_range", float_range);
 
     rng
 }
@@ -98,7 +105,9 @@ mod tests {
             let out = [];
             for i in 0..500 {
                 let f = random(); let n = random_range(-3, 3); let x = random_range(2.0, 2.5);
+                let m = random_range(1, 1.5); let k = random_range(0.5, 1);
                 if f < 0.0 || f >= 1.0 || n < -3 || n >= 3 || x < 2.0 || x >= 2.5 { throw "out of range"; }
+                if m < 1.0 || m >= 1.5 || k < 0.5 || k >= 1.0 || type_of(m) != "f64" { throw "mixed out of range"; }
                 out.push(n);
             }
             out

@@ -99,6 +99,8 @@ names another with `role`. Settings:
 | `spacing` | text | between glyphs, in sizes |
 | `jagged` | text | lines start up to this much further in, at random, in sizes |
 | `clearance` | text | how far it keeps from what it wraps around, default size / 4 |
+| `split_words` | text | `true` breaks a word round what text wraps around, instead of moving it past whole, for a tighter fit; a number is the fewest letters a piece may have (`true` is 2) |
+| `split_padding` | text | with `split_words`, how much further the pieces keep from what they're split round, in sizes |
 | `fit` | text | shrink the text until all of it fits its box (for headings) |
 | `style` | art, bands, rules, borders | the stroke style, for art that's a path or glyph |
 

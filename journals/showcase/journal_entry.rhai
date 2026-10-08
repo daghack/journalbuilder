@@ -8,11 +8,13 @@
 //   glyphs    every variant of every glyph of every font
 //   art       shapes and paths, hatching, vectors, mazes, snakes, brambles
 //   text      text boxes, text kept clear of drawings, text along paths,
-//             scattered notes
+//             scattered notes, words split round drawings
 //   locks     every lock type, and a lock chain drawn as a maze
 //   spread    one drawing across two pages: a page split into tiles
 //   layouts   pages typeset from layouts: an inline one, and the layout
 //             files (the title page is one too)
+//   visions   two plates drawn with the brushes together: an insane
+//             grimoire's eye in a summoning circle, and a horned dreamer
 //
 // When journals gain a capability (a function, an art tool, a brush, a
 // font, a lock type), it gets a labelled example here: see CLAUDE.md.
@@ -555,6 +557,49 @@ text.add_canvas(board.scatter_notes(["lorem ipsum", "dolor sit amet", "consectet
 	#{ symbol_scale: 20, width_range: [240, 340], height_range: [25, 35], clearance: 24, layout: "words", avoid: new_line(new_vec(100, 1250), new_vec(1100, 1250)) }));
 book.bind("text", text);
 
+// Words round a drawing: whole, moved past it (the default), broken
+// round it with split_words, and with split_padding to keep the pieces
+// further off. split_words: n is the shortest piece allowed.
+let text = sheet("text");
+text.add_canvas(subhead("splitting words", TOP));
+text.add_canvas(caption("layout: \"words\", avoid; then split_words: true; then split_padding: 0.6", TOP + 50));
+fn seal(c) {
+	let s = new_canvas();
+	let star = new_path();
+	for i in 0..=5 {
+		let a = -PI() / 2.0 + i * 4.0 * PI() / 5.0;
+		let p = c + new_vec(70 * a.cos(), 70 * a.sin());
+		if i == 0 { star.move_to(p); } else { star.line_to(p); }
+	}
+	s.add_path(new_circle(c, 78), global::CAPTION);
+	s.add_path(star, global::CAPTION);
+	s
+}
+for (options, i) in [#{}, #{ split_words: true }, #{ split_words: true, split_padding: 0.6 }] {
+	let c = new_vec(LEFT + 160 + i * 340, TOP + 330);
+	let drawing = seal(c + new_vec(-50, -60));
+	text.add_canvas(drawing);
+	let box = #{ center: c, width: 320, height: 420, symbol_scale: 17, layout: "words", avoid: drawing, clearance: 4 };
+	box += options;
+	text.add_glyphs(new_textbox(box).fill(PLAIN.glyphs(LOREM + LOREM)).placed, TEXT);
+}
+// Along a path too, and in layouts (a role's split_words and
+// split_padding: see the inline layout).
+let y = TOP + 680;
+text.add_canvas(caption("fill_with_text along a line past three circles: whole words, then split_words: 2", y));
+for (options, i) in [#{ layout: "words" }, #{ layout: "words", split_words: 2 }] {
+	let line_y = y + 80 + i * 110;
+	let rings = new_avoidance_tree();
+	for k in 0..3 {
+		let at = new_vec(LEFT + 210 + k * 300, line_y);
+		text.add_path(new_circle(at, 30), CAPTION);
+		rings.add_region(new_circle(at, 30), 6);
+	}
+	options.avoid = rings;
+	text.add_canvas(new_line(new_vec(LEFT, line_y), new_vec(RIGHT, line_y)).fill_with_text(LOREM, PLAIN, 22, TEXT, options)[0]);
+}
+book.bind("text", text);
+
 // ---- locks ----
 
 let locks = sheet("locks");
@@ -656,7 +701,8 @@ for tile in tiles {
 // typeset fills. Here: a heading that shrinks to fit, a drop cap the text
 // wraps around, a body flowing down one column and on down the next (and
 // on to a second page), a band of ornaments between them, a figure fitted
-// to its box, a rule, a spacer and a page label. Layouts usually live in
+// to its box, a rule, a spacer and a page label. Words beside the drop cap
+// may break round it (split_words, split_padding). Layouts usually live in
 // layouts/ (see the files used below, and layouts/README.md).
 fn sample_page(n, info) {
 	column(#{ padding: [90, 100, 60, 100], gap: 16 }, [
@@ -665,7 +711,7 @@ fn sample_page(n, info) {
 		row(#{ grow: 1, gap: 30 }, [
 			column(#{ grow: 1 }, [
 				if n == 0 { initial("body", #{ position: "absolute", top: 0, left: 0, width: 90, height: 90 }) } else { spacer() },
-				flow("body", #{ grow: 1 }),
+				flow("body", #{ grow: 1, split_words: true, split_padding: 0.2 }),
 			]),
 			band("diamond", #{ width: 14 }),
 			column(#{ grow: 1 }, [
@@ -734,6 +780,364 @@ for page in layout("captioned_figure").typeset(#{
 }) {
 	book.bind_page("layouts", page);
 }
+
+// ---- visions: two plates drawn with the brushes ----
+//
+// Pictures rather than samples: the brushes together, as a page of an
+// insane grimoire would use them. Order matters: Smudge, Liquify and Blur
+// work on the ink already down, and the watercolours take up what's under
+// them.
+
+seed(13);
+const NIGHT = "rgba(24, 12, 10, 0.2)";
+const SMOKE = "rgba(43, 29, 18, 0.18)";
+const BLOOD = "#7a1410";
+
+// Brushes for the plates, each with the pressure profile its marks want.
+fn plate_brush(name, low, high, size, profile) {
+	let b = new_brush(name, low, high, size);
+	b.pressure_profile = profile;
+	b
+}
+const SHADOW = new_style(1, NIGHT, plate_brush("Airbrush", 0.3, 0.9, 90, "taper"));
+const HAZE = new_style(1, SMOKE, plate_brush("Airbrush", 0.2, 0.8, 50, "taper"));
+const GLOW = new_style(1, "rgba(155, 35, 24, 0.55)", plate_brush("Airbrush", 0.2, 0.9, 40, "taper"));
+const OUTLINE = new_style(1, INK, plate_brush("Rough Ink", 0.3, 0.9, 5, "taper"));
+const FINE = new_style(1, INK, plate_brush("Ink Pen", 0.2, 0.7, 2.2, "taper"));
+const THORN = new_style(1, INK, plate_brush("Rough Ink", 0.05, 1.0, 6, "ramp"));
+const LASH = new_style(1, INK, plate_brush("Hair", 0.3, 0.9, 7, "taper"));
+const SHADE = new_style(1, "rgba(43, 29, 18, 0.7)", plate_brush("Charcoal", 0.3, 0.8, 5, "constant"));
+const GRAPHITE = new_style(1, "rgba(43, 29, 18, 0.6)", plate_brush("Pencil", 0.3, 0.8, 2.5, "taper"));
+const SIGIL = new_style(1, RED, plate_brush("Calligraphy", 0.5, 0.9, 3.5, "constant"));
+const WASH = new_style(1, "rgba(122, 20, 16, 0.6)", plate_brush("Rough Watercolor", 0.4, 0.9, 7, "taper"));
+const BLEED = new_style(1, "rgba(155, 35, 24, 0.3)", plate_brush("Smooth Watercolor", 0.2, 0.9, 4, "ramp"));
+const SPONGED = new_style(1, "rgba(24, 12, 10, 0.45)", plate_brush("Sponge", 0.2, 0.9, 14, "taper"));
+const SMEAR = new_style(1, INK, plate_brush("Smudge", 0.4, 0.9, 30, "taper"));
+const MELT = new_style(1, INK, plate_brush("Liquify", 0.4, 0.9, 40, "taper"));
+const DREAM = new_style(1, INK, plate_brush("Blur", 0.4, 0.9, 50, "constant"));
+
+// A point on a cubic curve.
+fn bez(p0, p1, p2, p3, t) {
+	let u = 1.0 - t;
+	p0 * (u * u * u) + p1 * (3.0 * u * u * t) + p2 * (3.0 * u * t * t) + p3 * (t * t * t)
+}
+
+// A curl's points: from `from`, heading `angle`, bending more and more
+// (by `bend` per step to start with).
+fn curl_points(from, angle, length, bend, steps) {
+	let points = [from];
+	let at = from;
+	for i in 0..steps {
+		at += new_vec(angle.cos(), angle.sin()) * (length / steps);
+		points.push(at);
+		angle += bend * (1.0 + i / steps);
+	}
+	points
+}
+fn curl(from, angle, length, bend, steps) {
+	through(curl_points(from, angle, length, bend, steps))
+}
+
+// A path through `points`, or through them backwards.
+fn through(points) {
+	let p = new_path().move_to(points[0]);
+	for i in 1..points.len() { p.line_to(points[i]); }
+	p
+}
+fn reversed(points) {
+	let back = points;
+	back.reverse();
+	through(back)
+}
+
+// A wisp of smoke: a wavering line rising from `from`.
+fn wisp(from, height, sway) {
+	let p = new_path().move_to(from);
+	let phase = random() * 6.28;
+	for i in 1..=24 {
+		let t = i / 24.0;
+		p.line_to(from + new_vec(sway * (phase + t * 9.0).sin() * t, -height * t));
+	}
+	p
+}
+
+// An eye at `c`, `r` from the middle to a corner, turned by `turn`,
+// `wide` open: lids, shaded white, a hatched iris with a slit pupil, and
+// lashes like thorns. Small eyes are drawn with finer pens.
+fn eye(c, r, turn, wide) {
+	let e = new_canvas();
+	let small = r < 80;
+	let outline = if small { global::FINE } else { global::OUTLINE };
+	let left = c + new_vec(-r, 0);
+	let right = c + new_vec(r, 0);
+	let up = [left, c + new_vec(-r * 0.45, -r * wide), c + new_vec(r * 0.45, -r * wide), right];
+	let down = [left, c + new_vec(-r * 0.45, r * wide * 0.8), c + new_vec(r * 0.45, r * wide * 0.8), right];
+	let lids = new_path().move_to(left).cubic_to(up[1], up[2], right).cubic_to(down[2], down[1], left).close();
+	if !small {
+		e.add_path(lids.hatch(#{ spacing: r * 0.06, angle: 2.4, roughness: r * 0.01, inset: r * 0.03 }), global::GRAPHITE);
+	}
+	let iris = new_circle(c, r * 0.42);
+	e.add_path(iris.hatch(#{ spacing: if small { 4 } else { r * 0.08 }, angle: [0.7, 2.3], roughness: r * 0.01 }), global::GRAPHITE);
+	let fibres = if small { 12 } else { 36 };
+	for i in 0..fibres {
+		let a = i * 2.0 * PI() / fibres;
+		let d = new_vec(a.cos(), a.sin());
+		e.add_path(new_line(c + d * (r * 0.14), c + d * (r * 0.41)), global::FINE);
+	}
+	e.add_path(iris, outline);
+	let slit = new_path().move_to(c + new_vec(0, -r * 0.36)).quad_to(c + new_vec(r * 0.13, 0), c + new_vec(0, r * 0.36))
+		.quad_to(c + new_vec(-r * 0.13, 0), c + new_vec(0, -r * 0.36)).close();
+	e.add_path(slit.hatch(#{ spacing: if small { 2 } else { r * 0.012 }, angle: [0.3, 1.9] }), global::FINE);
+	e.add_path(slit, outline);
+	e.add_path(lids, outline);
+	// Lashes from the upper lid, drawn tip first so the ramp thickens toward the lid.
+	for i in 1..14 {
+		let t = i / 14.0;
+		let root = bez(up[0], up[1], up[2], up[3], t);
+		let out = (root - c).normalized();
+		e.add_path(curl(root, out.angle(), r * (0.25 + 0.35 * (1.0 - (2.0 * t - 1.0).abs())), (t - 0.5) * 0.25, 10), if small { global::GRAPHITE } else { global::LASH });
+	}
+	e.rotate_around(c, turn)
+}
+
+// A hand of shadow reaching up from `wrist`, its fingers clawed toward
+// `toward` (an angle).
+fn hand(wrist, toward, size) {
+	let h = new_canvas();
+	let dir = new_vec(toward.cos(), toward.sin());
+	let palm = wrist + dir * (size * 0.5);
+	h.add_path(new_line(wrist - dir * (size * 1.6), palm), global::HAZE);
+	h.add_path(new_line(wrist - dir * (size * 1.6), palm), global::THORN);
+	let across = dir.rotated(PI() / 2.0);
+	for f in 0..5 {
+		// The thumb splays out; the fingers reach long and claw inward.
+		let spread = if f == 0 { -0.9 } else { (f - 2.5) * 0.16 };
+		let len = size * [0.8, 1.5, 1.75, 1.6, 1.2][f];
+		let base = palm + across * (size * 0.13 * (f - 2.2)) + dir * (if f == 0 { -size * 0.2 } else { size * 0.1 });
+		let finger = curl_points(base, toward + spread, len, if f == 0 { 0.06 } else { -spread * 0.12 - 0.015 }, 16);
+		// Tip first, so the ramp thickens toward the knuckles.
+		h.add_path(reversed(finger), global::THORN);
+	}
+	h.add_path(new_circle(palm, size * 0.3).hatch(#{ spacing: size * 0.05, angle: [toward, toward + 1.5], roughness: 2 }), global::SHADE);
+	h
+}
+
+// Points on a circle.
+fn ring_point(c, r, a) {
+	c + new_vec(a.cos(), a.sin()) * r
+}
+
+// The first plate: the sleeper's eye, in a seven-pointed circle, weeping
+// blood, with hands of shadow reaching up for it.
+let plate = new_canvas();
+let centre = new_vec(600, 780);
+// Night gathering at the edges.
+for i in 0..26 {
+	let a = i * PI() / 13;
+	let from = ring_point(centre, 760 + random() * 120, a);
+	plate.add_path(curl(from, a + PI() + 0.4, 260 + random() * 160, 0.05, 16), SHADOW);
+}
+for i in 0..14 {
+	plate.add_path(wisp(new_vec(LEFT + random() * 1000, BOTTOM + 40), 300 + random() * 500, 60), HAZE);
+}
+// The circle: rings, a chant in eldritch between them, and a heptagram.
+let r_out = 420;
+let r_in = 360;
+plate.add_path(new_circle(centre, r_out + 18), OUTLINE);
+plate.add_path(new_circle(centre, r_out), SIGIL);
+plate.add_path(new_circle(centre, r_in), SIGIL);
+let chant = "ph nglui mglw nafh cthulhu r lyeh wgah nagl fhtagn ia ia ";
+plate.add_canvas(new_circle(centre, (r_out + r_in) / 2 - 10).fit_text(chant + chant, font("eldritch"), new_style(1, INK, PEN)));
+let star = new_path();
+for i in 0..=7 {
+	let p = ring_point(centre, r_in, -PI() / 2.0 + i * 6.0 * PI() / 7.0);
+	if i == 0 { star.move_to(p); } else { star.line_to(p); }
+}
+plate.add_path(star, SIGIL);
+// The seven archangels' seals between the points, outside the circle.
+for (seal, i) in font("archangel").glyphs("0123456") {
+	seal.scale = 70;
+	seal.position = ring_point(centre, r_out + 75, -PI() / 2.0 + (i + 0.5) * 2.0 * PI() / 7.0);
+	plate.add_glyph(seal, OUTLINE);
+	plate.add_path(new_circle(seal.position, 46), FINE);
+}
+plate.add_canvas(eye(centre, 230, 0.0, 0.62));
+// Tears of blood down to a pool, and a stain where they gather.
+for (dx, i) in [-70, 10, 85] {
+	let from = centre + new_vec(dx, 150 - dx.abs() * 0.4);
+	let fall = new_path().move_to(from);
+	for k in 1..=20 {
+		let t = k / 20.0;
+		fall.line_to(from + new_vec(14 * (t * 11 + i).sin(), 520 * t));
+	}
+	plate.add_path(fall.copy(), BLEED);
+	plate.add_path(fall, new_style(1, BLOOD, plate_brush("Ink Pen", 0.1, 0.9, 3, "ramp")));
+	plate.add_path(new_circle(from + new_vec(0, 535), 14 + i * 3).hatch(4, 0.8, 1), new_style(1, BLOOD, PEN));
+}
+plate.add_path(wave(400, 800, 1335, 10), new_style(1, BLOOD, plate_brush("Rough Ink", 0.2, 0.6, 4, "taper")));
+// Hands reaching up from below.
+plate.add_canvas(hand(new_vec(260, 1430), -PI() / 2.0 + 0.45, 150));
+plate.add_canvas(hand(new_vec(950, 1450), -PI() / 2.0 - 0.4, 170));
+// The dream takes hold: sponged dark at the corners, the ring smeared and
+// warped, the lower edge blurred.
+for i in 0..5 {
+	let a = 0.3 + i * 1.25;
+	plate.add_path(curl(ring_point(centre, r_out - 30, a), a + PI() / 2.0, 160, 0.06, 10), MELT);
+}
+for i in 0..3 {
+	let a = 2.2 + i * 0.5;
+	plate.add_path(new_arc(centre, (r_out + r_in) / 2, a, a + 0.25), SMEAR);
+}
+plate.add_path(new_line(new_vec(LEFT, 1440), new_vec(RIGHT, 1440)), DREAM);
+// The running head and label over the picture.
+plate.add_canvas(sheet("visions"));
+plate.add_canvas(caption("the sleeper's eye: Airbrush, Charcoal, Hair, Pencil, Calligraphy, Watercolor, Smudge, Liquify", TOP));
+book.bind("visions", plate);
+
+// A ridged horn from `root`, curling as `curl_points` does, `width` across
+// at the root and narrowing to a point.
+fn horn(root, angle, length, bend, width) {
+	let h = new_canvas();
+	let spine = curl_points(root, angle, length, bend, 36);
+	let n = spine.len();
+	let left = [];
+	let right = [];
+	for i in 0..n {
+		let t = i / (n - 1.0);
+		let along = (spine[if i + 1 < n { i + 1 } else { i }] - spine[if i > 0 { i - 1 } else { i }]).normalized();
+		let w = width * (1.0 - t) * (1.0 - 0.25 * t) + 1.0;
+		left.push(spine[i] + along.rotated(PI() / 2.0) * w);
+		right.push(spine[i] - along.rotated(PI() / 2.0) * w);
+	}
+	let back = right;
+	back.reverse();
+	let outline = through(left + back).close();
+	h.add_path(outline.hatch(#{ spacing: 7, angle: angle + 1.3, roughness: 1, bow: 1.5, inset: 1 }), global::SHADE);
+	for i in range(2, n - 2, 2) {
+		h.add_path(new_path().move_to(left[i]).quad_to(spine[i] + (spine[i + 1] - spine[i]) * 1.5, right[i]), global::FINE);
+	}
+	h.add_path(outline, global::OUTLINE);
+	h
+}
+
+// The second plate: a horned thing dreaming under a black moon, its body
+// smoke and serpents, falling into a whirlpool of text; eyes everywhere.
+let plate = new_canvas();
+// A bruised sky, and night at the edges.
+for i in 0..3 {
+	plate.add_path(wave(LEFT - 60, RIGHT + 60, TOP + 120 + i * 90, 30 + i * 8), new_style(1, "rgba(122, 20, 16, 0.12)", plate_brush("Rough Watercolor", 0.2, 0.7, 16, "taper")));
+}
+for i in 0..22 {
+	let a = i * PI() / 11;
+	plate.add_path(curl(ring_point(new_vec(600, 800), 780 + random() * 120, a), a + PI() - 0.3, 240 + random() * 160, -0.04, 16), SHADOW);
+}
+// The black moon: sponged dark, haloed, the halo blurred.
+let moon = new_vec(900, 400);
+plate.add_path(new_circle(moon, 125), new_style(1, "rgba(155, 35, 24, 0.22)", plate_brush("Airbrush", 0.3, 0.9, 20, "constant")));
+plate.add_path(new_circle(moon, 85).hatch(#{ spacing: 14, angle: [0.5, 2.1], roughness: 3 }), SPONGED);
+plate.add_path(new_circle(moon, 88), OUTLINE);
+plate.add_path(new_circle(moon, 170), DREAM);
+
+// The body: smoke pouring down from the jaw, and serpents in it.
+let head = new_vec(520, 690);
+for i in 0..18 {
+	let from = head + new_vec(-160 + i * 19, 150 + random() * 60);
+	let fall = new_path().move_to(from);
+	let phase = random() * 6.28;
+	for k in 1..=20 {
+		let t = k / 20.0;
+		fall.line_to(from + new_vec((i - 9) * 22 * t + 40 * (phase + t * 7).sin() * t, 520 * t));
+	}
+	plate.add_path(fall.copy(), HAZE);
+	plate.add_path(fall, LASH);
+}
+for s in [[new_vec(330, 1010), 2.6, new_vec(470, 1300), 3], [new_vec(760, 980), 0.4, new_vec(640, 1280), 8], [new_vec(560, 1160), -0.6, new_vec(400, 1180), 11]] {
+	plate.add_path(art::snake_path(s[0], s[1], s[2], 620, 30, s[3]), OUTLINE);
+}
+
+// The head: horns, a pointed face shaded down one side, three eyes, a
+// grin of teeth.
+plate.add_canvas(horn(head + new_vec(-95, -130), -2.0, 520, -0.065, 46));
+plate.add_canvas(horn(head + new_vec(95, -130), -1.14, 520, 0.065, 46));
+let face = new_path().move_to(head + new_vec(0, -190))
+	.cubic_to(head + new_vec(120, -190), head + new_vec(175, -60), head + new_vec(150, 20))
+	.cubic_to(head + new_vec(130, 120), head + new_vec(60, 200), head + new_vec(0, 250))
+	.cubic_to(head + new_vec(-60, 200), head + new_vec(-130, 120), head + new_vec(-150, 20))
+	.cubic_to(head + new_vec(-175, -60), head + new_vec(-120, -190), head + new_vec(0, -190));
+plate.add_path(face.hatch(#{ spacing: 7, angle: 2.3, roughness: 1.5, inset: 3 }), GRAPHITE);
+let shadow_side = new_path().move_to(head + new_vec(40, -185)).cubic_to(head + new_vec(160, -150), head + new_vec(170, 60), head + new_vec(0, 248))
+	.cubic_to(head + new_vec(90, 120), head + new_vec(110, -40), head + new_vec(40, -185));
+plate.add_path(shadow_side.hatch(#{ spacing: 6, angle: [0.9, 1.6], roughness: 1.5 }), SHADE);
+// Hollow cheeks and a cleft brow.
+for side in [-1, 1] {
+	plate.add_path(new_path().move_to(head + new_vec(side * 120, 10)).quad_to(head + new_vec(side * 70, 60), head + new_vec(side * 95, 140)), THORN);
+	plate.add_path(new_line(head + new_vec(side * 12, 20), head + new_vec(side * 22, 60)), THORN);
+}
+plate.add_path(face, OUTLINE);
+for side in [-1, 1] {
+	let at = head + new_vec(side * 62, -20);
+	plate.add_path(new_line(at - new_vec(25, 0), at + new_vec(25, 0)), GLOW);
+	plate.add_canvas(eye(at, 52, side * 0.35, 0.42));
+	plate.add_path(new_path().move_to(head + new_vec(side * 15, -70)).quad_to(head + new_vec(side * 70, -45), head + new_vec(side * 125, -75)), THORN);
+}
+plate.add_canvas(eye(head + new_vec(0, -125), 34, PI() / 2.0, 0.5));
+// The grin: the dark of the mouth, its edges notched by fangs, which are
+// left bare.
+let corner_l = head + new_vec(-110, 95);
+let corner_r = head + new_vec(110, 95);
+let upper = [corner_l];
+let lower = [];
+for k in 1..12 {
+	let t = k / 12.0;
+	let top = bez(corner_l, head + new_vec(-37, 125), head + new_vec(37, 125), corner_r, t);
+	let bottom = bez(corner_l, head + new_vec(-37, 190), head + new_vec(37, 190), corner_r, t);
+	let fang = 30 - 30 * (2.0 * t - 1.0).abs();
+	upper.push(if k % 2 == 1 { top + new_vec(0, 8 + fang) } else { top });
+	lower.push(if k % 2 == 0 { bottom - new_vec(0, 4 + fang * 0.4) } else { bottom });
+}
+upper.push(corner_r);
+lower.reverse();
+let grin = through(upper + lower).close();
+plate.add_path(grin.hatch(#{ spacing: 3, angle: [1.2, 2.0] }), FINE);
+plate.add_path(grin, OUTLINE);
+
+// Eyes in the dark, watching.
+for e in [[new_vec(190, 400), 0.3, 40], [new_vec(1020, 800), -0.5, 46], [new_vec(170, 920), 0.9, 34], [new_vec(1000, 1150), 0.2, 38], [new_vec(700, 330), -0.2, 26], [new_vec(280, 1250), -0.7, 30]] {
+	plate.add_canvas(eye(e[0], e[2], e[1], 0.55));
+}
+
+// The whirlpool the dreamer falls into: text spiralling in, then warped.
+let pool = new_vec(600, 1330);
+let spiral = new_path().move_to(pool + new_vec(360, 0));
+for i in 1..300 {
+	let a = i * 0.04;
+	let r = 360 - i * 1.05;
+	spiral.line_to(pool + new_vec(r * a.cos(), r * a.sin() * 0.4));
+}
+plate.add_canvas(spiral.fill_with_text(LOREM, PLAIN, 20, new_style(1, RED, PEN))[0]);
+for i in 0..3 {
+	plate.add_path(new_arc(pool, 140 + i * 70, 0.4 + i, 1.4 + i).scale_by(1), MELT);
+}
+
+// Thorns climbing in from the corners, blooming red.
+for b in [[new_vec(LEFT - 20, BOTTOM + 40), -1.2, 3], [new_vec(RIGHT + 20, BOTTOM + 40), -1.94, 6]] {
+	let thorns = art::bramble(b[0], b[1], 520, 40, b[2]);
+	plate.add_path(thorns.vines, OUTLINE);
+	plate.add_path(thorns.leaves, FINE);
+	plate.add_path(thorns.flowers, SIGIL);
+}
+// Spattered ink.
+for i in 0..40 {
+	let at = head + new_vec(random_range(-420, 420), random_range(-480, -180));
+	plate.add_path(new_circle(at, random_range(0.5, 3)), new_style(1, INK, plate_brush("Rough Ink", 0.5, 1.0, 2, "constant")));
+}
+// Smeared from the chin into the smoke.
+for i in 0..3 {
+	plate.add_path(new_line(head + new_vec(-40 + i * 40, 230), head + new_vec(-60 + i * 60, 420)), SMEAR);
+}
+plate.add_canvas(sheet("visions"));
+plate.add_canvas(caption("the horned dreamer: Rough Watercolor, Sponge, Blur, Airbrush, Hair, Charcoal, Liquify", TOP));
+book.bind("visions", plate);
 
 // ---- the title page and the contents, which go first ----
 

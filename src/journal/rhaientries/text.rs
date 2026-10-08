@@ -13,6 +13,10 @@
 //!     avoid: canvas,                // optional: see avoid.rs
 //!     clearance: 6.0,               // how far from it; default: symbol_scale / 8
 //!     spacing: 0.1,                 // extra space between glyphs, in symbol scales (default 0)
+//!     split_words: true,            // "words" only: break words round what's avoided, rather
+//!                                   // than moving them past it whole; or the fewest glyphs
+//!                                   // a piece may have (true is 2)
+//!     split_padding: 0.3,           // pieces keep this much further from it, in symbol scales
 //! });
 //! let res = tb.fill(font.glyphs(msg));   // #{ placed: [..], unplaced: [..] }
 //! let blocks = tb.place_all(glyphs);     // one array per filled box
@@ -51,7 +55,7 @@ use crate::journal::fonts::Font;
 use crate::journal::fonts::FontBook;
 use crate::journal::canvas::textbox::{TextBox as CoreTextBox, TextBoxLineMode, TextBoxOptions};
 use crate::journal::canvas::Canvas as JournalCanvas;
-use crate::journal::symbol::Symbol;
+use crate::journal::symbol::{Symbol, WordSplit};
 use super::avoid::{Avoid, AvoidOption};
 use super::options::{check_keys, number, positive, range};
 
@@ -69,7 +73,7 @@ pub struct TextBox {
     spacing: f32,
 }
 
-const TEXTBOX_KEYS: [&str; 9] = ["center", "width", "height", "symbol_scale", "layout", "jagged_edge", "avoid", "clearance", "spacing"];
+const TEXTBOX_KEYS: [&str; 11] = ["center", "width", "height", "symbol_scale", "layout", "jagged_edge", "avoid", "clearance", "spacing", "split_words", "split_padding"];
 
 /// The `spacing` option: extra space between glyphs, as a fraction of the
 /// symbol scale. Negative tightens, down to glyphs touching their
@@ -83,12 +87,38 @@ pub(super) fn spacing(caller: &str, options: &Map) -> RhaiResult<f32> {
 }
 
 /// The `layout` option: "flat" (the default) places glyph by glyph, and
-/// "words" keeps words together, wrapping at blanks.
+/// "words" keeps words together, wrapping at blanks, unless `split_words`
+/// lets them break round what they avoid (see `word_split`).
 pub(super) fn line_mode(caller: &str, options: &Map) -> RhaiResult<TextBoxLineMode> {
+    let split = word_split(caller, options)?;
     match options.get("layout").map(|l| l.to_string()).as_deref() {
+        None | Some("flat") if split.is_some() => Err(format!("{}: 'split_words' needs layout: \"words\" (flat text is placed glyph by glyph already)", caller).into()),
         None | Some("flat") => Ok(TextBoxLineMode::Flat),
-        Some("words") => Ok(TextBoxLineMode::WordsByBlankSymbol),
+        Some("words") => Ok(TextBoxLineMode::WordsByBlankSymbol(split)),
         Some(other) => Err(format!("{}: unknown layout '{}'; expected \"flat\" or \"words\"", caller, other).into()),
+    }
+}
+
+/// The `split_words` and `split_padding` options: whether words may break
+/// round what they avoid, rather than moving past it whole (`true`, or
+/// the fewest glyphs a piece may have: `true` is 2), and how much further
+/// the pieces keep from it than the clearance, in symbol scales (default
+/// 0).
+pub(super) fn word_split(caller: &str, options: &Map) -> RhaiResult<Option<WordSplit>> {
+    let min_piece = match options.get("split_words") {
+        None => None,
+        Some(v) if v.is_bool() => v.as_bool().expect("a bool").then_some(2),
+        Some(v) => match v.as_int() {
+            Ok(n) if n >= 1 => Some(n as usize),
+            _ => return Err(format!("{}: 'split_words' should be true, false, or the fewest glyphs a piece may have (at least 1), got {}", caller, v).into()),
+        },
+    };
+    let padding = number(caller, options, "split_padding")?;
+    match (min_piece, padding) {
+        (None, Some(_)) => Err(format!("{}: 'split_padding' needs 'split_words'", caller).into()),
+        (None, None) => Ok(None),
+        (Some(_), Some(p)) if !(p >= 0.0 && p.is_finite()) => Err(format!("{}: 'split_padding' must be a finite number of at least 0, got {}", caller, p).into()),
+        (Some(min_piece), padding) => Ok(Some(WordSplit { min_piece, padding: padding.unwrap_or(0.0) })),
     }
 }
 
@@ -319,6 +349,34 @@ mod tests {
         assert!(counts[1] < counts[0], "{:?}", counts);
     }
 
+    #[test]
+    fn split_words_break_round_what_they_avoid() {
+        let xs: rhai::Array = eval(r#"
+            fn last_before(glyphs, x) {
+                let m = -1000.0;
+                for g in glyphs { if g.position.x < x && g.position.x > m { m = g.position.x; } }
+                m
+            }
+            let bar = new_line(new_vec(-150.0, -100.0), new_vec(-150.0, 100.0));
+            let opts = #{ center: new_vec(0.0, 0.0), width: 400, height: 10, symbol_scale: 10.0, layout: "words", avoid: bar, clearance: 2.0 };
+            let whole = new_textbox(opts).fill(font.glyphs("abcdefghijklmnop")).placed;
+            opts.split_words = true;
+            let split = new_textbox(opts).fill(font.glyphs("abcdefghijklmnop")).placed;
+            opts.split_padding = 1.0;
+            let padded = new_textbox(opts).fill(font.glyphs("abcdefghijklmnop")).placed;
+            opts.split_words = 8;   // the piece before the bar would be too short
+            let long_pieces = new_textbox(opts).fill(font.glyphs("abcdefghijklmnop")).placed;
+            [whole[0].position.x, split[0].position.x, last_before(split, -150.0), last_before(padded, -150.0),
+             long_pieces[0].position.x, split.len(), padded.len()]
+        "#);
+        let xs: Vec<f64> = xs.into_iter().map(|x| x.as_float().unwrap_or_else(|_| x.as_int().unwrap() as f64)).collect();
+        assert!(xs[0] > -150.0, "a whole word moves past the bar: {:?}", xs);
+        assert!(xs[1] < -150.0, "a split one starts before it: {:?}", xs);
+        assert!(xs[3] < xs[2], "padding keeps the first piece further from it: {:?}", xs);
+        assert!(xs[4] > -150.0, "pieces too short to split: {:?}", xs);
+        assert!(xs[5] == 16.0 && xs[6] == 16.0, "every glyph placed: {:?}", xs);
+    }
+
     const SPLAT_SETUP: &str = r#"
         let style = new_style(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
         let base = new_canvas();
@@ -417,6 +475,10 @@ mod tests {
             (format!("#{{ center: {}, width: 10, height: 10, symbol_scale: 2, layout: \"zigzag\" }}", c), "unknown layout 'zigzag'"),
             (format!("#{{ center: {}, width: 10, height: 10, symbol_scale: 2, clearance: 3 }}", c), "'clearance' needs 'avoid'"),
             (format!("#{{ center: {}, width: 10, height: 10, symbol_scale: 2, avoid: new_canvas(), clearance: -3 }}", c), "'clearance' must be a finite number"),
+            (format!("#{{ center: {}, width: 10, height: 10, symbol_scale: 2, split_words: true }}", c), "'split_words' needs layout: \"words\""),
+            (format!("#{{ center: {}, width: 10, height: 10, symbol_scale: 2, layout: \"words\", split_padding: 1 }}", c), "'split_padding' needs 'split_words'"),
+            (format!("#{{ center: {}, width: 10, height: 10, symbol_scale: 2, layout: \"words\", split_words: 0 }}", c), "'split_words' should be true, false"),
+            (format!("#{{ center: {}, width: 10, height: 10, symbol_scale: 2, layout: \"words\", split_words: true, split_padding: -1 }}", c), "'split_padding' must be a finite number"),
         ] {
             let err = fails(&format!("let ok = 1;\nnew_textbox({});", opts));
             assert!(err.contains(want) && err.contains("line 2"), "{}: {}", want, err);

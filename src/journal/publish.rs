@@ -1,5 +1,6 @@
 //! Writing an entry's pages out: Darkly renders (an image per canvas, an
-//! image per page, or one PDF of the pages) and SVG renders.
+//! image per page, or one PDF of the pages) and SVG renders. Each shows its
+//! progress, page by page, on the terminal (see `Progress`).
 
 use ::darkly::engine::DarklyEngine;
 use image::RgbaImage;
@@ -9,6 +10,7 @@ use super::canvas::StrokeColor;
 use super::compose::{self, Placed};
 use super::darkly;
 use super::pdf::PdfWriter;
+use super::progress::Progress;
 use super::rhaientries::{Entry, Page};
 use super::stable_hash;
 
@@ -38,16 +40,24 @@ fn write_error(path: &str, e: impl std::fmt::Display) -> String {
     format!("couldn't write {}: {}", path, e)
 }
 
+/// Progress through the pages that will be written.
+fn pages_progress(entry: &Entry, what: &str, only: Option<&[usize]>) -> Progress {
+    Progress::new(what, entry.selected_pages(only).count())
+}
+
 /// A Darkly render of each canvas, `darkly_{page}_{canvas}.png`, of every
 /// page or those in `only`. Empty canvases are skipped (journalbuild warns
 /// about them).
 pub fn canvas_images(entry: &Entry, engine: &mut DarklyEngine, dir: &str, render: &Render, only: Option<&[usize]>) -> Result<(), String> {
+    let mut progress = pages_progress(entry, "Rendering", only);
     for (i, page) in entry.selected_pages(only) {
         for (label, canvas) in page.rendered_canvases() {
+            progress.start(&format!("{} {}", page.label(i), label));
             let filename = format!("{}/darkly_{}_{}.png", dir, page.label(i), label);
             darkly::render(&canvas, engine, render.scale, render.supersample)
                 .save(&filename).map_err(|e| write_error(&filename, e))?;
         }
+        progress.step();
     }
     Ok(())
 }
@@ -55,12 +65,15 @@ pub fn canvas_images(entry: &Entry, engine: &mut DarklyEngine, dir: &str, render
 /// A Darkly render of each page, its canvases layered into one image (see
 /// `page_image`), `darkly_{page}.png`.
 pub fn page_images(entry: &Entry, engine: &mut DarklyEngine, dir: &str, render: &Render, only: Option<&[usize]>) -> Result<(), String> {
+    let mut progress = pages_progress(entry, "Rendering", only);
     for (i, page) in entry.selected_pages(only) {
         let label = page.label(i);
+        progress.start(&label);
         if let Some(image) = page_image(page, &label, engine, render) {
             let filename = format!("{}/darkly_{}.png", dir, label);
             image.save(&filename).map_err(|e| write_error(&filename, e))?;
         }
+        progress.step();
     }
     Ok(())
 }
@@ -71,8 +84,12 @@ pub fn page_images(entry: &Entry, engine: &mut DarklyEngine, dir: &str, render: 
 pub fn pdf(entry: &Entry, engine: &mut DarklyEngine, path: &str, title: &str, render: &Render, only: Option<&[usize]>) -> Result<(), String> {
     let mut pdf = PdfWriter::create(path).map_err(|e| write_error(path, e))?;
     let points = 72.0 / UNITS_PER_INCH / render.scale;
+    let mut progress = pages_progress(entry, "Rendering", only);
     for (i, page) in entry.selected_pages(only) {
-        if let Some(image) = page_image(page, &page.label(i), engine, render) {
+        progress.start(&page.label(i));
+        let image = page_image(page, &page.label(i), engine, render);
+        progress.step();
+        if let Some(image) = image {
             pdf.add_page(&image, image.width() as f32 * points, image.height() as f32 * points)
                 .map_err(|e| write_error(path, e))?;
         }
@@ -130,8 +147,9 @@ pub fn page_image(page: &Page, label: &str, engine: &mut DarklyEngine, render: &
 /// style's width is the stroke's geometric width; in Darkly it scales the
 /// brush's pressure instead (see `new_style`).
 pub fn svgs(entry: &Entry, dir: &str, scale: f32, only: Option<&[usize]>) -> Result<(), String> {
-    println!("Publishing SVGs:");
+    let mut progress = pages_progress(entry, "SVGs", only);
     for (i, page) in entry.selected_pages(only) {
+        progress.start(&page.label(i));
         for (label, canvas) in page.rendered_canvases() {
             let name = format!("{}_{}", page.label(i), label);
             let (svg_file, png_file) = (format!("{}/{}.svg", dir, name), format!("{}/{}.png", dir, name));
@@ -139,10 +157,10 @@ pub fn svgs(entry: &Entry, dir: &str, scale: f32, only: Option<&[usize]>) -> Res
             // roughened differently. Tiles use the whole page's.
             let seed = canvas.frame().filter(|frame| frame.is_tile()).map_or_else(|| stable_hash(&name), |frame| frame.svg_seed);
             let (svg, png) = canvas.to_svg_and_png(2.0 * scale, page.svg_style(), seed);
-            println!("\t - {}", svg_file);
             std::fs::write(&svg_file, svg).map_err(|e| write_error(&svg_file, e))?;
             std::fs::write(&png_file, png).map_err(|e| write_error(&png_file, e))?;
         }
+        progress.step();
     }
     Ok(())
 }

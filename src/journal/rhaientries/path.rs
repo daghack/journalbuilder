@@ -50,22 +50,23 @@ use crate::journal::fonts::FontBook;
 pub(super) type TextSource = (Rc<FontBook>, random::SharedRng);
 
 /// Options for text along a path.
-const PATH_TEXT_KEYS: [&str; 4] = ["spacing", "avoid", "clearance", "layout"];
+const PATH_TEXT_KEYS: [&str; 6] = ["spacing", "avoid", "clearance", "layout", "split_words", "split_padding"];
 
 /// Text along a path: glyph by glyph, or keeping words together on a
 /// subpath ("words" layout).
 fn place_text(symbols: Vec<Symbol>, path: &StrokePath, args: &SymbolPlacementArgs, mode: &TextBoxLineMode) -> (Vec<Symbol>, Vec<Symbol>) {
     match mode {
         TextBoxLineMode::Flat => place_along_path(symbols, path, args),
-        TextBoxLineMode::WordsByBlankSymbol => place_words_along_path(symbols, path, args),
+        TextBoxLineMode::WordsByBlankSymbol(split) => place_words_along_path(symbols, path, args, *split),
     }
 }
 
-/// `path.fill_with_text(text, font, size, style[, #{ spacing, avoid, clearance, layout }])`:
+/// `path.fill_with_text(text, font, size, style[, #{ spacing, avoid, clearance, layout, split_words, split_padding }])`:
 /// the text along as many copies of the path as it takes, one canvas per
 /// copy. Glyphs sit at their widths, plus `spacing` (a fraction of the font
 /// size), and keep clear of `avoid` (see avoid.rs). With `layout: "words"`,
-/// words aren't split around what's avoided or between subpaths.
+/// words aren't split between subpaths, nor around what's avoided unless
+/// `split_words` lets them be (see `text::word_split`).
 fn fill_with_text(path: &mut Path, msg: &str, font: Font, fontsize: Dynamic, style: StrokeStyle, options: Map, (symdict, rng): &TextSource) -> RhaiResult<Vec<Dynamic>> {
     let fontsize = float("fill_with_text", "the font size", &fontsize)?;
     check_keys("fill_with_text", &options, &PATH_TEXT_KEYS)?;
@@ -106,7 +107,7 @@ fn fill_with_text(path: &mut Path, msg: &str, font: Font, fontsize: Dynamic, sty
     Ok(all_canvases)
 }
 
-/// `path.fit_text(text, font, style[, #{ spacing, avoid, clearance, layout }])`:
+/// `path.fit_text(text, font, style[, #{ spacing, avoid, clearance, layout, split_words, split_padding }])`:
 /// the text along the path at the largest font size that fits it.
 fn fit_text(path: &mut Path, msg: &str, font: Font, style: StrokeStyle, options: Map, (symdict, rng): &TextSource) -> RhaiResult<Canvas> {
     check_keys("fit_text", &options, &PATH_TEXT_KEYS)?;

@@ -1,5 +1,7 @@
 use scribe::journal::rhaientries::{JournalEngine, LockLibrary, DEFAULT_LAYOUTS_DIR, DEFAULT_LOCKS_DIR};
 use scribe::journal::{fonts, darkly, publish};
+use scribe::journal::progress::{clock, Progress};
+use std::cell::RefCell;
 
 use std::rc::Rc;
 
@@ -188,6 +190,7 @@ fn main() {
 }
 
 fn run(args: &Args) -> Result<(), String> {
+    let started = std::time::Instant::now();
     let symd = fonts::FontBook::from_file(&args.font_file)
         .map_err(|err| format!("couldn't load the font file {}: {}", args.font_file, err))?;
     let symd = Rc::new(symd);
@@ -197,7 +200,17 @@ fn run(args: &Args) -> Result<(), String> {
     let output_dir = args.output_dir.clone()
         .unwrap_or_else(|| format!("{}/{}/output", args.journals_dir, journal_name));
     let mut engine = JournalEngine::with_dirs(symd.clone(), &args.locks_dir, &args.layouts_dir);
-    let entry = engine.build_entry_file(&journal_path)?;
+    // A spinner while the script runs, which can take a while.
+    let running = Rc::new(RefCell::new(Progress::new(&format!("Running {}", journal_name), 0)));
+    let spinner = running.clone();
+    engine.on_progress(move |ops| {
+        if ops % 256 == 0 {
+            spinner.borrow_mut().tick("");
+        }
+    });
+    let entry = engine.build_entry_file(&journal_path);
+    running.borrow_mut().finish();
+    let entry = entry?;
     check_missing_glyphs(&symd, args.strict_glyphs)?;
     if entry.page_count() == 0 {
         return Err(format!("{} produced no pages; add them with journal_entry.add_page(page)", journal_path));
@@ -234,6 +247,8 @@ fn run(args: &Args) -> Result<(), String> {
     } else {
         publish::canvas_images(&entry, &mut darkly_engine, &output_dir, &render, only)?;
     }
+    let count = only.map_or(entry.page_count(), |pages| pages.len());
+    eprintln!("Rendered {} page{} of {} to {} in {}", count, if count == 1 { "" } else { "s" }, journal_name, output_dir, clock(started.elapsed()));
     Ok(())
 }
 

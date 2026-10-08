@@ -8,6 +8,7 @@ pub mod symbol;
 pub mod parchment;
 pub mod paths;
 pub mod pdf;
+pub mod progress;
 pub mod publish;
 pub mod hatch;
 pub mod typeset;

@@ -212,6 +212,17 @@ impl SymbolPlacementArgs<'_> {
     }
 }
 
+/// Breaking words round what text avoids: a word that something blocks
+/// partway goes on in pieces either side of it, instead of moving past it
+/// whole. Each piece is at least `min_piece` glyphs, and keeps `padding`
+/// (a fraction of the symbol scale) further from what it's split round
+/// than the clearance.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WordSplit {
+    pub min_piece: usize,
+    pub padding: f32,
+}
+
 /// Samples per curve when measuring a path to place glyphs along it.
 const SAMPLES_PER_CURVE: usize = 20;
 /// When a glyph is blocked, how far on to try next, as a fraction of the
@@ -278,26 +289,26 @@ impl<'a> Placer<'a> {
     }
 
     /// Whether a glyph placed starting `start` along the current walk hits
-    /// anything.
-    fn blocked(&self, placed: &Symbol, start: f32) -> bool {
+    /// anything, keeping `pad` further than the padding from what's avoided.
+    fn blocked(&self, placed: &Symbol, start: f32, pad: f32) -> bool {
         if placed.is_blank() {
             return false;
         }
         let footprint = placed.footprint();
         let at = self.offset + start;
-        self.args.avoid.is_some_and(|tree| tree.blocks(&footprint, self.args.padding))
+        self.args.avoid.is_some_and(|tree| tree.blocks(&footprint, self.args.padding + pad))
             || self.placed.blocks(&footprint, 0.0)
             || self.recent.iter().any(|(other, end)| at - end > self.args.symbol_scale && shapes_within(&footprint, other, 0.0))
     }
 
     /// `run` glyph after glyph from `start`: `Some(Err(()))` if one is
     /// blocked, `None` if they run off the end.
-    fn try_run(&self, walk: &Walk, start: f32, run: &[Symbol]) -> Option<Result<Run, ()>> {
+    fn try_run(&self, walk: &Walk, start: f32, run: &[Symbol], pad: f32) -> Option<Result<Run, ()>> {
         let (mut placed, mut spans) = (Vec::new(), Vec::new());
         let mut at = start;
         for symbol in run {
             let glyph = self.spot(walk, at, symbol)?;
-            if self.blocked(&glyph, at) {
+            if self.blocked(&glyph, at, pad) {
                 return Some(Err(()));
             }
             let end = at + self.width(symbol);
@@ -310,19 +321,19 @@ impl<'a> Placer<'a> {
 
     /// `run` placed glyph after glyph from the first spot at or after
     /// `from` where it's all clear, or `None` if it runs off the end first.
-    fn fit_run(&self, walk: &Walk, from: f32, run: &[Symbol]) -> Option<Run> {
+    fn fit_run(&self, walk: &Walk, from: f32, run: &[Symbol], pad: f32) -> Option<Run> {
         let step = (self.args.symbol_scale * SEARCH_STEP).max(1e-3);
         let mut start = from;
         let mut blocked_at = None;
         loop {
-            match self.try_run(walk, start, run)? {
+            match self.try_run(walk, start, run, pad)? {
                 Ok(found) => {
                     let Some(mut low) = blocked_at else { return Some(found) };
                     // Close in on where the obstacle ends.
                     let (mut high, mut best) = (start, found);
                     for _ in 0..REFINE_STEPS {
                         let mid = (low + high) / 2.0;
-                        match self.try_run(walk, mid, run) {
+                        match self.try_run(walk, mid, run, pad) {
                             Some(Ok(closer)) => (high, best) = (mid, closer),
                             _ => low = mid,
                         }
@@ -335,6 +346,39 @@ impl<'a> Placer<'a> {
                 }
             }
         }
+    }
+
+    /// `word` from the first spot at or after `from` where it's clear, as
+    /// `fit_run`; with `split`, a word that something blocks partway is
+    /// broken round it rather than moved past it, if it can be.
+    fn fit_word(&self, walk: &Walk, from: f32, word: &[Symbol], split: Option<WordSplit>, pad: f32) -> Option<Run> {
+        let whole = self.fit_run(walk, from, word, pad)?;
+        match split {
+            Some(split) if whole.1[0].0 > from + 1e-3 => Some(self.split_word(walk, from, word, split).unwrap_or(whole)),
+            _ => Some(whole),
+        }
+    }
+
+    /// `word` in pieces: the longest first piece that fits from `from`,
+    /// and the rest past what stops it (broken again if need be), all
+    /// `split.padding` further from what they avoid. `None` if no first
+    /// piece fits, or the rest runs off the end.
+    fn split_word(&self, walk: &Walk, from: f32, word: &[Symbol], split: WordSplit) -> Option<Run> {
+        let min = split.min_piece.max(1);
+        let pad = split.padding * self.args.symbol_scale;
+        let n = word.len();
+        if n < 2 * min {
+            return None;
+        }
+        for k in (min..=n - min).rev() {
+            let Some(Ok((mut glyphs, mut spans))) = self.try_run(walk, from, &word[..k], pad) else { continue };
+            let rest_from = spans.last().expect("a piece has glyphs").1 + self.gap();
+            let (rest, rest_spans) = self.fit_word(walk, rest_from, &word[k..], Some(split), pad)?;
+            glyphs.extend(rest);
+            spans.extend(rest_spans);
+            return Some((glyphs, spans));
+        }
+        None
     }
 
     /// Keep a glyph placed from `start` to `end` along the current walk.
@@ -372,7 +416,7 @@ pub fn place_along_path(mut symbols: Vec<Symbol>, path: &StrokePath, args: &Symb
         let walk = Walk::new(&substroke, SAMPLES_PER_CURVE);
         let mut cursor = 0.0;
         while next < symbols.len() {
-            let Some((mut placed, spans)) = placer.fit_run(&walk, cursor, &symbols[next..=next]) else { break };
+            let Some((mut placed, spans)) = placer.fit_run(&walk, cursor, &symbols[next..=next], 0.0) else { break };
             let ((start, end), glyph) = (spans[0], placed.pop().expect("one glyph"));
             placer.commit(&glyph, start, end);
             symbols[next] = glyph;
@@ -387,8 +431,9 @@ pub fn place_along_path(mut symbols: Vec<Symbol>, path: &StrokePath, args: &Symb
 
 /// Like `place_along_path`, but word by word: a word (the glyphs up to a
 /// blank, which goes with it) is kept together on one subpath, the subpaths
-/// being lines. A word longer than a whole line is split over lines.
-pub fn place_words_along_path(symbols: Vec<Symbol>, path: &StrokePath, args: &SymbolPlacementArgs) -> (Vec<Symbol>, Vec<Symbol>) {
+/// being lines. A word longer than a whole line is split over lines, and
+/// with `split`, a word is broken round what it avoids (see `WordSplit`).
+pub fn place_words_along_path(symbols: Vec<Symbol>, path: &StrokePath, args: &SymbolPlacementArgs, split: Option<WordSplit>) -> (Vec<Symbol>, Vec<Symbol>) {
     let mut words: VecDeque<Vec<Symbol>> = VecDeque::new();
     let mut word = Vec::new();
     for symbol in symbols {
@@ -415,7 +460,7 @@ pub fn place_words_along_path(symbols: Vec<Symbol>, path: &StrokePath, args: &Sy
             // Blanks after the word go wherever the word ends, even past
             // the end of the line.
             let letters = word.len() - word.iter().rev().take_while(|s| s.is_blank()).count();
-            let fitted = if letters == 0 { Some((Vec::new(), Vec::new())) } else { placer.fit_run(&walk, cursor, &word[..letters]) };
+            let fitted = if letters == 0 { Some((Vec::new(), Vec::new())) } else { placer.fit_word(&walk, cursor, &word[..letters], split, 0.0) };
             match fitted {
                 Some((glyphs, spans)) => {
                     for (glyph, (start, end)) in glyphs.iter().zip(&spans) {
@@ -439,7 +484,7 @@ pub fn place_words_along_path(symbols: Vec<Symbol>, path: &StrokePath, args: &Sy
                         // the rest on the next.
                         let mut fitted = 0;
                         while fitted < letters {
-                            let Some((mut glyphs, spans)) = placer.fit_run(&walk, cursor, &word[fitted..=fitted]) else { break };
+                            let Some((mut glyphs, spans)) = placer.fit_run(&walk, cursor, &word[fitted..=fitted], 0.0) else { break };
                             let ((start, end), glyph) = (spans[0], glyphs.pop().expect("one glyph"));
                             placer.commit(&glyph, start, end);
                             placed.push(glyph);
