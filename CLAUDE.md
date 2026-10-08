@@ -16,17 +16,23 @@ the same change:
   engine): add a labelled example on the page it belongs to, or a new page
   if nothing fits. New options deserve an example too, even though the
   test below can't see them.
-- **A font or symbol set** (glyphs added to `config/symbols.json`): add it
-  to the fonts page with its alphabet and a sentence. The glyphs page draws
-  every glyph by itself.
+- **A font or symbol set** (a font added to `config/fonts.json`): add it
+  to the fonts pages with its alphabet and a line. The glyphs pages draw
+  every glyph of every font by themselves.
 - **A brush**: the pens page draws every `brush_names()` entry by itself;
   add examples only for new brush settings.
 - **A lock type** (`locks/*.rhai`): add a row to the locks page.
 - **A new kind of page or output** (layouts, splitting, ...): show it on
   its own page, and update the page list at the top of the showcase.
 
-`tests/showcase.rs` fails when a function scripts can call, a font (a
-glyph family of 20 or more), or a lock type isn't in the showcase. Don't
+The showcase is a sample book: every page is `W` x `H`, drawn on a
+`sheet(section)` (running head) and bound with `book.bind(section,
+canvas)` (folio, name, contents entry); typeset pages go in with
+`book.bind_page`. When a page fills up, bind it and start another sheet;
+the contents follow.
+
+`tests/showcase.rs` fails when a function scripts can call, a font (of
+20 glyphs or more), or a lock type isn't in the showcase. Don't
 silence it by adding to its `NOT_SHOWN` list unless the function truly
 isn't a capability (printing, auto-generated fields).
 
@@ -37,12 +43,9 @@ glyph, and look at the pages you changed:
 ./target/release/journalbuild showcase --strict-glyphs --output-dir /tmp/showcase
 ```
 
-Conventions there: labels and body text are in plain (`label_font`),
-which has capitals, digits and punctuation, and headings in loche
-(`heading_font`); strokes are light colours, since transparent renders
-are viewed on a dark background, but dark on paper (`--background`),
-which the palette at the top switches on `background()` (journals that
-don't call it get light inks darkened on paper automatically); sections are
+Conventions there: labels and body text are in plain (`PLAIN`), which
+has capitals, digits and punctuation, and headings in loche (`LOCHE`);
+inks are red and near-black; text blocks are lorem ipsum; sections are
 labelled with the calls they show.
 
 ## Checking changes

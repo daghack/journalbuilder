@@ -1,9 +1,20 @@
 //! Fonts and glyphs for rhai scripts.
 //!
+//! Fonts come from the font file (`config/fonts.json`, see fonts.rs), each
+//! with its glyphs and the settings text is set with. A font is a value:
+//! changing one changes that copy, not the font everywhere.
+//!
 //! ```rhai
-//! let copper = new_fontset(["copper_upper"], ["copper_lower"]);
+//! let copper = font("copper");                  // as the font file sets it
+//! copper.character_padding = 0.08;              // room between glyphs, in font sizes
+//! copper.space_width = 0.4;                     // a space's width, in font sizes
+//! copper.fallback = font("loche_upper");        // where missing characters are looked for; () for nowhere
+//! let tight = font("loche_lower", #{ character_padding: 0.0 });   // settings as options
 //! let ternary = ternary_font("balanced_ternary");   // a..m -> 1..13, n..z -> -13..-1
-//! let loche = lowercase_font("loche_upper");
+//! font_names();                                 // every font, sorted
+//! copper.name;
+//! copper.characters();                          // the characters it has glyphs for
+//! copper.variants("a");                         // every variant of a glyph
 //!
 //! // Glyphs sit at the origin with scale 1 until moved. A glyph's path spans
 //! // -1..1, drawn at half its scale, so scale is its size in canvas units.
@@ -13,8 +24,8 @@
 //!     g.rotate_by(0.1);
 //!     canvas.add_glyph(g, style);
 //! }
-//! canvas.add_glyph(glyph("basic_eye").scale_by(50.0), style);
-//! glyph_names("archangel_");    // every glyph whose name starts so, sorted
+//! canvas.add_glyph(font("symbols").glyph("basic_eye").scale_by(50.0), style);
+//! ternary.glyph(-13);                           // a glyph by its name (or number)
 //!
 //! // Glyphs, like paths and canvases, are shared: every copy of one (a
 //! // variable, an array element, a loop variable) is the same glyph, so
@@ -25,17 +36,18 @@
 //! canvas.add_glyphs(word, style);   // adds copies of the glyphs' strokes
 //! ```
 //!
-//! Variant picks come from the engine's seeded generator.
+//! A character is looked for as it is in the font and its fallbacks, then in
+//! the other case; variant picks come from the engine's seeded generator.
 
-use rhai::{Array, Dynamic, Engine};
+use rhai::{Array, Dynamic, Engine, EvalAltResult, Map};
 use std::rc::Rc;
 
-use super::options::float;
+use super::options::{check_keys, float};
 use super::random::SharedRng;
 use super::{Canvas, CanvasData, Path, Shared, StrokeStyle, Vec2};
-use crate::journal::fonts::{Font, FontSet};
+use crate::journal::fonts::{Font, Mapping};
 use crate::journal::symbol::Symbol;
-use crate::journal::symboldict::SymbolPathDict;
+use crate::journal::fonts::FontBook;
 
 use super::RhaiResult;
 
@@ -97,60 +109,120 @@ pub(super) fn glyph_array(caller: &str, glyphs: Array) -> RhaiResult<Vec<Glyph>>
     }).collect()
 }
 
-fn font_names(caller: &str, names: Array) -> RhaiResult<Vec<String>> {
-    names.into_iter().map(|name| {
-        name.into_immutable_string()
-            .map(|s| s.to_string())
-            .map_err(|type_name| format!("{}: font names must be strings, got {}", caller, type_name).into())
-    }).collect()
+/// A font from the book, by name.
+fn named(book: &FontBook, caller: &str, name: &str) -> RhaiResult<Font> {
+    book.font(name).ok_or_else(|| format!("{}: no font named '{}'; fonts: {}", caller, name, book.names().join(", ")).into())
 }
 
-/// `font`, if the dictionary has glyphs for every font it names.
-fn checked(symdict: &SymbolPathDict, caller: &str, font: Font) -> RhaiResult<Font> {
-    for prefix in font.prefixes() {
-        if symdict.symbols_with_prefix(&format!("{}_", prefix)).is_empty() {
-            return Err(format!("{}: no glyphs named '{}_*'", caller, prefix).into());
-        }
+/// A font, or a font's name, as `fallback` takes; `()` for none.
+fn fallback_font(book: &FontBook, caller: &str, value: Dynamic) -> RhaiResult<Option<Box<Font>>> {
+    if value.is_unit() {
+        return Ok(None);
     }
-    Ok(font)
+    if value.is::<Font>() {
+        return Ok(Some(Box::new(value.cast::<Font>())));
+    }
+    let type_name = value.type_name();
+    let name = value.into_immutable_string()
+        .map_err(|_| -> Box<EvalAltResult> { format!("{}: a fallback is a font, a font's name or (), got {}", caller, type_name).into() })?;
+    Ok(Some(Box::new(named(book, caller, &name)?)))
 }
 
-pub fn register(engine: &mut Engine, symdict: Rc<SymbolPathDict>, rng: SharedRng) {
+fn set_padding(font: &mut Font, caller: &str, value: &Dynamic) -> RhaiResult<()> {
+    let padding = float(caller, "character_padding", value)?;
+    if padding < 0.0 {
+        return Err(format!("{}: character_padding can't be negative, got {}", caller, padding).into());
+    }
+    font.character_padding = padding as f32;
+    Ok(())
+}
+
+fn set_space(font: &mut Font, caller: &str, value: &Dynamic) -> RhaiResult<()> {
+    let width = float(caller, "space_width", value)?;
+    if !(width > 0.0) {
+        return Err(format!("{}: space_width must be positive, got {}", caller, width).into());
+    }
+    font.space_width = width as f32;
+    Ok(())
+}
+
+/// A setting as scripts read it: by way of its shortest decimal form, so
+/// 0.3 reads back as 0.3 rather than 0.30000001192092896.
+fn setting(value: f32) -> Dynamic {
+    Dynamic::from(value.to_string().parse::<f64>().expect("a float's string form parses"))
+}
+
+/// A glyph's name, from a string or a number (as `ternary.glyph(-13)`).
+fn glyph_key(key: &Dynamic) -> String {
+    key.to_string()
+}
+
+pub fn register(engine: &mut Engine, symdict: Rc<FontBook>, rng: SharedRng) {
     engine.register_type_with_name::<Font>("Font");
     register_glyph(engine);
 
-    let sd = symdict.clone();
-    engine.register_fn("new_fontset", move |upper: Array, lower: Array| -> RhaiResult<Font> {
-        let set = FontSet::new(font_names("new_fontset", upper)?, font_names("new_fontset", lower)?);
-        checked(&sd, "new_fontset", Font::Set(set))
+    let book = symdict;
+    let b = book.clone();
+    engine.register_fn("font", move |name: &str| named(&b, "font", name));
+    let b = book.clone();
+    engine.register_fn("font", move |name: &str, options: Map| -> RhaiResult<Font> {
+        const CALLER: &str = "font";
+        check_keys(CALLER, &options, &["character_padding", "space_width", "fallback"])?;
+        let mut font = named(&b, CALLER, name)?;
+        if let Some(value) = options.get("character_padding") {
+            set_padding(&mut font, CALLER, value)?;
+        }
+        if let Some(value) = options.get("space_width") {
+            set_space(&mut font, CALLER, value)?;
+        }
+        if let Some(value) = options.get("fallback") {
+            font.fallback = fallback_font(&b, CALLER, value.clone())?;
+        }
+        Ok(font)
     });
-    let sd = symdict.clone();
-    engine.register_fn("ternary_font", move |prefix: &str| -> RhaiResult<Font> {
-        checked(&sd, "ternary_font", Font::Ternary(prefix.to_string()))
+    let b = book.clone();
+    engine.register_fn("ternary_font", move |name: &str| -> RhaiResult<Font> {
+        let mut font = named(&b, "ternary_font", name)?;
+        font.mapping = Mapping::BalancedTernary;
+        Ok(font)
     });
-    let sd = symdict.clone();
-    engine.register_fn("lowercase_font", move |prefix: &str| -> RhaiResult<Font> {
-        checked(&sd, "lowercase_font", Font::lowercase(prefix))
-    });
+    let b = book.clone();
+    engine.register_fn("font_names", move || -> Array { b.names().into_iter().map(Dynamic::from).collect() });
 
-    let sd = symdict.clone();
+    engine.register_get("name", |f: &mut Font| f.name().to_string());
+    engine.register_get_set("character_padding",
+        |f: &mut Font| setting(f.character_padding),
+        |f: &mut Font, value: Dynamic| set_padding(f, "font.character_padding", &value));
+    engine.register_get_set("space_width",
+        |f: &mut Font| setting(f.space_width),
+        |f: &mut Font, value: Dynamic| set_space(f, "font.space_width", &value));
+    let b = book.clone();
+    engine.register_get_set("fallback",
+        |f: &mut Font| f.fallback.as_deref().map_or(Dynamic::UNIT, |fallback| Dynamic::from(fallback.clone())),
+        move |f: &mut Font, value: Dynamic| -> RhaiResult<()> {
+            f.fallback = fallback_font(&b, "font.fallback", value)?;
+            Ok(())
+        });
+    engine.register_fn("characters", |f: &mut Font| -> Array { f.characters().into_iter().map(Dynamic::from).collect() });
+    engine.register_fn("variants", |f: &mut Font, key: Dynamic| -> RhaiResult<Array> {
+        let key = glyph_key(&key);
+        let variants = f.variants(&key)
+            .ok_or_else(|| format!("variants: font '{}' has no glyph '{}'", f.name(), key))?;
+        Ok(variants.into_iter().map(|symbol| Dynamic::from(Glyph::new(symbol))).collect())
+    });
+    // The font's own glyph for a character or name: its first variant. (Its
+    // fallbacks aren't looked in; `glyphs` sets text as text is set.)
+    engine.register_fn("glyph", |f: &mut Font, key: Dynamic| -> RhaiResult<Glyph> {
+        let key = glyph_key(&key);
+        f.variants(&key).and_then(|v| v.into_iter().next()).map(Glyph::new)
+            .ok_or_else(|| format!("glyph: font '{}' has no glyph '{}'", f.name(), key).into())
+    });
+    let b = book;
     engine.register_fn("glyphs", move |font: &mut Font, text: &str| -> Array {
-        font.builder(&sd)
-            .build(text, &mut *rng.borrow_mut())
+        font.build(text, &b, &mut *rng.borrow_mut())
             .into_iter()
             .map(|symbol| Dynamic::from(Glyph::new(symbol)))
             .collect()
-    });
-    // Every glyph name starting with `prefix`, sorted ("" for all of them).
-    let sd = symdict.clone();
-    engine.register_fn("glyph_names", move |prefix: &str| -> Array {
-        sd.symbols_with_prefix(prefix).into_iter().map(Dynamic::from).collect()
-    });
-    let sd = symdict;
-    engine.register_fn("glyph", move |name: &str| -> RhaiResult<Glyph> {
-        sd.get_symbol_base(name)
-            .map(|base| Glyph::new(Symbol::new_default_from_base_rc(base)))
-            .ok_or_else(|| format!("glyph: unknown symbol '{}'", name).into())
     });
 
     engine.register_fn("add_glyph", |canvas: &mut Canvas, glyph: Glyph, style: StrokeStyle| -> RhaiResult<()> {
@@ -171,7 +243,7 @@ mod tests {
     use super::*;
 
     fn engine() -> JournalEngine {
-        let symd = SymbolPathDict::from_file(crate::journal::symboldict::DEFAULT_SYMBOLS).expect("Failed to load symbols.json");
+        let symd = FontBook::from_file(crate::journal::fonts::DEFAULT_FONTS).expect("Failed to load fonts.json");
         JournalEngine::new(Rc::new(symd))
     }
 
@@ -186,11 +258,12 @@ mod tests {
     #[test]
     fn ternary_font_maps_letters_to_balanced_symbols() {
         let ok: bool = eval(r#"
-            let g = ternary_font("balanced_ternary").glyphs("aZ ");
-            let want = ["balanced_ternary_1", "balanced_ternary_-1", "balanced_ternary_0"];
+            let t = ternary_font("balanced_ternary");
+            let g = t.glyphs("aZ ");
+            let want = [1, -1, 0];
             let same = true;
-            for (name, i) in want {
-                if g[i].path().to_string() != glyph(name).path().to_string() { same = false; }
+            for (key, i) in want {
+                if g[i].path().to_string() != t.glyph(key).path().to_string() { same = false; }
             }
             same
         "#);
@@ -198,28 +271,54 @@ mod tests {
     }
 
     #[test]
-    fn glyph_names_lists_the_dictionary() {
-        let names: Array = eval(r#"glyph_names("archangel_")"#);
+    fn fonts_list_their_glyphs() {
+        let names: Array = eval(r#"font("archangel").characters()"#);
         let names: Vec<String> = names.into_iter().map(|n| n.into_string().unwrap()).collect();
-        assert_eq!(names, (0..7).map(|i| format!("archangel_{}", i)).collect::<Vec<_>>());
-        let all: Array = eval(r#"glyph_names("")"#);
-        assert!(all.len() > 300);
-    }
-
-    #[test]
-    fn glyph_scale_is_its_size() {
-        // Paths span -1..1 and are drawn at half the scale, so a glyph at
-        // scale 2 draws its path unchanged.
+        assert_eq!(names, (0..7).map(|i| i.to_string()).collect::<Vec<_>>());
         let ok: bool = eval(r#"
-            glyph("basic_eye").scale_by(2.0).path().to_string() == load_symbol("basic_eye").to_string()
+            font_names().contains("copper") && font("copper").name == "copper"
+                && font("copper").variants("a").len() == 4 && font("archangel").glyph(3).scale == 1.0
         "#);
         assert!(ok);
     }
 
     #[test]
+    fn font_settings_can_be_changed() {
+        let values: Array = eval(r#"
+            let f = font("loche_lower");
+            let file = f.character_padding;
+            f.character_padding = 0.3;
+            f.space_width = 1;
+            let g = font("loche_lower", #{ character_padding: 0, space_width: 0.2, fallback: "loche_upper" });
+            let wide = f.glyphs("a")[0].path();
+            [file, f.character_padding, f.space_width, g.character_padding, g.space_width, g.fallback.name, font("loche_lower").character_padding]
+        "#);
+        assert_eq!(values[1].as_float().unwrap(), 0.3);
+        assert_eq!(values[2].as_float().unwrap(), 1.0);
+        assert_eq!(values[3].as_float().unwrap(), 0.0);
+        assert!((values[4].as_float().unwrap() - 0.2).abs() < 1e-6);
+        assert_eq!(values[5].clone().into_string().unwrap(), "loche_upper");
+        assert_eq!(values[0].as_float().unwrap(), values[6].as_float().unwrap(), "changing a copy leaves the font file's alone");
+        // A fallback can be dropped.
+        let ok: bool = eval(r#"let c = font("copper"); c.fallback = (); c.fallback == ()"#);
+        assert!(ok);
+    }
+
+    #[test]
+    fn glyph_scale_is_its_size() {
+        // Paths span -1..1 and are drawn at half the scale: a glyph at scale
+        // 2 is its path as stored, 2 units across for a 2-unit wide path.
+        let width: f64 = eval(r#"
+            let p = font("symbols").glyph("X").scale_by(2.0).path();
+            p.bounds().width
+        "#);
+        assert!((width - 2.0).abs() < 1e-3, "{}", width);
+    }
+
+    #[test]
     fn glyph_properties_and_chained_transforms() {
         let values: Array = eval(r#"
-            let g = glyph("basic_eye");
+            let g = font("symbols").glyph("basic_eye");
             g.scale = 10.0;
             g.position = new_vec(1.0, 2.0);
             g.rotation = 0.5;
@@ -234,7 +333,7 @@ mod tests {
     fn spaces_are_blank_glyphs_and_add_nothing() {
         let script = r#"
             let style = new_style(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
-            let g = lowercase_font("loche_upper").glyphs("a b");
+            let g = font("loche_upper").glyphs("a b");
             if !g[1].is_blank || g[0].is_blank { throw "expected only the space to be blank"; }
             let canvas = new_canvas();
             canvas.add_glyphs(g, style);
@@ -247,29 +346,38 @@ mod tests {
     }
 
     #[test]
-    fn font_sets_fall_back_to_the_other_case() {
-        // copper_upper has neither '?' nor a capital Q; the lower fonts
-        // (loche_upper, copper_lower) do.
+    fn fonts_fall_back_and_to_the_other_case() {
+        // copper has no '?' but falls back to loche_upper, which has; it has
+        // no capital Q, but has a q; loche_upper's capitals set lowercase.
         let missing: rhai::Map = eval(r#"
-            let g = new_fontset(["copper_upper"], ["loche_upper"]).glyphs("?");
-            let h = new_fontset(["copper_upper"], ["copper_lower"]).glyphs("Q");
+            font("copper").glyphs("?Q");
+            font("loche_upper").glyphs("abc");
             missing_glyphs()
         "#);
         assert!(missing.is_empty(), "{:?}", missing);
+        let missing: rhai::Map = eval(r#"
+            let c = font("copper");
+            c.fallback = ();
+            c.glyphs("?");
+            missing_glyphs()
+        "#);
+        assert!(missing.contains_key("?"), "without its fallback copper has no '?'");
     }
 
     #[test]
     fn unknown_fonts_and_glyphs_fail_at_their_line() {
         for (script, want) in [
-            ("let ok = 1;\nternary_font(\"no_such_font\");", "ternary_font: no glyphs named 'no_such_font_*'"),
-            ("let ok = 1;\nlowercase_font(\"no_such_font\");", "lowercase_font: no glyphs named 'no_such_font_*'"),
-            ("let ok = 1;\nnew_fontset([\"copper_upper\"], [\"coper_lower\"]);", "new_fontset: no glyphs named 'coper_lower_*'"),
-            ("let ok = 1;\nnew_fontset([\"copper_upper\"], [3]);", "font names must be strings"),
-            ("let ok = 1;\nglyph(\"no_such_glyph\");", "glyph: unknown symbol 'no_such_glyph'"),
-            ("let ok = 1;\nnew_canvas().add_glyphs([glyph(\"basic_eye\"), 3], new_style(1.0, \"black\", new_brush(\"Ink Pen\", 0.3, 0.7, 1.0)));", "add_glyphs: item 1"),
+            ("let ok = 1;\nternary_font(\"no_such_font\");", "ternary_font: no font named 'no_such_font'"),
+            ("let ok = 1;\nfont(\"coper\");", "font: no font named 'coper'; fonts: "),
+            ("let ok = 1;\nfont(\"copper\", #{ padding: 1 });", "font: unknown option 'padding'"),
+            ("let ok = 1;\nfont(\"copper\", #{ character_padding: -1 });", "character_padding can't be negative"),
+            ("let ok = 1;\nlet f = font(\"copper\"); f.space_width = 0;", "space_width must be positive"),
+            ("let ok = 1;\nlet f = font(\"copper\"); f.fallback = 3;", "a fallback is a font, a font's name or ()"),
+            ("let ok = 1;\nfont(\"symbols\").glyph(\"no_such_glyph\");", "glyph: font 'symbols' has no glyph 'no_such_glyph'"),
+            ("let ok = 1;\nnew_canvas().add_glyphs([font(\"symbols\").glyph(\"X\"), 3], new_style(1.0, \"black\", new_brush(\"Ink Pen\", 0.3, 0.7, 1.0)));", "add_glyphs: item 1"),
         ] {
             let err = fails(script);
-            assert!(err.contains(want) && err.contains("line 2"), "{}", err);
+            assert!(err.contains(want) && err.contains("line 2"), "{}: {}", want, err);
         }
     }
 }

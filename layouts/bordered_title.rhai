@@ -1,6 +1,6 @@
-// missal_title: a title page, as the Jagged Missal's opens: the title,
-// a flourish and the credits centred in a ruled frame, inside a border of
-// ornamental bands with a piece in each corner.
+// bordered_title: a title page: the title, a flourish and the credits
+// centred in a ruled frame, inside a border of ornamental bands with a
+// piece in each corner.
 //
 // Flows: "title"; "subtitle" and "credits" (lines broken with "\n") if
 // given.
@@ -23,9 +23,9 @@ fn corner(top, left) {
 fn page(n, info) {
 	let middle = [flow("title", #{ height: 300, fit: true, align: "center", valign: "center" })];
 	if info.art.contains("flourish") {
-		middle.push(figure("flourish", #{ height: 50, margin: [10, 300, 30, 300] }));
+		middle.push(figure("flourish", #{ height: 50, margin: [10, "25%", 30, "25%"] }));
 	} else {
-		middle.push(rule(#{ role: "frame", height: 20, margin: [10, 380, 30, 380] }));
+		middle.push(rule(#{ role: "frame", height: 20, margin: [10, "30%", 30, "30%"] }));
 	}
 	for name in ["subtitle", "credits"] {
 		if info.flows.contains(name) {
@@ -34,13 +34,13 @@ fn page(n, info) {
 	}
 	let inside = column(#{ grow: 1, justify: "center", padding: [30, 60], border: "frame" }, middle);
 	let framed = [
-		band("border", #{ height: 70 }),
+		band("border", #{ height: 70, shrink: 0 }),
 		row(#{ grow: 1, padding: [16, 0] }, [
-			band("border", #{ width: 70 }),
+			band("border", #{ width: 70, shrink: 0 }),
 			column(#{ grow: 1, padding: [0, 16] }, [inside]),
-			band("border", #{ width: 70 }),
+			band("border", #{ width: 70, shrink: 0 }),
 		]),
-		band("border", #{ height: 70 }),
+		band("border", #{ height: 70, shrink: 0 }),
 	];
 	if info.art.contains("corner") {
 		framed += [corner(true, true), corner(true, false), corner(false, true), corner(false, false)];

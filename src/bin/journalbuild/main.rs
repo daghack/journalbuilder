@@ -1,6 +1,5 @@
 use scribe::journal::rhaientries::{JournalEngine, LockLibrary, DEFAULT_LAYOUTS_DIR, DEFAULT_LOCKS_DIR};
-use scribe::journal::{symboldict, darkly, publish};
-use scribe::journal::background::Paper;
+use scribe::journal::{fonts, darkly, publish};
 
 use std::rc::Rc;
 
@@ -27,7 +26,7 @@ fn prepare_output_dir(dir: &str) -> Result<(), String> {
 
 /// Report characters drawn with the fallback glyph; with `strict`, stop
 /// before rendering instead.
-fn check_missing_glyphs(symd: &symboldict::SymbolPathDict, strict: bool) -> Result<(), String> {
+fn check_missing_glyphs(symd: &fonts::FontBook, strict: bool) -> Result<(), String> {
     if let Some(report) = symd.missing_glyph_report() {
         if strict {
             return Err(format!("{} (failing because of --strict-glyphs)", report));
@@ -41,8 +40,8 @@ const DEFAULT_SUPERSAMPLE: f32 = 1.2;
 
 const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--svg]
                     [--scale S] [--supersample K] [--strict-glyphs]
-                    [--background PAPER] [--pdf]
-                    [--journals-dir DIR] [--output-dir DIR] [--symbols FILE]
+                    [--parchment] [--pdf]
+                    [--journals-dir DIR] [--output-dir DIR] [--fonts FILE]
                     [--locks-dir DIR] [--layouts-dir DIR]
        journalbuild --check-locks [--locks-dir DIR]
 
@@ -52,18 +51,16 @@ const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--svg
                       and that SVG as a PNG; by default only Darkly renders.
                       Stroke widths are geometric widths there, while in
                       Darkly they scale brush pressure.
-  --background PAPER  Render each page as one image on paper,
-                      darkly_{page}.png, its canvases layered in order.
-                      The paper is parchment: a mottled scroll browning
-                      toward its edges. Pages get a border of paper round
-                      their strokes; each tile of a split page is a sheet
-                      of its own. Light inks are drawn dark on paper,
-                      unless the script calls background() (the paper's
-                      name) to pick its own.
+  --parchment         Render each page as one image on parchment,
+                      darkly_{page}.png, its canvases layered in order: a
+                      mottled scroll browning toward its edges. Pages get
+                      a border of parchment round their strokes; each tile
+                      of a split page is a sheet of its own. Light inks are
+                      drawn dark, so they show.
   --pdf               Put the pages in one PDF, {journal}.pdf, a page per
                       page, rather than writing images: each page's
-                      canvases layered into one image (on paper, with
-                      --background), 150 canvas units to the inch.
+                      canvases layered into one image (on parchment,
+                      with --parchment), 150 canvas units to the inch.
   --strict-glyphs     Fail before rendering if any character had no glyph
                       (by default they're drawn as X and listed as a warning).
   --scale S           Scale output images (default 1.0), brushes included.
@@ -75,8 +72,8 @@ const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--svg
                       grows with K squared.
   --journals-dir DIR  Directory containing journals (default: the
                       repository's journals/).
-  --symbols FILE      Symbol dictionary (default: the repository's
-                      config/symbols.json).
+  --fonts FILE        Font file (default: the repository's
+                      config/fonts.json).
   --output-dir DIR    Where to write renders (default: <journal>/output).
                       Earlier .png/.svg/.pdf renders there are cleared first
                       (except with --page); other files are kept.
@@ -97,10 +94,10 @@ struct Args {
     scale: f32,
     supersample: f32,
     output_dir: Option<String>,
-    symbols: String,
+    font_file: String,
     locks_dir: String,
     layouts_dir: String,
-    background: Option<Paper>,
+    parchment: bool,
     pdf: bool,
 }
 
@@ -119,11 +116,11 @@ fn parse_args() -> Result<Args, String> {
     let mut supersample = DEFAULT_SUPERSAMPLE;
     // Defaults are found from the repository, not the working directory.
     let mut journals_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/journals").to_string();
-    let mut symbols = symboldict::DEFAULT_SYMBOLS.to_string();
+    let mut font_file = fonts::DEFAULT_FONTS.to_string();
     let mut locks_dir = DEFAULT_LOCKS_DIR.to_string();
     let mut layouts_dir = DEFAULT_LAYOUTS_DIR.to_string();
     let mut output_dir = None;
-    let mut background = None;
+    let mut parchment = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -141,16 +138,12 @@ fn parse_args() -> Result<Args, String> {
                 supersample = value.parse::<f32>().ok().filter(|k| *k >= 1.0)
                     .ok_or(format!("invalid supersample '{}'; expected a number >= 1, e.g. 1.5", value))?;
             }
-            "--background" => {
-                let value = args.next().ok_or("--background needs a paper: --background parchment")?;
-                background = Some(Paper::from_name(&value)
-                    .ok_or(format!("unknown paper '{}'; expected one of {}", value, Paper::NAMES.join(", ")))?);
-            }
+            "--parchment" => parchment = true,
             "--journals-dir" => {
                 journals_dir = args.next().ok_or("--journals-dir needs a directory")?;
             }
-            "--symbols" => {
-                symbols = args.next().ok_or("--symbols needs a file")?;
+            "--fonts" => {
+                font_file = args.next().ok_or("--fonts needs a file")?;
             }
             "--locks-dir" => {
                 locks_dir = args.next().ok_or("--locks-dir needs a directory")?;
@@ -179,7 +172,7 @@ fn parse_args() -> Result<Args, String> {
         (Some(_), true) => return Err("--check-locks checks lock files, so it takes no journal name".to_string()),
         (None, false) => return Err("missing journal name".to_string()),
     };
-    Ok(Args { strict_glyphs, check_locks, journal_name, journals_dir, pages, svg, scale, supersample, output_dir, symbols, locks_dir, layouts_dir, background, pdf })
+    Ok(Args { strict_glyphs, check_locks, journal_name, journals_dir, pages, svg, scale, supersample, output_dir, font_file, locks_dir, layouts_dir, parchment, pdf })
 }
 
 fn main() {
@@ -195,8 +188,8 @@ fn main() {
 }
 
 fn run(args: &Args) -> Result<(), String> {
-    let symd = symboldict::SymbolPathDict::from_file(&args.symbols)
-        .map_err(|err| format!("couldn't load the symbol dictionary {}: {}", args.symbols, err))?;
+    let symd = fonts::FontBook::from_file(&args.font_file)
+        .map_err(|err| format!("couldn't load the font file {}: {}", args.font_file, err))?;
     let symd = Rc::new(symd);
 
     let journal_name = &args.journal_name;
@@ -204,7 +197,6 @@ fn run(args: &Args) -> Result<(), String> {
     let output_dir = args.output_dir.clone()
         .unwrap_or_else(|| format!("{}/{}/output", args.journals_dir, journal_name));
     let mut engine = JournalEngine::with_dirs(symd.clone(), &args.locks_dir, &args.layouts_dir);
-    engine.set_background(args.background);
     let entry = engine.build_entry_file(&journal_path)?;
     check_missing_glyphs(&symd, args.strict_glyphs)?;
     if entry.page_count() == 0 {
@@ -232,12 +224,12 @@ fn run(args: &Args) -> Result<(), String> {
     }
     // One Darkly engine for the whole run; canvases resize it as needed.
     let mut darkly_engine = darkly::new_engine(1, 1);
-    let render = publish::Render { scale: args.scale, supersample: args.supersample, paper: args.background };
+    let render = publish::Render { scale: args.scale, supersample: args.supersample, parchment: args.parchment };
     if args.pdf {
         let path = format!("{}/{}.pdf", output_dir, journal_name);
         publish::pdf(&entry, &mut darkly_engine, &path, journal_name, &render, only)?;
         println!("Wrote {}", path);
-    } else if render.paper.is_some() {
+    } else if render.parchment {
         publish::page_images(&entry, &mut darkly_engine, &output_dir, &render, only)?;
     } else {
         publish::canvas_images(&entry, &mut darkly_engine, &output_dir, &render, only)?;

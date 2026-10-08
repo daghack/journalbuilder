@@ -26,9 +26,8 @@ use rhai::{Dynamic, Engine, EvalAltResult, Scope};
 
 /// What rhai functions return: a value, or an error for the script.
 pub(super) type RhaiResult<T> = Result<T, Box<EvalAltResult>>;
-use super::background::Paper;
 use super::paths::StrokePath;
-use super::symboldict::SymbolPathDict;
+use super::fonts::FontBook;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -93,24 +92,20 @@ pub type Canvas = Shared<CanvasData>;
 pub struct JournalEngine {
     engine: Engine,
     warnings: Rc<RefCell<Vec<String>>>,
-    /// The paper pages will be rendered on, for `background()`.
-    paper: Rc<std::cell::Cell<Option<Paper>>>,
-    /// Whether the script has asked `background()`.
-    asked_background: Rc<std::cell::Cell<bool>>,
 }
 
 impl JournalEngine {
     /// An engine with the repository's lock types (DEFAULT_LOCKS_DIR).
-    pub fn new(symdict: Rc<SymbolPathDict>) -> Self {
+    pub fn new(symdict: Rc<FontBook>) -> Self {
         Self::with_locks_dir(symdict, DEFAULT_LOCKS_DIR)
     }
     /// An engine whose lock types are the lock files in `locks_dir`.
-    pub fn with_locks_dir(symdict: Rc<SymbolPathDict>, locks_dir: impl Into<std::path::PathBuf>) -> Self {
+    pub fn with_locks_dir(symdict: Rc<FontBook>, locks_dir: impl Into<std::path::PathBuf>) -> Self {
         Self::with_dirs(symdict, locks_dir, DEFAULT_LAYOUTS_DIR)
     }
     /// An engine with the lock files in `locks_dir` and the layout files
     /// in `layouts_dir`.
-    pub fn with_dirs(symdict: Rc<SymbolPathDict>, locks_dir: impl Into<std::path::PathBuf>, layouts_dir: impl Into<std::path::PathBuf>) -> Self {
+    pub fn with_dirs(symdict: Rc<FontBook>, locks_dir: impl Into<std::path::PathBuf>, layouts_dir: impl Into<std::path::PathBuf>) -> Self {
         let mut engine = Engine::new();
         let rng = random::register(&mut engine);
         let text: TextSource = (symdict.clone(), rng.clone());
@@ -147,24 +142,6 @@ impl JournalEngine {
             }).collect()
         });
 
-        let load_symdict = symdict.clone();
-        engine.register_fn("load_symbol", move |symname: &str| -> Result<Path, Box<EvalAltResult>> {
-            load_symdict.get_strokepath(symname).map(Path::new)
-                .ok_or_else(|| format!("load_symbol: unknown symbol '{}'", symname).into())
-        });
-
-        // `background()`: the paper pages are rendered on ("parchment"),
-        // or () for none, so a journal can pick inks that show on it:
-        // dark on paper, light on a transparent render. A journal that
-        // never asks is drawn in dark ink on paper.
-        let paper: Rc<std::cell::Cell<Option<Paper>>> = Rc::default();
-        let asked_background: Rc<std::cell::Cell<bool>> = Rc::default();
-        let (p, asked) = (paper.clone(), asked_background.clone());
-        engine.register_fn("background", move || -> Dynamic {
-            asked.set(true);
-            p.get().map_or(Dynamic::UNIT, |paper| paper.name().into())
-        });
-
         art::register(&mut engine);
         avoid::register(&mut engine);
         layout::register(&mut engine, symdict.clone(), rng.clone(), layouts_dir.into());
@@ -176,8 +153,6 @@ impl JournalEngine {
         JournalEngine {
             engine,
             warnings,
-            paper,
-            asked_background,
         }
     }
     /// The name of every function scripts can call that this crate
@@ -200,17 +175,9 @@ impl JournalEngine {
     pub fn build_entry_str(&mut self, script_str: &str) -> Result<Entry, String> {
         let mut scope = Scope::new();
         scope.push("journal_entry", Entry::default());
-        self.asked_background.set(false);
         self.engine.run_with_scope(&mut scope, script_str).map_err(|err| err.to_string())?;
-        let mut entry: Entry = scope.get_value("journal_entry")
-            .ok_or_else(|| "the script replaced journal_entry with something that isn't an entry".to_string())?;
-        entry.picks_ink = self.asked_background.get();
-        Ok(entry)
-    }
-    /// Tell scripts, through `background()`, the paper their pages will be
-    /// rendered on.
-    pub fn set_background(&mut self, paper: Option<Paper>) {
-        self.paper.set(paper);
+        scope.get_value("journal_entry")
+            .ok_or_else(|| "the script replaced journal_entry with something that isn't an entry".to_string())
     }
     pub fn build_entry_file(&mut self, rhai_filename: &str) -> Result<Entry, String> {
         let file_contents = std::fs::read_to_string(rhai_filename)
@@ -227,27 +194,11 @@ mod tests {
     use crate::journal::publish;
 
     fn engine() -> JournalEngine {
-        let symd = SymbolPathDict::from_file(crate::journal::symboldict::DEFAULT_SYMBOLS).expect("Failed to load symbols.json");
+        let symd = FontBook::from_file(crate::journal::fonts::DEFAULT_FONTS).expect("Failed to load fonts.json");
         JournalEngine::new(Rc::new(symd))
     }
 
     const BRUSH: &str = r#"let brush = new_brush("Calligraphy", 0.25, 0.5, 1.0);"#;
-
-    #[test]
-    fn entries_know_whether_they_pick_their_inks() {
-        let mut e = engine();
-        assert!(!e.build_entry_str("let x = 1;").unwrap().picks_ink());
-        assert!(e.build_entry_str("let on_paper = background() != ();").unwrap().picks_ink());
-        assert!(!e.build_entry_str("let x = 1;").unwrap().picks_ink(), "each build starts afresh");
-    }
-
-    #[test]
-    fn scripts_see_the_paper_they_are_rendered_on() {
-        let mut e = engine();
-        assert!(e.engine.eval::<Dynamic>("background()").unwrap().is_unit());
-        e.set_background(Some(Paper::Parchment));
-        assert_eq!(e.engine.eval::<String>("background()").unwrap(), "parchment");
-    }
 
     #[test]
     fn new_style_accepts_css_colors() {
@@ -263,14 +214,6 @@ mod tests {
         let script = format!("{}\nlet bad = new_style(1.5, \"darkredd\", brush);", BRUSH);
         let err = engine().build_entry_str(&script).expect_err("bad color should fail").to_string();
         assert!(err.contains("darkredd"), "{}", err);
-        assert!(err.contains("line 2"), "{}", err);
-    }
-
-    #[test]
-    fn load_symbol_rejects_unknown_name_with_line() {
-        let err = engine().build_entry_str("let ok = load_symbol(\"basic_eye\");\nlet bad = load_symbol(\"no_such_glyph\");")
-            .expect_err("unknown symbol should fail").to_string();
-        assert!(err.contains("unknown symbol 'no_such_glyph'"), "{}", err);
         assert!(err.contains("line 2"), "{}", err);
     }
 
@@ -381,7 +324,7 @@ mod tests {
             journal_entry.add_page(page);
 
             // Loop variables share too, so loops can change array elements.
-            let gs = lowercase_font("loche_upper").glyphs("ab");
+            let gs = font("loche_upper").glyphs("ab");
             for g in gs { g.scale = 7.0; }
             if gs[0].scale != 7.0 || gs[1].scale != 7.0 { throw "loop should change the glyphs"; }
             // A canvas can add itself.
@@ -406,16 +349,45 @@ mod tests {
     }
 
     #[test]
+    fn sized_pages_are_their_size_whatever_is_drawn() {
+        let entry = engine().build_entry_str(r#"
+            let c = new_canvas();
+            c.add_path(new_line(new_vec(10, 10), new_vec(500, 10)), new_style(1, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0)));
+            let p = new_page();
+            p.name = "sized";
+            p.size = new_vec(200, 100);
+            p.add_canvas(c);
+            if p.size.x != 200.0 || p.size.y != 100.0 { throw "the size reads back"; }
+            journal_entry.add_page(p);
+            journal_entry.add_pages(p.split(2, 1));
+            let q = new_page();
+            q.size = new_vec(10, 10);
+            q.size = ();
+            if q.size != () { throw "() clears the size"; }
+        "#).expect("script should run");
+        let whole = parry2d::bounding_volume::Aabb::new(parry2d::math::Vec2::ZERO, parry2d::math::Vec2::new(200.0, 100.0));
+        let (_, canvas) = entry.pages[0].rendered_canvases().next().unwrap();
+        assert_eq!(canvas.frame().unwrap().page, whole, "the page is its size, though the line runs past it");
+        assert!(!canvas.frame().unwrap().is_tile());
+        // Its tiles divide the size, not the strokes.
+        let (_, tile) = entry.pages[2].rendered_canvases().next().unwrap();
+        assert_eq!((tile.frame().unwrap().page, tile.frame().unwrap().column), (whole, 1));
+        for (script, want) in [("p.size = 3;", "page.size: expected a vec"), ("p.size = new_vec(0, 10);", "at least 1")] {
+            let err = engine().build_entry_str(&format!("let p = new_page();\n{}", script)).expect_err(script);
+            assert!(err.contains(want) && err.contains("line 2"), "{}: {}", want, err);
+        }
+    }
+
+    #[test]
     fn missing_glyphs_are_drawn_and_reported() {
         let script = r#"
             let style = new_style(1.5, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
-            let font = new_fontset(["copper_upper"], ["copper_lower"]);
+            let font = font("copper");
             let canvas = new_line(new_vec(0.0, 0.0), new_vec(400.0, 0.0)).fit_text("a~b~", font, style);
             let missing = missing_glyphs();
             if missing["~"].count != 2 { throw "expected ~ twice, got " + missing; }
-            // Non-lowercase characters (punctuation included) try the upper
-            // fonts first, then the lower ones.
-            if missing["~"].tried != ["copper_upper_~", "copper_lower_~"] { throw "unexpected tried list: " + missing["~"].tried; }
+            // The font, then its fallback.
+            if missing["~"].tried != ["copper '~'", "loche_upper '~'"] { throw "unexpected tried list: " + missing["~"].tried; }
         "#;
         engine().build_entry_str(script).expect("script should run");
     }
@@ -434,7 +406,7 @@ mod tests {
         let script = |seed: i64| format!(r#"{}
             seed({});
             let style = new_style(1.5, "black", brush);
-            let font = new_fontset(["copper_upper"], ["copper_lower"]);
+            let font = font("copper");
             let path = new_path().move_to(new_vec(0.0, 0.0)).line_to(new_vec(2000.0, 0.0));
             let page = new_page();
             page.add_canvas(path.fit_text("a banana and an aardvark", font, style));
@@ -479,7 +451,7 @@ mod tests {
     fn text_that_cannot_fit_its_path_is_an_error() {
         let setup = r#"
             let s = new_style(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
-            let font = new_fontset(["copper_upper"], ["copper_lower"]);
+            let font = font("copper");
             let short = new_line(new_vec(0.0, 0.0), new_vec(10.0, 0.0));
         "#;
         for (script, want) in [
@@ -500,7 +472,7 @@ mod tests {
     fn glyph_xs(msg: &str, options: &str) -> Vec<f32> {
         let script = format!(r#"
             let s = new_style(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
-            let font = lowercase_font("loche_upper");
+            let font = font("loche_upper");
             let line = new_line(new_vec(0.0, 0.0), new_vec(2000.0, 0.0));
             let page = new_page();
             for c in line.fill_with_text("{}", font, 20.0, s{}) {{ page.add_canvas(c); }}
@@ -520,16 +492,16 @@ mod tests {
         let tight = glyph_xs("iiii", "");
         let gaps: Vec<f32> = tight.windows(2).map(|w| w[1] - w[0]).collect();
         let i_width = {
-            let symd = SymbolPathDict::from_file(crate::journal::symboldict::DEFAULT_SYMBOLS).unwrap();
-            let sym = symd.get_symbol_base("loche_upper_i").unwrap();
-            crate::journal::symbol::Symbol::new_default_from_base_rc(sym).hull_aabb().extents().x * 20.0 / 2.0
+            let symd = FontBook::from_file(crate::journal::fonts::DEFAULT_FONTS).unwrap();
+            let i = symd.font("loche_upper").unwrap().variants("I").unwrap().remove(0);
+            i.hull_aabb().extents().x * 20.0 / 2.0
         };
         assert!(gaps.iter().all(|g| (g - i_width).abs() < 0.5), "gaps {:?}, i is {} wide", gaps, i_width);
         // spacing adds a fraction of the font size between glyphs.
         let spaced = glyph_xs("iiii", ", #{ spacing: 0.5 }");
         let spaced_gaps: Vec<f32> = spaced.windows(2).map(|w| w[1] - w[0]).collect();
         assert!(spaced_gaps.iter().zip(&gaps).all(|(s, g)| (s - g - 10.0).abs() < 0.5), "{:?} vs {:?}", spaced_gaps, gaps);
-        let err = engine().build_entry_str("new_line(new_vec(0.0, 0.0), new_vec(9.0, 0.0)).fill_with_text(\"a\", lowercase_font(\"loche_upper\"), 2.0, new_style(1.0, \"black\", new_brush(\"Ink Pen\", 0.3, 0.7, 1.0)), #{ spacng: 1 });")
+        let err = engine().build_entry_str("new_line(new_vec(0.0, 0.0), new_vec(9.0, 0.0)).fill_with_text(\"a\", font(\"loche_upper\"), 2.0, new_style(1.0, \"black\", new_brush(\"Ink Pen\", 0.3, 0.7, 1.0)), #{ spacng: 1 });")
             .expect_err("unknown option").to_string();
         assert!(err.contains("unknown option 'spacng'"), "{}", err);
     }
@@ -540,7 +512,7 @@ mod tests {
         // round again must not land on the first ones.
         let script = r#"
             let s = new_style(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
-            let font = lowercase_font("loche_upper");
+            let font = font("loche_upper");
             let ring = new_circle(new_vec(0.0, 0.0), 30.0);
             ring.fill_with_text("abcdefghijklmnopqrstuvwxyz", font, 20.0, s).len()
         "#;
@@ -555,7 +527,7 @@ mod tests {
         // word is split around it.
         let script = |layout: &str| format!(r#"
             let s = new_style(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
-            let font = lowercase_font("loche_upper");
+            let font = font("loche_upper");
             let post = new_line(new_vec(300.0, -100.0), new_vec(300.0, 100.0));
             let line = new_line(new_vec(0.0, 0.0), new_vec(2000.0, 0.0));
             let page = new_page();
@@ -727,7 +699,7 @@ mod tests {
             ("new_circle(new_vec(0.0, 0.0), 5.0).scale_by(0.0 / 0.0);", "scale_by: the scale must be finite"),
             // Finite, but past what paths hold.
             ("c.add_path(new_circle(new_vec(0.0, 0.0), 5.0).scale_by(1e300), s);", "add_path: the path has a non-finite"),
-            ("c.add_glyph(glyph(\"basic_eye\").scale_by(1e300), s);", "add_glyph: the path has a non-finite"),
+            ("c.add_glyph(font(\"symbols\").glyph(\"basic_eye\").scale_by(1e300), s);", "add_glyph: the path has a non-finite"),
         ] {
             let err = engine().build_entry_str(&format!("{}\n{}", setup, script)).expect_err(script).to_string();
             assert!(err.contains(want), "{}: {}", want, err);

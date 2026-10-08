@@ -145,11 +145,11 @@ pub fn colour_or_gradient(caller: &str, value: Dynamic) -> RhaiResult<crate::jou
 mod tests {
     use super::super::JournalEngine;
     use crate::journal::gradient::{Gradient, GradientKind};
-    use crate::journal::symboldict::SymbolPathDict;
+    use crate::journal::fonts::FontBook;
     use std::rc::Rc;
 
     fn engine() -> JournalEngine {
-        JournalEngine::new(Rc::new(SymbolPathDict::from_file(crate::journal::symboldict::DEFAULT_SYMBOLS).unwrap()))
+        JournalEngine::new(Rc::new(FontBook::from_file(crate::journal::fonts::DEFAULT_FONTS).unwrap()))
     }
 
     fn gradient(script: &str) -> Gradient {

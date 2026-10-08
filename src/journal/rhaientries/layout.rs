@@ -111,13 +111,12 @@ use super::glyphs::Glyph;
 use super::options::{check_keys, number};
 use super::random::SharedRng;
 use super::{check_finite, CanvasData, Canvas, Page, Path, Stroke, StrokeStyle};
-use crate::journal::stable_hash;
 use crate::journal::avoid::AvoidanceTree;
 use crate::journal::canvas::Frame;
 use crate::journal::paths::StrokePath;
 use crate::journal::fonts::Font;
 use crate::journal::symbol::Symbol;
-use crate::journal::symboldict::SymbolPathDict;
+use crate::journal::fonts::FontBook;
 use crate::journal::typeset::{fitting_size, set_text, Align, TextStyle};
 
 use super::RhaiResult;
@@ -697,13 +696,13 @@ fn compute(root: &Node, size: (f32, f32), sizes: &HashMap<usize, (Option<f32>, O
 
 /// Text a slot sets: its glyphs, characters, and whether it starts a
 /// paragraph.
-fn slot_text<'a>(content: &'a mut Content, node: &Node, role: &Role, labels: &'a HashMap<usize, (Vec<Symbol>, Vec<char>)>, index: usize, symdict: &SymbolPathDict, rng: &SharedRng) -> RhaiResult<(&'a [Symbol], &'a [char], bool)> {
+fn slot_text<'a>(content: &'a mut Content, node: &Node, role: &Role, labels: &'a HashMap<usize, (Vec<Symbol>, Vec<char>)>, index: usize, symdict: &FontBook, rng: &SharedRng) -> RhaiResult<(&'a [Symbol], &'a [char], bool)> {
     match &node.kind {
         Kind::Flow(name) | Kind::Initial(name) => {
             let font = role.font.clone().ok_or_else(|| format!("typeset: {} needs a font in its role '{}'", node.kind.describe(), node.role))?;
             let flow = content.flow(name)?;
             if !flow.glyphs.contains_key(&node.role) {
-                let glyphs = font.builder(symdict).build(&flow.text, &mut *rng.borrow_mut());
+                let glyphs = font.build(&flow.text, symdict, &mut *rng.borrow_mut());
                 flow.glyphs.insert(node.role.clone(), glyphs);
             }
             let start = flow.cursor;
@@ -756,7 +755,7 @@ fn bounds_of(strokes: &[Stroke]) -> Aabb {
 /// Lay out and fill one page. Returns the page's canvas and whether any
 /// flow moved on.
 #[allow(clippy::too_many_arguments)]
-fn typeset_page(ctx: &NativeCallContext, root: &Node, n: usize, content: &mut Content, symdict: &SymbolPathDict, rng: &SharedRng) -> RhaiResult<(CanvasData, bool)> {
+fn typeset_page(ctx: &NativeCallContext, root: &Node, n: usize, content: &mut Content, symdict: &FontBook, rng: &SharedRng) -> RhaiResult<(CanvasData, bool)> {
     let mut nodes = Vec::new();
     root.walk(&mut nodes);
     let roles: Vec<Option<Role>> = nodes.iter().map(|node| {
@@ -768,7 +767,7 @@ fn typeset_page(ctx: &NativeCallContext, root: &Node, n: usize, content: &mut Co
         if let Kind::Label(text) = &node.kind {
             let font = roles[i].as_ref().and_then(|r| r.font.clone())
                 .ok_or_else(|| format!("typeset: page {}'s {} needs a font in its role '{}'", n, node.kind.describe(), node.role))?;
-            labels.insert(i, (font.builder(symdict).build(text, &mut *rng.borrow_mut()), text.chars().collect::<Vec<char>>()));
+            labels.insert(i, (font.build(text, symdict, &mut *rng.borrow_mut()), text.chars().collect::<Vec<char>>()));
         }
     }
     // Lay out; then size boxes left to their text by it, and again.
@@ -984,7 +983,7 @@ fn band(strokes: &[Stroke], from: Aabb, rect: Aabb, turn: Option<f32>) -> Vec<St
     out
 }
 
-fn typeset(ctx: NativeCallContext, layout: &mut Layout, content: Map, symdict: &SymbolPathDict, rng: &SharedRng) -> RhaiResult<Array> {
+fn typeset(ctx: NativeCallContext, layout: &mut Layout, content: Map, symdict: &FontBook, rng: &SharedRng) -> RhaiResult<Array> {
     let caller = "typeset";
     let mut content = parse_content(caller, &content, layout, &ctx)?;
     let mut pages = Array::new();
@@ -1008,17 +1007,13 @@ fn typeset(ctx: NativeCallContext, layout: &mut Layout, content: Map, symdict: &
             return Err(format!("{}: page {} sets none of what's left of flow(s) {}; give them slots, or more room", caller, n, left.join(", ")).into());
         }
         let name = format!("{}_{}", content.name, n);
-        canvas.frame = Some(Frame {
-            page: Aabb::new(PVec::ZERO, PVec::new(content.width, content.height)),
-            column: 0, columns: 1, row: 0, rows: 1,
-            svg_seed: stable_hash(&format!("{}_0", name)),
-        });
+        canvas.frame = Some(Frame::whole(Aabb::new(PVec::ZERO, PVec::new(content.width, content.height))));
         pages.push(Dynamic::from(Page { name: Some(name), canvases: vec![canvas], ..Page::default() }));
     }
     Ok(pages)
 }
 
-pub fn register(engine: &mut Engine, symdict: Rc<SymbolPathDict>, rng: SharedRng, layouts_dir: PathBuf) {
+pub fn register(engine: &mut Engine, symdict: Rc<FontBook>, rng: SharedRng, layouts_dir: PathBuf) {
     engine.register_type_with_name::<Node>("LayoutBox");
     engine.register_type_with_name::<Layout>("Layout");
     for (name, kind) in [("row", Kind::Row), ("column", Kind::Column)] {
@@ -1051,11 +1046,11 @@ pub fn register(engine: &mut Engine, symdict: Rc<SymbolPathDict>, rng: SharedRng
 mod tests {
     use super::super::{Entry, JournalEngine};
     use crate::journal::canvas::Canvas as JournalCanvas;
-    use crate::journal::symboldict::SymbolPathDict;
+    use crate::journal::fonts::FontBook;
     use std::rc::Rc;
 
     fn engine() -> JournalEngine {
-        let symd = SymbolPathDict::from_file(crate::journal::symboldict::DEFAULT_SYMBOLS).expect("Failed to load symbols.json");
+        let symd = FontBook::from_file(crate::journal::fonts::DEFAULT_FONTS).expect("Failed to load fonts.json");
         JournalEngine::new(Rc::new(symd))
     }
 
@@ -1063,7 +1058,7 @@ mod tests {
         let pen = new_brush("Ink Pen", 0.3, 0.7, 1.0);
         let ink = new_style(1.0, "black", pen);
         let red = new_style(1.0, "darkred", pen);
-        let font = lowercase_font("loche_upper");
+        let font = font("loche_upper");
         let words = "the quick brown fox jumps over the lazy dog ";
         let roles = #{
             body: #{ font: font, style: ink, size: 12.0 },
@@ -1154,7 +1149,7 @@ mod tests {
     #[test]
     fn layout_files_load_by_name() {
         let entry = build(r#"
-            let pages = layout("missal_figure").typeset(#{
+            let pages = layout("captioned_figure").typeset(#{
                 flows: #{ caption: "a circle" },
                 roles: #{ caption: #{ font: font, style: red, size: 40.0 }, figure: #{ style: ink } },
                 art: #{ figure: new_circle(new_vec(0.0, 0.0), 1.0) },
@@ -1170,7 +1165,7 @@ mod tests {
         let width = xs.iter().cloned().fold(f32::MIN, f32::max) - xs.iter().cloned().fold(f32::MAX, f32::min);
         assert!(width > 500.0, "the figure should be scaled up to its box, got {}", width);
         let err = engine().build_entry_str("let ok = 1;\nlayout(\"no_such_layout\");").expect_err("unknown layout");
-        assert!(err.contains("no layout file") && err.contains("missal_spread") && err.contains("line 2"), "{}", err);
+        assert!(err.contains("no layout file") && err.contains("two_column_article") && err.contains("line 2"), "{}", err);
     }
 
     #[test]
@@ -1213,7 +1208,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("bad.rhai"), "fn page(n, info) {\n\trow(#{ colour: 1 }, [])\n}\n").unwrap();
         std::fs::write(dir.join("pageless.rhai"), "fn other() {}\n").unwrap();
-        let symd = SymbolPathDict::from_file(crate::journal::symboldict::DEFAULT_SYMBOLS).unwrap();
+        let symd = FontBook::from_file(crate::journal::fonts::DEFAULT_FONTS).unwrap();
         let mut engine = JournalEngine::with_dirs(Rc::new(symd), crate::journal::rhaientries::DEFAULT_LOCKS_DIR, &dir);
         let err = engine.build_entry_str("layout(\"bad\").typeset(#{ width: 10, height: 10 });").expect_err("bad layout");
         assert!(err.contains("layout 'bad' page 0") && err.contains("unknown option 'colour'") && err.contains("line 2"), "{}", err);

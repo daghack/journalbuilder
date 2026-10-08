@@ -171,11 +171,11 @@ pub(super) fn bounds_map(b: Aabb) -> Option<Map> {
 #[cfg(test)]
 mod tests {
     use super::super::JournalEngine;
-    use crate::journal::symboldict::SymbolPathDict;
+    use crate::journal::fonts::FontBook;
     use std::rc::Rc;
 
     fn engine() -> JournalEngine {
-        let symd = SymbolPathDict::from_file(crate::journal::symboldict::DEFAULT_SYMBOLS).expect("Failed to load symbols.json");
+        let symd = FontBook::from_file(crate::journal::fonts::DEFAULT_FONTS).expect("Failed to load fonts.json");
         JournalEngine::new(Rc::new(symd))
     }
 

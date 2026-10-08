@@ -275,6 +275,14 @@ pub struct Frame {
 }
 
 impl Frame {
+    /// The whole of `page`, as one tile: a page of a set size.
+    pub fn whole(page: bounding_volume::Aabb) -> Frame {
+        Frame { page, column: 0, columns: 1, row: 0, rows: 1, svg_seed: 0 }
+    }
+    /// Whether this is one tile of several.
+    pub fn is_tile(&self) -> bool {
+        self.columns * self.rows > 1
+    }
     /// The whole page's size, as renders size a canvas: at least a unit
     /// each way.
     pub fn page_extents(&self) -> Vec2 {

@@ -4,7 +4,7 @@
 use ::darkly::engine::DarklyEngine;
 use image::RgbaImage;
 
-use super::background::{self, Paper, Sheet};
+use super::parchment::{self, Sheet};
 use super::canvas::StrokeColor;
 use super::compose::{self, Placed};
 use super::darkly;
@@ -21,8 +21,8 @@ pub struct Render {
     /// Rendered at this multiple of the size and filtered down (see
     /// `darkly::render`).
     pub supersample: f32,
-    /// The paper pages are drawn on, for page images and PDFs.
-    pub paper: Option<Paper>,
+    /// Whether page images and PDFs are drawn on parchment.
+    pub parchment: bool,
 }
 
 /// Canvas units to an inch in PDF output: a page 1100 units across is
@@ -57,7 +57,7 @@ pub fn canvas_images(entry: &Entry, engine: &mut DarklyEngine, dir: &str, render
 pub fn page_images(entry: &Entry, engine: &mut DarklyEngine, dir: &str, render: &Render, only: Option<&[usize]>) -> Result<(), String> {
     for (i, page) in entry.selected_pages(only) {
         let label = page.label(i);
-        if let Some(image) = page_image(page, &label, engine, render, entry.picks_ink()) {
+        if let Some(image) = page_image(page, &label, engine, render) {
             let filename = format!("{}/darkly_{}.png", dir, label);
             image.save(&filename).map_err(|e| write_error(&filename, e))?;
         }
@@ -72,7 +72,7 @@ pub fn pdf(entry: &Entry, engine: &mut DarklyEngine, path: &str, title: &str, re
     let mut pdf = PdfWriter::create(path).map_err(|e| write_error(path, e))?;
     let points = 72.0 / UNITS_PER_INCH / render.scale;
     for (i, page) in entry.selected_pages(only) {
-        if let Some(image) = page_image(page, &page.label(i), engine, render, entry.picks_ink()) {
+        if let Some(image) = page_image(page, &page.label(i), engine, render) {
             pdf.add_page(&image, image.width() as f32 * points, image.height() as f32 * points)
                 .map_err(|e| write_error(path, e))?;
         }
@@ -85,25 +85,26 @@ pub fn pdf(entry: &Entry, engine: &mut DarklyEngine, path: &str, title: &str, re
 
 /// A page rendered with Darkly as one image, `label` being its name in
 /// output: its canvases layered in order, each where it is on the page, on
-/// paper if the render has some. On paper, a page that isn't a tile (or
+/// parchment if the render is on it. On parchment, a page that isn't a tile (or
 /// typeset) gets a border of paper round its strokes; each tile of a split
 /// page is a sheet of its own, like a big drawing spread over several
-/// pages. On paper, unless the entry `picks_ink` itself, light inks are
-/// drawn dark so they show (see `StrokeColor::as_ink_on_paper`). `None` if
-/// nothing is drawn.
-pub fn page_image(page: &Page, label: &str, engine: &mut DarklyEngine, render: &Render, picks_ink: bool) -> Option<RgbaImage> {
+/// pages. On parchment, light inks are drawn dark so they show (see
+/// `StrokeColor::as_ink_on_paper`). `None` if nothing is drawn.
+pub fn page_image(page: &Page, label: &str, engine: &mut DarklyEngine, render: &Render) -> Option<RgbaImage> {
     let scale = render.scale;
     let mut layers = Vec::new();
     let mut frame = None;
     for (_, mut canvas) in page.rendered_canvases() {
-        if render.paper.is_some() && !picks_ink {
+        if render.parchment {
             canvas.recolor(StrokeColor::as_ink_on_paper);
         }
         frame = frame.or(canvas.frame().copied());
         layers.push(Placed { at: canvas.render_origin(scale), image: darkly::render(&canvas, engine, scale, render.supersample) });
     }
     let ink = compose::flatten(layers)?;
-    let Some(paper) = render.paper else { return Some(ink.image) };
+    if !render.parchment {
+        return Some(ink.image);
+    }
     // A tile or typeset page is a sheet as big as its frame; other pages get
     // a border of paper round their strokes.
     let (corner, size) = match frame {
@@ -119,7 +120,7 @@ pub fn page_image(page: &Page, label: &str, engine: &mut DarklyEngine, render: &
         }
     };
     let sheet = Sheet { corner, size, scale, seed: stable_hash(label) };
-    let mut sheet = Placed { image: background::paint(paper, &sheet), at: corner };
+    let mut sheet = Placed { image: parchment::paint(&sheet), at: corner };
     compose::draw(&mut sheet, &ink, compose::ink_on_paper);
     Some(sheet.image)
 }
@@ -136,7 +137,7 @@ pub fn svgs(entry: &Entry, dir: &str, scale: f32, only: Option<&[usize]>) -> Res
             let (svg_file, png_file) = (format!("{}/{}.svg", dir, name), format!("{}/{}.png", dir, name));
             // Seeded by the file's name: the same every run, but each canvas
             // roughened differently. Tiles use the whole page's.
-            let seed = canvas.frame().map_or_else(|| stable_hash(&name), |frame| frame.svg_seed);
+            let seed = canvas.frame().filter(|frame| frame.is_tile()).map_or_else(|| stable_hash(&name), |frame| frame.svg_seed);
             let (svg, png) = canvas.to_svg_and_png(2.0 * scale, page.svg_style(), seed);
             println!("\t - {}", svg_file);
             std::fs::write(&svg_file, svg).map_err(|e| write_error(&svg_file, e))?;

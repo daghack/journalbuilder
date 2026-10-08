@@ -26,18 +26,16 @@ Useful flags (`journalbuild` with no arguments lists them all):
 - `--svg`: also render each canvas as an SVG, and that SVG as a PNG.
 - `--strict-glyphs`: fail if any character has no glyph, instead of
   drawing an X and warning.
-- `--background parchment`: render each page as one image,
-  `darkly_{page}.png`, on procedural paper: a mottled scroll browning
-  toward ragged edges. Pages get a border of paper round their strokes;
-  typeset pages are a sheet the size of the page, and each tile of a split
-  page a sheet of its own. Ink is dark on paper by default: light colours
-  are drawn as dark as they were light, hue kept. A script that calls
-  `background()` (the paper's name, or `()`) picks its own inks instead,
-  e.g. light for transparent renders viewed on a dark background.
+- `--parchment`: render each page as one image, `darkly_{page}.png`, on
+  procedural parchment: a mottled scroll browning toward ragged edges.
+  Pages get a border of parchment round their strokes; typeset pages are
+  a sheet the size of the page, and each tile of a split page a sheet of
+  its own. Light inks are drawn as dark as they were light, hue kept, so
+  they show.
 - `--pdf`: put the pages in one PDF, `{journal}.pdf`, instead of images:
-  each page's canvases layered into one image (on paper, with
-  `--background`), at 150 canvas units to the inch whatever the scale.
-- `--journals-dir`, `--output-dir`, `--symbols`, `--locks-dir`,
+  each page's canvases layered into one image (on parchment, with
+  `--parchment`), at 150 canvas units to the inch whatever the scale.
+- `--journals-dir`, `--output-dir`, `--fonts`, `--locks-dir`,
   `--layouts-dir`: read or write somewhere other than the repository's
   defaults.
 - `--check-locks`: run every lock file's examples instead of building a
@@ -51,15 +49,15 @@ Useful flags (`journalbuild` with no arguments lists them all):
 | `journals/showcase` | a page each of every brush, font, glyph, art tool, text layout and lock type, with the calls that make them |
 | `locks/` | lock types, one rhai file each; see [locks/README.md](locks/README.md) |
 | `layouts/` | page layouts, one rhai file each; see [layouts/README.md](layouts/README.md) |
-| `config/symbols.json` | the symbol dictionary: every glyph's SVG path, by name, with optional `bearing` (room either side when text is set) or `blank` (a space this wide, such as a font's own `{font}_ `) |
-| `src/journal/` | canvases, paths, glyph placement, fonts, hatching, gradients, paper, and Darkly and SVG rendering |
+| `config/fonts.json` | every font: its glyphs' SVG paths by character (a list for variants), `character_padding`, `space_width` and `fallback`; sets of symbols are fonts too |
+| `src/journal/` | canvases, paths, glyph placement, fonts, hatching, gradients, parchment, and Darkly and SVG rendering |
 | `src/journal/publish.rs` | writing an entry out: images per canvas or page, PDFs, SVGs |
 | `src/journal/art/` | procedural path art: snakes and brambles, free or along a path |
 | `src/journal/rhaientries/` | the rhai API journals and lock files use |
 | `src/lockbuilder/` | runs lock chains forward (lock) and backward (unlock) |
 | `src/bin/journalbuild/` | the command line |
 | `tests/`, `scripts/smoke.sh` | tests, below |
-| `scripts/plain_font.py` | draws the plain font into `config/symbols.json` |
+| `scripts/plain_font.py` | draws the plain font into `config/fonts.json` |
 | `assets/svgsets/` | source artwork for symbol sets (not read by the build) |
 
 ## Writing a journal
@@ -74,7 +72,7 @@ let ink = new_style(2.5, "rgba(0, 0, 0, 0.8)", brush);
 let canvas = new_canvas();
 canvas.add_path(new_circle(new_vec(0.0, 0.0), 100.0), ink);
 
-let font = new_fontset(["copper_upper"], ["copper_lower"]);
+let font = font("copper");
 for (g, i) in font.glyphs("ink") {
 	g.scale = 50.0;
 	g.position = new_vec(i * 50.0 - 50.0, 0.0);
@@ -118,13 +116,20 @@ What to know:
 - **Randomness is seeded.** `random()`, `random_range(a, b)`, glyph variant
   picks, text layout and hatching all draw from one generator with a fixed
   seed, so a journal renders the same every run. `seed(n)` changes it.
-- **Glyphs and fonts.** `glyph("balanced_ternary_3")` loads a symbol by
-  name; `new_fontset`, `ternary_font` and `lowercase_font` map text to
-  glyphs; `new_fontset(["plain_upper"], ["plain_lower"])` is plain, a
-  simple font made to read easily, with digits and punctuation. Text
-  layout: `new_textbox` flows glyphs into a box,
-  `canvas.scatter_notes` scatters messages across a canvas, and
-  `path.fill_with_msg` / `fit_msg_to` write along a path.
+- **Fonts and glyphs.** Fonts come from `config/fonts.json`, each with
+  its glyphs and how text is set in it: `character_padding` between
+  glyphs and `space_width` (both in font sizes), and a `fallback` font for
+  characters it hasn't. `font("copper")` is a font as the file sets it;
+  `font("loche_lower", #{ character_padding: 0.3 })` or
+  `f.character_padding = 0.3` changes a copy. A character is looked for as
+  it is in the font and its fallbacks, then in the other case, so a font of
+  capitals sets lowercase text in them. `font("plain")` is a simple font
+  made to read easily. `f.glyphs(text)` gives a text's glyphs,
+  `f.glyph("a")` one glyph, `f.variants("a")` all of a glyph's variants,
+  and `font_names()` every font; `ternary_font("balanced_ternary")` maps
+  letters to balanced-ternary digits. Text layout: `new_textbox` flows
+  glyphs into a box, `canvas.scatter_notes` scatters notes across a
+  canvas, and `path.fill_with_text` / `fit_text` write along a path.
 - **Keeping text clear.** Every text layout takes `avoid` (a path, canvas,
   glyph, or an array of them) and `clearance`, and keeps each glyph's
   whole outline that far from it. For more control, build an avoidance
@@ -149,6 +154,10 @@ What to know:
   different colours; `art::bramble_along(path, flower_size, random_seed)`
   grows one along a path, such as a maze's, and `art::snake_along(path,
   max_width, random_seed)` makes a many-headed serpent of one.
+- **Page sizes.** A page is as big as its strokes, plus `page.margin`;
+  with `page.size = new_vec(1200, 1600)` it's exactly that, from the
+  origin, and strokes past its edges are cut off. The showcase is a book
+  of such pages.
 - **Splitting pages.** `page.split(columns, rows)` cuts a named page into a
   grid of tiles, each a page of its own named `{name}_{row}_{column}`
   (`page.split(#{ tile_width: 1200, tile_height: 1600 })` makes tiles of a
@@ -165,7 +174,7 @@ What to know:
 - **Page layouts.** A layout lays out pages as trees of flexbox boxes, and
   `typeset` pours text, art and ornaments into their slots, chaining the
   text through columns and pages until it runs out:
-  `journal_entry.add_pages(layout("missal_spread").typeset(#{ flows,
+  `journal_entry.add_pages(layout("two_column_article").typeset(#{ flows,
   roles, art }))`. Layouts are rhai files in `layouts/`; see
   [layouts/README.md](layouts/README.md).
 - **Problems.** `warn("...")` reports something without stopping the

@@ -7,7 +7,7 @@ layout its text, the look of each kind of text (a font, an ink, a size) and
 its art, and gets back as many pages as the text needs:
 
 ```rhai
-journal_entry.add_pages(layout("missal_spread").typeset(#{
+journal_entry.add_pages(layout("two_column_article").typeset(#{
 	name: "lunar",
 	flows: #{ title: "Lunar Influence", body: text, caption: "the moon" },
 	roles: #{
@@ -23,9 +23,9 @@ journal_entry.add_pages(layout("missal_spread").typeset(#{
 }));
 ```
 
-`layout("missal_spread")` loads `missal_spread.rhai` from here (or from
+`layout("two_column_article")` loads `two_column_article.rhai` from here (or from
 `journalbuild --layouts-dir DIR`). Adding a layout means adding a file;
-nothing needs recompiling. `journals/jagged_missal` uses every layout here.
+nothing needs recompiling. `journals/showcase` uses every layout here.
 
 ## What a layout file defines
 

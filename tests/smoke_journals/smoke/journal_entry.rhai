@@ -16,7 +16,7 @@ let faint = new_style(1.0, "hsl(160, 50%, 40%, 0.6)", ink_pen);
 let shade = new_style(1.0, "rgba(0, 0, 0, 0.4)", ink_pen);
 let swell = new_style(2.0, "#5c1d2a", tapered);
 
-let font = new_fontset(["copper_upper", "loche_upper"], ["copper_lower", "loche_lower"]);
+let font = font("copper");
 
 // ---- page one: shapes, curves, symbols, and text on a path ----
 let shapes = new_canvas();
@@ -40,7 +40,7 @@ shapes.add_path(
 // A symbol, transformed with chained calls, at a seeded random tilt.
 seed(3);
 shapes.add_path(
-	load_symbol("basic_eye").scale_by(30.0).rotate_around(new_vec(0.0, 0.0), random_range(-0.3, 0.3)).translate_by(new_vec(0.0, 0.0)),
+	font("symbols").glyph("basic_eye").scale_by(2).path().scale_by(30.0).rotate_around(new_vec(0.0, 0.0), random_range(-0.3, 0.3)).translate_by(new_vec(0.0, 0.0)),
 	outline);
 
 // Text fitted along an arc.
@@ -57,16 +57,16 @@ for (g, i) in ring {
 	shapes.add_glyph(g, outline);
 }
 // A for loop's variable is a copy, so index to change the glyphs in place.
-let word = lowercase_font("loche_upper").glyphs("ash");
+let word = font("loche_upper").glyphs("ash");
 for i in 0..word.len() {
 	word[i].scale = 18.0;
 	word[i].position = new_vec(-180.0 + i * 20.0, 100.0);
 }
 shapes.add_glyphs(word, text);
-shapes.add_glyph(glyph("basic_eye").scale_by(24.0).translate_by(new_vec(-150.0, 0.0)), accent);
+shapes.add_glyph(font("symbols").glyph("basic_eye").scale_by(24.0).translate_by(new_vec(-150.0, 0.0)), accent);
 
 // Notes scattered over the page, clear of the drawing and each other.
-let notes = shapes.scatter_notes(["smoke rises", "glass breaks"], lowercase_font("loche_upper"), faint,
+let notes = shapes.scatter_notes(["smoke rises", "glass breaks"], font("loche_upper"), faint,
 	#{ symbol_scale: 12.0, width_range: [60, 100], height_range: [30, 50] });
 shapes.add_canvas(notes);
 
@@ -123,7 +123,7 @@ let maze_canvas = new_canvas();
 maze_canvas.add_path(maze.path().scale_by(cell_size), faint);
 for cell in maze.cells() {
 	maze_canvas.add_path(
-		load_symbol("balanced_ternary_" + (cell.symbol - 13)).scale_by(cell_size / 2.0)
+		font("balanced_ternary").glyph((cell.symbol - 13)).scale_by(2).path().scale_by(cell_size / 2.0)
 			.translate_by(new_vec(cell.x * cell_size, cell.y * cell_size)),
 		outline);
 }
@@ -141,7 +141,7 @@ maze_canvas.add_glyphs(key.placed, text);
 
 // Words wrapped into two small boxes, side by side.
 let boxes = new_textbox(#{ center: new_vec(0.0, 0.0), width: 60, height: 30, symbol_scale: 9.0, layout: "words", jagged_edge: 0.5 })
-	.place_all(lowercase_font("loche_upper").glyphs("words wrap at the spaces between them and spill into another box"));
+	.place_all(font("loche_upper").glyphs("words wrap at the spaces between them and spill into another box"));
 for (block, i) in boxes {
 	for g in block {
 		maze_canvas.add_glyph(g.translate_by(new_vec(i * 70.0, b.max.y + 40.0)), text);
@@ -209,12 +209,12 @@ journal_entry.add_pages(new_layout("book", Fn("smoke_page")).typeset(#{
 	width: 360, height: 260,
 	flows: #{ title: "the smoke book", body: words + words + words + "\n\n" + words + words + words + words + words + words + words + words + words },
 	roles: #{
-		body: #{ font: lowercase_font("loche_upper"), style: text, size: 11.0, align: "justify", indent: 1.0 },
+		body: #{ font: font("loche_upper"), style: text, size: 11.0, align: "justify", indent: 1.0 },
 		heading: #{ font: font, style: accent, size: 28.0, align: "center" },
 		initial: #{ font: font, style: accent },
 		dot: #{ style: faint },
 		eye: #{ style: outline },
 		frame: #{ style: faint },
 	},
-	art: #{ dot: new_circle(new_vec(0.0, 0.0), 2.0), eye: load_symbol("basic_eye") },
+	art: #{ dot: new_circle(new_vec(0.0, 0.0), 2.0), eye: font("symbols").glyph("basic_eye").scale_by(2).path() },
 }));

@@ -1,5 +1,5 @@
-// missal_figure: a full-page figure with its caption beneath, as the Jagged
-// Missal's plates are set.
+// captioned_figure: a figure filling the page, with its caption centred
+// beneath it.
 //
 // Flows: "caption".
 // Roles: "caption", and a style for the figure if it's a path.

@@ -43,11 +43,11 @@ use crate::journal::canvas::textbox::TextBoxLineMode;
 use crate::journal::paths::StrokePath;
 use crate::journal::fonts::Font;
 use crate::journal::symbol::{place_along_path, place_words_along_path, Symbol, SymbolPlacementArgs};
-use crate::journal::symboldict::SymbolPathDict;
+use crate::journal::fonts::FontBook;
 
-/// Where text's glyphs come from: the symbol dictionary, and the generator
+/// Where text's glyphs come from: the fonts, and the generator
 /// that picks glyph variants.
-pub(super) type TextSource = (Rc<SymbolPathDict>, random::SharedRng);
+pub(super) type TextSource = (Rc<FontBook>, random::SharedRng);
 
 /// Options for text along a path.
 const PATH_TEXT_KEYS: [&str; 4] = ["spacing", "avoid", "clearance", "layout"];
@@ -72,7 +72,6 @@ fn fill_with_text(path: &mut Path, msg: &str, font: Font, fontsize: Dynamic, sty
     if !(fontsize > 0.0) {
         return Err(format!("fill_with_text: font size must be positive, got {}", fontsize).into());
     }
-    let builder = font.builder(symdict);
     let mode = line_mode("fill_with_text", &options)?;
     let avoid = avoid::AvoidOption::parse("fill_with_text", &options, false)?;
     let tree = avoid.tree.as_ref().map(|a| a.borrow());
@@ -84,7 +83,7 @@ fn fill_with_text(path: &mut Path, msg: &str, font: Font, fontsize: Dynamic, sty
     };
 
     let mut all_canvases = Vec::new();
-    let mut symbols = builder.build(msg, &mut *rng.borrow_mut());
+    let mut symbols = font.build(msg, symdict, &mut *rng.borrow_mut());
     let path = path.get();
     let total = symbols.len();
     while !symbols.is_empty() {
@@ -113,8 +112,7 @@ fn fit_text(path: &mut Path, msg: &str, font: Font, style: StrokeStyle, options:
     check_keys("fit_text", &options, &PATH_TEXT_KEYS)?;
     let path = &path.get();
     let mut canvas = CanvasData::default();
-    let builder = font.builder(symdict);
-    let symbols = builder.build(msg, &mut *rng.borrow_mut());
+    let symbols = font.build(msg, symdict, &mut *rng.borrow_mut());
     let mode = line_mode("fit_text", &options)?;
     let avoid = avoid::AvoidOption::parse("fit_text", &options, false)?;
     let tree = avoid.tree.as_ref().map(|a| a.borrow());
@@ -317,11 +315,11 @@ fn hatch(path: &StrokePath, options: &HatchOptions, rng: &SharedRng) -> RhaiResu
 #[cfg(test)]
 mod tests {
     use super::super::JournalEngine;
-    use crate::journal::symboldict::SymbolPathDict;
+    use crate::journal::fonts::FontBook;
     use std::rc::Rc;
 
     fn engine() -> JournalEngine {
-        let symd = SymbolPathDict::from_file(crate::journal::symboldict::DEFAULT_SYMBOLS).expect("Failed to load symbols.json");
+        let symd = FontBook::from_file(crate::journal::fonts::DEFAULT_FONTS).expect("Failed to load fonts.json");
         JournalEngine::new(Rc::new(symd))
     }
 

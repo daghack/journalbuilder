@@ -1,5 +1,4 @@
-// missal_spread: an article in two columns, as the Jagged Missal sets
-// them. The first page opens with a heading over the left column and a
+// two_column_article: an article in two columns. The first page opens with a heading over the left column and a
 // drop cap, with an illustration and its caption atop the right column; the
 // body runs down the left column, on down the right, and on over as many
 // pages as it takes, two columns each, with an ornamental band between them

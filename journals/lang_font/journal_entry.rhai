@@ -4,7 +4,7 @@
 // The book has no capital H, J, K, Q, U, X, Y or Z; those are drawn in its
 // hand rather than traced.
 
-let font = new_fontset(["lang_upper"], ["lang_lower"]);
+let font = font("lang");
 // Glyphs are 0.8 units to the x-height and drawn at half their size, so at
 // size 80 the x-height is 32 canvas units.
 let nib = new_brush("Calligraphy", 0.4, 0.7, 2.3);
@@ -18,7 +18,7 @@ fn write_line(text, at, size, style, font) {
 	// Glyphs are placed on the line through the middle of their x-height.
 	let y = at.y - size * 0.4 / 2.0;
 	let path = new_line(new_vec(at.x, y), new_vec(at.x + 4000.0, y));
-	for c in path.fill_with_text(text, font, size, style, #{ spacing: 0.12 }) { line.add_canvas(c); }
+	for c in path.fill_with_text(text, font, size, style) { line.add_canvas(c); }
 	line
 }
 

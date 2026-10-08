@@ -205,11 +205,11 @@ pub fn register(engine: &mut Engine) {
 #[cfg(test)]
 mod tests {
     use super::super::JournalEngine;
-    use crate::journal::symboldict::SymbolPathDict;
+    use crate::journal::fonts::FontBook;
     use std::rc::Rc;
 
     fn engine() -> JournalEngine {
-        let symd = SymbolPathDict::from_file(crate::journal::symboldict::DEFAULT_SYMBOLS).expect("Failed to load symbols.json");
+        let symd = FontBook::from_file(crate::journal::fonts::DEFAULT_FONTS).expect("Failed to load fonts.json");
         JournalEngine::new(Rc::new(symd))
     }
 
@@ -246,7 +246,7 @@ mod tests {
         let ok: bool = eval(r#"
             let a = new_avoidance_tree();
             let b = a;
-            let g = glyph("basic_eye").scale_by(20.0);
+            let g = font("symbols").glyph("basic_eye").scale_by(20.0);
             b.add([g, new_line(new_vec(100.0, 0.0), new_vec(200.0, 0.0))]);
             let c = a.copy();
             c.add(new_line(new_vec(0.0, 500.0), new_vec(10.0, 500.0)), 1.0);

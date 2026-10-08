@@ -14,8 +14,7 @@ pub enum SymbolType {
 #[derive(Debug, Clone)]
 pub struct SymbolBase {
     symbol_type: SymbolType,
-    /// The hull's bounding box, widened across by the glyph's bearing:
-    /// the room text layout gives the glyph.
+    /// The hull's bounding box, which text layout reads for every glyph.
     hull_aabb: parry2d::bounding_volume::Aabb,
     /// The convex hull of its strokes, unplaced: what text keeps clear of.
     hull: Vec<Vec2>,
@@ -29,14 +28,6 @@ impl SymbolBase {
             hull: hull.points().to_vec(),
             symbol_type,
         }
-    }
-    /// The same glyph with `bearing` (in glyph units) of room either side
-    /// of it when text is set. What text keeps clear of is still its
-    /// strokes' hull.
-    pub fn with_bearing(mut self, bearing: f32) -> SymbolBase {
-        self.hull_aabb.mins.x -= bearing;
-        self.hull_aabb.maxs.x += bearing;
-        self
     }
     pub fn is_blank(&self) -> bool {
         matches!(self.symbol_type, SymbolType::Blank(_, _))
@@ -87,6 +78,9 @@ pub struct Symbol {
     scale: f32,
     position: Vec2,
     rotation_rad: f32,
+    /// Room between this glyph and its neighbours when text is set, in
+    /// font sizes: its font's character padding, half each side.
+    padding: f32,
 }
 
 impl Symbol {
@@ -99,7 +93,15 @@ impl Symbol {
             scale,
             position,
             rotation_rad,
+            padding: 0.0,
         }
+    }
+    /// The same glyph with `padding` (in font sizes) between it and its
+    /// neighbours when text is set. What text keeps clear of is still its
+    /// strokes' hull.
+    pub fn with_padding(mut self, padding: f32) -> Symbol {
+        self.padding = padding;
+        self
     }
     pub fn position(&self) -> Vec2 {
         self.position
@@ -131,9 +133,14 @@ impl Symbol {
     }
 
     /// The bounding box of the unplaced glyph's hull (its path spans about
-    /// -1..1), widened across by its bearing: the room text gives it.
+    /// -1..1), widened across by its padding: the room text gives it.
+    /// Half the padding goes each side, and a font size is 2 glyph units,
+    /// so each side gains `padding` units.
     pub fn hull_aabb(&self) -> parry2d::bounding_volume::Aabb {
-        self.base.hull_aabb
+        let mut b = self.base.hull_aabb;
+        b.mins.x -= self.padding;
+        b.maxs.x += self.padding;
+        b
     }
     /// The convex hull of the glyph's strokes as placed: the room it takes.
     pub fn footprint(&self) -> Vec<Vec2> {

@@ -3,7 +3,7 @@
 //! surfacing minutes into a render.
 
 use scribe::journal::rhaientries::JournalEngine;
-use scribe::journal::symboldict::SymbolPathDict;
+use scribe::journal::fonts::FontBook;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -18,7 +18,7 @@ fn rhai_journals(dir: &str) -> Vec<PathBuf> {
 }
 
 fn check_scripts(scripts: &[PathBuf]) {
-    let symd = Rc::new(SymbolPathDict::from_file(scribe::journal::symboldict::DEFAULT_SYMBOLS).expect("Failed to load symbols.json"));
+    let symd = Rc::new(FontBook::from_file(scribe::journal::fonts::DEFAULT_FONTS).expect("Failed to load fonts.json"));
     let failures: Vec<String> = scripts.iter()
         .filter_map(|script| {
             let mut engine = JournalEngine::new(symd.clone());

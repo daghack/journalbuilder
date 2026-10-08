@@ -1,16 +1,15 @@
 pub mod art;
 pub mod avoid;
-pub mod background;
 pub mod canvas;
 pub mod compose;
 pub mod fonts;
 pub mod gradient;
 pub mod symbol;
+pub mod parchment;
 pub mod paths;
 pub mod pdf;
 pub mod publish;
 pub mod hatch;
-pub mod symboldict;
 pub mod typeset;
 pub mod rhaientries;
 pub mod darkly;

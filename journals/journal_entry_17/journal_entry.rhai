@@ -35,7 +35,7 @@ let cell_size = 50.0;
 let avoid = new_canvas();
 let cells = [];
 for cell in maze.cells() {
-	let g = glyph("balanced_ternary_" + (cell.symbol - 13));
+	let g = font("balanced_ternary").glyph((cell.symbol - 13));
 	g.scale = cell_size;
 	g.position = new_vec(cell.x * cell_size, cell.y * cell_size);
 	cells.push(g);
@@ -87,7 +87,7 @@ fn ring_point(count, step, radius) {
 }
 
 fn add_digit(digit, at, style) {
-	let g = glyph("balanced_ternary_" + digit);
+	let g = font("balanced_ternary").glyph(digit);
 	g.scale = 50.0;
 	g.position = at.center;
 	g.rotation = at.angle + PI() / 2.0;
@@ -147,7 +147,7 @@ let shorts = [
 	"Do you see this world for what it is?",
 	"There is no number of walking sticks I could retrieve to balance out the ruin I have wrought",
 ];
-dial.add_canvas(dial.scatter_notes(shorts, lowercase_font("loche_upper"), new_style(2.0, "darkred", brush),
+dial.add_canvas(dial.scatter_notes(shorts, font("loche_upper"), new_style(2.0, "darkred", brush),
 	#{ symbol_scale: 30.0, width_range: [200, 500], height_range: [300, 600] }));
 
 let dial_page = new_page();

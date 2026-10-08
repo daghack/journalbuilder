@@ -3,7 +3,9 @@
 use rhai::{CustomType, Dynamic, Engine, EvalAltResult, Map, TypeBuilder};
 
 use super::options::{check_keys, number};
-use super::{Canvas, CanvasData};
+use super::{Canvas, CanvasData, RhaiResult, Vec2};
+use parry2d::bounding_volume::Aabb;
+use parry2d::math::Vec2 as PVec;
 use crate::journal::canvas::Canvas as JournalCanvas;
 use crate::journal::canvas::{SvgStyle, Frame};
 use crate::journal::stable_hash;
@@ -13,19 +15,9 @@ use crate::journal::stable_hash;
 pub struct Entry {
     #[rhai_type(skip)]
     pub(super) pages: Vec<Page>,
-    /// Whether the script asked `background()`, and so picked inks for
-    /// the paper (or lack of it) itself.
-    #[rhai_type(skip)]
-    pub(super) picks_ink: bool,
 }
 
 impl Entry {
-    /// Whether the script picks its own inks for paper (by asking
-    /// `background()`); if not, renders on paper draw it in dark ink (see
-    /// `StrokeColor::as_ink_on_paper`).
-    pub fn picks_ink(&self) -> bool {
-        self.picks_ink
-    }
     fn add_page(&mut self, page: Page) -> Result<(), Box<EvalAltResult>> {
         let label = page.label(self.pages.len());
         if self.pages.iter().enumerate().any(|(i, p)| p.label(i) == label) {
@@ -113,6 +105,11 @@ pub struct Page {
     /// default (see `margin_for`).
     #[rhai_type(skip)]
     pub(super) margin: Option<f64>,
+    /// A set size (`page.size`): the page is the region from the origin to
+    /// this, its canvases cut off at its edges. `None` for as big as its
+    /// strokes.
+    #[rhai_type(skip)]
+    pub(super) size: Option<PVec>,
 }
 
 impl Default for Page {
@@ -122,6 +119,7 @@ impl Default for Page {
             name: None,
             svg_style: Some(SvgStyle::DEFAULT),
             margin: None,
+            size: None,
         }
     }
 }
@@ -158,9 +156,33 @@ impl Page {
             if !rendered.has_strokes() {
                 return None;
             }
-            rendered.pad(self.margin_for(canvas));
+            match self.size {
+                Some(size) => rendered.set_frame(Some(Frame::whole(Aabb::new(PVec::ZERO, size)))),
+                None => rendered.pad(self.margin_for(canvas)),
+            }
         }
         Some(rendered)
+    }
+    fn get_size(&mut self) -> Dynamic {
+        self.size.map_or(Dynamic::UNIT, |s| Dynamic::from(Vec2::new(s.x as f64, s.y as f64)))
+    }
+    /// `page.size = new_vec(width, height)`: the page is the region from
+    /// the origin to there, whatever is drawn on it, and strokes past its
+    /// edges are cut off; `()` for as big as its strokes (the default).
+    fn set_size(&mut self, size: Dynamic) -> RhaiResult<()> {
+        if size.is_unit() {
+            self.size = None;
+            return Ok(());
+        }
+        let type_name = size.type_name();
+        let size: PVec = size.try_cast::<Vec2>()
+            .ok_or_else(|| -> Box<EvalAltResult> { format!("page.size: expected a vec (width, height) or (), got {}", type_name).into() })?
+            .into();
+        if !(size.x >= 1.0 && size.y >= 1.0) {
+            return Err(format!("page.size: width and height must be at least 1, got ({}, {})", size.x, size.y).into());
+        }
+        self.size = Some(size);
+        Ok(())
     }
     /// The margin rendered around `canvas`: the page's `margin`, or by
     /// default half the largest brush size on the canvas, the least that
@@ -284,15 +306,23 @@ impl Page {
         }
         let canvases: Vec<(usize, &CanvasData)> = self.canvases.iter().enumerate()
             .filter(|(_, canvas)| !canvas.strokes.is_empty() || canvas.frame.is_some()).collect();
-        let mut region = parry2d::bounding_volume::Aabb::new_invalid();
-        for (_, canvas) in &canvases {
-            let bounds = match canvas.frame {
-                Some(frame) => frame.page,
-                None => self.render_canvas(canvas).expect("the canvas has strokes").bounds(),
-            };
-            region.take_point(bounds.mins);
-            region.take_point(bounds.maxs);
-        }
+        // A page of a set size splits by it; others by what their canvases
+        // render.
+        let mut region = match self.size {
+            Some(size) => Aabb::new(PVec::ZERO, size),
+            None => {
+                let mut region = Aabb::new_invalid();
+                for (_, canvas) in &canvases {
+                    let bounds = match canvas.frame {
+                        Some(frame) => frame.page,
+                        None => self.render_canvas(canvas).expect("the canvas has strokes").bounds(),
+                    };
+                    region.take_point(bounds.mins);
+                    region.take_point(bounds.maxs);
+                }
+                region
+            }
+        };
         if canvases.is_empty() {
             return Err(format!("{}: the page has nothing drawn on it to split", CALLER).into());
         }
@@ -336,6 +366,8 @@ impl Page {
                     name: Some(format!("{}_{}_{}", name, row, column)),
                     svg_style: self.svg_style.clone(),
                     margin: self.margin,
+                    // Each tile is framed to its part of the page.
+                    size: None,
                 };
                 for (i, canvas) in &seeded {
                     let mut part = canvas.clone();
@@ -369,6 +401,7 @@ impl Page {
             .with_get_set("name", Self::get_name, Self::set_name)
             .with_get_set("svg_style", Self::get_svg_style, Self::set_svg_style)
             .with_get_set("margin", Self::get_margin, Self::set_margin)
+            .with_get_set("size", Self::get_size, Self::set_size)
             .with_fn("split", Self::split)
             .with_fn("split", Self::split_with)
             .with_get("tile", Self::get_tile)

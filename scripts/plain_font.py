@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
-"""Writes the plain font into config/symbols.json.
+"""Writes the plain font into config/fonts.json.
 
 Plain is a simple single-stroke sans for text that should read easily:
-capitals and digits as `plain_upper_{c}`, lowercase as `plain_lower_{c}`
-(use it as `new_fontset(["plain_upper"], ["plain_lower"])`), punctuation
-with the capitals. Glyphs are drawn here as strokes of lines and elliptical
-arcs; running the script replaces every `plain_` glyph in the dictionary
-with them, leaving the others as they are.
+capitals, lowercase, digits and punctuation, set as `font("plain")`.
+Glyphs are drawn here as strokes of lines and elliptical arcs; running the
+script replaces the font file's "plain" font with them, leaving the other
+fonts as they are.
 
 Glyph space runs -1..1 with y down. Capitals and digits stand from the cap
 line (-0.7) to the baseline (0.7); lowercase from the x-height (-0.28),
-with ascenders to -0.8 and descenders to 1.05. Each glyph has a `bearing`:
-room either side of its strokes when text is set. `plain_upper_ ` and
-`plain_lower_ ` are blanks, the font's spaces.
+with ascenders to -0.8 and descenders to 1.05. The font's
+`character_padding` (in font sizes) is the room between glyphs, and its
+`space_width` the width of a space.
 """
 
 import json
@@ -20,15 +19,17 @@ import math
 import os
 import sys
 
-SYMBOLS = os.path.join(os.path.dirname(__file__), "..", "config", "symbols.json")
+FONTS = os.path.join(os.path.dirname(__file__), "..", "config", "fonts.json")
 
 CAP, BASE = -0.7, 0.7
 XH = -0.28
 ASC, DESC = -0.8, 1.05
 MID = (XH + BASE) / 2  # middle of the x-height
-BEARING = 0.16
-# Spaces are this wide, rather than the default 1.0: words read as words.
-SPACE = 0.62
+# Room between glyphs, in font sizes.
+PADDING = 0.16
+# Spaces are this wide, in font sizes, rather than the default 0.5: words
+# read as words.
+SPACE = 0.31
 
 
 def num(v):
@@ -254,22 +255,38 @@ def upper():
     return g
 
 
+def write_fonts(fonts, path):
+    """The font file, one glyph to a line, so diffs stay readable."""
+    lines = ["{"]
+    names = list(fonts)
+    for i, name in enumerate(names):
+        font = fonts[name]
+        lines.append("\t%s: {" % json.dumps(name))
+        for key in [k for k in font if k != "glyphs"]:
+            lines.append("\t\t%s: %s," % (json.dumps(key), json.dumps(font[key])))
+        lines.append('\t\t"glyphs": {')
+        keys = list(font["glyphs"])
+        for j, key in enumerate(keys):
+            comma = "," if j < len(keys) - 1 else ""
+            lines.append("\t\t\t%s: %s%s" % (json.dumps(key, ensure_ascii=False), json.dumps(font["glyphs"][key], ensure_ascii=False), comma))
+        lines.append("\t\t}")
+        lines.append("\t}" + ("," if i < len(names) - 1 else ""))
+    lines.append("}")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+
+
 def main():
-    # One glyph per line: edit the lines, so the other glyphs' lines stay
-    # exactly as they were.
-    with open(SYMBOLS, encoding="utf-8") as f:
-        lines = f.read().split("\n")
-    entries = [line.strip().rstrip(",") for line in lines if line.strip().startswith("{")]
-    kept = [e for e in entries if not json.loads(e)["name"].startswith("plain_")]
-    glyphs = [("plain_upper", upper()), ("plain_lower", lower())]
-    for prefix, chars in glyphs:
-        kept.append(json.dumps({"name": "%s_ " % prefix, "blank": SPACE}))
-        for char, path in chars.items():
-            kept.append(json.dumps({"name": "%s_%s" % (prefix, char), "path": str(path), "bearing": BEARING}, ensure_ascii=False))
-    with open(SYMBOLS, "w", encoding="utf-8") as f:
-        f.write("[\n" + ",\n".join("\t" + e for e in kept) + "\n]\n")
-    json.load(open(SYMBOLS, encoding="utf-8"))  # still valid
-    print("wrote %d plain glyphs to %s" % (sum(len(c) for _, c in glyphs), os.path.normpath(SYMBOLS)), file=sys.stderr)
+    with open(FONTS, encoding="utf-8") as f:
+        fonts = json.load(f, object_pairs_hook=dict)
+    # upper() keys its capitals by lowercase letter, as lower() does its
+    # lowercase.
+    glyphs = {(char.upper() if char.isalpha() else char): str(path) for char, path in upper().items()}
+    glyphs.update((char, str(path)) for char, path in lower().items())
+    fonts["plain"] = {"character_padding": PADDING, "space_width": SPACE, "glyphs": glyphs}
+    write_fonts(fonts, FONTS)
+    json.load(open(FONTS, encoding="utf-8"))  # still valid
+    print("wrote %d plain glyphs to %s" % (len(glyphs), os.path.normpath(FONTS)), file=sys.stderr)
 
 
 if __name__ == "__main__":

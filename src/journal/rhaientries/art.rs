@@ -125,11 +125,11 @@ pub fn register(engine: &mut Engine) {
 #[cfg(test)]
 mod tests {
     use super::super::JournalEngine;
-    use crate::journal::symboldict::{SymbolPathDict, DEFAULT_SYMBOLS};
+    use crate::journal::fonts::{FontBook, DEFAULT_FONTS};
     use std::rc::Rc;
 
     fn engine() -> JournalEngine {
-        JournalEngine::new(Rc::new(SymbolPathDict::from_file(DEFAULT_SYMBOLS).expect("Failed to load symbols.json")))
+        JournalEngine::new(Rc::new(FontBook::from_file(DEFAULT_FONTS).expect("Failed to load fonts.json")))
     }
 
     #[test]

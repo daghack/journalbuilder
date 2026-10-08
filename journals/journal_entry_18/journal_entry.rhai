@@ -23,7 +23,7 @@ let shorts = [
 
 let box_size = 150.0;
 let symbol_scale = 19.0;
-let font = lowercase_font("loche_upper");
+let font = font("loche_upper");
 let boxes = new_textbox(#{
 	center: new_vec(0.0, 0.0), width: box_size, height: box_size,
 	symbol_scale: symbol_scale, layout: "words", jagged_edge: 0.5,

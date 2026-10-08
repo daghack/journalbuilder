@@ -1,11 +1,11 @@
 //! Keeps journals/showcase up to date: it should show everything journals
 //! can draw with. These fail when something scripts can call, a font, or a
 //! lock type isn't in it (see CLAUDE.md). Brushes and glyphs needn't be
-//! listed: the showcase draws every one of `brush_names()` and
-//! `glyph_names("")`.
+//! listed: the showcase draws every one of `brush_names()`, and every
+//! variant of every glyph of every font in `font_names()`.
 
 use scribe::journal::rhaientries::JournalEngine;
-use scribe::journal::symboldict::{SymbolPathDict, DEFAULT_SYMBOLS};
+use scribe::journal::fonts::{FontBook, DEFAULT_FONTS};
 use std::rc::Rc;
 
 const SHOWCASE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/journals/showcase/journal_entry.rhai");
@@ -32,7 +32,7 @@ fn mentions(text: &str, word: &str) -> bool {
 
 #[test]
 fn every_function_scripts_can_call_is_in_the_showcase() {
-    let symd = Rc::new(SymbolPathDict::from_file(DEFAULT_SYMBOLS).unwrap());
+    let symd = Rc::new(FontBook::from_file(DEFAULT_FONTS).unwrap());
     let script = showcase();
     let missing: Vec<String> = JournalEngine::new(symd).function_names().into_iter()
         // Properties: `get$name` and `set$name`.
@@ -45,22 +45,13 @@ fn every_function_scripts_can_call_is_in_the_showcase() {
 
 #[test]
 fn every_font_is_in_the_showcase() {
-    // Glyph families of 20 or more are fonts; smaller ones (archangel's
-    // seven, single symbols) are only in the glyph catalogue.
-    let symd = SymbolPathDict::from_file(DEFAULT_SYMBOLS).unwrap();
-    let mut families: std::collections::BTreeMap<String, usize> = Default::default();
-    for name in symd.symbols_with_prefix("") {
-        let mut parts: Vec<&str> = name.split('_').collect();
-        while parts.len() > 1 && parts[parts.len() - 1].chars().count() <= 3 {
-            parts.pop();
-        }
-        *families.entry(parts.join("_")).or_default() += 1;
-    }
+    // Fonts of 20 glyphs or more; smaller sets (archangel's seven, the
+    // symbols) are only in the glyph catalogue, which draws every glyph.
+    let book = FontBook::from_file(DEFAULT_FONTS).unwrap();
     let script = showcase();
-    let missing: Vec<&String> = families.iter()
-        .filter(|(family, count)| **count >= 20 && !family.starts_with("debug"))
-        .map(|(family, _)| family)
-        .filter(|family| !script.contains(&format!("\"{}\"", family)))
+    let missing: Vec<String> = book.names().into_iter()
+        .filter(|name| !name.starts_with("debug") && book.font(name).unwrap().characters().len() >= 20)
+        .filter(|name| !script.contains(&format!("\"{}\"", name)))
         .collect();
     assert!(missing.is_empty(), "add these fonts to the showcase's fonts page: {:?}", missing);
 }
@@ -86,5 +77,5 @@ fn every_lock_type_is_in_the_showcase() {
 fn the_showcase_draws_every_brush_and_glyph() {
     let script = showcase();
     assert!(script.contains("brush_names()"), "the pens page should draw every brush from brush_names()");
-    assert!(script.contains("glyph_names(\"\")"), "the glyphs page should draw every glyph from glyph_names(\"\")");
+    assert!(script.contains("font_names()") && script.contains(".variants("), "the glyphs page should draw every variant of every font's glyphs, from font_names()");
 }

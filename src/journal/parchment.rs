@@ -1,5 +1,6 @@
-//! Paper to render pages on: procedural textures in the manner of old
-//! scrolls, drawn under a page's strokes (`--background`).
+//! Parchment to render pages on (`--parchment`): a procedural texture in
+//! the manner of an old scroll, mottled and fibrous, browning toward
+//! ragged edges, drawn under a page's strokes.
 //!
 //! Textures are worked out in canvas units, so they look the same at any
 //! `--scale`. Each page is a sheet of its own, seeded from its name: the
@@ -10,31 +11,6 @@
 use image::{ImageBuffer, RgbaImage};
 use noise::{NoiseFn, Perlin};
 use rayon::prelude::*;
-
-/// A kind of paper.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Paper {
-    /// Cream parchment, mottled and fibrous, browning toward ragged
-    /// edges: a scroll.
-    Parchment,
-}
-
-impl Paper {
-    pub const NAMES: [&'static str; 1] = ["parchment"];
-
-    pub fn from_name(name: &str) -> Option<Self> {
-        match name {
-            "parchment" => Some(Self::Parchment),
-            _ => None,
-        }
-    }
-
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Parchment => "parchment",
-        }
-    }
-}
 
 /// A sheet of paper on a grid of pixels from the canvas units' origin at
 /// `scale` pixels per unit: its corner and size.
@@ -47,7 +23,7 @@ pub struct Sheet {
 }
 
 /// The sheet, opaque.
-pub fn paint(paper: Paper, sheet: &Sheet) -> RgbaImage {
+pub fn paint(sheet: &Sheet) -> RgbaImage {
     let (x0, y0) = sheet.corner;
     let (width, height) = sheet.size;
     let texture = Texture::new(sheet);
@@ -58,9 +34,7 @@ pub fn paint(paper: Paper, sheet: &Sheet) -> RgbaImage {
             let x = (x0 + column as i64) as f64 + 0.5;
             let y = (y0 + row as i64) as f64 + 0.5;
             let p = [x / texture.scale, y / texture.scale];
-            let [r, g, b] = match paper {
-                Paper::Parchment => texture.parchment(p),
-            };
+            let [r, g, b] = texture.parchment(p);
             let byte = |v: f64| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
             [byte(r), byte(g), byte(b), 255]
         })
@@ -224,18 +198,10 @@ mod tests {
     #[test]
     fn paper_is_opaque_and_follows_its_seed() {
         let sheet = Sheet { corner: (-10, 5), size: (60, 40), scale: 0.2, seed: 3 };
-        let a = paint(Paper::Parchment, &sheet);
+        let a = paint(&sheet);
         assert_eq!(a.dimensions(), (60, 40));
         assert!(a.pixels().all(|p| p.0[3] == 255));
-        assert_eq!(a, paint(Paper::Parchment, &sheet));
-        assert_ne!(a, paint(Paper::Parchment, &Sheet { seed: 4, ..sheet }));
-    }
-
-    #[test]
-    fn papers_have_names() {
-        for name in Paper::NAMES {
-            assert!(Paper::from_name(name).is_some());
-        }
-        assert_eq!(Paper::from_name("vellum"), None);
+        assert_eq!(a, paint(&sheet));
+        assert_ne!(a, paint(&Sheet { seed: 4, ..sheet }));
     }
 }
