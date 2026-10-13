@@ -2,11 +2,9 @@
 // of Lazarolth, as a little book in Loche's keeping. The rules are as given;
 // Loche's own asides close each entry, in Loche's hand (loche_lower).
 //
-//   01 title        Loche, of the Collectors
-//   02 contents
-//   03-04 masteries  Hook, Ventriloquist, Assassinate; Light Step, Fervor
-//   05-07 rites      Phantasmagoric Manifestation, Grey Feast, Leech Regret
-//   08 at a glance  calls, Stealth and Tracking, states, what each rite needs
+//   01-02 masteries  Hook, Ventriloquist, Assassinate; Light Step, Fervor
+//   03-05 rites      Phantasmagoric Manifestation, Grey Feast, Leech Regret
+//   06 at a glance  calls, Stealth and Tracking, states, what each rite needs
 //
 // Render it as a book: journalbuild loche_rules --parchment (or --pdf).
 
@@ -98,7 +96,7 @@ fn padded(n) {
 }
 
 fn bind_page(section, page) {
-	let number = this.pages.len() + 3;
+	let number = this.pages.len() + 1;
 	let slug = section;
 	slug.replace(" ", "_");
 	page.name = `${padded(number)}_${slug}`;
@@ -118,7 +116,7 @@ fn entries(section, list, art, scale) {
 	for name in roles.keys() {
 		if roles[name].contains("size") && name != "head" && name != "folio" { roles[name].size *= scale; }
 	}
-	let flows = #{ "000_head": section, "999_folio": `${this.pages.len() + 3}` };
+	let flows = #{ "000_head": section, "999_folio": `${this.pages.len() + 1}` };
 	for (parts, e) in list {
 		for (part, i) in parts {
 			flows[`${e + 1}${padded(i)}_${part[0]}`] = part[1];
@@ -131,48 +129,6 @@ fn entries(section, list, art, scale) {
 }
 
 // ---- drawings ----
-
-// A coiled snake, hatched: the Collectors' kind of creature.
-fn snake_in(b) {
-	let c = new_canvas();
-	let r = b.height.min(b.width) * 0.42;
-	let snake = art::snake_path(b.center + new_vec(-r * 1.1, -r * 0.5), 0.3, b.center + new_vec(r * 1.3, r * 0.6), r * 9.0, r * 0.22, 7);
-	c.add_path(snake, global::LINE);
-	c.add_path(snake.hatch(#{ spacing: 7.0, angle: 1.1, bow: 2.5, inset: 2.0 }), new_style(1, global::GREEN, global::PEN));
-	c
-}
-
-// A leech: a fat curved body, ringed with hatching.
-fn leech(c, length, angle, bend) {
-	let along = new_vec(angle.cos(), angle.sin());
-	let across = along.rotated(PI() / 2.0);
-	let top = [];
-	let bottom = [];
-	for i in 0..=24 {
-		let t = i / 24.0;
-		let spine = c + along * ((t - 0.5) * length) + across * (bend * (PI() * t).sin());
-		let half = length * 0.13 * (PI() * t).sin().sqrt() + 2.0;
-		top.push(spine + across * half);
-		bottom.push(spine - across * half);
-	}
-	let body = new_path().move_to(top[0]);
-	for p in top { body.line_to(p); }
-	bottom.reverse();
-	for p in bottom { body.line_to(p); }
-	body.close();
-	#{ body: body, rings: body.hatch(#{ spacing: 9.0, angle: angle + PI() / 2.0, bow: 1.5, inset: 3.0 }) }
-}
-
-fn leeches_in(b) {
-	let c = new_canvas();
-	let size = b.width.min(b.height * 2.2) * 0.3;
-	for (shape, i) in [[-1.0, -0.25, 0.2], [0.0, 0.15, -0.1], [1.0, -0.1, 0.35]] {
-		let l = leech(b.center + new_vec(shape[0] * size * 1.05, shape[1] * size * 0.6), size, shape[2] + 0.2 * i, size * 0.12 * (1 - i));
-		c.add_path(l.body, global::LINE);
-		c.add_path(l.rings, global::CAPTION);
-	}
-	c
-}
 
 // The eye of Saqir: an eye in a ring of short rays.
 fn eye_in(b) {
@@ -227,7 +183,7 @@ book.entries("masteries", [
 		["body", "With study and recitation of a piece of scripture for no less than 5 minutes, the user gains the Hopeful state."],
 		["note", "Hold the Hunger. Hunt and Harvest come before Feast."],
 	],
-], #{ figure: Fn("snake_in") });
+], #{});
 
 // ---- rites of Lazarolth ----
 
@@ -277,18 +233,18 @@ book.entries("rites", [[
 	["sub", "Mechanical Effect"],
 	["body", "This rite creates three Soul Leeches. Anyone who is Faith in Higher Power may swallow whole one of these live leeches, and all Insanities they are infected with are lowered to Mild intensity until the next Dawn. If the individual who swallows one is not a follower of Lazarolth, they also suffer a -1 Faith penalty for the same period."],
 	["note", "Three leeches. Choose the mouths with care — the faithless pay in faith."],
-]], #{ figure: Fn("leeches_in") });
+]], #{});
 
 // ---- at a glance ----
 
 book.entries("at a glance", [
 	[
 		["title", "Calls"],
-		["body", "\"Power Strike\" — Hook: spend an unused \"Quick\" call for it.\n\"Unlocatable\" — Ventriloquist: call it before speaking from Stealth."],
+		["body", "\"Parry\"\n\"Dodge\"\n\"Quick\"\n\"Steady\"\n\"Tracking\"\n\"Power Strike\" — Hook: spend an unused \"Quick\" call for it.\n\"Unlocatable\" — Ventriloquist: call it before speaking from Stealth."],
 	],
 	[
 		["title", "Stealth and Tracking"],
-		["body", "Ventriloquist — speak in the Stealth state without breaking it. Tracking may still find me.\nAssassinate — attack from Stealth within two arms' reach. No normal parry or dodge (divine ones still work); a torso hit unless I say otherwise. It leaves Stealth.\nLight Step — ignore Tracking calls from humans or Malefic. Divine or Arcane Tracking must be followed."],
+		["body", "Ventriloquist — speak in the Stealth state without breaking it.\nAssassinate — attack from Stealth within two arms' reach. No normal parry or dodge (divine ones still work); a torso hit unless I say otherwise. It leaves Stealth.\nLight Step — ignore Tracking calls from humans or Malefic. Divine or Arcane Tracking must be followed."],
 	],
 	[
 		["title", "States"],
@@ -300,55 +256,6 @@ book.entries("at a glance", [
 		["note", "Burn this page before it is found."],
 	],
 ], #{});
-
-// ---- the title page and the contents ----
-
-let leaf = new_path().move_to(new_vec(0, -22)).quad_to(new_vec(14, -4), new_vec(0, 22)).quad_to(new_vec(-14, -4), new_vec(0, -22));
-let corner = font("symbols").glyph("basic_eye").copy();
-let title = layout("bordered_title").typeset(#{
-	width: W, height: H,
-	flows: #{
-		title: "Loche",
-		subtitle: "of the Collectors",
-		credits: "skill masteries and rites of Lazarolth\n\nkept in my own hand;\nnot for other eyes",
-	},
-	roles: #{
-		title: #{ font: font("copper"), style: HEADING, size: 170, line_height: 1.0 },
-		subtitle: #{ font: LOCHE, style: HEADING, size: 44 },
-		credits: #{ font: PLAIN, style: TEXT, size: 28 },
-		frame: #{ style: CAPTION },
-		border: #{ style: LINE },
-		corner: #{ style: HEADING },
-	},
-	art: #{ border: leaf, corner: corner },
-})[0];
-title.name = "01_title";
-journal_entry.add_page(title);
-
-let contents = new_canvas();
-fn write_in(text, x, y, size, style, font) {
-	let c = new_canvas();
-	for part in new_line(new_vec(x, y), new_vec(x + 5000.0, y)).fill_with_text(text, font, size, style) {
-		c.add_canvas(part);
-	}
-	c
-}
-contents.add_canvas(write_in("contents", LEFT, 105, 48, HEADING, LOCHE));
-contents.add_path(new_line(new_vec(LEFT, 150), new_vec(RIGHT, 150)), CAPTION);
-let y = TOP + 40;
-for entry in book.contents {
-	contents.add_canvas(write_in(entry[0], LEFT + 60, y, 40, HEADING, LOCHE));
-	contents.add_path(new_line(new_vec(500, y + 12), new_vec(980, y + 12)), new_style(1, RED, new_brush("Ink Pen", 0.2, 0.4, 1)));
-	contents.add_canvas(write_in(`${entry[1]}`, 1010, y, 30, TEXT, PLAIN));
-	y += 110;
-}
-contents.add_canvas(write_in("Hold the Hunger.", 640, 1380, 34, HAND, LOCHE_HAND));
-contents.add_canvas(write_in("Hunt and Harvest come before Feast.", 380, 1430, 34, HAND, LOCHE_HAND));
-let contents_page = new_page();
-contents_page.name = "02_contents";
-contents_page.size = new_vec(W, H);
-contents_page.add_canvas(contents);
-journal_entry.add_page(contents_page);
 
 journal_entry.add_pages(book.pages);
 
