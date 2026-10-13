@@ -49,6 +49,24 @@ server can host. `npm test` runs the frontend's unit tests.
 
 [wasm-pack]: https://rustwasm.github.io/wasm-pack/installer/
 
+### In Docker
+
+`webapp/Dockerfile` builds the renderer and the site and serves them with
+nginx; it needs only Docker. Build from the repository root:
+
+```bash
+docker build -f webapp/Dockerfile -t journal-editor .
+```
+
+```bash
+docker run --rm -p 8080:80 journal-editor
+```
+
+Then open http://localhost:8080. Browsers offer WebGPU (for Darkly) only on
+localhost or over HTTPS, so anywhere else, serve it behind TLS. The first
+build compiles the whole crate for wasm and takes a while; later builds
+reuse BuildKit's caches.
+
 ## How it fits together
 
 | path | what's there |

@@ -1,0 +1,12 @@
+# The build context is the repository root (see webapp/Dockerfile); leave
+# out builds, installs, renders and the reference images.
+.git
+**/target
+**/node_modules
+**/.DS_Store
+references
+journals/*/output
+webapp/frontend/dist
+webapp/frontend/wasm-pkg
+webapp/frontend/generated
+webapp/frontend/.angular
