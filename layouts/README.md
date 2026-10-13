@@ -90,13 +90,13 @@ names another with `role`. Settings:
 
 | key | | |
 |---|---|---|
-| `font`, `style`, `size` | text | the font, stroke style and symbol scale |
+| `font`, `style`, `size` | text | the font (leant for italics: `font("plain", #{ skew: 0.25 })`), stroke style and symbol scale |
 | `line_height` | text | in sizes, default 1.25 |
 | `align` | text | "left", "center", "right", "justify" (a paragraph's last line is left) |
 | `valign` | text | "top", "center", "bottom" in its box |
 | `indent` | text | a paragraph's first line, in sizes |
 | `paragraph_gap` | text | in lines, default 0.5 |
-| `spacing` | text | between glyphs, in sizes |
+| `spacing` | text | between glyphs, in sizes, on top of the font's padding between their outlines |
 | `jagged` | text | lines start up to this much further in, at random, in sizes |
 | `clearance` | text | how far it keeps from what it wraps around, default size / 4 |
 | `split_words` | text | `true` breaks a word round what text wraps around, instead of moving it past whole, for a tighter fit; a number is the fewest letters a piece may have (`true` is 2) |

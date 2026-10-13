@@ -3,8 +3,8 @@
 //
 //   pens      every Darkly brush; pressure profiles, widths, colours,
 //             gradients, and strokes gone over in passes
-//   fonts     every font, its alphabet and a line, font settings, and
-//             glyphs placed by hand
+//   fonts     every font, its alphabet and a line, font settings,
+//             italics and spacing by outlines, and glyphs placed by hand
 //   glyphs    every variant of every glyph of every font
 //   art       shapes and paths, hatching, vectors, mazes, snakes, brambles
 //   text      text boxes, text kept clear of drawings, text along paths,
@@ -331,13 +331,43 @@ fonts.add_canvas(caption("f.fallback = \"copper\": eldritch, with capitals and s
 fonts.add_canvas(write_in("Lorem ipsum. Dolor sit amet.", LEFT, y + 46, 36, SAMPLE, lettered, #{}));
 y += 130;
 
+// Italics: a font's skew leans every glyph it sets (its fallbacks' too),
+// tops forward, in radians. Text is set with each glyph as close to the
+// last as their outlines allow, plus the padding, so leaning text doesn't
+// open it up, and an A tucks under a V.
+if y + 560 > BOTTOM {
+	book.bind("fonts", fonts);
+	fonts = sheet("fonts");
+	y = TOP;
+}
+fonts.add_canvas(subhead("italics", y));
+y += 60;
+let backslant = font("loche_lower");
+backslant.skew = -0.2;
+if backslant.skew != -0.2 || font("loche_lower").skew != 0 { throw "a font's skew is its copy's"; }
+let leant = [
+	["font(\"plain\", #{ skew: 0.25 })", font("plain", #{ skew: 0.25 }), "Lorem ipsum dolor sit amet, consectetur."],
+	["font(\"copper\", #{ skew: 0.3 }): its fallback, loche_upper, leant too", font("copper", #{ skew: 0.3 }), "Lorem Ipsum. Dolor Sit Amet?"],
+	["f.skew = -0.2: leant back", backslant, lorem],
+];
+for row in leant {
+	fonts.add_canvas(caption(row[0], y));
+	fonts.add_canvas(write_in(row[2], LEFT, y + 46, 36, SAMPLE, row[1], #{}));
+	y += 106;
+}
+fonts.add_canvas(caption("set by outlines, upright and leant: glyphs tuck in as far as their hulls allow", y));
+for (f, i) in [PLAIN, font("plain", #{ skew: 0.25 })] {
+	fonts.add_canvas(write_in("AVATAR. To Tea, LT; Yo! don't", LEFT, y + 46 + i * 54, 36, SAMPLE, f, #{}));
+}
+y += 170;
+
 // Glyphs one at a time: placed, scaled and turned by hand.
 if y + 200 > BOTTOM {
 	book.bind("fonts", fonts);
 	fonts = sheet("fonts");
 	y = TOP;
 }
-fonts.add_canvas(caption("glyphs placed by hand: glyphs(text), glyph(name), and their scale, position and rotation", y));
+fonts.add_canvas(caption("glyphs placed by hand: glyphs(text), glyph(name), and their scale, position, rotation and skew", y));
 y += 80;
 let word = font("copper").glyphs("turning");
 for (g, i) in word {
@@ -345,6 +375,7 @@ for (g, i) in word {
 	g.scale = 50;
 	g.position = new_vec(LEFT + 40 + i * 70, y);
 	g.rotation = i * 0.2;
+	g.skew = 0.3 - 0.1 * i;
 	g.translate_by(new_vec(0, 8 * i)).scale_by(1 + 0.05 * i).rotate_by(0.05);
 }
 fonts.add_glyphs(word, SAMPLE);

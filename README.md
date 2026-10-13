@@ -132,9 +132,16 @@ What to know:
 - **Fonts and glyphs.** Fonts come from `config/fonts.json`, each with
   its glyphs and how text is set in it: `character_padding` between
   glyphs and `space_width` (both in font sizes), and a `fallback` font for
-  characters it hasn't. `font("copper")` is a font as the file sets it;
+  characters it hasn't. Text is set with each glyph as close to the last
+  as their outlines (the convex hulls of their strokes, as drawn) allow,
+  plus the padding, so a `V` tucks in beside an `A` and a `.` under a
+  `T`'s arm, while glyphs that share no height (an apostrophe after an
+  `n`) only tuck in a little. `font("copper")` is a font as the file sets it;
   `font("loche_lower", #{ character_padding: 0.3 })` or
-  `f.character_padding = 0.3` changes a copy. A character is looked for as
+  `f.character_padding = 0.3` changes a copy. `skew` leans a font's
+  glyphs into italics (`font("plain", #{ skew: 0.25 })`, in radians, tops
+  forward), its fallbacks' too, without opening up its spacing; a glyph
+  has its own `g.skew`. A character is looked for as
   it is in the font and its fallbacks, then in the other case, so a font of
   capitals sets lowercase text in them. `font("plain")` is a simple font
   made to read easily. `f.glyphs(text)` gives a text's glyphs,

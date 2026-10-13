@@ -12,9 +12,11 @@
 use parry2d::bounding_volume::Aabb;
 use parry2d::math::Vec2;
 use rand::{Rng, RngCore};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use super::avoid::AvoidanceTree;
-use super::symbol::{Symbol, WordSplit};
+use super::symbol::{Outline, Spacing, Symbol, WordSplit};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Align {
@@ -95,12 +97,20 @@ pub struct Setting {
     pub paragraph_start: bool,
 }
 
-/// A glyph's width at `style`'s size, and where its outline's middle is
-/// from its origin (glyphs are centred on their outlines across, not down,
-/// so they keep to the line).
-fn glyph_width(symbol: &Symbol, size: f32) -> (f32, f32) {
-    let hull = symbol.hull_aabb();
-    (hull.extents().x * size / 2.0, hull.center().x * size / 2.0)
+/// Glyphs' outlines at one size, worked out as they're needed.
+struct Outlines<'a> {
+    glyphs: &'a [Symbol],
+    size: f32,
+    cache: RefCell<Vec<Option<Rc<Outline>>>>,
+}
+
+impl<'a> Outlines<'a> {
+    fn new(glyphs: &'a [Symbol], size: f32) -> Self {
+        Outlines { glyphs, size, cache: RefCell::new(vec![None; glyphs.len()]) }
+    }
+    fn get(&self, k: usize) -> Rc<Outline> {
+        self.cache.borrow_mut()[k].get_or_insert_with(|| Rc::new(self.glyphs[k].outline(self.size))).clone()
+    }
 }
 
 /// Stretches of the line from `x0` to `x1` whose band from `y0` to `y1` is
@@ -132,12 +142,19 @@ fn free_spans(x0: f32, x1: f32, y0: f32, y1: f32, avoid: Option<&AvoidanceTree>,
     spans
 }
 
-/// One glyph on a line: which, where its box starts, and its width.
+/// One glyph on a line: which, where its room starts, its width, and where
+/// its room starts from its position.
 struct Item {
     index: usize,
     x: f32,
     width: f32,
-    offset: f32,
+    left: f32,
+}
+
+impl Item {
+    fn end(&self) -> f32 {
+        self.x + self.width
+    }
 }
 
 /// Set as much of `glyphs` (made from `chars`, one each) as fits in `rect`.
@@ -155,6 +172,15 @@ pub fn set_text(rect: Aabb, style: &TextStyle, glyphs: &[Symbol], chars: &[char]
     let mut lines = 0;
     let is_break = |i: usize| chars[i] == '\n';
     let is_space = |i: usize| glyphs[i].is_blank() && chars[i] != '\n';
+    let outlines = Outlines::new(&glyphs[..n], size);
+    // Glyph k set beside the glyphs in `spacing`, `x` being where it would
+    // start set at their widths.
+    let place = |spacing: &mut Spacing, k: usize, x: f32| {
+        let outline = outlines.get(k);
+        let x = spacing.start(&outline, x, gap);
+        spacing.push(outline.clone(), x);
+        Item { index: k, x, width: outline.width(), left: outline.left() }
+    };
     loop {
         // Spaces and breaks before the line's first word.
         let mut breaks = 0;
@@ -192,6 +218,8 @@ pub fn set_text(rect: Aabb, style: &TextStyle, glyphs: &[Symbol], chars: &[char]
         let mut broke_word = false;
         for (span, &(start, end)) in spans.iter().enumerate() {
             let mut items = Vec::new();
+            // The glyphs set in this stretch, which the next is set beside.
+            let mut spacing = Spacing::default();
             let mut x = if broke_word { (start + split_pad).min(end) } else { start };
             broke_word = false;
             let mut line_done = false;
@@ -201,25 +229,29 @@ pub fn set_text(rect: Aabb, style: &TextStyle, glyphs: &[Symbol], chars: &[char]
                     line_done = true;
                     break;
                 }
-                // The word from i, and its width.
+                // The word from i, set from x.
                 let mut j = i;
-                let mut width = 0.0;
                 while j < n && !glyphs[j].is_blank() && !is_break(j) {
-                    width += glyph_width(&glyphs[j], size).0 + gap;
                     j += 1;
                 }
-                let width = width - gap;
-                if x + width <= end + 1e-3 {
-                    for (k, glyph) in glyphs.iter().enumerate().take(j).skip(i) {
-                        let (w, offset) = glyph_width(glyph, size);
-                        items.push(Item { index: k, x, width: w, offset });
-                        x += w + gap;
+                let mut after = spacing.clone();
+                let mut at = x;
+                let word: Vec<Item> = (i..j).map(|k| {
+                    let item = place(&mut after, k, at);
+                    at = item.end() + gap;
+                    item
+                }).collect();
+                if word.last().is_none_or(|last| last.end() <= end + 1e-3) {
+                    if let Some(last) = word.last() {
+                        x = last.end() + gap;
                     }
+                    items.extend(word);
+                    spacing = after;
                     i = j;
                     // Spaces after it, if they fit; otherwise they end the stretch.
                     let mut full = false;
                     while i < n && is_space(i) {
-                        let (w, _) = glyph_width(&glyphs[i], size);
+                        let w = outlines.get(i).width();
                         i += 1;
                         if x + w > end {
                             full = true;
@@ -230,16 +262,18 @@ pub fn set_text(rect: Aabb, style: &TextStyle, glyphs: &[Symbol], chars: &[char]
                     if full {
                         break;
                     }
-                } else if i == line_start && width > rect.extents().x {
+                } else if i == line_start && word[word.len() - 1].end() - word[0].x > rect.extents().x {
                     // Longer than a whole line: as much as fits, the rest
                     // on the next line.
                     while i < j {
-                        let (w, offset) = glyph_width(&glyphs[i], size);
-                        if x + w > end + 1e-3 && !items.is_empty() {
+                        let mut after = spacing.clone();
+                        let item = place(&mut after, i, x);
+                        if item.end() > end + 1e-3 && !items.is_empty() {
                             break;
                         }
-                        items.push(Item { index: i, x, width: w, offset });
-                        x += w + gap;
+                        x = item.end() + gap;
+                        items.push(item);
+                        spacing = after;
                         i += 1;
                     }
                     line_done = true;
@@ -250,22 +284,12 @@ pub fn set_text(rect: Aabb, style: &TextStyle, glyphs: &[Symbol], chars: &[char]
                     // rest past what's in the way.
                     if let Some(split) = style.split.filter(|_| span + 1 < spans.len()) {
                         let min = split.min_piece.max(1);
-                        let mut head = 0;
-                        let mut right = x;
-                        while i + head < j && j - (i + head) > min {
-                            let (w, _) = glyph_width(&glyphs[i + head], size);
-                            if right + w > end - split_pad + 1e-3 {
-                                break;
-                            }
-                            right += w + gap;
-                            head += 1;
-                        }
+                        let head = word.iter()
+                            .take((j - i).saturating_sub(min))
+                            .take_while(|item| item.end() <= end - split_pad + 1e-3)
+                            .count();
                         if head >= min {
-                            for k in i..i + head {
-                                let (w, offset) = glyph_width(&glyphs[k], size);
-                                items.push(Item { index: k, x, width: w, offset });
-                                x += w + gap;
-                            }
+                            items.extend(word.into_iter().take(head));
                             i += head;
                             broke_word = true;
                         }
@@ -282,7 +306,7 @@ pub fn set_text(rect: Aabb, style: &TextStyle, glyphs: &[Symbol], chars: &[char]
         // Align each stretch's words, and place them.
         for (items, (_, end)) in &mut line_items {
             let Some(last) = items.last() else { continue };
-            let slack = (*end - (last.x + last.width)).max(0.0);
+            let slack = (*end - last.end()).max(0.0);
             let shift = match style.align {
                 Align::Left | Align::Justify => 0.0,
                 Align::Center => slack / 2.0,
@@ -305,8 +329,8 @@ pub fn set_text(rect: Aabb, style: &TextStyle, glyphs: &[Symbol], chars: &[char]
                 }
                 let mut glyph = glyphs[item.index].clone();
                 glyph.scale_by(size);
-                glyph.set_position(Vec2::new(item.x + shift + extra + item.width / 2.0 - item.offset, middle));
-                setting.width = setting.width.max(item.x + shift + extra + item.width - rect.mins.x);
+                glyph.set_position(Vec2::new(item.x + shift + extra - item.left, middle));
+                setting.width = setting.width.max(item.end() + shift + extra - rect.mins.x);
                 if !glyph.is_blank() {
                     setting.placed.push(glyph);
                 }
@@ -430,7 +454,29 @@ mod tests {
         for y in &ys[..ys.len() - 1] {
             assert!(last_x(*y) > 140.0, "line at {} ends at {}", y, last_x(*y));
         }
-        assert!(last_x(ys[ys.len() - 1]) < 140.0);
+        // The last line is set as it would be set left.
+        let left = set_text(rect(150.0, 200.0), &TextStyle::new(10.0), &g, &c, false, None, &mut rng());
+        let on_last = |s: &Setting| s.placed.iter().filter(|g| (g.position().y - ys[ys.len() - 1]).abs() < 1e-3).map(|g| g.position().x).collect::<Vec<_>>();
+        assert_eq!(on_last(&s), on_last(&left));
+        assert!(on_last(&s).len() > 2);
+    }
+
+    #[test]
+    fn leant_text_is_set_as_closely_as_upright() {
+        let (upright, c) = text("the quick brown fox jumps over the lazy dog");
+        let leant: Vec<Symbol> = upright.iter().map(|g| if g.is_blank() { g.clone() } else { g.clone().with_skew(0.3) }).collect();
+        let set = |g: &[Symbol]| set_text(rect(1000.0, 20.0), &TextStyle::new(10.0), g, &c, false, None, &mut rng());
+        let (a, b) = (set(&upright), set(&leant));
+        // Wider by about the lean of its last glyph, not of every glyph.
+        let lean = 0.3f32.tan() * 10.0;
+        assert!((b.width - a.width).abs() < lean, "{} -> {}", a.width, b.width);
+        // And no glyph runs into another.
+        for pair in b.placed.windows(2) {
+            let shape = |g: &Symbol| parry2d::shape::ConvexPolygon::from_convex_hull(&g.footprint()).unwrap();
+            let pose = parry2d::math::Pose::identity();
+            let contact = parry2d::query::contact(&pose, &shape(&pair[0]), &pose, &shape(&pair[1]), 1.0).unwrap();
+            assert!(contact.is_none_or(|c| c.dist > -1e-3), "{:?}", contact);
+        }
     }
 
     #[test]

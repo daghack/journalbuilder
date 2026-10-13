@@ -63,8 +63,9 @@ fn place_text(symbols: Vec<Symbol>, path: &StrokePath, args: &SymbolPlacementArg
 
 /// `path.fill_with_text(text, font, size, style[, #{ spacing, avoid, clearance, layout, split_words, split_padding }])`:
 /// the text along as many copies of the path as it takes, one canvas per
-/// copy. Glyphs sit at their widths, plus `spacing` (a fraction of the font
-/// size), and keep clear of `avoid` (see avoid.rs). With `layout: "words"`,
+/// copy. Glyphs sit as close as their outlines and padding allow (see
+/// `symbol::Outline`), plus `spacing` (a fraction of the font size), and
+/// keep clear of `avoid` (see avoid.rs). With `layout: "words"`,
 /// words aren't split between subpaths, nor around what's avoided unless
 /// `split_words` lets them be (see `text::word_split`).
 fn fill_with_text(path: &mut Path, msg: &str, font: Font, fontsize: Dynamic, style: StrokeStyle, options: Map, (symdict, rng): &TextSource) -> RhaiResult<Vec<Dynamic>> {

@@ -1198,7 +1198,7 @@ mod tests {
             ("let ok = 1;\nflow(\"a\", #{ gap: 3 });", "unknown option 'gap'"),
             (&typeset("flows: #{ title: \"t\" }"), "sets a flow 'body', but there's no such flow"),
             (&typeset("flows: #{ title: \"t\", body: \"b\", extra: \"never placed\" }"), "page 1 sets none of what's left of flow(s) 'extra'"),
-            (&typeset("flows: #{ title: \"t\", body: words + words + words + words + words + words + words + words + words + words + words + words + words + words + words + words }, max_pages: 1"), "still text left after 1 pages"),
+            (&typeset("flows: #{ title: \"t\", body: words + words + words + words + words + words + words + words + words + words + words + words + words + words + words + words + words + words + words + words + words + words + words + words }, max_pages: 1"), "still text left after 1 pages"),
             ("journal_entry.add_pages(book.typeset(#{ width: 400, height: 300, roles: roles, flows: #{ title: \"t\", body: \"b\" } }));", "there's no art named 'divider'"),
             ("roles.remove(\"body\");\njournal_entry.add_pages(book.typeset(#{ width: 400, height: 300, roles: roles, flows: #{ title: \"t\", body: \"b\" } }));", "uses role 'body', which `roles` doesn't have"),
             ("journal_entry.add_pages(book.typeset(#{ roles: roles }));", "give the page's 'width'"),

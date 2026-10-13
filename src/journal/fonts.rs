@@ -18,10 +18,15 @@
 //! - `glyphs` maps each character (or, in a set of symbols, each name) to
 //!   SVG path data spanning about -1..1, y down, or to a list of variants,
 //!   one of which is picked at random each time the character is set.
-//! - `character_padding` is room between neighbouring glyphs and
+//! - `character_padding` is room between neighbouring glyphs' outlines and
 //!   `space_width` the width of a space, both in font sizes (default 0 and
 //!   0.5). A tab is four spaces.
 //! - `fallback` names a font to look in for characters this one hasn't.
+//!
+//! Text is set with each glyph as close to the last as their outlines (the
+//! convex hulls of their strokes, leant as they're drawn) allow, plus the
+//! padding: see `symbol::Outline`. So a font can be leant into italics
+//! (`Font::skew`, which scripts set) without opening up its spacing.
 //!
 //! A character is looked for as it is in the font and then its fallbacks,
 //! then in the other case (so a font of capitals sets lowercase text in
@@ -114,6 +119,10 @@ pub struct Font {
     pub character_padding: f32,
     /// A space's width, in font sizes.
     pub space_width: f32,
+    /// How far its glyphs lean, as italics do, in radians (see
+    /// `Symbol::skew_rad`). It leans every glyph the font sets, its
+    /// fallbacks' too.
+    pub skew: f32,
     pub fallback: Option<Box<Font>>,
     pub mapping: Mapping,
 }
@@ -132,7 +141,7 @@ impl Font {
         self.glyphs.glyphs.get(key).map(|bases| bases.iter().map(|base| self.symbol(base)).collect())
     }
     fn symbol(&self, base: &Rc<SymbolBase>) -> Symbol {
-        Symbol::new_default_from_base_rc(base.clone()).with_padding(self.character_padding)
+        Symbol::new_default_from_base_rc(base.clone()).with_padding(self.character_padding).with_skew(self.skew)
     }
     /// This font and then its fallbacks, in order.
     fn chain(&self) -> impl Iterator<Item = &Font> {
@@ -152,7 +161,10 @@ impl Font {
     /// several. Characters with no glyph anywhere are drawn with `book`'s
     /// fallback glyph, and recorded there.
     pub fn build(&self, text: &str, book: &FontBook, rng: &mut dyn RngCore) -> Vec<Symbol> {
-        text.chars().map(|c| self.glyph_for(c, book, rng)).collect()
+        text.chars().map(|c| {
+            let glyph = self.glyph_for(c, book, rng);
+            if glyph.is_blank() { glyph } else { glyph.with_skew(self.skew) }
+        }).collect()
     }
     fn glyph_for(&self, c: char, book: &FontBook, rng: &mut dyn RngCore) -> Symbol {
         if self.mapping == Mapping::BalancedTernary {
@@ -256,6 +268,7 @@ impl FontBook {
                 glyphs: glyphs.clone(),
                 character_padding: entry.character_padding,
                 space_width: entry.space_width,
+                skew: 0.0,
                 fallback,
                 mapping: Mapping::Characters,
             })
@@ -387,6 +400,22 @@ mod tests {
         let built = f.build("a ", &b, &mut StdRng::seed_from_u64(1));
         assert!((built[0].hull_aabb().extents().x - 1.0).abs() < 0.03);
         assert!((built[1].hull_aabb().extents().x - 2.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn a_skewed_font_leans_every_glyph_it_sets() {
+        let b = book(r#"{
+            "caps": { "glyphs": { "A": "M -0.1 0 L 0.1 0" } },
+            "lower": { "fallback": "caps", "glyphs": { "a": "M -0.2 0 L 0.2 0" } }
+        }"#);
+        let mut lower = b.font("lower").unwrap();
+        lower.skew = 0.2;
+        let built = lower.build("aA ", &b, &mut StdRng::seed_from_u64(1));
+        // Its fallback's glyphs too, but not spaces, which have no strokes.
+        assert_eq!(built.iter().map(|g| g.skew_rad()).collect::<Vec<_>>(), [0.2, 0.2, 0.0]);
+        assert_eq!(lower.variants("a").unwrap()[0].skew_rad(), 0.2);
+        // The font it falls back to sets its own text upright.
+        assert_eq!(b.font("caps").unwrap().build("A", &b, &mut StdRng::seed_from_u64(1))[0].skew_rad(), 0.0);
     }
 
     #[test]

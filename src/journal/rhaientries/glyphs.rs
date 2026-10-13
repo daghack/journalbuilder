@@ -8,8 +8,10 @@
 //! let copper = font("copper");                  // as the font file sets it
 //! copper.character_padding = 0.08;              // room between glyphs, in font sizes
 //! copper.space_width = 0.4;                     // a space's width, in font sizes
+//! copper.skew = 0.2;                            // italics: glyphs lean 0.2 radians, tops forward
 //! copper.fallback = font("loche_upper");        // where missing characters are looked for; () for nowhere
 //! let tight = font("loche_lower", #{ character_padding: 0.0 });   // settings as options
+//! let italic = font("plain", #{ skew: 0.25 });
 //! let ternary = ternary_font("balanced_ternary");   // a..m -> 1..13, n..z -> -13..-1
 //! font_names();                                 // every font, sorted
 //! copper.name;
@@ -22,6 +24,7 @@
 //!     g.scale = 30.0;
 //!     g.position = new_vec(i * 40.0, 0.0);
 //!     g.rotate_by(0.1);
+//!     g.skew = 0.3;                             // leant about its centre, before it's turned
 //!     canvas.add_glyph(g, style);
 //! }
 //! canvas.add_glyph(font("symbols").glyph("basic_eye").scale_by(50.0), style);
@@ -71,6 +74,12 @@ fn register_glyph(engine: &mut Engine) {
             |g: &mut Glyph| Dynamic::from(g.borrow().rotation_rad() as f64),
             |g: &mut Glyph, rotation: Dynamic| -> RhaiResult<()> {
                 g.borrow_mut().set_rotation_rad(float("glyph.rotation", "the rotation", &rotation)? as f32);
+                Ok(())
+            })
+        .register_get_set("skew",
+            |g: &mut Glyph| Dynamic::from(g.borrow().skew_rad() as f64),
+            |g: &mut Glyph, skew: Dynamic| -> RhaiResult<()> {
+                g.borrow_mut().set_skew_rad(skew_angle("glyph.skew", &skew)?);
                 Ok(())
             })
         .register_get("is_blank", |g: &mut Glyph| g.borrow().is_blank())
@@ -137,6 +146,15 @@ fn set_padding(font: &mut Font, caller: &str, value: &Dynamic) -> RhaiResult<()>
     Ok(())
 }
 
+/// A skew: an angle in radians short of a right angle either way.
+fn skew_angle(caller: &str, value: &Dynamic) -> RhaiResult<f32> {
+    let skew = float(caller, "the skew", value)?;
+    if !(skew.abs() < std::f64::consts::FRAC_PI_2) {
+        return Err(format!("{}: skew must be an angle in radians between -PI() / 2 and PI() / 2, got {}", caller, skew).into());
+    }
+    Ok(skew as f32)
+}
+
 fn set_space(font: &mut Font, caller: &str, value: &Dynamic) -> RhaiResult<()> {
     let width = float(caller, "space_width", value)?;
     if !(width > 0.0) {
@@ -167,13 +185,16 @@ pub fn register(engine: &mut Engine, symdict: Rc<FontBook>, rng: SharedRng) {
     let b = book.clone();
     engine.register_fn("font", move |name: &str, options: Map| -> RhaiResult<Font> {
         const CALLER: &str = "font";
-        check_keys(CALLER, &options, &["character_padding", "space_width", "fallback"])?;
+        check_keys(CALLER, &options, &["character_padding", "space_width", "skew", "fallback"])?;
         let mut font = named(&b, CALLER, name)?;
         if let Some(value) = options.get("character_padding") {
             set_padding(&mut font, CALLER, value)?;
         }
         if let Some(value) = options.get("space_width") {
             set_space(&mut font, CALLER, value)?;
+        }
+        if let Some(value) = options.get("skew") {
+            font.skew = skew_angle(CALLER, value)?;
         }
         if let Some(value) = options.get("fallback") {
             font.fallback = fallback_font(&b, CALLER, value.clone())?;
@@ -196,6 +217,12 @@ pub fn register(engine: &mut Engine, symdict: Rc<FontBook>, rng: SharedRng) {
     engine.register_get_set("space_width",
         |f: &mut Font| setting(f.space_width),
         |f: &mut Font, value: Dynamic| set_space(f, "font.space_width", &value));
+    engine.register_get_set("skew",
+        |f: &mut Font| setting(f.skew),
+        |f: &mut Font, value: Dynamic| -> RhaiResult<()> {
+            f.skew = skew_angle("font.skew", &value)?;
+            Ok(())
+        });
     let b = book.clone();
     engine.register_get_set("fallback",
         |f: &mut Font| f.fallback.as_deref().map_or(Dynamic::UNIT, |fallback| Dynamic::from(fallback.clone())),
@@ -305,6 +332,43 @@ mod tests {
     }
 
     #[test]
+    fn skew_leans_glyphs_tops_forward() {
+        // The X's strokes run corner to corner, 1 unit apart at scale 1:
+        // leant, its top corners move right and its bottom ones left, by
+        // tan(skew) of half that each.
+        let values: Array = eval(r#"
+            let upright = font("symbols").glyph("X").path().bounds();
+            let g = font("symbols").glyph("X");
+            g.skew = 0.4;
+            let leant = g.path().bounds();
+            let f = font("plain", #{ skew: 0.25 });
+            let it = font("plain");
+            it.skew = -0.1;
+            [upright.width, leant.width, g.skew, f.skew, f.glyphs("a b")[0].skew, f.glyphs("a b")[1].skew, it.skew, font("plain").skew]
+        "#);
+        let f = |i: usize| values[i].as_float().unwrap();
+        assert!((f(1) - f(0) - 0.4f64.tan()).abs() < 1e-3, "{} -> {}", f(0), f(1));
+        assert!((f(2) - 0.4).abs() < 1e-6 && f(3) == 0.25 && (f(4) - 0.25).abs() < 1e-6);
+        assert_eq!(f(5), 0.0, "spaces aren't leant");
+        assert_eq!((f(6), f(7)), (-0.1, 0.0));
+    }
+
+    #[test]
+    fn leant_text_along_a_path_is_set_as_closely_as_upright() {
+        // Leaning glyphs mustn't open up the spaces between them: the line
+        // is longer by about one glyph's lean, not every glyph's.
+        let widths: Array = eval(r#"
+            let s = new_style(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
+            let line = new_line(new_vec(0.0, 0.0), new_vec(4000.0, 0.0));
+            let text = "the quick brown fox jumps over the lazy dog";
+            [line.fill_with_text(text, font("plain"), 20.0, s)[0].bounds().width,
+             line.fill_with_text(text, font("plain", #{ skew: 0.3 }), 20.0, s)[0].bounds().width]
+        "#);
+        let (upright, leant) = (widths[0].as_float().unwrap(), widths[1].as_float().unwrap());
+        assert!((leant - upright).abs() < 0.3f64.tan() * 20.0, "{} -> {}", upright, leant);
+    }
+
+    #[test]
     fn glyph_scale_is_its_size() {
         // Paths span -1..1 and are drawn at half the scale: a glyph at scale
         // 2 is its path as stored, 2 units across for a 2-unit wide path.
@@ -372,6 +436,8 @@ mod tests {
             ("let ok = 1;\nfont(\"copper\", #{ padding: 1 });", "font: unknown option 'padding'"),
             ("let ok = 1;\nfont(\"copper\", #{ character_padding: -1 });", "character_padding can't be negative"),
             ("let ok = 1;\nlet f = font(\"copper\"); f.space_width = 0;", "space_width must be positive"),
+            ("let ok = 1;\nfont(\"copper\", #{ skew: 2 });", "font: skew must be an angle in radians between"),
+            ("let ok = 1;\nlet g = font(\"copper\").glyph(\"a\"); g.skew = -1.6;", "glyph.skew: skew must be an angle"),
             ("let ok = 1;\nlet f = font(\"copper\"); f.fallback = 3;", "a fallback is a font, a font's name or ()"),
             ("let ok = 1;\nfont(\"symbols\").glyph(\"no_such_glyph\");", "glyph: font 'symbols' has no glyph 'no_such_glyph'"),
             ("let ok = 1;\nnew_canvas().add_glyphs([font(\"symbols\").glyph(\"X\"), 3], new_style(1.0, \"black\", new_brush(\"Ink Pen\", 0.3, 0.7, 1.0)));", "add_glyphs: item 1"),

@@ -219,6 +219,15 @@ impl StrokePath {
             *cmd = cmd.rotate_around(point, angle);
         }
     }
+    /// The path leant over as italics lean: each point moved across by
+    /// `shear` times its height above the origin (y is down, so a positive
+    /// shear leans tops right and bottoms left).
+    pub fn sheared_by(mut self, shear: f32) -> Self {
+        for cmd in &mut self.commands {
+            *cmd = cmd.map_points(|_, p| Vec2::new(p.x - shear * p.y, p.y));
+        }
+        self
+    }
     /// The same path with every line and quadratic segment written as a
     /// cubic, which the SVG output's roughening works on.
     pub fn to_cubics(&self) -> StrokePath {
