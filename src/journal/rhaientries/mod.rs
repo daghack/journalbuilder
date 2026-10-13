@@ -829,6 +829,63 @@ mod tests {
     }
 
     #[test]
+    fn brushes_pool_and_vary_their_pressure() {
+        let script = r#"
+            let b = new_brush("Ink Pen", 0.2, 0.8, 1.0);
+            if b.pool != 0.0 || b.pool_depth != 0.3 || b.pressure_variation != 0.0 || b.variation_length != 12.0 { throw "no pooling or variation by default"; }
+            b.pool = 0.4;
+            b.pool_depth = 0.5;
+            b.pressure_variation = 0.25;
+            b.variation_length = 6;
+            let c = new_canvas();
+            c.add_path(new_line(new_vec(0.0, 0.0), new_vec(10.0, 0.0)), new_style(1.0, "black", b));
+            let p = new_page();
+            p.add_canvas(c);
+            journal_entry.add_page(p);
+        "#;
+        let entry = engine().build_entry_str(script).expect("script should run");
+        let jc: JournalCanvas = entry.pages[0].canvases()[0].clone().into();
+        let brush = jc.strokes()[0].style.brush.clone().unwrap();
+        assert_eq!((brush.pool, brush.pool_depth, brush.pressure_variation, brush.variation_length), (0.4, 0.5, 0.25, 6.0));
+        for (setting, want) in [
+            ("b.pool = -0.1;", "pool can't be negative"),
+            ("b.pool_depth = 0;", "pool_depth is a fraction"),
+            ("b.pool_depth = 1.5;", "pool_depth is a fraction"),
+            ("b.pressure_variation = 1;", "pressure_variation is a fraction"),
+            ("b.variation_length = 0;", "variation_length must be positive"),
+        ] {
+            let err = engine().build_entry_str(&format!("let b = new_brush(\"Ink Pen\", 0.2, 0.8, 1.0);\n{}", setting))
+                .expect_err(setting).to_string();
+            assert!(err.contains(want) && err.contains("line 2"), "{}: {}", want, err);
+        }
+    }
+
+    #[test]
+    fn text_along_a_path_can_hold_an_angle() {
+        // Upright text up a steep line: each glyph's strokes are an upright
+        // glyph's, moved.
+        let script = r#"
+            let s = new_style(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
+            let line = new_line(new_vec(0.0, 0.0), new_vec(300.0, -400.0));
+            [line.fill_with_text("ll", font("plain"), 20.0, s, #{ angle: 0.0 })[0], line.fit_text("ll", font("plain"), s, #{ angle: 0 })]
+        "#;
+        let canvases: rhai::Array = engine().engine.eval(script).expect("should run");
+        for canvas in canvases {
+            let canvas = canvas.cast::<Canvas>();
+            for stroke in &canvas.borrow().strokes {
+                // An l is a tall stroke: upright, its points barely move across.
+                let xs: Vec<f32> = stroke.path.points_within().iter().map(|p| p.x).collect();
+                let ys: Vec<f32> = stroke.path.points_within().iter().map(|p| p.y).collect();
+                let spread = |v: &[f32]| v.iter().fold(f32::MIN, |m, x| m.max(*x)) - v.iter().fold(f32::MAX, |m, x| m.min(*x));
+                assert!(spread(&xs) < spread(&ys) / 3.0, "an upright l: {} across, {} down", spread(&xs), spread(&ys));
+            }
+        }
+        let err = engine().build_entry_str("let ok = 1;\nnew_line(new_vec(0.0, 0.0), new_vec(90.0, 0.0)).fit_text(\"a\", font(\"plain\"), new_style(1.0, \"black\", new_brush(\"Ink Pen\", 0.3, 0.7, 1.0)), #{ angle: \"up\" });")
+            .expect_err("a bad angle").to_string();
+        assert!(err.contains("fit_text") && err.contains("angle") && err.contains("line 2"), "{}", err);
+    }
+
+    #[test]
     fn styles_go_over_their_strokes_in_passes() {
         let script = r#"
             let s = new_style(1.0, "black", new_brush("Ink Pen", 0.2, 0.8, 1.0));

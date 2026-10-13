@@ -109,6 +109,15 @@ What to know:
   `new_style(width, color, brush)`, `width` scales the brush's
   pressure in Darkly renders, so past `1 / max_pressure` a stroke gets no
   heavier (the render warns), but it's the stroke's geometric width in SVG.
+- **Pressure.** `brush.pressure_profile` runs pressure along each stroke
+  (`"ramp"`, `"taper"` or `"constant"`). `brush.pressure_variation = 0.2`
+  lets it wander up to 20% either way, rising and falling about every
+  `brush.variation_length` units (default 12), so ramps and tapers look
+  less mechanical. `brush.pool = 0.4` pools ink toward the bottom of each
+  path, each glyph for text: 40% heavier at the very bottom, rising over
+  its lowest `brush.pool_depth` (default 0.3 of its height). Both are
+  pressure in Darkly renders, so capped as width is, and width in the
+  styled SVG output.
 - **Going over strokes.** `style.passes = 7` draws each stroke in the
   style seven times over, and `style.jitter = 9` lets each pass's ends
   stray by up to 9 units, so a straight stroke turns, stretches and
@@ -121,7 +130,9 @@ What to know:
 - **Gradients.** In place of a colour, `new_gradient(["red", "gold",
   "blue"])` runs along each stroke from start to end; with `#{ from, to }`
   it's laid across the page between two points, and with `#{ center,
-  radius }` out from a point. Colours are spaced evenly, or placed as
+  radius }` out from a point. `#{ vertical: true }` runs down each path
+  (each glyph) from its top to its bottom, for ink darker where it pools.
+  Colours are spaced evenly, or placed as
   `[position, colour]`. `style.color = gradient` works too.
 - **Shared values.** Paths, glyphs and canvases are shared: assigning one,
   passing it or looping over it gives the same value, so changes through any
@@ -149,7 +160,9 @@ What to know:
   and `font_names()` every font; `ternary_font("balanced_ternary")` maps
   letters to balanced-ternary digits. Text layout: `new_textbox` flows
   glyphs into a box, `canvas.scatter_notes` scatters notes across a
-  canvas, and `path.fill_with_text` / `fit_text` write along a path.
+  canvas, and `path.fill_with_text` / `fit_text` write along a path,
+  each glyph turned to it, or held at `angle` (radians, 0 upright) with
+  `#{ angle: 0 }`.
 - **Keeping text clear.** Every text layout takes `avoid` (a path, canvas,
   glyph, or an array of them) and `clearance`, and keeps each glyph's
   whole outline that far from it. For more control, build an avoidance

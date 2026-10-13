@@ -6,6 +6,12 @@
 //! `p.move_to(a).line_to(b);` draws both segments into `p`.
 //!
 //! ```rhai
+//! // Text along a path, each glyph turned to it, or held upright (or at
+//! // any angle, in radians) and set along it.
+//! let words = arc.fill_with_text("lorem ipsum", font, 20.0, style);
+//! let upright = arc.fill_with_text("lorem ipsum", font, 20.0, style, #{ angle: 0.0 });
+//! let fitted = arc.fit_text("lorem", font, style, #{ angle: 0.2 });
+//!
 //! // Hatch the inside of a closed path: lines `spacing` apart at `angle`
 //! // (radians), their ends jittered by up to `roughness`.
 //! let shading = new_circle(new_vec(0.0, 0.0), 20.0).hatch(3.0, random_range(0.0, 6.28), 1.0);
@@ -50,7 +56,16 @@ use crate::journal::fonts::FontBook;
 pub(super) type TextSource = (Rc<FontBook>, random::SharedRng);
 
 /// Options for text along a path.
-const PATH_TEXT_KEYS: [&str; 6] = ["spacing", "avoid", "clearance", "layout", "split_words", "split_padding"];
+const PATH_TEXT_KEYS: [&str; 7] = ["spacing", "avoid", "clearance", "layout", "split_words", "split_padding", "angle"];
+
+/// The `angle` option: glyphs held at this angle (radians, 0 upright)
+/// along the path, rather than turned to follow it.
+fn text_angle(caller: &str, options: &Map) -> RhaiResult<Option<f32>> {
+    match number(caller, options, "angle")? {
+        Some(a) if !a.is_finite() => Err(format!("{}: 'angle' must be a finite number of radians, got {}", caller, a).into()),
+        angle => Ok(angle),
+    }
+}
 
 /// Text along a path: glyph by glyph, or keeping words together on a
 /// subpath ("words" layout).
@@ -61,13 +76,14 @@ fn place_text(symbols: Vec<Symbol>, path: &StrokePath, args: &SymbolPlacementArg
     }
 }
 
-/// `path.fill_with_text(text, font, size, style[, #{ spacing, avoid, clearance, layout, split_words, split_padding }])`:
+/// `path.fill_with_text(text, font, size, style[, #{ spacing, avoid, clearance, layout, split_words, split_padding, angle }])`:
 /// the text along as many copies of the path as it takes, one canvas per
 /// copy. Glyphs sit as close as their outlines and padding allow (see
 /// `symbol::Outline`), plus `spacing` (a fraction of the font size), and
 /// keep clear of `avoid` (see avoid.rs). With `layout: "words"`,
 /// words aren't split between subpaths, nor around what's avoided unless
-/// `split_words` lets them be (see `text::word_split`).
+/// `split_words` lets them be (see `text::word_split`). With `angle`,
+/// glyphs keep to that angle rather than turning with the path.
 fn fill_with_text(path: &mut Path, msg: &str, font: Font, fontsize: Dynamic, style: StrokeStyle, options: Map, (symdict, rng): &TextSource) -> RhaiResult<Vec<Dynamic>> {
     let fontsize = float("fill_with_text", "the font size", &fontsize)?;
     check_keys("fill_with_text", &options, &PATH_TEXT_KEYS)?;
@@ -81,6 +97,7 @@ fn fill_with_text(path: &mut Path, msg: &str, font: Font, fontsize: Dynamic, sty
         avoid: tree.as_deref(),
         padding: avoid.padding(fontsize as f32),
         spacing: spacing("fill_with_text", &options)?,
+        angle: text_angle("fill_with_text", &options)?,
         ..SymbolPlacementArgs::new(fontsize as f32)
     };
 
@@ -108,7 +125,7 @@ fn fill_with_text(path: &mut Path, msg: &str, font: Font, fontsize: Dynamic, sty
     Ok(all_canvases)
 }
 
-/// `path.fit_text(text, font, style[, #{ spacing, avoid, clearance, layout, split_words, split_padding }])`:
+/// `path.fit_text(text, font, style[, #{ spacing, avoid, clearance, layout, split_words, split_padding, angle }])`:
 /// the text along the path at the largest font size that fits it.
 fn fit_text(path: &mut Path, msg: &str, font: Font, style: StrokeStyle, options: Map, (symdict, rng): &TextSource) -> RhaiResult<Canvas> {
     check_keys("fit_text", &options, &PATH_TEXT_KEYS)?;
@@ -121,6 +138,7 @@ fn fit_text(path: &mut Path, msg: &str, font: Font, style: StrokeStyle, options:
     let mut args = SymbolPlacementArgs {
         avoid: tree.as_deref(),
         spacing: spacing("fit_text", &options)?,
+        angle: text_angle("fit_text", &options)?,
         ..SymbolPlacementArgs::new(20.0)
     };
     let mut window_min = 0.1;

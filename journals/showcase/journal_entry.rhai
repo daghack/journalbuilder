@@ -2,13 +2,15 @@
 // page the same size. After the title page and the contents:
 //
 //   pens      every Darkly brush; pressure profiles, widths, colours,
-//             gradients, and strokes gone over in passes
+//             gradients, strokes gone over in passes, pooling ink and
+//             wandering pressure
 //   fonts     every font, its alphabet and a line, font settings,
 //             italics and spacing by outlines, and glyphs placed by hand
 //   glyphs    every variant of every glyph of every font
 //   art       shapes and paths, hatching, vectors, mazes, snakes, brambles
-//   text      text boxes, text kept clear of drawings, text along paths,
-//             scattered notes, words split round drawings
+//   text      text boxes, text kept clear of drawings, text along paths
+//             (turned to them or held at an angle), scattered notes,
+//             words split round drawings
 //   locks     every lock type, and a lock chain drawn as a maze
 //   spread    one drawing across two pages: a page split into tiles
 //   layouts   pages typeset from layouts: an inline one, the layout files
@@ -264,6 +266,56 @@ let rough = TEXT;
 rough.jitter = 1.2;
 pens.add_canvas(write_in("Lorem ipsum dolor sit amet, consectetur adipiscing elit,", LEFT, y + 60, 30, rough, PLAIN, #{}));
 pens.add_canvas(write_in("sed do eiusmod tempor incididunt ut labore et dolore.", LEFT, y + 110, 30, rough, PLAIN, #{}));
+book.bind("pens", pens);
+
+// Ink as a hand leaves it: pooling toward the bottom of each glyph, a
+// gradient down each glyph, and pressure wandering along each stroke.
+let pens = sheet("pens");
+pens.add_canvas(subhead("pooling ink", TOP));
+pens.add_canvas(caption("brush.pool = p, brush.pool_depth = d: up to p heavier over the lowest d of each glyph", TOP + 50));
+let y = TOP + 150;
+for row in [[0, 0.3], [0.6, 0.3], [1.2, 0.5]] {
+	let brush = new_brush("Ink Pen", 0.2, 0.45, 3.2);
+	brush.pool = row[0];
+	brush.pool_depth = row[1];
+	if brush.pool != row[0] || brush.pool_depth != row[1] { throw "pool and pool_depth read back"; }
+	pens.add_canvas(write(`pool ${row[0]}, depth ${row[1]}`, LEFT, y, 24));
+	pens.add_canvas(write_in("lorem ipsum", 400, y, 72, new_style(1, INK, brush), LOCHE, #{}));
+	y += 105;
+}
+pens.add_canvas(caption("new_gradient(colours, #{ vertical: true }): down each glyph, top to bottom", y));
+let darkening = new_gradient([RED, [0.6, RED], INK], #{ vertical: true });
+pens.add_canvas(write_in("dolor sit amet", LEFT, y + 90, 72, new_style(1, darkening, new_brush("Ink Pen", 0.3, 0.6, 3.2)), LOCHE, #{}));
+y += 175;
+pens.add_canvas(caption("both: ink pooling dark at the bottom of plain text", y));
+let pooled = new_brush("Ink Pen", 0.3, 0.6, 1.6);
+pooled.pool = 0.5;
+let pooled_ink = new_style(1, new_gradient([RED, [0.5, RED], INK], #{ vertical: true }), pooled);
+pens.add_canvas(write_in("Lorem ipsum dolor sit amet, consectetur adipiscing elit,", LEFT, y + 60, 30, pooled_ink, PLAIN, #{}));
+pens.add_canvas(write_in("sed do eiusmod tempor incididunt ut labore et dolore.", LEFT, y + 110, 30, pooled_ink, PLAIN, #{}));
+
+y += 190;
+pens.add_canvas(subhead("wandering pressure", y));
+pens.add_canvas(caption("brush.pressure_variation = v, brush.variation_length = l: up to v either way, every l or so", y + 50));
+y += 130;
+for profile in ["ramp", "taper", "constant"] {
+	pens.add_canvas(write(profile, LEFT, y, 24));
+	for (variation, i) in [0, 0.35] {
+		let brush = new_brush("Ink Pen", 0.05, 0.7, 10);
+		brush.pressure_profile = profile;
+		brush.pressure_variation = variation;
+		brush.variation_length = 70;
+		if brush.pressure_variation != variation || brush.variation_length != 70 { throw "variation reads back"; }
+		pens.add_path(new_line(new_vec(330 + i * 400, y), new_vec(690 + i * 400, y)), new_style(1, GOLD, brush));
+	}
+	y += 55;
+}
+pens.add_canvas(caption("a hand that wanders: pressure_variation = 0.35, variation_length = 10, in a tapering pen", y));
+let wandering = new_brush("Ink Pen", 0.3, 0.7, 1.8);
+wandering.pressure_profile = "taper";
+wandering.pressure_variation = 0.35;
+wandering.variation_length = 10;
+pens.add_canvas(write_in("lorem ipsum dolor", LEFT, y + 80, 72, new_style(1, INK, wandering), LOCHE, #{}));
 book.bind("pens", pens);
 
 // ---- fonts ----
@@ -668,6 +720,17 @@ for (options, i) in [#{ layout: "words" }, #{ layout: "words", split_words: 2 }]
 	}
 	options.avoid = rings;
 	text.add_canvas(new_line(new_vec(LEFT, line_y), new_vec(RIGHT, line_y)).fill_with_text(LOREM, PLAIN, 22, TEXT, options)[0]);
+}
+// Glyphs held at an angle, rather than turned to the path: set along it,
+// as close as their outlines at that angle allow.
+y += 340;
+text.add_canvas(caption("along a curve, turned to it; then #{ angle: 0 }, upright; then #{ angle: 0.3 }", y));
+for (angle, i) in [(), 0, 0.3] {
+	let x = LEFT + i * 340;
+	let path = new_path().move_to(new_vec(x, y + 120)).cubic_to(new_vec(x + 110, y + 40), new_vec(x + 210, y + 200), new_vec(x + 320, y + 120));
+	text.add_path(path, CAPTION);
+	let options = if angle == () { #{} } else { #{ angle: angle } };
+	text.add_canvas(path.fill_with_text("lorem ipsum dolor sit", PLAIN, 28, TEXT, options)[0]);
 }
 book.bind("text", text);
 

@@ -3,6 +3,18 @@
 //! ```rhai
 //! let pen = new_brush("Ink Pen", 0.4, 0.8, 2.0);    // name, min and max pressure, size
 //! pen.pressure_profile = "taper";                   // or "ramp" (the default) or "constant"
+//!
+//! // Ink pooling: strokes heavier toward the bottom of each path (each
+//! // glyph, for text), here 40% heavier at the very bottom, rising over the
+//! // lowest quarter of its height.
+//! pen.pool = 0.4;                // default 0
+//! pen.pool_depth = 0.25;         // default 0.3, a fraction of the height
+//!
+//! // Pressure wandering along each stroke, up to 20% either way, rising
+//! // and falling about every 8 canvas units: organic ramps and tapers.
+//! pen.pressure_variation = 0.2;  // default 0
+//! pen.variation_length = 8.0;    // default 12
+//!
 //! let ink = new_style(1.0, "#253443", pen);          // width, colour (or gradient), brush
 //!
 //! // Strokes gone over again and again, as a hand going over its writing:
@@ -39,6 +51,14 @@ pub struct BrushSettings {
     pub(super) size: f64,
     #[rhai_type(skip)]
     pub(super) pressure_profile: PressureProfile,
+    #[rhai_type(skip)]
+    pub(super) pool: f64,
+    #[rhai_type(skip)]
+    pub(super) pool_depth: f64,
+    #[rhai_type(skip)]
+    pub(super) pressure_variation: f64,
+    #[rhai_type(skip)]
+    pub(super) variation_length: f64,
 }
 
 impl BrushSettings {
@@ -51,6 +71,10 @@ impl BrushSettings {
             max_pressure,
             size,
             pressure_profile: PressureProfile::default(),
+            pool: 0.0,
+            pool_depth: 0.3,
+            pressure_variation: 0.0,
+            variation_length: 12.0,
         }
     }
     fn get_pressure_profile(&mut self) -> String {
@@ -75,6 +99,18 @@ impl BrushSettings {
         if !(self.size > 0.0) {
             return Err(format!("{}: size must be positive, got {}", caller, self.size).into());
         }
+        if !(self.pool >= 0.0 && self.pool.is_finite()) {
+            return Err(format!("{}: pool can't be negative, got {}", caller, self.pool).into());
+        }
+        if !(self.pool_depth > 0.0 && self.pool_depth <= 1.0) {
+            return Err(format!("{}: pool_depth is a fraction of the height, above 0 and at most 1, got {}", caller, self.pool_depth).into());
+        }
+        if !(0.0..1.0).contains(&self.pressure_variation) {
+            return Err(format!("{}: pressure_variation is a fraction either way, from 0 up to (not including) 1, got {}", caller, self.pressure_variation).into());
+        }
+        if !(self.variation_length > 0.0 && self.variation_length.is_finite()) {
+            return Err(format!("{}: variation_length must be positive, got {}", caller, self.variation_length).into());
+        }
         Ok(())
     }
     fn build_extra(builder: &mut TypeBuilder<Self>) {
@@ -95,6 +131,10 @@ impl BrushSettings {
         number_property(builder, "min_pressure", |b| &mut b.min_pressure);
         number_property(builder, "max_pressure", |b| &mut b.max_pressure);
         number_property(builder, "size", |b| &mut b.size);
+        number_property(builder, "pool", |b| &mut b.pool);
+        number_property(builder, "pool_depth", |b| &mut b.pool_depth);
+        number_property(builder, "pressure_variation", |b| &mut b.pressure_variation);
+        number_property(builder, "variation_length", |b| &mut b.variation_length);
         builder.with_get_set("pressure_profile", Self::get_pressure_profile, Self::set_pressure_profile);
     }
 }
@@ -107,6 +147,10 @@ impl From<BrushSettings> for Brush {
             min_pressure: bs.min_pressure as f32,
             max_pressure: bs.max_pressure as f32,
             pressure_profile: bs.pressure_profile,
+            pool: bs.pool as f32,
+            pool_depth: bs.pool_depth as f32,
+            pressure_variation: bs.pressure_variation as f32,
+            variation_length: bs.variation_length as f32,
         }
     }
 }

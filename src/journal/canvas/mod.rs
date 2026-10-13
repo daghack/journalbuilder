@@ -80,7 +80,7 @@ fn svg_gradient(gradient: &Gradient, id: &str) -> String {
         GradientKind::Radial { center, radius } => format!(
             "<radialGradient id=\"{}\" gradientUnits=\"userSpaceOnUse\" cx=\"{}\" cy=\"{}\" r=\"{}\">{}</radialGradient>",
             id, center.x, center.y, radius, stops),
-        GradientKind::Along => String::new(),
+        GradientKind::Along | GradientKind::Vertical => String::new(),
     }
 }
 
@@ -108,6 +108,66 @@ pub struct Brush {
     pub min_pressure: f32,
     pub max_pressure: f32,
     pub pressure_profile: PressureProfile,
+    /// Ink pooling: how much heavier strokes get toward the bottom of each
+    /// path (each glyph, for text), as a fraction (0.3 is 30% heavier at
+    /// the very bottom), rising over the lowest `pool_depth` of its height.
+    pub pool: f32,
+    pub pool_depth: f32,
+    /// How much pressure wanders along strokes, as a fraction either way,
+    /// and over about how many canvas units it rises and falls.
+    pub pressure_variation: f32,
+    pub variation_length: f32,
+}
+
+impl Brush {
+    /// How much heavier a stroke is at height `y` in a path reaching from
+    /// `top` to `bottom` (`y` down): 1 above its lowest `pool_depth`, rising
+    /// smoothly to `1 + pool` at the bottom. Paths with no height don't
+    /// pool.
+    pub fn pooling(&self, y: f32, top: f32, bottom: f32) -> f32 {
+        let height = bottom - top;
+        if self.pool == 0.0 || !(height > 1e-3) {
+            return 1.0;
+        }
+        let depth = (self.pool_depth * height).max(1e-6);
+        let s = ((y - (bottom - depth)) / depth).clamp(0.0, 1.0);
+        1.0 + self.pool * s * s * (3.0 - 2.0 * s)
+    }
+    /// The pressure's wandering along one stroke, seeded with `seed`, or
+    /// `None` if it doesn't.
+    pub fn variation(&self, seed: u32) -> Option<Variation> {
+        (self.pressure_variation > 0.0).then(|| Variation {
+            noise: Perlin::new(seed),
+            amount: self.pressure_variation,
+            length: self.variation_length.max(1e-3),
+        })
+    }
+    /// The heaviest a stroke gets, as a multiple of its pressure profile:
+    /// pooled and varied at once.
+    pub fn heaviest(&self) -> f32 {
+        (1.0 + self.pool) * (1.0 + self.pressure_variation)
+    }
+}
+
+/// How a stroke's pressure wanders along it: smooth noise, rising and
+/// falling about every `length` units.
+pub struct Variation {
+    noise: Perlin,
+    amount: f32,
+    length: f32,
+}
+
+impl Variation {
+    /// The multiple of its pressure a stroke has `distance` units along
+    /// it, within `1 ± amount`: two octaves of Perlin noise.
+    pub fn at(&self, distance: f32) -> f32 {
+        let x = (distance / self.length) as f64;
+        // Perlin noise is 0 on whole numbers, so it's read off them. The
+        // octaves rarely reach past ±0.9 together; that's stretched to ±1.
+        let n = self.noise.get([x + 0.31, 0.47]) + 0.5 * self.noise.get([2.0 * x + 0.73, 3.19]);
+        let n = (n as f32 / 0.9).clamp(-1.0, 1.0);
+        (1.0 + self.amount * n).max(0.0)
+    }
 }
 
 /// How pressure runs along each stroke, between a brush's min and max.
@@ -163,10 +223,11 @@ impl StrokeStyle {
         }
     }
     /// How far a stroke's marks reach either side of its line: half the
-    /// wider of its width (in SVG output) and its brush (in Darkly's).
+    /// wider of its width at its heaviest (in SVG output) and its brush (in
+    /// Darkly's).
     pub fn reach(&self) -> f32 {
-        let brush = self.brush.as_ref().map_or(0.0, |b| b.size);
-        self.width.max(brush).max(0.0) / 2.0
+        let (brush, heaviest) = self.brush.as_ref().map_or((0.0, 1.0), |b| (b.size, b.heaviest()));
+        (self.width * heaviest).max(brush).max(0.0) / 2.0
     }
 }
 
@@ -178,6 +239,17 @@ pub fn parse_color(color: &str) -> Result<[f32; 4], String> {
     Ok([c.red, c.green, c.blue, c.alpha].map(|v| v as f32 / 255.0))
 }
 
+/// The highest and lowest of some points (y being down).
+fn top_and_bottom(points: impl Iterator<Item = Vec2>) -> (f32, f32) {
+    points.fold((f32::MAX, f32::MIN), |(top, bottom), p| (top.min(p.y), bottom.max(p.y)))
+}
+
+/// How far down from `top` to `bottom` height `y` is, from 0 to 1; the
+/// middle if they're level.
+fn down(y: f32, top: f32, bottom: f32) -> f32 {
+    if bottom > top { (y - top) / (bottom - top) } else { 0.5 }
+}
+
 /// A stroke as a plain SVG path, `width` wide. `id` names its gradient,
 /// if it has one across the canvas; along a stroke, it's cut into pieces,
 /// each its own colour.
@@ -187,9 +259,11 @@ fn plain_path(stroke: &ColoredStroke, id: &str) -> String {
         "<path d=\"{}\" style=\"fill:none;stroke:{};stroke-width:{};{}\" />", d, paint, style.width, cap);
     match &style.color {
         StrokeColor::Solid(color) => line(path, color, ""),
-        StrokeColor::Gradient(gradient) if gradient.kind == GradientKind::Along => {
+        StrokeColor::Gradient(gradient) if gradient.per_stroke() => {
             let mut svg = String::new();
-            for (mut points, closed) in path.flattened(0.1) {
+            let subpaths = path.flattened(0.1);
+            let (top, bottom) = top_and_bottom(subpaths.iter().flat_map(|(points, _)| points.iter().copied()));
+            for (mut points, closed) in subpaths {
                 if closed {
                     points.push(points[0]);
                 }
@@ -213,8 +287,11 @@ fn plain_path(stroke: &ColoredStroke, id: &str) -> String {
                     for p in &points[i + 1..=end] {
                         d = d.line_to(p.x, p.y);
                     }
-                    let colour = css(gradient.at((lengths[i] + lengths[end]) / 2.0 / total));
-                    svg.push_str(&line(&d, &colour, "stroke-linecap:round;stroke-linejoin:round;"));
+                    let t = match gradient.kind {
+                        GradientKind::Vertical => down(points[i].lerp(points[end], 0.5).y, top, bottom),
+                        _ => (lengths[i] + lengths[end]) / 2.0 / total,
+                    };
+                    svg.push_str(&line(&d, &css(gradient.at(t)), "stroke-linecap:round;stroke-linejoin:round;"));
                     i = end;
                 }
             }
@@ -567,15 +644,20 @@ impl Canvas {
         path.adjust_by(|&cmd| {
             cmd.pos_roughen_by(pos_roughen, rng)
         });
-        // Each subpath's sides: a point either side of each sample.
+        // Each subpath's sides: a point either side of each sample, as far
+        // as the trailed-off width, pooled toward the bottom of the whole
+        // path and varied along it, if its brush says so.
+        let brush = stroke.style.brush.as_ref();
+        let substrokes: Vec<_> = path.to_substrokes().iter().map(|s| s.get_point_samples(distance)).collect();
+        let (top, bottom) = top_and_bottom(substrokes.iter().flatten().map(|s| s.point));
+        let variation_seed = brush.filter(|b| b.pressure_variation > 0.0).map(|_| rng.next_u32());
         let mut outlines = Vec::new();
-        for substroke in path.to_substrokes() {
-            let samples = substroke.get_point_samples(distance);
+        for (k, samples) in substrokes.into_iter().enumerate() {
             if samples.len() < 2 {
                 continue;
             }
             let last = (samples.len() - 1) as f32;
-            let width = |i: usize| {
+            let trail = |i: usize| {
                 let percentile = i as f32 / last;
                 if percentile < trail_off_percent {
                     halfwidth * (percentile / trail_off_percent)
@@ -585,10 +667,17 @@ impl Canvas {
                     halfwidth
                 }
             };
-            // Reversed, the right side's widths run from the other end.
+            let variation = brush.zip(variation_seed).and_then(|(b, seed)| b.variation(seed.wrapping_add(k as u32)));
+            let mut along = 0.0;
+            let heavier: Vec<f32> = samples.iter().enumerate().map(|(i, sample)| {
+                along += if i > 0 { samples[i - 1].point.distance(sample.point) } else { 0.0 };
+                brush.map_or(1.0, |b| b.pooling(sample.point.y, top, bottom))
+                    * variation.as_ref().map_or(1.0, |v| v.at(along))
+            }).collect();
+            // Reversed, the right side's trail runs from the other end.
             let n = samples.len();
             let sides: Vec<(Vec2, Vec2)> = samples.iter().enumerate()
-                .map(|(i, sample)| (sample.point + width(i) * sample.normal, sample.point - width(n - 1 - i) * sample.normal))
+                .map(|(i, sample)| (sample.point + trail(i) * heavier[i] * sample.normal, sample.point - trail(n - 1 - i) * heavier[i] * sample.normal))
                 .collect();
             outlines.push((samples[0].point, sides));
         }
@@ -605,9 +694,10 @@ impl Canvas {
             path.close_path()
         };
         match &stroke.style.color {
-            StrokeColor::Gradient(gradient) if gradient.kind == GradientKind::Along => {
+            StrokeColor::Gradient(gradient) if gradient.per_stroke() => {
                 // Pieces a few samples long, overlapping by one so they
-                // meet, each in the colour at its middle.
+                // meet, each in the colour at its middle: how far along
+                // it is, or down the whole path.
                 let mut svg = String::new();
                 for (_, sides) in &outlines {
                     let last = (sides.len() - 1) as f32;
@@ -615,7 +705,14 @@ impl Canvas {
                     let mut i = 0;
                     while i + 1 < sides.len() {
                         let end = (i + step).min(sides.len() - 1);
-                        let colour = css(gradient.at((i + end) as f32 / 2.0 / last));
+                        let t = match gradient.kind {
+                            GradientKind::Vertical => {
+                                let (l, r) = sides[(i + end) / 2];
+                                down((l.y + r.y) / 2.0, top, bottom)
+                            }
+                            _ => (i + end) as f32 / 2.0 / last,
+                        };
+                        let colour = css(gradient.at(t));
                         svg.push_str(&format!("<path d=\"{}\" fill=\"{}\" stroke=\"{}\" stroke-width=\"0.3\" />", outline(None, &sides[i..=end]), colour, colour));
                         i = end;
                     }
@@ -715,6 +812,23 @@ mod svg_output_tests {
     }
 
     #[test]
+    fn vertical_gradients_run_down_each_path() {
+        // An S down from y = 0 to 60, swinging back and forth: pieces go
+        // from red at the top to blue at the bottom.
+        let zigzag = StrokePath::new().move_to(0.0, 0.0).cubic_curve_to(60.0, 10.0, -60.0, 50.0, 0.0, 60.0);
+        let opts = SvgStyle { roughness: 0.0, point_sample_distance: 1.0, trail_off_percent: 0.15, noise_amplitude: 0.0 };
+        for styled in [None, Some(&opts)] {
+            let mut canvas = Canvas::new();
+            canvas.add_strokes(zigzag.clone(), StrokeStyle { width: 2.0, color: gradient(GradientKind::Vertical), brush: None });
+            let svg = canvas.to_svg(styled, 1);
+            let reds: Vec<u8> = svg.split("rgba(").skip(1).map(|c| c.split(',').next().unwrap().parse().unwrap()).collect();
+            assert!(reds[0] > 200 && *reds.last().unwrap() < 50, "{:?}", reds);
+            assert!(reds.windows(2).all(|w| w[0] >= w[1]), "never back up the path: {:?}", reds);
+            canvas.to_png(1.0, styled, 1);
+        }
+    }
+
+    #[test]
     fn styled_output_follows_the_seed() {
         let mut canvas = Canvas::new();
         let style = StrokeStyle { width: 2.0, color: "black".into(), brush: None };
@@ -728,7 +842,37 @@ mod svg_output_tests {
 
 #[cfg(test)]
 mod pressure_tests {
-    use super::PressureProfile;
+    use super::{Brush, PressureProfile};
+
+    fn brush(pool: f32, pressure_variation: f32) -> Brush {
+        Brush { name: "Ink Pen".into(), size: 1.0, min_pressure: 0.2, max_pressure: 0.8, pressure_profile: PressureProfile::Ramp, pool, pool_depth: 0.25, pressure_variation, variation_length: 10.0 }
+    }
+
+    #[test]
+    fn ink_pools_toward_the_bottom() {
+        let b = brush(0.4, 0.0);
+        // A path from y = 0 to 100 (down): untouched above its lowest 25.
+        assert_eq!(b.pooling(0.0, 0.0, 100.0), 1.0);
+        assert_eq!(b.pooling(75.0, 0.0, 100.0), 1.0);
+        assert!((b.pooling(100.0, 0.0, 100.0) - 1.4).abs() < 1e-6);
+        let rising: Vec<f32> = (75..=100).map(|y| b.pooling(y as f32, 0.0, 100.0)).collect();
+        assert!(rising.windows(2).all(|w| w[1] >= w[0]), "{:?}", rising);
+        assert_eq!(b.pooling(3.0, 3.0, 3.0), 1.0, "a level path doesn't pool");
+        assert_eq!(brush(0.0, 0.0).pooling(100.0, 0.0, 100.0), 1.0);
+    }
+
+    #[test]
+    fn pressure_varies_smoothly_within_its_bounds() {
+        assert!(brush(0.0, 0.0).variation(1).is_none());
+        let v = brush(0.0, 0.3).variation(7).unwrap();
+        let along: Vec<f32> = (0..2000).map(|i| v.at(i as f32 * 0.1)).collect();
+        assert!(along.iter().all(|m| (0.7..=1.3).contains(m)), "within 30% either way");
+        let (lo, hi) = along.iter().fold((f32::MAX, f32::MIN), |(a, b), m| (a.min(*m), b.max(*m)));
+        assert!(lo < 0.9 && hi > 1.1, "it wanders: {}..{}", lo, hi);
+        assert!(along.windows(2).all(|w| (w[1] - w[0]).abs() < 0.03), "smoothly");
+        assert_eq!(v.at(12.5), brush(0.0, 0.3).variation(7).unwrap().at(12.5), "seeded");
+        assert_ne!(v.at(12.5), brush(0.0, 0.3).variation(8).unwrap().at(12.5));
+    }
 
     #[test]
     fn profiles_run_between_min_and_max() {

@@ -207,15 +207,16 @@ fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, page_origin: Vec2, 
         let mut reach: f32 = 0.0;
         for &(stroke, seed) in pass {
             let samples = pen.draw(layer, stroke, seed, gradient.is_some());
-            if gradient.is_some_and(|g| g.kind == GradientKind::Along) {
-                along.extend(samples);
+            if let Some(g) = gradient.filter(|g| g.per_stroke()) {
+                let vertical = g.kind == GradientKind::Vertical;
+                along.extend(samples.into_iter().map(|(p, t, down)| (p, if vertical { down } else { t })));
                 reach = reach.max(stroke.style.brush.as_ref().map_or(0.0, |b| b.size) * brush_scale);
             }
         }
         let mut image = export(pen.engine, layer);
         if let Some(gradient) = gradient {
             let to_canvas = |x: f32, y: f32| page_origin + Vec2::new((x + offset.0) / ratio.x, (y + offset.1) / ratio.y);
-            let along = (gradient.kind == GradientKind::Along).then(|| Along::new(along, reach));
+            let along = gradient.per_stroke().then(|| Along::new(along, reach));
             colorize(&mut image, gradient, to_canvas, along.as_ref());
         }
         let image = Placed { image, at: (0, 0) };
@@ -254,8 +255,8 @@ struct Pen<'a> {
 impl Pen<'_> {
     /// Draw a stroke on `layer`, in white if `white` (to be coloured
     /// after), returning its points in render pixels with how far along
-    /// its subpath each is, from 0 to 1.
-    fn draw(&mut self, layer: LayerId, stroke: &ColoredStroke, seed: u32, white: bool) -> Vec<(Vec2, f32)> {
+    /// its subpath each is and how far down the whole path, from 0 to 1.
+    fn draw(&mut self, layer: LayerId, stroke: &ColoredStroke, seed: u32, white: bool) -> Vec<(Vec2, f32, f32)> {
         let ColoredStroke { path, style, .. } = stroke;
         let brush = style.brush.as_ref()
             .expect("Darkly strokes need a brush (rhai stroke styles always have one)");
@@ -274,12 +275,15 @@ impl Pen<'_> {
         let pressure_range = brush.max_pressure - brush.min_pressure;
         // A style's width scales its brush's pressure here (in the plain
         // output it's a geometric width). Darkly caps pressure at 1, so
-        // past that, wider strokes stop getting heavier.
-        let peak_pressure = style.width * brush.max_pressure;
-        if peak_pressure > 1.0 && self.warned_saturation.insert((style.width.to_bits(), brush.name.clone(), brush.max_pressure.to_bits())) {
+        // past that, wider strokes stop getting heavier. Pooling and
+        // variation can take them past it too.
+        let peak_pressure = style.width * brush.max_pressure * brush.heaviest();
+        if peak_pressure > 1.0 && self.warned_saturation.insert((style.width.to_bits(), brush.name.clone(), peak_pressure.to_bits())) {
             eprintln!(
-                "warning: width {} strokes with brush '{}' (pressure {}-{}) reach pressure {:.2}; Darkly caps pressure at 1, so their heaviest parts look the same",
-                style.width, brush.name, brush.min_pressure, brush.max_pressure, peak_pressure,
+                "warning: width {} strokes with brush '{}' (pressure {}-{}{}) reach pressure {:.2}; Darkly caps pressure at 1, so their heaviest parts look the same",
+                style.width, brush.name, brush.min_pressure, brush.max_pressure,
+                if brush.heaviest() > 1.0 { format!(", pooled and varied up to {:.2}x", brush.heaviest()) } else { String::new() },
+                peak_pressure,
             );
         }
         let [cr, cg, cb, ca] = if white {
@@ -295,29 +299,42 @@ impl Pen<'_> {
         };
         let (w_ratio, h_ratio) = (self.ratio.x, self.ratio.y);
         let sample_spacing = SAMPLE_SPACING_PX / w_ratio.max(h_ratio);
+        let substrokes: Vec<Vec<CurveSample>> = path.to_substrokes().iter().map(|s| s.get_point_samples(sample_spacing)).collect();
+        // The whole path's top and bottom, which it pools toward and its
+        // vertical gradient runs between.
+        let (top, bottom) = substrokes.iter().flatten()
+            .fold((f32::MAX, f32::MIN), |(top, bottom), s| (top.min(s.point.y), bottom.max(s.point.y)));
         let mut points = Vec::new();
-        for (i, substroke) in path.to_substrokes().iter().enumerate() {
+        for (i, samples) in substrokes.into_iter().enumerate() {
             // Darkly seeds each stroke's random brush texture from the wall
             // clock by default; numbering the strokes instead makes renders
             // reproducible while keeping neighbouring strokes distinct. (A
             // tile's strokes keep their numbers from the whole page.)
-            self.engine.set_stroke_seed(Some(seed.wrapping_add(i as u32)));
+            let stroke_seed = seed.wrapping_add(i as u32);
+            self.engine.set_stroke_seed(Some(stroke_seed));
             self.drawn = self.drawn.wrapping_add(1);
+            let variation = brush.variation(stroke_seed);
             // One stroke_path call per substroke: Darkly stabilizes and draws
             // the whole stroke at once, instead of re-rendering and
             // committing on every point as live stroke_to does.
             let mut ops = Vec::new();
-            let samples = substroke.get_point_samples(sample_spacing);
             let sample_count = samples.len();
+            let mut distance = 0.0;
+            let mut last = samples.first().map(|s| s.point);
             for (i, CurveSample { point,  .. }) in samples.into_iter().enumerate() {
+                distance += last.map_or(0.0, |l| l.distance(point));
+                last = Some(point);
                 let t_param = i as f32 / sample_count as f32;
-                let pressure = style.width * (brush.pressure_profile.at(t_param) * pressure_range + pressure_min);
+                let pressure = style.width * (brush.pressure_profile.at(t_param) * pressure_range + pressure_min)
+                    * brush.pooling(point.y, top, bottom)
+                    * variation.as_ref().map_or(1.0, |v| v.at(distance));
                 // Where it is in the whole page's render, less the offset:
                 // a whole number, so a tile's strokes land exactly where the
                 // page's would.
                 let x = (point.x - self.page_origin.x) * w_ratio - self.offset.0;
                 let y = (point.y - self.page_origin.y) * h_ratio - self.offset.1;
-                points.push((Vec2::new(x, y), i as f32 / (sample_count - 1).max(1) as f32));
+                let down = if bottom > top { (point.y - top) / (bottom - top) } else { 0.5 };
+                points.push((Vec2::new(x, y), i as f32 / (sample_count - 1).max(1) as f32, down));
                 ops.push(StrokeOp::BrushStroke {
                     x,
                     y,

@@ -18,6 +18,8 @@ pub enum GradientKind {
     /// Along each stroke (each subpath of a path), from its start to its
     /// end.
     Along,
+    /// Down each path (each glyph, for text), from its top to its bottom.
+    Vertical,
     /// Across the canvas from `from` to `to`, the same all along lines at
     /// right angles to it; before `from` and past `to`, the end colours.
     Linear { from: Vec2, to: Vec2 },
@@ -39,11 +41,17 @@ impl Gradient {
         std::array::from_fn(|i| ca[i] + (cb[i] - ca[i]) * k)
     }
 
+    /// Whether it's laid over each stroke on its own (along it, or down
+    /// it) rather than across the canvas.
+    pub fn per_stroke(&self) -> bool {
+        matches!(self.kind, GradientKind::Along | GradientKind::Vertical)
+    }
+
     /// How far through the gradient a point is, for gradients laid across
-    /// the canvas; `None` for gradients along strokes.
+    /// the canvas; `None` for gradients laid over each stroke.
     pub fn t_at(&self, p: Vec2) -> Option<f32> {
         match self.kind {
-            GradientKind::Along => None,
+            GradientKind::Along | GradientKind::Vertical => None,
             GradientKind::Linear { from, to } => {
                 let d = to - from;
                 Some((p - from).dot(d) / d.length_squared().max(1e-12))
@@ -63,8 +71,9 @@ impl Gradient {
     }
 }
 
-/// Points along strokes, each with how far along its stroke it is (0 to
-/// 1), for finding how far along the strokes any nearby pixel is.
+/// Points along strokes, each with how far through the gradient it is (0
+/// to 1: along its stroke, or down it), for finding how far through any
+/// nearby pixel is.
 pub struct Along {
     cell: f32,
     cells: HashMap<(i32, i32), Vec<(Vec2, f32)>>,
@@ -119,8 +128,8 @@ impl Along {
 /// each pixel takes the gradient's colour where it is, times its own (so a
 /// brush's shading stays), with the gradient's alpha on top of its own.
 /// `to_canvas` turns a pixel's centre into canvas units, for gradients
-/// across the canvas; `along` gives how far along the strokes a pixel is,
-/// for gradients along them.
+/// across the canvas; `along` gives how far through the gradient a pixel
+/// is, for gradients laid over each stroke.
 pub fn colorize(image: &mut RgbaImage, gradient: &Gradient, to_canvas: impl Fn(f32, f32) -> Vec2 + Sync, along: Option<&Along>) {
     let width = image.width() as usize;
     image.par_chunks_mut(width * 4).enumerate().for_each(|(y, row)| {
@@ -131,7 +140,7 @@ pub fn colorize(image: &mut RgbaImage, gradient: &Gradient, to_canvas: impl Fn(f
             }
             let centre = (x as f32 + 0.5, y as f32 + 0.5);
             let colour = match gradient.kind {
-                GradientKind::Along => gradient.at(along.map_or(0.0, |a| a.t_near(Vec2::new(centre.0, centre.1)))),
+                GradientKind::Along | GradientKind::Vertical => gradient.at(along.map_or(0.0, |a| a.t_near(Vec2::new(centre.0, centre.1)))),
                 _ => gradient.at_point(to_canvas(centre.0, centre.1)).expect("a gradient across the canvas"),
             };
             for (c, g) in px[..3].iter_mut().zip(colour) {
@@ -170,6 +179,7 @@ mod tests {
         let radial = red_to_blue(GradientKind::Radial { center: Vec2::new(1.0, 1.0), radius: 4.0 });
         assert_eq!(radial.t_at(Vec2::new(1.0, 3.0)), Some(0.5));
         assert_eq!(red_to_blue(GradientKind::Along).t_at(Vec2::ZERO), None);
+        assert_eq!(red_to_blue(GradientKind::Vertical).t_at(Vec2::ZERO), None);
     }
 
     #[test]

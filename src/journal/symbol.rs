@@ -406,11 +406,15 @@ pub struct SymbolPlacementArgs<'a> {
     /// its height: "below" being the glyph's own down, along the path's
     /// normal.
     pub baseline_shift: f32,
+    /// Glyphs turned to this angle (radians, 0 upright) wherever they are,
+    /// rather than to the path; they're still set along it, as close as
+    /// their outlines at that angle allow.
+    pub angle: Option<f32>,
 }
 
 impl SymbolPlacementArgs<'_> {
     pub fn new(symbol_scale: f32) -> Self {
-        SymbolPlacementArgs { avoid: None, padding: 0.0, symbol_scale, spacing: 0.0, baseline_shift: 0.0 }
+        SymbolPlacementArgs { avoid: None, padding: 0.0, symbol_scale, spacing: 0.0, baseline_shift: 0.0, angle: None }
     }
 }
 
@@ -423,6 +427,12 @@ impl SymbolPlacementArgs<'_> {
 pub struct WordSplit {
     pub min_piece: usize,
     pub padding: f32,
+}
+
+/// The angle that turns an upright glyph to a path whose normal (its
+/// glyphs' down) is `normal`.
+fn path_turn(normal: Vec2) -> f32 {
+    normal.y.atan2(normal.x) - std::f32::consts::FRAC_PI_2
 }
 
 /// Samples per curve when measuring a path to place glyphs along it.
@@ -478,6 +488,17 @@ impl<'a> Placer<'a> {
         self.args.spacing * self.args.symbol_scale
     }
 
+    /// `piece` as it's set from `at` along `walk`: at a fixed angle, its
+    /// outline is turned as the glyph is against the path there, so it's
+    /// set as close as it is at that angle. Otherwise it's as it was made.
+    fn shaped(&self, walk: &Walk, at: f32, piece: &Piece) -> Piece {
+        let Some(angle) = self.args.angle else { return piece.clone() };
+        let Some(here) = walk.at(at.clamp(0.0, walk.length())) else { return piece.clone() };
+        let mut turned = piece.symbol.clone();
+        turned.rotate_rad_by(angle - path_turn(here.normal));
+        Piece { outline: Rc::new(turned.outline(self.args.symbol_scale)), symbol: piece.symbol.clone() }
+    }
+
     /// Where `piece` starts set after `spacing`, `cursor` being where it
     /// would start set at their widths. Blanks start at the cursor; glyphs
     /// are set beside the glyphs before them, whatever blanks are between.
@@ -492,11 +513,11 @@ impl<'a> Placer<'a> {
     fn spot(&self, walk: &Walk, start: f32, piece: &Piece) -> Option<Symbol> {
         let outline = &piece.outline;
         let (l, r) = (walk.at(start)?, walk.at(start + outline.width())?);
-        let turn = l.normal.y.atan2(l.normal.x) - std::f32::consts::FRAC_PI_2;
+        let turn = path_turn(l.normal);
         let middle = (outline.left() + outline.right()) / 2.0;
         let mut placed = piece.symbol.clone();
         placed.set_position(l.point.lerp(r.point, 0.5) - Vec2::new(turn.cos(), turn.sin()) * middle + l.normal * (self.args.baseline_shift * outline.height()));
-        placed.rotate_rad_by(turn);
+        placed.rotate_rad_by(self.args.angle.unwrap_or(turn));
         placed.scale_by(self.args.symbol_scale);
         Some(placed)
     }
@@ -533,6 +554,7 @@ impl<'a> Placer<'a> {
         let (mut glyphs, mut spans) = (Vec::new(), Vec::new());
         let mut at = start;
         for (k, piece) in run.iter().enumerate() {
+            let piece = &self.shaped(walk, at, piece);
             if k > 0 {
                 at = self.start(&spacing, piece, at);
             }
@@ -557,7 +579,7 @@ impl<'a> Placer<'a> {
     /// the end first.
     fn fit_run(&self, walk: &Walk, from: f32, run: &[Piece], spacing: &Spacing, pad: f32) -> Option<Run> {
         let step = (self.args.symbol_scale * SEARCH_STEP).max(1e-3);
-        let mut start = self.start(spacing, &run[0], from);
+        let mut start = self.start(spacing, &self.shaped(walk, from, &run[0]), from);
         let mut blocked_at = None;
         loop {
             match self.try_run(walk, start, run, spacing, pad)? {
@@ -588,7 +610,7 @@ impl<'a> Placer<'a> {
     fn fit_word(&self, walk: &Walk, from: f32, word: &[Piece], spacing: &Spacing, split: Option<WordSplit>, pad: f32) -> Option<Run> {
         let whole = self.fit_run(walk, from, word, spacing, pad)?;
         match split {
-            Some(split) if whole.spans[0].0 > self.start(spacing, &word[0], from) + 1e-3 => {
+            Some(split) if whole.spans[0].0 > self.start(spacing, &self.shaped(walk, from, &word[0]), from) + 1e-3 => {
                 Some(self.split_word(walk, from, word, spacing, split).unwrap_or(whole))
             }
             _ => Some(whole),
@@ -606,7 +628,7 @@ impl<'a> Placer<'a> {
         if n < 2 * min {
             return None;
         }
-        let start = self.start(spacing, &word[0], from);
+        let start = self.start(spacing, &self.shaped(walk, from, &word[0]), from);
         for k in (min..=n - min).rev() {
             let Some(Ok(mut head)) = self.try_run(walk, start, &word[..k], spacing, pad) else { continue };
             let rest_from = head.spans.last().expect("a piece has glyphs").1 + self.gap();
@@ -809,6 +831,30 @@ mod tests {
         assert!((top - (0.25 + 0.5 * 0.4f32.tan())).abs() < 0.01, "{}", top);
         let bounds = glyph(BAR).with_skew(0.4).placed_strokepath().points_within().iter().fold(f32::MIN, |m, p| m.max(p.x));
         assert!((bounds - (0.25 + 0.5 * 0.4f32.tan())).abs() < 1e-5, "{}", bounds);
+    }
+
+    #[test]
+    fn glyphs_can_hold_an_angle_along_a_path() {
+        // Wide bars up a steep line and round a bend, held upright: upright
+        // wherever they are, each further along, and set as close as their
+        // outlines allow at that angle, clear of each other but not far.
+        const WIDE: &str = "M -1 -0.3 L 1 -0.3 L 1 0.3 L -1 0.3 Z";
+        let path = StrokePath::new().move_to(0.0, 0.0).line_to(30.0, -40.0).cubic_curve_to(50.0, -66.0, 90.0, -66.0, 140.0, -40.0);
+        let symbols = vec![glyph(WIDE); 12];
+        for angle in [0.0, 0.3] {
+            let args = SymbolPlacementArgs { angle: Some(angle), ..SymbolPlacementArgs::new(8.0) };
+            let (placed, unplaced) = place_along_path(symbols.clone(), &path, &args);
+            assert!(unplaced.is_empty() && placed.len() == 12);
+            for pair in placed.windows(2) {
+                assert_eq!(pair[1].rotation_rad(), angle);
+                let shrunk = |g: &Symbol| { let c = g.position(); g.footprint().into_iter().map(|p| c + (p - c) * 0.98).collect::<Vec<_>>() };
+                assert!(!shapes_within(&shrunk(&pair[0]), &shrunk(&pair[1]), 0.0), "{}: glyphs at {:?} and {:?} overlap", angle, pair[0].position(), pair[1].position());
+                assert!(pair[0].position().distance(pair[1].position()) < 8.5, "{}: glyphs at {:?} and {:?} are set apart", angle, pair[0].position(), pair[1].position());
+            }
+        }
+        // Turned to the line instead, they lie along it.
+        let (placed, _) = place_along_path(symbols, &path, &SymbolPlacementArgs::new(8.0));
+        assert!((placed[0].rotation_rad() - (-40.0f32).atan2(30.0)).abs() < 1e-3, "{}", placed[0].rotation_rad());
     }
 
     #[test]

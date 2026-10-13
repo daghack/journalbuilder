@@ -7,6 +7,9 @@
 //! // ...or placed, as [position, colour] from 0 to 1 (mixing the two
 //! // spaces the unplaced ones evenly between their neighbours).
 //! let late = new_gradient(["gold", [0.8, "gold"], "red"]);
+//! // Down each path (each glyph, for text), from its top to its bottom:
+//! // ink darkening where it pools.
+//! let pooled = new_gradient(["#9b2318", "#2b1d12"], #{ vertical: true });
 //! // Across the page, from one point to another...
 //! let across = new_gradient(["red", "blue"], #{ from: new_vec(0.0, 0.0), to: new_vec(500.0, 0.0) });
 //! // ...or out from a centre.
@@ -18,8 +21,8 @@
 //!
 //! In Darkly renders a gradient stroke is drawn in white and coloured
 //! after, keeping its brush's texture; brushes that move ink (Smudge, Blur)
-//! don't reach across it. In SVG output a gradient along a stroke is drawn
-//! in short pieces, each its own colour.
+//! don't reach across it. In SVG output a gradient along or down a stroke
+//! is drawn in short pieces, each its own colour.
 
 use rhai::{Array, Dynamic, Engine, EvalAltResult, Map};
 
@@ -86,10 +89,20 @@ fn vec_option(options: &Map, key: &str) -> RhaiResult<Option<parry2d::math::Vec2
     }).transpose()
 }
 
-/// `new_gradient(colours[, #{ from, to } or #{ center, radius }])`.
+/// `new_gradient(colours[, #{ from, to }, #{ center, radius } or #{ vertical: true }])`.
 pub fn new_gradient(colours: Array, options: Map) -> RhaiResult<Gradient> {
-    check_keys(CALLER, &options, &["from", "to", "center", "radius"])?;
+    check_keys(CALLER, &options, &["from", "to", "center", "radius", "vertical"])?;
     let stops = stops(colours)?;
+    let vertical = match options.get("vertical") {
+        None => false,
+        Some(v) => v.as_bool().map_err(|t| -> Box<EvalAltResult> { format!("{}: 'vertical' should be true or false, got {}", CALLER, t).into() })?,
+    };
+    if vertical {
+        if options.len() > 1 {
+            return Err(format!("{}: 'vertical' runs down each path, so it takes no 'from', 'to', 'center' or 'radius'", CALLER).into());
+        }
+        return Ok(Gradient { stops, kind: GradientKind::Vertical });
+    }
     let (from, to, center) = (vec_option(&options, "from")?, vec_option(&options, "to")?, vec_option(&options, "center")?);
     let radius = number(CALLER, &options, "radius")?;
     let kind = match (from, to, center, radius) {
@@ -106,7 +119,7 @@ pub fn new_gradient(colours: Array, options: Map) -> RhaiResult<Gradient> {
             }
             GradientKind::Radial { center, radius }
         }
-        _ => return Err(format!("{}: give 'from' and 'to' (across the page), 'center' and 'radius' (out from a point), or neither (along each stroke)", CALLER).into()),
+        _ => return Err(format!("{}: give 'from' and 'to' (across the page), 'center' and 'radius' (out from a point), 'vertical: true' (down each path), or none (along each stroke)", CALLER).into()),
     };
     Ok(Gradient { stops, kind })
 }
@@ -114,6 +127,7 @@ pub fn new_gradient(colours: Array, options: Map) -> RhaiResult<Gradient> {
 fn describe(g: &mut Gradient) -> String {
     let kind = match g.kind {
         GradientKind::Along => "along strokes".to_string(),
+        GradientKind::Vertical => "down each path".to_string(),
         GradientKind::Linear { from, to } => format!("from ({}, {}) to ({}, {})", from.x, from.y, to.x, to.y),
         GradientKind::Radial { center, radius } => format!("out from ({}, {}) to {}", center.x, center.y, radius),
     };
@@ -177,6 +191,10 @@ mod tests {
         assert!(matches!(g.kind, GradientKind::Linear { .. }));
         let g = gradient(r#"new_gradient(["red", "blue"], #{ center: new_vec(1.0, 1.0), radius: 5 })"#);
         assert!(matches!(g.kind, GradientKind::Radial { radius: 5.0, .. }));
+        let g = gradient(r#"new_gradient(["red", "blue"], #{ vertical: true })"#);
+        assert_eq!(g.kind, GradientKind::Vertical);
+        let g = gradient(r#"new_gradient(["red", "blue"], #{ vertical: false })"#);
+        assert_eq!(g.kind, GradientKind::Along);
     }
 
     #[test]
@@ -205,6 +223,8 @@ mod tests {
             (r#"new_gradient(["red", "blue"], #{ from: new_vec(0.0, 0.0) })"#, "give 'from' and 'to'"),
             (r#"new_gradient(["red", "blue"], #{ center: new_vec(0.0, 0.0), radius: 0 })"#, "'radius' must be a positive"),
             (r#"new_gradient(["red", "blue"], #{ angle: 1 })"#, "unknown option 'angle'"),
+            (r#"new_gradient(["red", "blue"], #{ vertical: 1 })"#, "'vertical' should be true or false"),
+            (r#"new_gradient(["red", "blue"], #{ vertical: true, radius: 3 })"#, "'vertical' runs down each path"),
             (r#"new_style(1.0, 3, new_brush("Ink Pen", 0.4, 0.8, 1.6))"#, "expected a colour string or a gradient"),
         ] {
             let err = fails(&format!("let ok = 1;\n{};", script));

@@ -66,6 +66,7 @@ impl<'a> TextBox<'a> {
             symbol_scale: self.symbol_scale,
             spacing: self.spacing,
             baseline_shift: BASELINE_SHIFT,
+            angle: None,
         };
         match self.layout {
             TextBoxLineMode::Flat => place_along_path(symbols, &stroke, &args),
