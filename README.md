@@ -209,7 +209,7 @@ The module docs in `src/journal/rhaientries/` cover each area in more
 detail: `style.rs` (brushes and styles, passes and jitter), `path.rs`
 (paths, hatching, text along paths), `text.rs` (text boxes, scattered
 notes), `glyphs.rs` (glyphs and fonts), `avoid.rs`, `layout.rs` (page
-layouts), `gradient.rs`, `random.rs`, `art.rs` and `locks/mod.rs`. The journals in `journals/` and
+layouts), `markdown.rs` (marked-up text for layouts), `gradient.rs`, `random.rs`, `art.rs` and `locks/mod.rs`. The journals in `journals/` and
 `tests/smoke_journals/smoke` use most of it.
 
 ## Using layouts
@@ -258,12 +258,17 @@ journal_entry.add_pages(layout("two_column_article").typeset(#{
 
 - **Flows** are strings. `"\n"` breaks a line and a blank line starts a
   paragraph. A flow that doesn't fit its box carries on in the next box
-  of the same name, then onto the next page.
+  of the same name, then onto the next page. A flow can also be
+  `markdown(text)`: `*emphasis*`, `**strong**`, `~~struck out~~`, and
+  `[text]{settings}` for colour, size, lean, passes, spacing, and lines
+  under and through, which break where the text does (see
+  [layouts/README.md](layouts/README.md#marked-up-text)).
 - **Roles** are maps of settings, by name. Text roles need `font`,
   `style` and `size` (the symbol scale, in canvas units); the rest are
   optional: `line_height`, `align`, `valign`, `indent`, `paragraph_gap`,
-  `spacing`, `jagged`, `clearance`, `split_words`, `split_padding` and
-  `fit`. Art, rules and bands need only a `style`. Each layout file's
+  `spacing`, `jagged`, `clearance`, `split_words`, `split_padding`,
+  `fit`, and `em` and `strong` (how markdown's emphasis and strong text
+  look). Art, rules and bands need only a `style`. Each layout file's
   header comment lists the roles it uses.
 - **Art** is a canvas (drawn in its own styles), a path or glyph (drawn in
   the role's style), or a function given its box,

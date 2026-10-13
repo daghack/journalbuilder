@@ -11,6 +11,7 @@ pub mod pdf;
 pub mod progress;
 pub mod publish;
 pub mod hatch;
+pub mod markup;
 pub mod typeset;
 pub mod rhaientries;
 pub mod darkly;

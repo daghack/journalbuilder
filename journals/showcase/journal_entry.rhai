@@ -11,8 +11,8 @@
 //             scattered notes, words split round drawings
 //   locks     every lock type, and a lock chain drawn as a maze
 //   spread    one drawing across two pages: a page split into tiles
-//   layouts   pages typeset from layouts: an inline one, and the layout
-//             files (the title page is one too)
+//   layouts   pages typeset from layouts: an inline one, the layout files
+//             (the title page is one too), and marked-up text, markdown()
 //
 // When journals gain a capability (a function, an art tool, a brush, a
 // font, a lock type), it gets a labelled example here: see CLAUDE.md.
@@ -274,7 +274,7 @@ book.bind("pens", pens);
 let alphabet = "abcdefghijklmnopqrstuvwxyz";
 let lorem = "lorem ipsum dolor sit amet, consectetur";
 let samples = [
-	#{ label: "font(\"plain\"): made to read easily", font: PLAIN, lines: [alphabet.to_upper(), alphabet, "0123456789 . , ; : ! ? ' \" - — _ ( ) [ ] { } / # + = * < > % &", "Lorem ipsum dolor sit amet, consectetur."] },
+	#{ label: "font(\"plain\"): made to read easily", font: PLAIN, lines: [alphabet.to_upper(), alphabet, "0123456789 . , ; : ! ? ' \" - — _ ~ ( ) [ ] { } / \\ # + = * < > % &", "Lorem ipsum dolor sit amet, consectetur."] },
 	#{ label: "font(\"copper\"): falling back to loche_upper for what it lacks", font: font("copper"), lines: [alphabet.to_upper(), alphabet, "Lorem Ipsum Dolor Sit Amet", "variants at random: aaaa eeee ssss"] },
 	#{ label: "font(\"loche_upper\"): capitals, lowercase text set in them", font: LOCHE, lines: [alphabet, lorem + ".", "punctuation . , ; : ' \" ? - —"] },
 	#{ label: "font(\"loche_lower\"): falling back to loche_upper for capitals and stops", font: font("loche_lower"), lines: [alphabet, "Lorem ipsum dolor sit amet, consectetur."] },
@@ -848,6 +848,62 @@ for page in layout("captioned_figure").typeset(#{
 	flows: #{ caption: "sed do eiusmod tempor incididunt" },
 	roles: #{ caption: #{ font: PLAIN, style: CAPTION, size: 28 } },
 	art: #{ figure: Fn("plant_in") },
+}) {
+	book.bind_page("layouts", page);
+}
+
+// Marked-up text: markdown(text) makes a flow that's styled as it's set.
+// *emphasis* and **strong** look as the role's em and strong say (by
+// default italic, and gone over twice); ~~text~~ is struck through; and
+// [text]{settings} sets its own colour, passes, jitter, lean, size,
+// character padding and word spacing, and lines under and through it.
+// Lines run across the spaces in what they mark, and break where the text
+// does: at the ends of lines, and either side of what it wraps round.
+fn markdown_page(n, info) {
+	column(#{ padding: [90, 100, 60, 100], gap: 12 }, [
+		flow("title", #{ role: "heading", height: 110 }),
+		flow("marks_label", #{ role: "caption" }),
+		flow("marks"),
+		flow("spans_label", #{ role: "caption" }),
+		flow("spans"),
+		flow("rules_label", #{ role: "caption" }),
+		flow("rules"),
+		flow("roles_label", #{ role: "caption" }),
+		flow("roles", #{ role: "loud" }),
+		flow("wrap_label", #{ role: "caption" }),
+		column(#{ grow: 1 }, [
+			figure("seal", #{ position: "absolute", top: 10, left: 360, width: 280, height: 280, wrap: "hull" }),
+			flow("wrap", #{ grow: 1, split_words: true, split_padding: 0.3 }),
+		]),
+		label("markdown(text)", #{ role: "folio", align: "center", height: 30 }),
+	])
+}
+let marked = #{ font: PLAIN, style: TEXT, size: 24, line_height: 1.45 };
+let loud = marked + #{ em: #{ color: RED }, strong: #{ underline: true, passes: 2, jitter: 1 } };
+for page in new_layout("marked", Fn("markdown_page")).typeset(#{
+	width: W, height: H,
+	flows: #{
+		title: "Markdown",
+		marks_label: "*emphasis* or _emphasis_, **strong**, ***both***, ~~struck through~~",
+		marks: markdown("Lorem ipsum *dolor sit amet*, consectetur _adipiscing_ elit, **sed do eiusmod** tempor ~~incididunt ut labore~~ et dolore magna aliqua. Ut enim ***ad minim*** veniam, quis nostrud exercitation."),
+		spans_label: "[text]{color, size, italic, skew, passes, jitter, character_padding, word_spacing}",
+		spans: markdown("Lorem ipsum [dolor sit]{color: #9b2318} amet, [consectetur]{size: 1.6} adipiscing [elit]{size: 0.7}, [sed do eiusmod]{italic} tempor [incididunt]{skew: -0.3} ut [labore et dolore]{passes: 4, jitter: 2.5} magna, [aliqua ut enim]{character_padding: 0.5} ad [minim veniam quis nostrud]{word_spacing: 1.4} exercitation, [ullamco [laboris]{size: 1.5} nisi]{color: #9b2318, italic}."),
+		rules_label: "underline: true, a count, or {count, spacing, color, passes, jitter}; strike (strikethrough) likewise",
+		rules: markdown("Lorem ipsum [dolor sit amet]{underline} consectetur [adipiscing elit]{underline: 2} sed do [eiusmod tempor incididunt ut labore et dolore magna aliqua, ut enim ad minim veniam]{underline: {color: #9b2318}} quis nostrud ~~exercitation~~ ullamco [laboris nisi ut aliquip]{strike: {count: 3, color: #9b2318}} ex ea [commodo consequat]{color: #9b2318, strike: {count: 4, spacing: 0.2, color: #2b1d12, jitter: 1.5}}."),
+		roles_label: "a role's em and strong: em: #{ color }, strong: #{ underline: true, passes: 2, jitter: 1 }",
+		roles: markdown("Lorem ipsum *dolor sit* amet, **consectetur adipiscing** elit, sed *do eiusmod* tempor **incididunt** ut labore."),
+		wrap_label: "wrapped round a figure with split_words: marked words, and their lines, break either side",
+		wrap: markdown("[Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt]{underline} ut labore et dolore magna aliqua. Ut enim ad minim veniam, [quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat]{strike: {count: 2, color: #9b2318}}. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. [Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum]{underline: {count: 2, color: #9b2318}}."),
+	},
+	roles: #{
+		heading: #{ font: LOCHE, style: HEADING, size: 80, align: "center", valign: "center" },
+		caption: #{ font: PLAIN, style: CAPTION, size: 20 },
+		marks: marked, spans: marked, rules: marked, loud: loud,
+		wrap: marked + #{ align: "justify" },
+		seal: #{ style: CAPTION },
+		folio: #{ font: PLAIN, style: CAPTION, size: 20 },
+	},
+	art: #{ seal: seal(new_vec(0, 0)) },
 }) {
 	book.bind_page("layouts", page);
 }

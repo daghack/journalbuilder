@@ -277,6 +277,19 @@ impl Outline {
     pub fn height(&self) -> f32 {
         self.max.y - self.min.y
     }
+    /// The outline `dy` further down across the line, as a glyph's is when
+    /// it's set that far below the others.
+    pub fn shifted(&self, dy: f32) -> Outline {
+        let down = |edge: &[Vec2]| edge.iter().map(|p| Vec2::new(p.x, p.y + dy)).collect();
+        Outline {
+            left_edge: down(&self.left_edge),
+            right_edge: down(&self.right_edge),
+            min: self.min + Vec2::new(0.0, dy),
+            max: self.max + Vec2::new(0.0, dy),
+            pad: self.pad,
+            lean: self.lean,
+        }
+    }
     /// How far right it reaches at height `y`: its right edge, or the
     /// furthest of its corners' cones (see `TUCK`), which reach past it
     /// above and below, and past its flattest parts.

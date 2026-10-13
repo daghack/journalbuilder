@@ -6,6 +6,7 @@ mod glyphs;
 mod gradient;
 mod layout;
 mod locks;
+mod markdown;
 mod options;
 mod path;
 mod random;
@@ -145,6 +146,7 @@ impl JournalEngine {
         art::register(&mut engine);
         avoid::register(&mut engine);
         layout::register(&mut engine, symdict.clone(), rng.clone(), layouts_dir.into());
+        markdown::register(&mut engine);
         glyphs::register(&mut engine, symdict.clone(), rng.clone());
         gradient::register(&mut engine);
         text::register(&mut engine, symdict.clone(), rng.clone());

@@ -89,6 +89,11 @@
 //! drawn) or "none". In text, `"\n"` breaks a line and a blank line starts
 //! a paragraph.
 //!
+//! A flow is a string, or `markdown(text)`: text styled as it's set, each
+//! stretch in its own colour, size, lean and passes, underlined or struck
+//! through (see markdown.rs). A role's `em` and `strong` say what its
+//! emphasis and strong text look like.
+//!
 //! **Art** is a canvas (its strokes keep their styles), a path or glyph
 //! (drawn in the slot's role style), or a function given the box,
 //! `#{ x, y, width, height, center }`, that returns a canvas or path
@@ -112,6 +117,7 @@ use stretch::number::Number;
 use stretch::style::{AlignContent, AlignItems, AlignSelf, Dimension, FlexDirection, FlexWrap, JustifyContent, PositionType, Style};
 
 use super::glyphs::Glyph;
+use super::markdown::{FlowText, SpanStyle, Styled};
 use super::options::{check_keys, number};
 use super::random::SharedRng;
 use super::text::word_split;
@@ -205,8 +211,8 @@ const BOX_KEYS: [&str; 20] = [
 ];
 const CONTAINER_KEYS: [&str; 4] = ["gap", "justify", "align", "align_content"];
 /// Role settings, which roles and slots take.
-const ROLE_KEYS: [&str; 15] = [
-    "font", "style", "size", "line_height", "align", "valign", "indent", "paragraph_gap", "spacing", "clearance", "jagged", "fit", "split_words", "split_padding", "role",
+const ROLE_KEYS: [&str; 17] = [
+    "font", "style", "size", "line_height", "align", "valign", "indent", "paragraph_gap", "spacing", "clearance", "jagged", "fit", "split_words", "split_padding", "em", "strong", "role",
 ];
 
 fn dimension(caller: &str, key: &str, value: &Dynamic) -> RhaiResult<Dimension> {
@@ -282,6 +288,7 @@ fn check_role_setting(caller: &str, key: &str, value: &Dynamic) -> RhaiResult<()
         "fit" if !value.is_bool() => Err(format!("{}: 'fit' should be true or false, got {}", caller, value).into()),
         // Checked with each other once a slot's settings are merged.
         "split_words" | "split_padding" => word_split(caller, &Map::from_iter([(key.into(), value.clone()), ("split_words".into(), true.into())])).map(|_| ()),
+        "em" | "strong" => SpanStyle::from_map(&format!("{} '{}'", caller, key), value).map(|_| ()),
         "role" => string(caller, key, value).map(|_| ()),
         _ => Ok(()),
     }
@@ -471,17 +478,21 @@ struct Role {
     text: Option<TextStyle>,
     fit: bool,
     valign: f32,
+    /// What emphasis and strong text in markdown look like.
+    em: SpanStyle,
+    strong: SpanStyle,
 }
 
 /// A flow of text, as far as it's been set.
 struct FlowState {
-    text: String,
+    text: FlowText,
+    /// The text's characters, without markup.
     chars: Vec<char>,
     cursor: usize,
     paragraph_start: bool,
-    /// The whole text's glyphs in each role that's set it, made when first
-    /// needed (glyph variants are picked at random).
-    glyphs: HashMap<String, Vec<Symbol>>,
+    /// The whole text's glyphs in each role that's set it, and how each is
+    /// drawn, made when first needed (glyph variants are picked at random).
+    styled: HashMap<String, Styled>,
 }
 
 impl FlowState {
@@ -557,7 +568,12 @@ impl Content {
             Some("bottom") => 1.0,
             _ => 0.0,
         };
-        Ok(Role { font, style, text, fit: settings.get("fit").and_then(|f| f.as_bool().ok()).unwrap_or(false), valign })
+        let em = settings.get("em").map_or(Ok(SpanStyle::emphasis()), |em| SpanStyle::from_map(&format!("{} 'em'", caller), em))?;
+        let strong = match settings.get("strong") {
+            Some(strong) => SpanStyle::from_map(&format!("{} 'strong'", caller), strong)?,
+            None => SpanStyle::strong(size.unwrap_or(0.0)),
+        };
+        Ok(Role { font, style, text, fit: settings.get("fit").and_then(|f| f.as_bool().ok()).unwrap_or(false), valign, em, strong })
     }
 }
 
@@ -586,8 +602,8 @@ fn parse_content(caller: &str, content: &Map, layout: &Layout, ctx: &NativeCallC
     let mut names: Vec<(String, Dynamic)> = map("flows")?.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
     names.sort_by(|a, b| a.0.cmp(&b.0));
     for (name, text) in names {
-        let text = text.into_immutable_string().map_err(|t| format!("{}: flow '{}' should be a string, got {}", caller, name, t))?.to_string();
-        flows.push((name, FlowState { chars: text.chars().collect(), text, cursor: 0, paragraph_start: true, glyphs: HashMap::new() }));
+        let text = FlowText::from_dynamic(&format!("{}: flow '{}'", caller, name), text)?;
+        flows.push((name, FlowState { chars: text.text().chars().collect(), text, cursor: 0, paragraph_start: true, styled: HashMap::new() }));
     }
     let roles = map("roles")?;
     for (name, role) in &roles {
@@ -702,26 +718,38 @@ fn compute(root: &Node, size: (f32, f32), sizes: &HashMap<usize, (Option<f32>, O
     Ok(placed)
 }
 
-/// Text a slot sets: its glyphs, characters, and whether it starts a
-/// paragraph.
-fn slot_text<'a>(content: &'a mut Content, node: &Node, role: &Role, labels: &'a HashMap<usize, (Vec<Symbol>, Vec<char>)>, index: usize, symdict: &FontBook, rng: &SharedRng) -> RhaiResult<(&'a [Symbol], &'a [char], bool)> {
+/// Text a slot sets: its glyphs as they're drawn, from which of them it
+/// starts, its characters from there, and whether it starts a paragraph.
+struct SlotText<'a> {
+    styled: &'a Styled,
+    start: usize,
+    chars: &'a [char],
+    paragraph_start: bool,
+}
+
+impl SlotText<'_> {
+    fn glyphs(&self) -> &[Symbol] {
+        &self.styled.glyphs[self.start..]
+    }
+}
+
+fn slot_text<'a>(content: &'a mut Content, node: &Node, role: &Role, labels: &'a HashMap<usize, (Styled, Vec<char>)>, index: usize, symdict: &FontBook, rng: &SharedRng) -> RhaiResult<Option<SlotText<'a>>> {
     match &node.kind {
         Kind::Flow(name) | Kind::Initial(name) => {
             let font = role.font.clone().ok_or_else(|| format!("typeset: {} needs a font in its role '{}'", node.kind.describe(), node.role))?;
             let flow = content.flow(name)?;
-            if !flow.glyphs.contains_key(&node.role) {
-                let glyphs = font.build(&flow.text, symdict, &mut *rng.borrow_mut());
-                flow.glyphs.insert(node.role.clone(), glyphs);
+            if !flow.styled.contains_key(&node.role) {
+                let styled = Styled::new(&flow.text, &font, &role.em, &role.strong, symdict, &mut *rng.borrow_mut());
+                flow.styled.insert(node.role.clone(), styled);
             }
             let start = flow.cursor;
-            let glyphs = &flow.glyphs[&node.role];
-            Ok((&glyphs[start..], &flow.chars[start..], flow.paragraph_start))
+            Ok(Some(SlotText { styled: &flow.styled[&node.role], start, chars: &flow.chars[start..], paragraph_start: flow.paragraph_start }))
         }
         Kind::Label(_) => {
-            let (glyphs, chars) = &labels[&index];
-            Ok((glyphs, chars, true))
+            let (styled, chars) = &labels[&index];
+            Ok(Some(SlotText { styled, start: 0, chars, paragraph_start: true }))
         }
-        _ => Ok((&[], &[], false)),
+        _ => Ok(None),
     }
 }
 
@@ -775,7 +803,7 @@ fn typeset_page(ctx: &NativeCallContext, root: &Node, n: usize, content: &mut Co
         if let Kind::Label(text) = &node.kind {
             let font = roles[i].as_ref().and_then(|r| r.font.clone())
                 .ok_or_else(|| format!("typeset: page {}'s {} needs a font in its role '{}'", n, node.kind.describe(), node.role))?;
-            labels.insert(i, (font.build(text, symdict, &mut *rng.borrow_mut()), text.chars().collect::<Vec<char>>()));
+            labels.insert(i, (Styled::plain(font.build(text, symdict, &mut *rng.borrow_mut())), text.chars().collect::<Vec<char>>()));
         }
     }
     // Lay out; then size boxes left to their text by it, and again.
@@ -790,7 +818,8 @@ fn typeset_page(ctx: &NativeCallContext, root: &Node, n: usize, content: &mut Co
             }
             let Some(text_style) = roles[i].as_ref().and_then(|r| r.text.clone()) else { continue };
             let role = roles[i].as_ref().expect("text slots have roles");
-            let (glyphs, chars, paragraph_start) = slot_text(content, node, role, &labels, i, symdict, rng)?;
+            let Some(text) = slot_text(content, node, role, &labels, i, symdict, rng)? else { continue };
+            let (glyphs, chars, paragraph_start) = (text.glyphs(), text.chars, text.paragraph_start);
             let pad = placed[i].outer.extents() - placed[i].inner.extents();
             let mut width = placed[i].inner.extents().x;
             let mut rng0 = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(0);
@@ -886,26 +915,27 @@ fn typeset_page(ctx: &NativeCallContext, root: &Node, n: usize, content: &mut Co
                 let role = role.expect("text slots have roles");
                 let style = role.style.clone().ok_or_else(|| format!("{}: its role '{}' needs a 'style'", caller, node.role))?;
                 let text_style = role.text.clone();
-                let (glyphs, chars, paragraph_start) = slot_text(content, node, role, &labels, i, symdict, rng)?;
+                let Some(text) = slot_text(content, node, role, &labels, i, symdict, rng)? else { continue };
                 let (set, consumed) = if let Kind::Initial(_) = node.kind {
-                    // The next letter, filling the box.
-                    let Some(k) = glyphs.iter().zip(chars).position(|(g, c)| !g.is_blank() && *c != '\n') else { continue };
+                    // The next letter, filling the box, in its ink.
+                    let glyphs = text.glyphs();
+                    let Some(k) = glyphs.iter().zip(text.chars).position(|(g, c)| !g.is_blank() && *c != '\n') else { continue };
                     let mut glyph = glyphs[k].clone();
+                    glyph.set_scale(1.0);
                     let hull = glyph.hull_aabb();
                     let scale = (inner.extents().x * 2.0 / hull.extents().x).min(inner.extents().y * 2.0 / hull.extents().y);
                     glyph.scale_by(scale);
                     glyph.set_position(inner.center() - hull.center() * glyph.scale() / 2.0);
+                    draw(&mut canvas, glyph.placed_strokepath(), &text.styled.look(text.start + k).ink.on(&style))?;
                     (vec![glyph], k + 1)
                 } else {
                     let text_style = text_style.ok_or_else(|| format!("{}: its role '{}' needs a 'size'", caller, node.role))?;
-                    let setting = set_slot(inner, &text_style, role, glyphs, chars, paragraph_start, &avoid, rng);
+                    let setting = set_slot(inner, &text_style, role, text.glyphs(), text.chars, text.paragraph_start, &avoid, rng);
+                    text.styled.draw(&mut canvas, &setting, text.start, &style, &avoid, text_style.clearance)?;
                     (setting.placed, setting.consumed)
                 };
                 let points: Vec<PVec> = set.iter().flat_map(|g| g.footprint()).collect();
                 keep_clear(&mut avoid, node, outer, &points);
-                for glyph in &set {
-                    draw(&mut canvas, glyph.placed_strokepath(), &style)?;
-                }
                 if let Kind::Initial(name) = &node.kind {
                     let flow = content.flow(name)?;
                     flow.cursor += consumed;
@@ -923,14 +953,12 @@ fn typeset_page(ctx: &NativeCallContext, root: &Node, n: usize, content: &mut Co
         let role = roles[i].as_ref().expect("text slots have roles");
         let style = role.style.clone().ok_or_else(|| format!("{}: its role '{}' needs a 'style'", caller, node.role))?;
         let text_style = role.text.clone().ok_or_else(|| format!("{}: its role '{}' needs a 'size'", caller, node.role))?;
-        let (glyphs, chars, paragraph_start) = slot_text(content, node, role, &labels, i, symdict, rng)?;
-        if glyphs.is_empty() {
+        let Some(text) = slot_text(content, node, role, &labels, i, symdict, rng)? else { continue };
+        if text.glyphs().is_empty() {
             continue;
         }
-        let setting = set_slot(placed[i].inner, &text_style, role, glyphs, chars, paragraph_start, &avoid, rng);
-        for glyph in &setting.placed {
-            draw(&mut canvas, glyph.placed_strokepath(), &style)?;
-        }
+        let setting = set_slot(placed[i].inner, &text_style, role, text.glyphs(), text.chars, text.paragraph_start, &avoid, rng);
+        text.styled.draw(&mut canvas, &setting, text.start, &style, &avoid, text_style.clearance)?;
         let flow = content.flow(name)?;
         flow.cursor += setting.consumed;
         flow.paragraph_start = setting.paragraph_start;

@@ -102,9 +102,49 @@ names another with `role`. Settings:
 | `split_words` | text | `true` breaks a word round what text wraps around, instead of moving it past whole, for a tighter fit; a number is the fewest letters a piece may have (`true` is 2) |
 | `split_padding` | text | with `split_words`, how much further the pieces keep from what they're split round, in sizes |
 | `fit` | text | shrink the text until all of it fits its box (for headings) |
+| `em`, `strong` | text | what emphasis and strong text in markdown look like: maps of span settings (below), by default `#{ italic: true }` and `#{ passes: 2, jitter: size / 20 }` |
 | `style` | art, bands, rules, borders | the stroke style, for art that's a path or glyph |
 
 In text, `"\n"` breaks a line and a blank line starts a paragraph.
+
+## Marked-up text
+
+A flow can be `markdown(text)` instead of a string: text styled as it's
+set, much as markdown styles it.
+
+```rhai
+flows: #{ body: markdown("Plain, *emphasis*, **strong**, ~~struck out~~, [in blue]{color: blue}, "
+    + "[scribbled out]{color: black, strike: {count: 3, color: hsla(0, 80%, 40%, 0.9)}}.") }
+```
+
+- `*text*` or `_text_` is emphasis, `**text**` or `__text__` strong (as the
+  role's `em` and `strong` say), and `~~text~~` struck through.
+- `[text]{settings}` is text with settings of its own: `key: value` pairs
+  separated by commas, a key on its own being `true`. Values are numbers,
+  `true`/`false`, text (`hsla(0, 80%, 40%, 0.9)` is one value), or more
+  settings in braces.
+- A backslash writes a mark as it is: `\*`, `\[`, `\~`, ...
+
+Spans nest, each changing what it's in. Settings (and `em` and `strong`):
+
+| key | | |
+|---|---|---|
+| `color` (`colour`) | a CSS colour | the ink |
+| `passes`, `jitter` | as a style's | gone over this many times, each pass astray by up to this much |
+| `italic` | true or false | leant as italics, or upright |
+| `skew` | radians | leant this far |
+| `size` | a number | times the size of the text around it; lines grow to fit, and smaller text sits on the same baseline |
+| `character_padding` | sizes | room between glyphs' outlines, in place of the font's |
+| `word_spacing` | sizes | a space's width, in place of the font's `space_width` |
+| `underline` | true, a count, or settings | lines under it, one below another |
+| `strike` (`strikethrough`) | true, a count, or settings | lines through it; more than one go back and forth as one stroke, scribbling it out |
+
+Lines' settings are `count`, `spacing` (how far apart, in sizes) and the
+`color`, `passes` and `jitter` they're drawn in (by default, the text's);
+`false` takes them away inside text that has them. They run across the
+spaces between the words they mark, and break where the text does: at the
+ends of lines, either side of what the text wraps round, and wherever they'd
+come within its `clearance` of it. `label` text is plain.
 
 ## Art
 

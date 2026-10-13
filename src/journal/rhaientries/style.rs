@@ -130,7 +130,7 @@ pub struct StrokeStyle {
 }
 
 /// The most passes a style draws its strokes in.
-const MAX_PASSES: i64 = 64;
+pub(super) const MAX_PASSES: i64 = 64;
 
 impl From<StrokeStyle> for JournalStrokeStyle {
     fn from(val: StrokeStyle) -> Self {
