@@ -1,0 +1,19 @@
+[package]
+name = "scribe-wasm"
+version = "0.1.0"
+edition = "2024"
+description = "The journal editor's renderer: runs journal scripts and renders their pages, in the browser."
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+journalbuilder = { path = "../..", features = ["embedded-assets"] }
+console_error_panic_hook = "0.1"
+js-sys = "0.3"
+serde = { version = "1.0.140", features = ["derive"] }
+serde-wasm-bindgen = "0.6"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+

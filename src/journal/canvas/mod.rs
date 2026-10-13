@@ -548,33 +548,51 @@ impl Canvas {
     /// falls: the size of the image, and the page pixel of its top-left
     /// corner (only a tile's isn't 0, 0).
     fn to_svg_at(&self, stylized: Option<&SvgStyle>, seed: u64, scale: f32) -> (String, (u32, u32), (u32, u32)) {
+        let (view, pixels, offset) = self.svg_view(scale);
+        let mut svg = format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{}\" height=\"{}\" viewBox=\"{} {} {} {}\">",
+            view[2], view[3], view[0], view[1], view[2], view[3]
+        );
+        svg.push_str(&self.svg_group_in(stylized, seed, view));
+        svg.push_str("</svg>");
+        (svg, pixels, offset)
+    }
+    /// The canvas's strokes as an SVG group in canvas units, and the box
+    /// of them its SVG shows, `[x, y, width, height]`: `to_svg` in parts,
+    /// to lay several canvases together.
+    pub fn to_svg_view(&self, stylized: Option<&SvgStyle>, seed: u64, scale: f32) -> (String, [f32; 4]) {
+        let (view, _, _) = self.svg_view(scale);
+        (self.svg_group_in(stylized, seed, view), view)
+    }
+    /// The box of canvas units the canvas's SVG shows, `[x, y, width,
+    /// height]` (see `to_svg_view`), without drawing it.
+    pub fn svg_view_box(&self, scale: f32) -> [f32; 4] {
+        self.svg_view(scale).0
+    }
+    fn svg_group_in(&self, stylized: Option<&SvgStyle>, seed: u64, view: [f32; 4]) -> String {
+        self.to_svg_group(stylized, seed, Vec2::new(view[0], view[1]), Vec2::new(view[0] + view[2], view[1] + view[3]))
+    }
+    /// The box of canvas units the SVG shows, `[x, y, width, height]`, the
+    /// size of its render at `scale` pixels per unit, and the page pixel of
+    /// that render's top-left corner (only a tile's isn't 0, 0).
+    fn svg_view(&self, scale: f32) -> ([f32; 4], (u32, u32), (u32, u32)) {
         let (min, max) = (self.bounds.mins, self.bounds.maxs);
         let invalid_bounds = min.x > max.x || min.y > max.y;
-        let (width, height, viewbox, pixels, offset) = if let Some(frame) = &self.frame {
+        if let Some(frame) = &self.frame {
             // The tile's pixels of the whole page's render, and the part of
             // the page they show.
             let [x0, y0, x1, y1] = frame.pixels(frame.page_pixels(scale));
             let origin = frame.page.mins + Vec2::new(x0 as f32, y0 as f32) / scale;
             let size = Vec2::new((x1 - x0) as f32, (y1 - y0) as f32) / scale;
-            let viewbox = format!("{} {} {} {}", origin.x, origin.y, size.x, size.y);
-            ((x1 - x0) as f32 / scale, (y1 - y0) as f32 / scale, viewbox, (x1 - x0, y1 - y0), (x0, y0))
+            ([origin.x, origin.y, size.x, size.y], (x1 - x0, y1 - y0), (x0, y0))
         } else if !invalid_bounds {
             let size = self.render_extents();
             // Center the bounds in the (possibly larger) render area.
             let origin = min - (size - (max - min)) / 2.0;
-            let viewbox = format!("{} {} {} {}", origin.x, origin.y, size.x, size.y);
-            (size.x, size.y, viewbox, (((size.x * scale) as u32).max(1), ((size.y * scale) as u32).max(1)), (0, 0))
+            ([origin.x, origin.y, size.x, size.y], (((size.x * scale) as u32).max(1), ((size.y * scale) as u32).max(1)), (0, 0))
         } else {
-            (100.0, 100.0, "0 0 100 100".to_string(), (((100.0 * scale) as u32).max(1), ((100.0 * scale) as u32).max(1)), (0, 0))
-        };
-        let view: Vec<f32> = viewbox.split(' ').map(|v| v.parse().expect("numbers")).collect();
-        let mut svg = format!(
-            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{}\" height=\"{}\" viewBox=\"{}\">",
-            width, height, viewbox
-        );
-        svg.push_str(&self.to_svg_group(stylized, seed, Vec2::new(view[0], view[1]), Vec2::new(view[0] + view[2], view[1] + view[3])));
-        svg.push_str("</svg>");
-        (svg, pixels, offset)
+            ([0.0, 0.0, 100.0, 100.0], (((100.0 * scale) as u32).max(1), ((100.0 * scale) as u32).max(1)), (0, 0))
+        }
     }
     /// Vary the opacity of a render with Perlin noise seeded by `seed`, read
     /// at page pixel `offset` plus each pixel's, so tiles' noise lines up.

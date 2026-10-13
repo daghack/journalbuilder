@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "journal-editor",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd webapp/frontend && . \"${NVM_DIR:-$HOME/.nvm}/nvm.sh\" && nvm use >/dev/null && npm run serve"],
+      "port": 4200
+    }
+  ]
+}

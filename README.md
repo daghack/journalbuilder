@@ -45,6 +45,17 @@ Useful flags (`journalbuild` with no arguments lists them all):
 - `--check-locks`: run every lock file's examples instead of building a
   journal.
 
+## Web editor
+
+[webapp/](webapp/README.md) is a browser editor for journal scripts. Pages
+redraw as you type, as SVG or rendered with Darkly over WebGPU, and export
+as a PDF or a zip of PNGs. The renderer is this crate built to
+WebAssembly. To run it:
+
+```bash
+cd webapp/frontend && npm install && npm start
+```
+
 ## Layout
 
 | path | what's there |
@@ -60,6 +71,7 @@ Useful flags (`journalbuild` with no arguments lists them all):
 | `src/journal/rhaientries/` | the rhai API journals and lock files use |
 | `src/lockbuilder/` | runs lock chains forward (lock) and backward (unlock) |
 | `src/bin/journalbuild/` | the command line |
+| `webapp/` | the web editor: `wasm/` (the renderer for the browser) and `frontend/` (the Angular app); see [webapp/README.md](webapp/README.md) |
 | `tests/`, `scripts/smoke.sh` | tests, below |
 | `scripts/plain_font.py` | draws the plain font into `config/fonts.json` |
 | `assets/svgsets/` | source artwork for symbol sets (not read by the build) |
@@ -378,5 +390,7 @@ defines; `journalbuild --check-locks` tests them.
 `smoke.sh` builds in release mode and runs `cargo test` (which also
 evaluates every journal script and every lock file's examples). It then runs
 `journalbuild --check-locks`, renders the smoke fixture in full, and renders
-page 0 of each journal at quarter scale. Renders go to a temporary directory;
-`--keep` keeps them.
+page 0 of each journal at quarter scale. Last, it checks that the web
+editor's renderer still builds for the browser and, if the editor's npm
+packages are installed and its wasm built, runs its unit tests and builds
+it. Renders go to a temporary directory; `--keep` keeps them.

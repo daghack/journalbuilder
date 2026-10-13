@@ -1,0 +1,10 @@
+/* Web workers: the eval and Darkly workers (src/app/workers). */
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./out-tsc/worker",
+    "lib": ["es2022", "webworker"],
+    "types": ["@webgpu/types"]
+  },
+  "include": ["src/**/*.worker.ts"]
+}

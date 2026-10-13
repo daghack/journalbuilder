@@ -3,6 +3,15 @@ name = "journalbuilder"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+members = [".", "webapp/wasm"]
+
+[features]
+# Compile the layout and lock files and config/fonts.json into the library
+# (`rhaientries::embedded`), for builds with no files to read, like the
+# web editor's.
+embedded-assets = []
+
 [dependencies]
 # Fork with DarklyEngine::stroke_path (batched offline strokes); switch back
 # to darkly-art/darkly once it lands upstream.
@@ -10,22 +19,35 @@ edition = "2024"
 # `cargo update` can't change how journals render.
 darkly = { git = "https://github.com/daghack/darkly.git", rev = "3f99aea54a106217d9c65ceadd0671bbae70b3e4" }
 flate2 = "1.1"
-image = "0.25.10"
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "rayon"] }
 noise = "0.9.0"
 parry2d = "0.26.1"
 petgraph = "0.7.1"
-rand = "0.9.0"
+rand = { version = "0.9.0", default-features = false, features = ["std", "std_rng"] }
 rayon = "1.11.0"
-resvg = "0.45.1"
+resvg = { version = "0.45.1", default-features = false }
 rhai = { version = "1.25.1", features = ["metadata"] }
 serde = { version = "1.0.140", features = ["derive"] }
 serde_json = "1.0.140"
-smol = "2.0.2"
 stretch = "0.3.2"
 svgtypes = "0.15.3"
 tiny-skia = "0.11.4"
-usvg = "0.45.1"
+usvg = { version = "0.45.1", default-features = false }
 wgpu = "29.0.4"
+# std::time::Instant, which panics in the browser, made to work there too.
+web-time = "1.1"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+smol = "2.0.2"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# rhai's hashing seeds itself from getrandom, which in the browser needs
+# its JS backend.
+rhai = { version = "1.25.1", features = ["metadata", "wasm-bindgen"] }
+getrandom = { version = "0.3", features = ["wasm_js"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
 
 [lib]
 name = "scribe"

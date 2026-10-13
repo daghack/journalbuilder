@@ -13,8 +13,10 @@ use std::io::{self, BufWriter, Seek, Write};
 /// JPEG quality for opaque pages.
 const JPEG_QUALITY: u8 = 92;
 
-pub struct PdfWriter {
-    out: BufWriter<File>,
+/// Writes to `out`: a file, or with `PdfWriter::new(Cursor::new(Vec::new()))`
+/// memory.
+pub struct PdfWriter<W: Write + Seek = BufWriter<File>> {
+    out: W,
     /// Where each object starts in the file, by object number less one.
     offsets: Vec<u64>,
     /// The page objects.
@@ -29,7 +31,12 @@ const INFO: u32 = 3;
 
 impl PdfWriter {
     pub fn create(path: &str) -> io::Result<Self> {
-        let mut out = BufWriter::new(File::create(path)?);
+        Self::new(BufWriter::new(File::create(path)?))
+    }
+}
+
+impl<W: Write + Seek> PdfWriter<W> {
+    pub fn new(mut out: W) -> io::Result<Self> {
         // The binary comment marks the file as binary for tools that check.
         out.write_all(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")?;
         Ok(PdfWriter { out, offsets: vec![0; 3], pages: Vec::new() })
@@ -102,8 +109,8 @@ impl PdfWriter {
     }
 
     /// Write the page tree, catalog and cross-reference table, titling the
-    /// document `title`.
-    pub fn finish(mut self, title: &str) -> io::Result<()> {
+    /// document `title`, and give back what it was written to.
+    pub fn finish(mut self, title: &str) -> io::Result<W> {
         let kids: Vec<String> = self.pages.iter().map(|p| format!("{} 0 R", p)).collect();
         self.object(PAGE_TREE, &format!("<< /Type /Pages /Kids [{}] /Count {} >>", kids.join(" "), self.pages.len()))?;
         self.object(CATALOG, &format!("<< /Type /Catalog /Pages {} 0 R >>", PAGE_TREE))?;
@@ -115,7 +122,8 @@ impl PdfWriter {
         }
         write!(self.out, "trailer\n<< /Size {} /Root {} 0 R /Info {} 0 R >>\nstartxref\n{}\n%%EOF\n",
             self.offsets.len() + 1, CATALOG, INFO, xref)?;
-        self.out.flush()
+        self.out.flush()?;
+        Ok(self.out)
     }
 }
 

@@ -9,9 +9,13 @@ use super::parchment::{self, Sheet};
 use super::canvas::StrokeColor;
 use super::compose::{self, Placed};
 use super::darkly;
+#[cfg(not(target_arch = "wasm32"))]
 use super::pdf::PdfWriter;
+#[cfg(not(target_arch = "wasm32"))]
 use super::progress::Progress;
-use super::rhaientries::{Entry, Page};
+#[cfg(not(target_arch = "wasm32"))]
+use super::rhaientries::Entry;
+use super::rhaientries::Page;
 use super::stable_hash;
 
 /// How Darkly renders are made.
@@ -36,11 +40,13 @@ pub const UNITS_PER_INCH: f32 = 150.0;
 const PAPER_BORDER: f32 = 0.06;
 const PAPER_BORDER_MIN: f32 = 20.0;
 
+#[cfg(not(target_arch = "wasm32"))]
 fn write_error(path: &str, e: impl std::fmt::Display) -> String {
     format!("couldn't write {}: {}", path, e)
 }
 
 /// Progress through the pages that will be written.
+#[cfg(not(target_arch = "wasm32"))]
 fn pages_progress(entry: &Entry, what: &str, only: Option<&[usize]>) -> Progress {
     Progress::new(what, entry.selected_pages(only).count())
 }
@@ -48,6 +54,7 @@ fn pages_progress(entry: &Entry, what: &str, only: Option<&[usize]>) -> Progress
 /// A Darkly render of each canvas, `darkly_{page}_{canvas}.png`, of every
 /// page or those in `only`. Empty canvases are skipped (journalbuild warns
 /// about them).
+#[cfg(not(target_arch = "wasm32"))]
 pub fn canvas_images(entry: &Entry, engine: &mut DarklyEngine, dir: &str, render: &Render, only: Option<&[usize]>) -> Result<(), String> {
     let mut progress = pages_progress(entry, "Rendering", only);
     for (i, page) in entry.selected_pages(only) {
@@ -64,6 +71,7 @@ pub fn canvas_images(entry: &Entry, engine: &mut DarklyEngine, dir: &str, render
 
 /// A Darkly render of each page, its canvases layered into one image (see
 /// `page_image`), `darkly_{page}.png`.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn page_images(entry: &Entry, engine: &mut DarklyEngine, dir: &str, render: &Render, only: Option<&[usize]>) -> Result<(), String> {
     let mut progress = pages_progress(entry, "Rendering", only);
     for (i, page) in entry.selected_pages(only) {
@@ -81,6 +89,7 @@ pub fn page_images(entry: &Entry, engine: &mut DarklyEngine, dir: &str, render: 
 /// The pages' images (see `page_image`) as the pages of one PDF at `path`,
 /// titled `title`. A page's size is its size in canvas units at
 /// `UNITS_PER_INCH`, whatever the scale.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn pdf(entry: &Entry, engine: &mut DarklyEngine, path: &str, title: &str, render: &Render, only: Option<&[usize]>) -> Result<(), String> {
     let mut pdf = PdfWriter::create(path).map_err(|e| write_error(path, e))?;
     let points = 72.0 / UNITS_PER_INCH / render.scale;
@@ -97,7 +106,7 @@ pub fn pdf(entry: &Entry, engine: &mut DarklyEngine, path: &str, title: &str, re
     if pdf.page_count() == 0 {
         return Err(format!("nothing to put in {}: every page is empty", path));
     }
-    pdf.finish(title).map_err(|e| write_error(path, e))
+    pdf.finish(title).map(|_| ()).map_err(|e| write_error(path, e))
 }
 
 /// A page rendered with Darkly as one image, `label` being its name in
@@ -107,20 +116,33 @@ pub fn pdf(entry: &Entry, engine: &mut DarklyEngine, path: &str, title: &str, re
 /// page is a sheet of its own, like a big drawing spread over several
 /// pages. On parchment, light inks are drawn dark so they show (see
 /// `StrokeColor::as_ink_on_paper`). `None` if nothing is drawn.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn page_image(page: &Page, label: &str, engine: &mut DarklyEngine, render: &Render) -> Option<RgbaImage> {
+    darkly::block_on(page_image_async(page, label, engine, render, &mut |_| {}))
+        .unwrap_or_else(|e| panic!("{}", e))
+}
+
+/// `page_image`, giving the GPU time as it goes (see
+/// `darkly::render_async`), with `progress` called with how far through the
+/// page it is, from 0 to 1. Fails if the GPU does.
+pub async fn page_image_async(page: &Page, label: &str, engine: &mut DarklyEngine, render: &Render, progress: &mut dyn FnMut(f32)) -> Result<Option<RgbaImage>, String> {
     let scale = render.scale;
     let mut layers = Vec::new();
     let mut frame = None;
-    for (_, mut canvas) in page.rendered_canvases() {
+    let canvases: Vec<_> = page.rendered_canvases().collect();
+    let count = canvases.len();
+    for (n, (_, mut canvas)) in canvases.into_iter().enumerate() {
         if render.parchment {
             canvas.recolor(StrokeColor::as_ink_on_paper);
         }
         frame = frame.or(canvas.frame().copied());
-        layers.push(Placed { at: canvas.render_origin(scale), image: darkly::render(&canvas, engine, scale, render.supersample) });
+        let mut canvas_progress = |done: f32| progress((n as f32 + done) / count as f32);
+        let image = darkly::render_async(&canvas, engine, scale, render.supersample, &mut canvas_progress).await?;
+        layers.push(Placed { at: canvas.render_origin(scale), image });
     }
-    let ink = compose::flatten(layers)?;
+    let Some(ink) = compose::flatten(layers) else { return Ok(None) };
     if !render.parchment {
-        return Some(ink.image);
+        return Ok(Some(ink.image));
     }
     // A tile or typeset page is a sheet as big as its frame; other pages get
     // a border of paper round their strokes.
@@ -139,13 +161,94 @@ pub fn page_image(page: &Page, label: &str, engine: &mut DarklyEngine, render: &
     let sheet = Sheet { corner, size, scale, seed: stable_hash(label) };
     let mut sheet = Placed { image: parchment::paint(&sheet), at: corner };
     compose::draw(&mut sheet, &ink, compose::ink_on_paper);
-    Some(sheet.image)
+    Ok(Some(sheet.image))
+}
+
+/// `image` as a PNG file's bytes.
+pub fn png_bytes(image: &RgbaImage) -> Result<Vec<u8>, String> {
+    let mut png = std::io::Cursor::new(Vec::new());
+    image.write_to(&mut png, image::ImageFormat::Png).map_err(|e| e.to_string())?;
+    Ok(png.into_inner())
+}
+
+/// The pixels per unit page SVGs are laid out for, as `svgs` lays out
+/// canvases at scale 1 (it matters only to where tiles' edges fall).
+const PAGE_SVG_SCALE: f32 = 2.0;
+
+/// A page as one SVG in canvas units, `[x, y, width, height]` of them
+/// showing (`page_view`): its canvases' SVGs (as `svgs` makes them)
+/// layered in order, each where it is on the page, with numbers to two
+/// decimal places to keep it small. `label` is the page's. `None` if
+/// nothing is drawn.
+pub fn page_svg(page: &Page, label: &str) -> Option<(String, [f32; 4])> {
+    let mut layers = String::new();
+    let mut page_view = None;
+    for (canvas_label, canvas) in page.rendered_canvases() {
+        let seed = canvas_svg_seed(&canvas, &format!("{}_{}", label, canvas_label));
+        let (group, view) = canvas.to_svg_view(page.svg_style(), seed, PAGE_SVG_SCALE);
+        let [x, y, w, h] = view;
+        layers.push_str(&format!(
+            "<svg x=\"{x}\" y=\"{y}\" width=\"{w}\" height=\"{h}\" viewBox=\"{x} {y} {w} {h}\">{group}</svg>"
+        ));
+        page_view = Some(union(page_view, view));
+    }
+    let [x, y, w, h] = page_view?;
+    let svg = format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\" viewBox=\"{x} {y} {w} {h}\">{layers}</svg>"
+    );
+    Some((trim_decimals(&svg, 2), [x, y, w, h]))
+}
+
+/// The box of canvas units `page_svg` shows, without drawing it.
+pub fn page_view(page: &Page) -> Option<[f32; 4]> {
+    page.rendered_canvases().fold(None, |view, (_, canvas)| Some(union(view, canvas.svg_view_box(PAGE_SVG_SCALE))))
+}
+
+/// The box `[x, y, width, height]` round `a` (if there is one) and `b`.
+fn union(a: Option<[f32; 4]>, b: [f32; 4]) -> [f32; 4] {
+    match a {
+        None => b,
+        Some([ax, ay, aw, ah]) => {
+            let [bx, by, bw, bh] = b;
+            let (x0, y0) = (ax.min(bx), ay.min(by));
+            [x0, y0, (ax + aw).max(bx + bw) - x0, (ay + ah).max(by + bh) - y0]
+        }
+    }
+}
+
+/// `text` with every decimal number cut to at most `places` places.
+fn trim_decimals(text: &str, places: usize) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        out.push(b);
+        i += 1;
+        let after_digit = b == b'.' && out.len() >= 2 && out[out.len() - 2].is_ascii_digit();
+        if after_digit && bytes.get(i).is_some_and(u8::is_ascii_digit) {
+            let start = i;
+            while bytes.get(i).is_some_and(u8::is_ascii_digit) {
+                i += 1;
+            }
+            out.extend_from_slice(&bytes[start..(start + places).min(i)]);
+        }
+    }
+    String::from_utf8(out).expect("only ASCII digits were removed")
+}
+
+/// The seed a canvas's SVG is roughened with, `name` being its file's name
+/// (`{page}_{canvas}`): the same every run, but each canvas roughened
+/// differently. Tiles use the whole page's.
+fn canvas_svg_seed(canvas: &super::canvas::Canvas, name: &str) -> u64 {
+    canvas.frame().filter(|frame| frame.is_tile()).map_or_else(|| stable_hash(name), |frame| frame.svg_seed)
 }
 
 /// SVG renders, one per canvas like the Darkly ones, each written as
 /// `{page}_{canvas}.svg` and rasterised to `{page}_{canvas}.png`. Here a
 /// style's width is the stroke's geometric width; in Darkly it scales the
 /// brush's pressure instead (see `new_style`).
+#[cfg(not(target_arch = "wasm32"))]
 pub fn svgs(entry: &Entry, dir: &str, scale: f32, only: Option<&[usize]>) -> Result<(), String> {
     let mut progress = pages_progress(entry, "SVGs", only);
     for (i, page) in entry.selected_pages(only) {
@@ -153,9 +256,7 @@ pub fn svgs(entry: &Entry, dir: &str, scale: f32, only: Option<&[usize]>) -> Res
         for (label, canvas) in page.rendered_canvases() {
             let name = format!("{}_{}", page.label(i), label);
             let (svg_file, png_file) = (format!("{}/{}.svg", dir, name), format!("{}/{}.png", dir, name));
-            // Seeded by the file's name: the same every run, but each canvas
-            // roughened differently. Tiles use the whole page's.
-            let seed = canvas.frame().filter(|frame| frame.is_tile()).map_or_else(|| stable_hash(&name), |frame| frame.svg_seed);
+            let seed = canvas_svg_seed(&canvas, &name);
             let (svg, png) = canvas.to_svg_and_png(2.0 * scale, page.svg_style(), seed);
             std::fs::write(&svg_file, svg).map_err(|e| write_error(&svg_file, e))?;
             std::fs::write(&png_file, png).map_err(|e| write_error(&png_file, e))?;
@@ -163,4 +264,17 @@ pub fn svgs(entry: &Entry, dir: &str, scale: f32, only: Option<&[usize]>) -> Res
         progress.step();
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decimals_are_cut_and_nothing_else() {
+        assert_eq!(
+            trim_decimals(r#"<path d="M 100.2043 -91.21536 L 3 4.5" stroke-width="1.25" id="gradient_7"/>v1.x"#, 2),
+            r#"<path d="M 100.20 -91.21 L 3 4.5" stroke-width="1.25" id="gradient_7"/>v1.x"#,
+        );
+    }
 }

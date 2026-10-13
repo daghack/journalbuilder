@@ -5,7 +5,7 @@
 
 use super::{parse_type, register_maze, Maze};
 use crate::lockbuilder::{base_n_symbols, symbols_to_string, InfoVar, InfoVarSet, InfoVarType, InfoVarTypeSet, Lock};
-use rhai::module_resolvers::FileModuleResolver;
+use super::super::sources::Sources;
 use rhai::{Array, Dynamic, Engine, EvalAltResult, FuncArgs, Map, Scope, AST};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
@@ -33,7 +33,7 @@ pub type ExampleResults = Vec<(String, Result<usize, String>)>;
 
 /// The lock types in a directory of lock files, each loaded when first used.
 pub struct LockLibrary {
-    dir: PathBuf,
+    sources: Sources,
     engine: Engine,
     types: RefCell<HashMap<String, Rc<LockType>>>,
 }
@@ -147,27 +147,24 @@ impl ScriptError {
 
 impl LockLibrary {
     pub fn new(dir: impl Into<PathBuf>) -> Self {
-        let dir = dir.into();
-        LockLibrary { engine: lock_engine(&dir), dir, types: RefCell::default() }
+        Self::with_sources(Sources::dir(dir))
+    }
+
+    /// The lock types in `sources`, with their helpers in `lib/`.
+    pub fn with_sources(sources: Sources) -> Self {
+        LockLibrary { engine: lock_engine(&sources), sources, types: RefCell::default() }
     }
 
     /// The lock types in the directory, sorted.
     pub fn available(&self) -> Result<Vec<String>, String> {
-        let entries = std::fs::read_dir(&self.dir)
-            .map_err(|e| format!("couldn't read the lock directory {}: {}", self.dir.display(), e))?;
-        let mut names: Vec<String> = entries
-            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
-            .filter(|path| path.is_file() && path.extension().is_some_and(|ext| ext == "rhai"))
-            .filter_map(|path| path.file_stem().map(|stem| stem.to_string_lossy().into_owned()))
-            .filter(|name| valid_type_name(name))
-            .collect();
-        names.sort();
-        Ok(names)
+        let names = self.sources.names()
+            .map_err(|e| format!("couldn't read the lock directory {}: {}", self.sources.root().display(), e))?;
+        Ok(names.into_iter().filter(|name| valid_type_name(name)).collect())
     }
 
     /// Whether the directory has a lock file for `type_name`.
     pub fn has(&self, type_name: &str) -> bool {
-        valid_type_name(type_name) && self.path(type_name).is_file()
+        valid_type_name(type_name) && self.sources.has(type_name)
     }
 
     /// A lock of type `type_name`, called `name` in error messages, with
@@ -280,10 +277,6 @@ impl LockLibrary {
         Ok(())
     }
 
-    fn path(&self, type_name: &str) -> PathBuf {
-        self.dir.join(format!("{}.rhai", type_name))
-    }
-
     fn lock_type(&self, type_name: &str) -> Result<Rc<LockType>, String> {
         if let Some(lock_type) = self.types.borrow().get(type_name) {
             return Ok(lock_type.clone());
@@ -298,7 +291,7 @@ impl LockLibrary {
 
     fn load(&self, type_name: &str) -> Result<LockType, String> {
         let file = format!("{}.rhai", type_name);
-        let ast = self.engine.compile_file(self.path(type_name)).map_err(|e| format!("{}: {}", file, e))?;
+        let ast = self.sources.compile(&self.engine, type_name).map_err(|e| format!("{}: {}", file, e))?;
         let mut lock_type = LockType { name: type_name.to_string(), file, ast, options: BTreeMap::new() };
         let missing: Vec<&str> = REQUIRED_FNS.iter()
             .filter(|(function, params, _)| !lock_type.defines(function, *params))
@@ -354,7 +347,7 @@ impl LockLibrary {
     /// imported helpers by their import path.
     fn shown_path(&self, source: &str) -> String {
         let path = Path::new(source);
-        let relative = path.strip_prefix(&self.dir).unwrap_or(path);
+        let relative = path.strip_prefix(self.sources.root()).unwrap_or(path);
         let mut shown = relative.to_string_lossy().into_owned();
         if relative.extension().is_none() {
             shown.push_str(".rhai");
@@ -503,10 +496,10 @@ impl Lock for RhaiLock {
 /// The engine lock files run in: rhai's standard library, option types,
 /// symbol helpers and mazes. Nothing random and nothing drawn, so a lock is
 /// a pure function of its options and values.
-fn lock_engine(dir: &Path) -> Engine {
+fn lock_engine(sources: &Sources) -> Engine {
     let mut engine = Engine::new();
     // `import "lib/permutations" as perm;` loads <dir>/lib/permutations.rhai.
-    engine.set_module_resolver(FileModuleResolver::new_with_path(dir));
+    engine.set_module_resolver(sources.module_resolver());
     register_maze(&mut engine);
     // Option types for options(): integer() is a required integer,
     // integer(3) one that defaults to 3, and so on.

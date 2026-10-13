@@ -1,0 +1,154 @@
+// Colours and type for the editor; light by default, dark when the system
+// is (or data-theme="dark" asks for it).
+
+:root {
+  color-scheme: light;
+  --font: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  --bg: #f4f2ee;
+  --fg: #1f1b16;
+  --muted: #6b645a;
+  --surface: #fbfaf7;
+  --surface-2: #efebe4;
+  --border: #d9d3c8;
+  --accent: #9b2318;
+  --accent-fg: #ffffff;
+  --danger: #b3261e;
+  --danger-bg: #fbe9e7;
+  --warning: #8a5a00;
+  --warning-bg: #fdf3dc;
+  --ok: #2f6b2a;
+
+  // The pages column (black in the mockup) and the stage (grey).
+  --rail-bg: #141210;
+  --rail-fg: #d8d2c8;
+  --rail-hover: #24211d;
+  --rail-selected: #7a756e;
+  --rail-selected-bg: #2c2925;
+  --stage-bg: #77716c;
+  --stage-fg: #f2efe9;
+  --paper: #ffffff;
+  --paper-muted: #9a938a;
+  --page-shadow: 0 2px 6px rgb(0 0 0 / 0.25), 0 12px 32px rgb(0 0 0 / 0.2);
+
+  --editor-bg: #ffffff;
+  --editor-fg: #1f1b16;
+  --editor-gutter-bg: #f7f5f1;
+  --editor-active-line: #f3efe6;
+  --editor-selection: #f1d6cf;
+
+  --syntax-comment: #8a8378;
+  --syntax-keyword: #8a1f63;
+  --syntax-string: #2f6b2a;
+  --syntax-number: #9b5a00;
+  --syntax-api: #9b2318;
+  --syntax-call: #5a3d8a;
+  --syntax-def: #1f4e7a;
+  --syntax-property: #1f6a6a;
+  --syntax-namespace: #8a6212;
+  --syntax-constant: #9b5a00;
+  --syntax-punctuation: #5e574e;
+}
+
+@mixin dark {
+  color-scheme: dark;
+  --bg: #161412;
+  --fg: #ece7df;
+  --muted: #a39b90;
+  --surface: #211e1b;
+  --surface-2: #2b2723;
+  --border: #3a3530;
+  --accent: #e0705f;
+  --accent-fg: #1a0d0a;
+  --danger: #ff8a7a;
+  --danger-bg: #3a1d19;
+  --warning: #f0c060;
+  --warning-bg: #352a14;
+  --ok: #8fcf7a;
+
+  --rail-bg: #0c0b0a;
+  --rail-fg: #cfc8bd;
+  --rail-hover: #1d1a17;
+  --rail-selected: #8a847c;
+  --rail-selected-bg: #26231f;
+  --stage-bg: #3b3835;
+  --stage-fg: #e4ded5;
+  --paper: #fbf9f4;
+  --paper-muted: #9a938a;
+
+  --editor-bg: #1b1916;
+  --editor-fg: #e8e2d8;
+  --editor-gutter-bg: #1f1c19;
+  --editor-active-line: #25221e;
+  --editor-selection: #4a2c26;
+
+  --syntax-comment: #8f877b;
+  --syntax-keyword: #e78fc4;
+  --syntax-string: #9fd38a;
+  --syntax-number: #f0b46a;
+  --syntax-api: #ff8f7d;
+  --syntax-call: #b9a3ef;
+  --syntax-def: #7fb8ec;
+  --syntax-property: #76cfcf;
+  --syntax-namespace: #e2c26c;
+  --syntax-constant: #f0b46a;
+  --syntax-punctuation: #b0a89c;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    @include dark;
+  }
+}
+:root[data-theme='dark'] {
+  @include dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font);
+  font-size: 14px;
+}
+
+button,
+select {
+  font: inherit;
+  font-size: 12px;
+  color: var(--fg);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+button:hover:not(:disabled),
+select:hover {
+  border-color: var(--muted);
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+button:focus-visible,
+select:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+progress {
+  accent-color: var(--accent);
+}

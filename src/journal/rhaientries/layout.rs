@@ -110,7 +110,7 @@ use parry2d::bounding_volume::Aabb;
 use parry2d::math::Vec2 as PVec;
 use rhai::{Array, Dynamic, Engine, EvalAltResult, FnPtr, Map, NativeCallContext, Scope, AST};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use super::sources::Sources;
 use std::rc::Rc;
 use stretch::geometry::{Rect as SRect, Size};
 use stretch::number::Number;
@@ -451,20 +451,17 @@ impl Layout {
     }
 }
 
-fn load_layout(ctx: &NativeCallContext, dir: &std::path::Path, name: &str) -> RhaiResult<Layout> {
+fn load_layout(ctx: &NativeCallContext, layouts: &Sources, name: &str) -> RhaiResult<Layout> {
     if name.is_empty() || name.contains(['/', '\\']) || name.starts_with('.') {
-        return Err(format!("layout: '{}' isn't a layout name; layouts are files in {}", name, dir.display()).into());
+        return Err(format!("layout: '{}' isn't a layout name; layouts are files in {}", name, layouts.root().display()).into());
     }
-    let path = dir.join(format!("{}.rhai", name));
-    if !path.is_file() {
-        let mut names: Vec<String> = std::fs::read_dir(dir).into_iter().flatten().flatten()
-            .filter_map(|e| e.path().file_stem().filter(|_| e.path().extension().is_some_and(|x| x == "rhai")).map(|s| s.to_string_lossy().into_owned()))
-            .collect();
-        names.sort();
+    let path = layouts.path(name);
+    if !layouts.has(name) {
+        let names = layouts.names().unwrap_or_default();
         return Err(format!("layout: no layout file {}; layouts: {}", path.display(), names.join(", ")).into());
     }
     let file = path.display().to_string();
-    let ast = ctx.engine().compile_file(path).map_err(|e| format!("layout '{}': {}", name, e))?;
+    let ast = layouts.compile(ctx.engine(), name).map_err(|e| format!("layout '{}': {}", name, e))?;
     if !ast.iter_functions().any(|f| f.name == "page" && f.params.len() == 2) {
         return Err(format!("layout '{}': {} doesn't define page(n, info)", name, file).into());
     }
@@ -1049,7 +1046,7 @@ fn typeset(ctx: NativeCallContext, layout: &mut Layout, content: Map, symdict: &
     Ok(pages)
 }
 
-pub fn register(engine: &mut Engine, symdict: Rc<FontBook>, rng: SharedRng, layouts_dir: PathBuf) {
+pub fn register(engine: &mut Engine, symdict: Rc<FontBook>, rng: SharedRng, layouts: Sources) {
     engine.register_type_with_name::<Node>("LayoutBox");
     engine.register_type_with_name::<Layout>("Layout");
     for (name, kind) in [("row", Kind::Row), ("column", Kind::Column)] {
@@ -1070,7 +1067,7 @@ pub fn register(engine: &mut Engine, symdict: Rc<FontBook>, rng: SharedRng, layo
         engine.register_fn(name, move || Node::new(name, k.clone(), Map::new(), Array::new()));
         engine.register_fn(name, move |options: Map| Node::new(name, kind.clone(), options, Array::new()));
     }
-    engine.register_fn("layout", move |ctx: NativeCallContext, name: &str| load_layout(&ctx, &layouts_dir, name));
+    engine.register_fn("layout", move |ctx: NativeCallContext, name: &str| load_layout(&ctx, &layouts, name));
     engine.register_fn("new_layout", |name: &str, page: FnPtr| -> RhaiResult<Layout> {
         Ok(Layout { name: super::check_name("new_layout", Dynamic::from(name.to_string()))?, source: Source::Function(page) })
     });

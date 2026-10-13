@@ -10,11 +10,15 @@ mod markdown;
 mod options;
 mod path;
 mod random;
+mod sources;
 mod style;
 mod text;
 mod vec;
 
 pub use layout::DEFAULT_LAYOUTS_DIR;
+pub use sources::Sources;
+#[cfg(feature = "embedded-assets")]
+pub use sources::embedded;
 pub use locks::{LockLibrary, DEFAULT_LOCKS_DIR};
 pub use canvas::{CanvasData, Stroke};
 pub use entry::{Entry, Page};
@@ -90,6 +94,34 @@ pub type Path = Shared<StrokePath>;
 /// canvases added to them.
 pub type Canvas = Shared<CanvasData>;
 
+/// Why a journal script failed: rhai's message, with the line, and where
+/// in the script it happened. An error in a function the script defines is
+/// placed where it happened in that function; one in a layout or lock file
+/// where the script called into it.
+#[derive(Clone, Debug)]
+pub struct ScriptError {
+    pub message: String,
+    pub line: Option<usize>,
+    pub column: Option<usize>,
+}
+
+impl ScriptError {
+    fn new(err: &EvalAltResult) -> Self {
+        let mut position = err.position();
+        let mut inner = err;
+        // Calls to the script's own functions (no source: it's not from a
+        // file) say where inside them it went wrong.
+        while let EvalAltResult::ErrorInFunctionCall(_, source, next, _) = inner
+            && source.is_empty() {
+            inner = next;
+            if !inner.position().is_none() {
+                position = inner.position();
+            }
+        }
+        ScriptError { message: err.to_string(), line: position.line(), column: position.position() }
+    }
+}
+
 pub struct JournalEngine {
     engine: Engine,
     warnings: Rc<RefCell<Vec<String>>>,
@@ -107,6 +139,17 @@ impl JournalEngine {
     /// An engine with the lock files in `locks_dir` and the layout files
     /// in `layouts_dir`.
     pub fn with_dirs(symdict: Rc<FontBook>, locks_dir: impl Into<std::path::PathBuf>, layouts_dir: impl Into<std::path::PathBuf>) -> Self {
+        Self::with_sources(symdict, Sources::dir(locks_dir), Sources::dir(layouts_dir))
+    }
+    /// An engine with the repository's lock and layout files compiled in,
+    /// for builds with no files to read.
+    #[cfg(feature = "embedded-assets")]
+    pub fn embedded(symdict: Rc<FontBook>) -> Self {
+        Self::with_sources(symdict, embedded::locks(), embedded::layouts())
+    }
+    /// An engine with the lock files in `locks` and the layout files in
+    /// `layouts`.
+    pub fn with_sources(symdict: Rc<FontBook>, locks: Sources, layouts: Sources) -> Self {
         let mut engine = Engine::new();
         let rng = random::register(&mut engine);
         let text: TextSource = (symdict.clone(), rng.clone());
@@ -145,12 +188,12 @@ impl JournalEngine {
 
         art::register(&mut engine);
         avoid::register(&mut engine);
-        layout::register(&mut engine, symdict.clone(), rng.clone(), layouts_dir.into());
+        layout::register(&mut engine, symdict.clone(), rng.clone(), layouts);
         markdown::register(&mut engine);
         glyphs::register(&mut engine, symdict.clone(), rng.clone());
         gradient::register(&mut engine);
         text::register(&mut engine, symdict.clone(), rng.clone());
-        locks::register(&mut engine, Rc::new(LockLibrary::new(locks_dir)));
+        locks::register(&mut engine, Rc::new(LockLibrary::with_sources(locks)));
 
         JournalEngine {
             engine,
@@ -175,11 +218,22 @@ impl JournalEngine {
     /// Run a journal script, returning the `journal_entry` it built. Errors
     /// are rhai's message, with the script line.
     pub fn build_entry_str(&mut self, script_str: &str) -> Result<Entry, String> {
+        self.build_entry(script_str).map_err(|err| err.message)
+    }
+    /// `build_entry_str`, with where in the script an error happened.
+    pub fn build_entry(&mut self, script_str: &str) -> Result<Entry, ScriptError> {
         let mut scope = Scope::new();
         scope.push("journal_entry", Entry::default());
-        self.engine.run_with_scope(&mut scope, script_str).map_err(|err| err.to_string())?;
+        self.engine.run_with_scope(&mut scope, script_str).map_err(|err| ScriptError::new(&err))?;
         scope.get_value("journal_entry")
-            .ok_or_else(|| "the script replaced journal_entry with something that isn't an entry".to_string())
+            .ok_or_else(|| ScriptError { message: "the script replaced journal_entry with something that isn't an entry".to_string(), line: None, column: None })
+    }
+    /// Call `f` with what the script passes to `print` and `debug`.
+    pub fn on_print(&mut self, f: impl Fn(&str) + 'static) {
+        let f = Rc::new(f);
+        let debug = f.clone();
+        self.engine.on_print(move |text| f(text));
+        self.engine.on_debug(move |text, _, _| debug(text));
     }
     /// Call `f` as a script runs, with how many operations it's done so
     /// far: to show that it's working.
@@ -209,6 +263,52 @@ mod tests {
     }
 
     const BRUSH: &str = r#"let brush = new_brush("Calligraphy", 0.25, 0.5, 1.0);"#;
+
+    #[test]
+    fn script_errors_say_where_in_the_script() {
+        // In the script's own function: where it went wrong in there.
+        let err = engine().build_entry("let a = 1;\nfn f() {\n    let x = [1][5];\n}\nf();").unwrap_err();
+        assert_eq!((err.line, err.column), (Some(3), Some(17)), "{}", err.message);
+        assert!(err.message.contains("line 5"), "{}", err.message);
+        // In a layout file: where the script called it.
+        let err = engine().build_entry("let a = 1;\nlayout(\"no_such_layout\");").unwrap_err();
+        assert_eq!(err.line, Some(2), "{}", err.message);
+        let err = engine().build_entry("let a = ;").unwrap_err();
+        assert_eq!(err.line, Some(1), "{}", err.message);
+    }
+
+    #[test]
+    fn print_and_debug_go_to_on_print() {
+        let printed: Rc<RefCell<Vec<String>>> = Rc::default();
+        let mut engine = engine();
+        let sink = printed.clone();
+        engine.on_print(move |text| sink.borrow_mut().push(text.to_string()));
+        engine.build_entry("print(\"hello\"); debug(2);").unwrap();
+        assert_eq!(*printed.borrow(), ["hello", "2"]);
+    }
+
+    #[test]
+    fn a_page_svg_lays_its_canvases_together() {
+        let entry = engine().build_entry_str(&format!(r#"{}
+            let style = new_style(1.0, "red", brush);
+            let a = new_canvas();
+            a.add_path(new_path().move_to(new_vec(0.0, 0.0)).line_to(new_vec(10.0, 0.0)), style);
+            let b = new_canvas();
+            b.add_path(new_path().move_to(new_vec(0.0, 20.0)).line_to(new_vec(30.0, 20.0)), style);
+            let page = new_page();
+            page.add_canvas(a);
+            page.add_canvas(b);
+            journal_entry.add_page(page);
+            journal_entry.add_page(new_page());
+        "#, BRUSH)).unwrap();
+        let (_, page) = entry.selected_pages(None).next().unwrap();
+        let (svg, [x, y, w, h]) = publish::page_svg(page, "page_0").unwrap();
+        assert_eq!(svg.matches("<svg").count(), 3, "{}", svg);
+        assert_eq!(svg.matches("<path").count(), 2, "{}", svg);
+        assert!(x <= 0.0 && y <= 0.0 && x + w >= 30.0 && y + h >= 20.0, "{:?}", [x, y, w, h]);
+        let (_, empty) = entry.selected_pages(None).nth(1).unwrap();
+        assert!(publish::page_svg(empty, "page_1").is_none());
+    }
 
     #[test]
     fn new_style_accepts_css_colors() {

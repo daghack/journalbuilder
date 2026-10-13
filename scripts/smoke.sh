@@ -8,6 +8,9 @@
 #      reduced scale, and every page of journals/showcase at reduced scale.
 #   4. Renders page 0 of every journal in journals/ at reduced scale, Darkly
 #      output only.
+#   5. Checks the web editor (webapp/): its renderer still builds for the
+#      browser and, once its npm packages are installed and its wasm built
+#      (webapp/README.md), its unit tests pass and it builds.
 #
 # Renders go to a temporary directory, so journals/*/output is untouched.
 # It is deleted afterwards unless something fails or --keep is passed.
@@ -44,6 +47,14 @@ if test_output=$(cargo test --release --quiet 2>&1); then
 else
 	echo "FAIL cargo test"
 	grep -E "FAILED|panicked|failed:" <<<"$test_output" | sed 's/^/     /' || true
+	FAILURES=$((FAILURES + 1))
+fi
+
+if embedded_output=$(cargo test --release --quiet --features embedded-assets --lib sources 2>&1); then
+	echo "ok   journals run the same with layout and lock files compiled in"
+else
+	echo "FAIL embedded layout and lock files"
+	grep -E "FAILED|panicked|failed:|error" <<<"$embedded_output" | sed 's/^/     /' || true
 	FAILURES=$((FAILURES + 1))
 fi
 
@@ -117,6 +128,27 @@ for journal in journals/*/; do
 		fi
 	fi
 done
+
+echo "== web editor"
+if ! rustup target list --installed 2>/dev/null | grep -q wasm32-unknown-unknown; then
+	echo "skip the wasm32-unknown-unknown target isn't installed (rustup target add wasm32-unknown-unknown)"
+elif wasm_output=$(cargo check --release --quiet -p scribe-wasm --target wasm32-unknown-unknown 2>&1); then
+	echo "ok   the renderer builds for the browser"
+else
+	echo "FAIL the renderer doesn't build for the browser"
+	grep -E "^error" -A5 <<<"$wasm_output" | sed 's/^/     /' || true
+	FAILURES=$((FAILURES + 1))
+fi
+FRONTEND=webapp/frontend
+if [[ ! -d $FRONTEND/node_modules || ! -f $FRONTEND/wasm-pkg/scribe_wasm.js ]]; then
+	echo "skip the editor's frontend: run npm install and npm run wasm in $FRONTEND first"
+elif web_output=$(cd $FRONTEND && { npm run --silent examples && npx ng test --watch=false && npx ng build; } 2>&1); then
+	echo "ok   the editor's unit tests pass and it builds"
+else
+	echo "FAIL the editor's frontend"
+	grep -iE "error|fail" <<<"$web_output" | head -n 10 | sed 's/^/     /' || true
+	FAILURES=$((FAILURES + 1))
+fi
 
 if [[ $FAILURES -gt 0 ]]; then
 	echo "== $FAILURES failure(s)"

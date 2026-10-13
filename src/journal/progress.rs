@@ -5,7 +5,8 @@
 //! stay clean; `finish` clears it.
 
 use std::io::{IsTerminal, Write};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 /// The bar's width, in characters.
 const BAR: usize = 24;

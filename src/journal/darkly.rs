@@ -1,4 +1,5 @@
-use darkly::engine::{DarklyEngine, types::StrokeOp, ExportImageResult};
+pub use darkly::engine::DarklyEngine;
+use darkly::engine::{types::StrokeOp, ExportImageResult};
 use darkly::layer::LayerId;
 use darkly::gpu::context::GpuContext;
 use darkly::coord::CanvasRect;
@@ -12,23 +13,144 @@ use crate::journal::compose::{self, Placed};
 use crate::journal::gradient::{colorize, Along, GradientKind};
 use std::collections::HashSet;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn new_engine(width: u32, height: u32) -> DarklyEngine {
+    block_on(new_engine_async(width, height)).unwrap_or_else(|e| panic!("{}", e))
+}
+
+/// A headless engine on the first GPU adapter (WebGPU in a browser), or
+/// why there isn't one.
+pub async fn new_engine_async(width: u32, height: u32) -> Result<DarklyEngine, String> {
     // Stroke prediction extrapolates and re-renders a tail ahead of the pen
     // to hide input latency; offline it only costs time. (Config is
     // thread-local, so this applies to engines used on this thread.)
     darkly::config::set("input.predictionHorizon", ConfigValue::Float(0.0));
     let instance_desc = wgpu::InstanceDescriptor::new_without_display_handle();
     let instance = wgpu::Instance::new(instance_desc);
-    let adapter = smol::block_on(
-        instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
-        .expect("Request for adapter failed.");
-    let (device, queue) = smol::block_on(adapter
-        .request_device(&wgpu::DeviceDescriptor::default()))
-        .expect("Request for device failed.");
+    let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions::default()).await
+        .map_err(|e| format!("Request for adapter failed: {}", e))?;
+    let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor::default()).await
+        .map_err(|e| format!("Request for device failed: {}", e))?;
+    #[cfg(target_arch = "wasm32")]
+    browser::watch(&device, &queue);
     let gpu = GpuContext::new_headless(device, queue);
     let mut engine = DarklyEngine::new(gpu, width, height);
     engine.add_raster_layer(None);
-    engine
+    Ok(engine)
+}
+
+/// Run a render to the end on this thread.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn block_on<T>(future: impl Future<Output = T>) -> T {
+    smol::block_on(future)
+}
+
+/// Give the GPU time to finish work the engine is waiting on. Natively
+/// that's a short sleep; in a browser, readbacks only complete once control
+/// goes back to its event loop, so it waits for a timer there.
+async fn wait_for_gpu() {
+    #[cfg(not(target_arch = "wasm32"))]
+    std::thread::sleep(std::time::Duration::from_millis(2));
+    #[cfg(target_arch = "wasm32")]
+    browser_pause().await;
+}
+
+/// Draw a frame, so the engine finishes the bookkeeping of the strokes
+/// drawn so far (see `Pen::draw`). In a browser, also wait for the GPU to
+/// finish the work sent so far and the readbacks it makes to land: there
+/// nothing else holds back how far the strokes run ahead of the GPU, and
+/// the GPU memory the work and readbacks hold grows until the browser's GPU
+/// process gives out. Fails if the GPU has (see `gpu_failure`).
+async fn catch_up(engine: &mut DarklyEngine) -> Result<(), String> {
+    engine.render(0.0);
+    #[cfg(target_arch = "wasm32")]
+    {
+        browser::work_done().await?;
+        browser_pause().await;
+        engine.render(0.0);
+    }
+    gpu_failure()
+}
+
+/// Why the GPU can't go on, if it can't: in a browser, if it's been lost
+/// or has reported an error. Natively those panic instead, as wgpu does by
+/// default.
+fn gpu_failure() -> Result<(), String> {
+    #[cfg(target_arch = "wasm32")]
+    if let Some(failure) = browser::failure() {
+        return Err(failure);
+    }
+    Ok(())
+}
+
+/// The browser's GPU: whether it's failed, and waiting for it.
+#[cfg(target_arch = "wasm32")]
+mod browser {
+    use std::cell::RefCell;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    struct Watch {
+        queue: wgpu::Queue,
+        failure: Arc<Mutex<Option<String>>>,
+    }
+
+    thread_local! {
+        /// The GPU of the engine last made on this thread (one per worker).
+        static GPU: RefCell<Option<Watch>> = const { RefCell::new(None) };
+    }
+
+    /// Keep note of `device` failing, rather than panicking (wgpu's default
+    /// for errors), so a render can stop and say why.
+    pub(super) fn watch(device: &wgpu::Device, queue: &wgpu::Queue) {
+        let failure: Arc<Mutex<Option<String>>> = Arc::default();
+        let lost = failure.clone();
+        device.set_device_lost_callback(move |reason, message| {
+            lost.lock().unwrap().get_or_insert_with(|| format!("the GPU was lost ({:?}): {}", reason, message));
+        });
+        let errored = failure.clone();
+        device.on_uncaptured_error(Arc::new(move |error: wgpu::Error| {
+            errored.lock().unwrap().get_or_insert_with(|| format!("the GPU reported an error: {}", error));
+        }));
+        GPU.set(Some(Watch { queue: queue.clone(), failure }));
+    }
+
+    pub(super) fn failure() -> Option<String> {
+        GPU.with_borrow(|gpu| gpu.as_ref().and_then(|gpu| gpu.failure.lock().unwrap().clone()))
+    }
+
+    /// Wait until the GPU has done the work sent to it so far.
+    pub(super) async fn work_done() -> Result<(), String> {
+        let done = Arc::new(AtomicBool::new(false));
+        let flag = done.clone();
+        let watched = GPU.with_borrow(|gpu| gpu.as_ref().map(|gpu| gpu.queue.on_submitted_work_done(move || flag.store(true, Ordering::Release))));
+        if watched.is_none() {
+            return Ok(());
+        }
+        while !done.load(Ordering::Acquire) {
+            if let Some(failure) = failure() {
+                return Err(failure);
+            }
+            super::browser_pause().await;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn browser_pause() {
+    use wasm_bindgen::{JsCast, JsValue};
+    let promise = js_sys::Promise::new(&mut |resolve, _| {
+        let global = js_sys::global();
+        let set_timeout = js_sys::Reflect::get(&global, &JsValue::from_str("setTimeout"))
+            .ok()
+            .and_then(|f| f.dyn_into::<js_sys::Function>().ok());
+        match set_timeout {
+            Some(set_timeout) => { let _ = set_timeout.call2(&global, &resolve, &JsValue::from(0)); }
+            None => { let _ = resolve.call0(&JsValue::NULL); }
+        }
+    });
+    let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
 }
 
 /// Resize the engine's canvas window so a single engine can be reused across
@@ -50,8 +172,16 @@ const SAMPLE_SPACING_PX: f32 = 1.0;
 /// reads `time_ms`, so feeding all zeros gives it no cadence to work with.
 const PEN_SPEED_PX_PER_MS: f64 = 0.25;
 
-/// How many strokes to draw between frame ticks (see `render_canvas`).
+/// How much of `render_async`'s progress is drawing strokes.
+const STROKES_SHARE: f32 = 0.85;
+
+/// How many strokes to draw between frame ticks (see `catch_up`). In a
+/// browser, where each tick waits for the GPU, fewer, to keep what's
+/// waiting on it small.
+#[cfg(not(target_arch = "wasm32"))]
 const FRAME_EVERY_STROKES: u32 = 25;
+#[cfg(target_arch = "wasm32")]
+const FRAME_EVERY_STROKES: u32 = 10;
 
 /// Output pixels rendered past a tile's edges when supersampling, for the
 /// filter back down to read: Lanczos-3 reaches 3 output pixels.
@@ -70,7 +200,17 @@ const BLEED_PX: i64 = 4;
 /// aliasing Darkly produces for brush marks thinner than about a pixel.
 ///
 /// Each stroke is drawn with its own brush; panics if a stroke has none.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn render(canvas: &Canvas, engine: &mut DarklyEngine, scale: f32, supersample: f32) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+    block_on(render_async(canvas, engine, scale, supersample, &mut |_| {}))
+        .unwrap_or_else(|e| panic!("{}", e))
+}
+
+/// `render`, giving the GPU time as it goes (see `wait_for_gpu`), with
+/// `progress` called with how far through it is, from 0 to 1: drawing the
+/// strokes takes it to `STROKES_SHARE`, reading back and filtering the rest.
+/// Fails if the GPU does (see `gpu_failure`).
+pub async fn render_async(canvas: &Canvas, engine: &mut DarklyEngine, scale: f32, supersample: f32, progress: &mut dyn FnMut(f32)) -> Result<ImageBuffer<Rgba<u8>, Vec<u8>>, String> {
     // The page this canvas is (a tile of), as its own render would size it.
     let (page_origin, extents, tile) = match canvas.frame() {
         Some(frame) => (frame.page.mins, frame.page_extents(), Some(frame)),
@@ -93,11 +233,14 @@ pub fn render(canvas: &Canvas, engine: &mut DarklyEngine, scale: f32, supersampl
     let rx1 = ((x1 + bleed) as f64 * k.0).ceil() as i64;
     let ry1 = ((y1 + bleed) as f64 * k.1).ceil() as i64;
     resize_canvas(engine, (rx1 - rx0) as u32, (ry1 - ry0) as u32);
-    let rendered = render_canvas(canvas, engine, page_origin, (rx0 as f32, ry0 as f32), ratio, scale * k.0.max(k.1) as f32);
-    if !supersampled {
-        return rendered;
-    }
-    downsample(&rendered, (rx0, ry0), k, (x0, y0), ((x1 - x0) as u32, (y1 - y0) as u32))
+    let rendered = render_canvas(canvas, engine, page_origin, (rx0 as f32, ry0 as f32), ratio, scale * k.0.max(k.1) as f32, progress).await?;
+    let rendered = if supersampled {
+        downsample(&rendered, (rx0, ry0), k, (x0, y0), ((x1 - x0) as u32, (y1 - y0) as u32))
+    } else {
+        rendered
+    };
+    progress(1.0);
+    Ok(rendered)
 }
 
 /// The Lanczos-3 kernel.
@@ -191,7 +334,7 @@ fn downsample(src: &ImageBuffer<Rgba<u8>, Vec<u8>>, src_origin: (i64, i64), k: (
 /// in white on a layer of their own (with any strokes next to them sharing
 /// the gradient), then coloured pixel by pixel and laid over what's below.
 /// Brushes that move ink (Smudge, Blur) don't reach across those layers.
-fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, page_origin: Vec2, offset: (f32, f32), ratio: Vec2, brush_scale: f32) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+async fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, page_origin: Vec2, offset: (f32, f32), ratio: Vec2, brush_scale: f32, progress: &mut dyn FnMut(f32)) -> Result<ImageBuffer<Rgba<u8>, Vec<u8>>, String> {
     let (engine_canvas_width, engine_canvas_height) = engine.canvas_dimensions();
     let origin = page_origin + Vec2::new(offset.0 / ratio.x, offset.1 / ratio.y);
     let view_max = origin + Vec2::new(engine_canvas_width as f32 / ratio.x, engine_canvas_height as f32 / ratio.y);
@@ -200,20 +343,23 @@ fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, page_origin: Vec2, 
         .collect();
     let mut pen = Pen { engine, page_origin, offset, ratio, brush_scale, loaded_name: None, loaded_size: None, drawn: 0, warned_colors: HashSet::new(), warned_saturation: HashSet::new() };
     let mut rendered: Option<Placed> = None;
+    let mut done = 0;
     for pass in strokes.chunk_by(|a, b| a.0.style.color.gradient() == b.0.style.color.gradient()) {
         let gradient = pass[0].0.style.color.gradient();
         let layer = pen.engine.add_raster_layer(None);
         let mut along = Vec::new();
         let mut reach: f32 = 0.0;
         for &(stroke, seed) in pass {
-            let samples = pen.draw(layer, stroke, seed, gradient.is_some());
+            let samples = pen.draw(layer, stroke, seed, gradient.is_some()).await?;
+            done += 1;
+            progress(STROKES_SHARE * done as f32 / strokes.len() as f32);
             if let Some(g) = gradient.filter(|g| g.per_stroke()) {
                 let vertical = g.kind == GradientKind::Vertical;
                 along.extend(samples.into_iter().map(|(p, t, down)| (p, if vertical { down } else { t })));
                 reach = reach.max(stroke.style.brush.as_ref().map_or(0.0, |b| b.size) * brush_scale);
             }
         }
-        let mut image = export(pen.engine, layer);
+        let mut image = export(pen.engine, layer).await?;
         if let Some(gradient) = gradient {
             let to_canvas = |x: f32, y: f32| page_origin + Vec2::new((x + offset.0) / ratio.x, (y + offset.1) / ratio.y);
             let along = gradient.per_stroke().then(|| Along::new(along, reach));
@@ -226,11 +372,11 @@ fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, page_origin: Vec2, 
         }
     }
     match rendered {
-        Some(rendered) => rendered.image,
+        Some(rendered) => Ok(rendered.image),
         // Nothing reaches it: an empty render.
         None => {
             let layer = pen.engine.add_raster_layer(None);
-            export(pen.engine, layer)
+            export(pen.engine, layer).await
         }
     }
 }
@@ -256,7 +402,7 @@ impl Pen<'_> {
     /// Draw a stroke on `layer`, in white if `white` (to be coloured
     /// after), returning its points in render pixels with how far along
     /// its subpath each is and how far down the whole path, from 0 to 1.
-    fn draw(&mut self, layer: LayerId, stroke: &ColoredStroke, seed: u32, white: bool) -> Vec<(Vec2, f32, f32)> {
+    async fn draw(&mut self, layer: LayerId, stroke: &ColoredStroke, seed: u32, white: bool) -> Result<Vec<(Vec2, f32, f32)>, String> {
         let ColoredStroke { path, style, .. } = stroke;
         let brush = style.brush.as_ref()
             .expect("Darkly strokes need a brush (rhai stroke styles always have one)");
@@ -357,16 +503,16 @@ impl Pen<'_> {
             // readbacks piles up: journal_entry_18 peaked at 14 GB and was
             // killed. Ticking every few strokes keeps it near 250 MB.
             if self.drawn.is_multiple_of(FRAME_EVERY_STROKES) {
-                self.engine.render(0.0);
+                catch_up(self.engine).await?;
             }
         }
-        points
+        Ok(points)
     }
 }
 
 /// Composite the document and read back `layer`'s render, then remove the
 /// layer.
-fn export(engine: &mut DarklyEngine, layer: LayerId) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+async fn export(engine: &mut DarklyEngine, layer: LayerId) -> Result<ImageBuffer<Rgba<u8>, Vec<u8>>, String> {
     // Composite the document to the surface. Call once per frame; the arg is the
     // animation clock in seconds (drives time-based veils). Returns whether it drew.
     engine.start_export();
@@ -377,9 +523,12 @@ fn export(engine: &mut DarklyEngine, layer: LayerId) -> ImageBuffer<Rgba<u8>, Ve
                 let buff: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::from_raw(width, height, rgba)
                     .expect("could not build image buffer");
                 engine.remove_layer(layer).expect("Failed to remove layer");
-                return buff;
+                return Ok(buff);
             }
-            None => std::thread::sleep(std::time::Duration::from_millis(2)),
+            None => {
+                wait_for_gpu().await;
+                gpu_failure()?;
+            }
         }
     }
 }
