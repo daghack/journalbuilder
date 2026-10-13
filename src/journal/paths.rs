@@ -95,6 +95,30 @@ impl PathCmd {
             PathCmd::ClosePath => PathCmd::ClosePath,
         }
     }
+    /// The command with each of its points (control points, then the end)
+    /// moved by `f`, which is given the point's index among them.
+    fn map_points(&self, mut f: impl FnMut(usize, Vec2) -> Vec2) -> Self {
+        let p = Vec2::new;
+        match *self {
+            PathCmd::MoveTo(x, y) => {
+                let a = f(0, p(x, y));
+                PathCmd::MoveTo(a.x, a.y)
+            }
+            PathCmd::LineTo(x, y) => {
+                let a = f(0, p(x, y));
+                PathCmd::LineTo(a.x, a.y)
+            }
+            PathCmd::CubicCurveTo(x1, y1, x2, y2, x, y) => {
+                let (a, b, c) = (f(0, p(x1, y1)), f(1, p(x2, y2)), f(2, p(x, y)));
+                PathCmd::CubicCurveTo(a.x, a.y, b.x, b.y, c.x, c.y)
+            }
+            PathCmd::QuadraticCurveTo(x1, y1, x, y) => {
+                let (a, b) = (f(0, p(x1, y1)), f(1, p(x, y)));
+                PathCmd::QuadraticCurveTo(a.x, a.y, b.x, b.y)
+            }
+            PathCmd::ClosePath => PathCmd::ClosePath,
+        }
+    }
     pub fn translate_by(&self, v: Vec2) -> Self {
         match self {
             PathCmd::MoveTo(x, y) => PathCmd::MoveTo(x + v.x, y + v.y),
@@ -155,6 +179,12 @@ impl StrokePath {
             points.extend(cmd.points_within());
         }
         points
+    }
+    /// A hash of the path's points, the same every run (FNV-1a over their
+    /// bits).
+    pub fn points_hash(&self) -> u64 {
+        self.points_within().iter().flat_map(|p| [p.x.to_bits(), p.y.to_bits()])
+            .fold(0xcbf29ce484222325, |hash, bits| (hash ^ bits as u64).wrapping_mul(0x100000001b3))
     }
     pub fn scaled_by(mut self, s: f32) -> Self {
         for cmd in &mut self.commands {
@@ -225,6 +255,36 @@ impl StrokePath {
     }
     pub fn rotated_by(self, angle: f32) -> Self {
         self.rotated_around(Vec2::new(0.0, 0.0), angle)
+    }
+    /// The path drawn `passes` times over, as a hand goes back over its
+    /// strokes, each pass a little astray: a pass of a subpath is moved by
+    /// an offset that runs along it from one random offset at its start to
+    /// another at its end, each up to `jitter` long. So its ends stray
+    /// independently, and a straight stroke stays straight but turns,
+    /// stretches and shifts. A subpath's passes follow one another.
+    pub fn retraced(&self, passes: usize, jitter: f32, rng: &mut dyn RngCore) -> StrokePath {
+        let mut offset = || {
+            // Uniform over the disc.
+            let r = jitter * rng.random::<f32>().sqrt();
+            let a = rng.random::<f32>() * std::f32::consts::TAU;
+            Vec2::new(r * a.cos(), r * a.sin())
+        };
+        let mut commands = Vec::new();
+        for substroke in self.to_substrokes() {
+            let spans = substroke.spans();
+            for _ in 0..passes {
+                let (start, end) = (offset(), offset());
+                for (cmd, &(from, to)) in substroke.commands.iter().zip(&spans) {
+                    // A command's points are spaced evenly over its span.
+                    let n = cmd.points_within().len().max(1) as f32;
+                    commands.push(cmd.map_points(|k, p| {
+                        let t = from + (to - from) * (k + 1) as f32 / n;
+                        p + start + (end - start) * t
+                    }));
+                }
+            }
+        }
+        StrokePath { commands }
     }
     pub fn to_substrokes(&self) -> Vec<SubstrokePath> {
         let mut substrokes = Vec::new();
@@ -896,6 +956,31 @@ impl SubstrokePath {
             commands,
         }
     }
+    /// How far along the subpath each command runs, from and to, as
+    /// fractions of its length measured along control polygons (all 0 if
+    /// it has none).
+    fn spans(&self) -> Vec<(f32, f32)> {
+        let (mut current, mut start) = (Vec2::ZERO, Vec2::ZERO);
+        let lengths: Vec<f32> = self.commands.iter().map(|cmd| {
+            let length = match *cmd {
+                PathCmd::MoveTo(x, y) => {
+                    start = Vec2::new(x, y);
+                    0.0
+                }
+                PathCmd::ClosePath => current.distance(start),
+                _ => cmd.points_within().iter().fold((current, 0.0), |(at, sum), &p| (p, sum + at.distance(p))).1,
+            };
+            current = cmd.ending_point().unwrap_or(start);
+            length
+        }).collect();
+        let total: f32 = lengths.iter().sum();
+        let mut along = 0.0;
+        lengths.iter().map(|length| {
+            let from = along;
+            along += length;
+            if total > 0.0 { (from / total, along / total) } else { (0.0, 0.0) }
+        }).collect()
+    }
     pub fn get_point_samples(&self, distance_interval: f32) -> Vec<CurveSample> {
         let mut stepper = SubstrokeStepper::new(self, 50);
         stepper.generate_equidistant_samples(distance_interval)
@@ -1011,6 +1096,43 @@ mod tests {
         assert!(close(ends[0], Vec2::new(3.0, 2.0)));
         assert!(close(ends[1], Vec2::new(1.0, 4.0)));
         assert!(close(ends[3], Vec2::new(1.0, 0.0)));
+    }
+
+    #[test]
+    fn retracing_draws_each_subpath_again_and_again_astray() {
+        let path = StrokePath::line(Vec2::new(0.0, 0.0), Vec2::new(100.0, 0.0))
+            .move_to(0.0, 50.0).quadratic_curve_to(50.0, 80.0, 100.0, 50.0).close_path();
+        let mut rng = StdRng::seed_from_u64(3);
+        let retraced = path.retraced(4, 5.0, &mut rng);
+        let (subpaths, passes) = (path.to_substrokes(), retraced.to_substrokes());
+        assert_eq!(passes.len(), 8, "{}", retraced);
+        for (i, pass) in passes.iter().enumerate() {
+            // Passes of a subpath follow one another, each its shape.
+            let original = &subpaths[i / 4];
+            assert_eq!(pass.commands.len(), original.commands.len());
+            let (old, new) = (StrokePath { commands: original.commands.clone() }, StrokePath { commands: pass.commands.clone() });
+            let moved: Vec<Vec2> = old.points_within().iter().zip(new.points_within()).map(|(a, b)| b - *a).collect();
+            assert!(moved.iter().all(|d| d.length() <= 5.0 + 1e-4), "{:?}", moved);
+            // Ends stray independently, everything between moving on a line
+            // from one offset to the other.
+            assert!((moved[0] - moved[moved.len() - 1]).length() > 1e-3, "{:?}", moved);
+        }
+        // A line stretches by no more than its ends stray.
+        let PathCmd::MoveTo(x0, y0) = passes[1].commands[0] else { panic!() };
+        let PathCmd::LineTo(x1, y1) = passes[1].commands[1] else { panic!() };
+        assert!((Vec2::new(x1 - x0, y1 - y0).length() - 100.0).abs() <= 10.0);
+        // The control point of the curve moves halfway between its ends'.
+        let curve: Vec<Vec2> = StrokePath { commands: passes[5].commands.clone() }.points_within();
+        let original: Vec<Vec2> = StrokePath { commands: subpaths[1].commands.clone() }.points_within();
+        let d: Vec<Vec2> = curve.iter().zip(&original).map(|(a, b)| *a - *b).collect();
+        assert!(close(d[1], (d[0] + d[2]) / 2.0), "{:?}", d);
+        // Seeded; and no jitter retraces exactly.
+        assert_eq!(path.retraced(4, 5.0, &mut StdRng::seed_from_u64(3)).to_string(), retraced.to_string());
+        let twice = StrokePath::line(Vec2::new(0.0, 0.0), Vec2::new(100.0, 0.0))
+            .move_to(0.0, 0.0).line_to(100.0, 0.0)
+            .move_to(0.0, 50.0).quadratic_curve_to(50.0, 80.0, 100.0, 50.0).close_path()
+            .move_to(0.0, 50.0).quadratic_curve_to(50.0, 80.0, 100.0, 50.0).close_path();
+        assert_eq!(path.retraced(2, 0.0, &mut rng).to_string(), twice.to_string());
     }
 
     #[test]

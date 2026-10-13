@@ -90,7 +90,7 @@ impl From<CanvasData> for JournalCanvas {
     fn from(val: CanvasData) -> Self {
         let mut canvas = JournalCanvas::new();
         for Stroke { path, style, seed } in val.strokes {
-            canvas.add_seeded_stroke(path, style.into(), seed);
+            canvas.add_seeded_stroke(style.retrace(path), style.into(), seed);
         }
         canvas.set_frame(val.frame);
         canvas
@@ -101,7 +101,7 @@ impl From<&CanvasData> for JournalCanvas {
     fn from(val: &CanvasData) -> Self {
         let mut canvas = JournalCanvas::new();
         for Stroke { path, style, seed } in val.strokes.iter() {
-            canvas.add_seeded_stroke(path.clone(), style.clone().into(), *seed);
+            canvas.add_seeded_stroke(style.retrace(path.clone()), style.clone().into(), *seed);
         }
         canvas.set_frame(val.frame);
         canvas

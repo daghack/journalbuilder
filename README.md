@@ -109,6 +109,15 @@ What to know:
   `new_style(width, color, brush)`, `width` scales the brush's
   pressure in Darkly renders, so past `1 / max_pressure` a stroke gets no
   heavier (the render warns), but it's the stroke's geometric width in SVG.
+- **Going over strokes.** `style.passes = 7` draws each stroke in the
+  style seven times over, and `style.jitter = 9` lets each pass's ends
+  stray by up to 9 units, so a straight stroke turns, stretches and
+  shifts a little each time: the scored, manic look of writing gone over
+  again and again. One pass with a little jitter just roughens a hand.
+  Passes are drawn whenever the canvas is, so whatever is in the style is
+  gone over, text included, and bounds and avoidance see every pass. Their
+  jitter is seeded from each stroke's own points, so it's the same every
+  run.
 - **Gradients.** In place of a colour, `new_gradient(["red", "gold",
   "blue"])` runs along each stroke from start to end; with `#{ from, to }`
   it's laid across the page between two points, and with `#{ center,
@@ -190,10 +199,10 @@ labelled with the calls that make it: render it with
 `target/release/journalbuild showcase`.
 
 The module docs in `src/journal/rhaientries/` cover each area in more
-detail: `path.rs` (paths, hatching, text along paths), `text.rs` (text
-boxes, scattered notes), `glyphs.rs` (glyphs and fonts), `avoid.rs`,
-`layout.rs` (page layouts), `gradient.rs`, `random.rs`, `art.rs` and
-`locks/mod.rs`. The journals in `journals/` and
+detail: `style.rs` (brushes and styles, passes and jitter), `path.rs`
+(paths, hatching, text along paths), `text.rs` (text boxes, scattered
+notes), `glyphs.rs` (glyphs and fonts), `avoid.rs`, `layout.rs` (page
+layouts), `gradient.rs`, `random.rs`, `art.rs` and `locks/mod.rs`. The journals in `journals/` and
 `tests/smoke_journals/smoke` use most of it.
 
 ## Using layouts

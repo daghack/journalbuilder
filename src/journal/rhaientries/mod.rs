@@ -827,6 +827,45 @@ mod tests {
     }
 
     #[test]
+    fn styles_go_over_their_strokes_in_passes() {
+        let script = r#"
+            let s = new_style(1.0, "black", new_brush("Ink Pen", 0.2, 0.8, 1.0));
+            if s.passes != 1 || s.jitter != 0.0 { throw "one clean pass by default"; }
+            let manic = s;
+            manic.passes = 5;
+            manic.jitter = 3;
+            if manic.passes != 5 || manic.jitter != 3.0 || s.passes != 1 { throw "styles are values"; }
+            let c = new_canvas();
+            let line = new_line(new_vec(0, 0), new_vec(100, 0));
+            c.add_path(line, s);
+            c.add_path(line.copy().append(new_circle(new_vec(50, 50), 20)), manic);
+            // Bounds take in where the passes stray.
+            let b = c.bounds();
+            if b.max.x <= 101.0 && b.min.x >= -1.0 { throw "bounds miss the passes: " + b; }
+            let p = new_page();
+            p.add_canvas(c);
+            journal_entry.add_page(p);
+        "#;
+        let entry = engine().build_entry_str(script).expect("script should run");
+        let canvas = &entry.pages[0].canvases()[0];
+        let jc: JournalCanvas = canvas.clone().into();
+        let subpaths: Vec<usize> = jc.strokes().iter().map(|s| s.path.to_substrokes().len()).collect();
+        assert_eq!(subpaths, vec![1, 10]);
+        // The same every time it's drawn.
+        let again: JournalCanvas = canvas.clone().into();
+        assert_eq!(jc.strokes()[1].path.to_string(), again.strokes()[1].path.to_string());
+        for (script, want) in [
+            ("s.passes = 0;", "style.passes: should be from 1 to 64, got 0"),
+            ("s.passes = 1.5;", "style.passes: should be a whole number"),
+            ("s.jitter = -1;", "style.jitter: can't be negative"),
+        ] {
+            let err = engine().build_entry_str(&format!("let s = new_style(1, \"black\", new_brush(\"Ink Pen\", 0.2, 0.8, 1));\n{}", script))
+                .expect_err("should fail").to_string();
+            assert!(err.contains(want) && err.contains("line 2"), "{}: {}", want, err);
+        }
+    }
+
+    #[test]
     fn per_stroke_brushes_reach_journal_canvas() {
         let script = r#"
             let ink = new_style(1.5, "black", new_brush("Rough Ink", 0.25, 0.5, 1.0));

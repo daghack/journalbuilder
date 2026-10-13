@@ -1,8 +1,8 @@
 // The showcase: a sample book of everything journals can draw with, every
 // page the same size. After the title page and the contents:
 //
-//   pens      every Darkly brush; pressure profiles, widths, colours and
-//             gradients
+//   pens      every Darkly brush; pressure profiles, widths, colours,
+//             gradients, and strokes gone over in passes
 //   fonts     every font, its alphabet and a line, font settings, and
 //             glyphs placed by hand
 //   glyphs    every variant of every glyph of every font
@@ -222,6 +222,48 @@ for i in 1..220 {
 	spiral.line_to(new_vec(870 + a * 4.0 * a.cos(), y + a * 4.0 * a.sin()));
 }
 pens.add_path(spiral, new_style(1, glow, new_brush("Ink Pen", 0.4, 0.8, 3)));
+book.bind("pens", pens);
+
+// Strokes gone over: a style draws each stroke in `passes` passes, each
+// pass's ends straying by up to `jitter` units. One pass with some jitter
+// roughens a hand; many make the manic, scored-over look of writing gone
+// over again and again. Text in the style is gone over too.
+let pens = sheet("pens");
+pens.add_canvas(subhead("going over strokes", TOP));
+pens.add_canvas(caption("style.passes = n, style.jitter = d: each stroke drawn n times, its ends astray by up to d", TOP + 50));
+let y = TOP + 130;
+for row in [[1, 0, "clean"], [1, 2.5, "a rough hand"], [3, 4, "gone over"], [7, 7, "and over"]] {
+	let style = new_style(1, INK, new_brush("Ink Pen", 0.5, 0.9, 0.8));
+	style.passes = row[0];
+	style.jitter = row[1];
+	if style.passes != row[0] || style.jitter != row[1] { throw "passes and jitter read back"; }
+	pens.add_canvas(write(`${row[2]}: ${row[0]}, ${row[1]}`, LEFT, y, 24));
+	pens.add_path(wave(380, 760, y, 22), style);
+	pens.add_path(new_circle(new_vec(850, y), 30), style);
+	pens.add_canvas(write_in("lorem", 920, y, 56, style, LOCHE, #{}));
+	y += 110;
+}
+y += 40;
+pens.add_canvas(caption("a manic hand: passes = 7, jitter = 9, in a tapering pen", y));
+let scored = new_brush("Ink Pen", 0.5, 0.95, 1.1);
+scored.pressure_profile = "taper";
+let manic = new_style(1, INK, scored);
+manic.passes = 7;
+manic.jitter = 9;
+pens.add_canvas(write_in("lorem ipsum", LEFT, y + 110, 96, manic, LOCHE, #{}));
+pens.add_canvas(write_in("dolor sit amet", LEFT, y + 210, 96, manic, LOCHE, #{}));
+y += 300;
+pens.add_canvas(caption("a heading gone over twice, passes = 2, jitter = 3, in red", y));
+let twice = new_style(1, RED, scored);
+twice.passes = 2;
+twice.jitter = 3;
+pens.add_canvas(write_in("consectetur adipiscing", LEFT, y + 80, 60, twice, LOCHE, #{}));
+y += 170;
+pens.add_canvas(caption("body text in a rough hand: passes = 1, jitter = 1.2", y));
+let rough = TEXT;
+rough.jitter = 1.2;
+pens.add_canvas(write_in("Lorem ipsum dolor sit amet, consectetur adipiscing elit,", LEFT, y + 60, 30, rough, PLAIN, #{}));
+pens.add_canvas(write_in("sed do eiusmod tempor incididunt ut labore et dolore.", LEFT, y + 110, 30, rough, PLAIN, #{}));
 book.bind("pens", pens);
 
 // ---- fonts ----

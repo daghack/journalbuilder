@@ -1,5 +1,23 @@
 //! Brushes and stroke styles for rhai scripts.
+//!
+//! ```rhai
+//! let pen = new_brush("Ink Pen", 0.4, 0.8, 2.0);    // name, min and max pressure, size
+//! pen.pressure_profile = "taper";                   // or "ramp" (the default) or "constant"
+//! let ink = new_style(1.0, "#253443", pen);          // width, colour (or gradient), brush
+//!
+//! // Strokes gone over again and again, as a hand going over its writing:
+//! // each stroke drawn in `passes` passes, each pass's ends straying by up
+//! // to `jitter` canvas units. With one pass, jitter just roughens a hand.
+//! ink.passes = 6;      // default 1
+//! ink.jitter = 4.0;    // default 0
+//! ```
+//!
+//! Passes are drawn when a canvas is rendered (or measured, or avoided), so
+//! anything drawn in the style, text included, is gone over. Their jitter
+//! is seeded from each stroke's own points, so it's the same every run.
 
+use rand::rngs::StdRng;
+use rand::SeedableRng;
 use rhai::{CustomType, Dynamic, Engine, EvalAltResult, ImmutableString, TypeBuilder};
 
 use super::gradient;
@@ -7,6 +25,7 @@ use super::options::float;
 use super::RhaiResult;
 use crate::journal::canvas::{Brush, PressureProfile, StrokeColor};
 use crate::journal::canvas::StrokeStyle as JournalStrokeStyle;
+use crate::journal::paths::StrokePath;
 
 #[derive(Debug, Default, Clone, CustomType)]
 #[rhai_type(extra = Self::build_extra)]
@@ -102,7 +121,16 @@ pub struct StrokeStyle {
     pub(super) color: StrokeColor,
     #[rhai_type(skip)]
     pub(super) brush: BrushSettings,
+    /// How many times each stroke is drawn.
+    #[rhai_type(skip)]
+    pub(super) passes: i64,
+    /// How far each pass's ends stray, in canvas units.
+    #[rhai_type(skip)]
+    pub(super) jitter: f64,
 }
+
+/// The most passes a style draws its strokes in.
+const MAX_PASSES: i64 = 64;
 
 impl From<StrokeStyle> for JournalStrokeStyle {
     fn from(val: StrokeStyle) -> Self {
@@ -132,7 +160,19 @@ impl StrokeStyle {
             width: float("new_style", "the width", &width)?,
             color: gradient::colour_or_gradient("new_style", color)?,
             brush,
+            passes: 1,
+            jitter: 0.0,
         })
+    }
+    /// A path as this style draws it: each subpath gone over `passes`
+    /// times, each pass astray by up to `jitter` (see
+    /// `StrokePath::retraced`), seeded from the path's own points.
+    pub fn retrace(&self, path: StrokePath) -> StrokePath {
+        if self.passes == 1 && self.jitter == 0.0 {
+            return path;
+        }
+        let mut rng = StdRng::seed_from_u64(path.points_hash());
+        path.retraced(self.passes as usize, self.jitter as f32, &mut rng)
     }
     /// `style.color`: the colour string, or the gradient.
     fn get_color(&mut self) -> Dynamic {
@@ -153,6 +193,22 @@ impl StrokeStyle {
                 Ok(())
             })
             .with_get_set("color", Self::get_color, Self::set_color)
+            .with_get_set("passes", |s: &mut Self| Dynamic::from(s.passes), |s: &mut Self, passes: Dynamic| -> RhaiResult<()> {
+                let passes = passes.as_int().map_err(|t| -> Box<EvalAltResult> { format!("style.passes: should be a whole number, got {}", t).into() })?;
+                if !(1..=MAX_PASSES).contains(&passes) {
+                    return Err(format!("style.passes: should be from 1 to {}, got {}", MAX_PASSES, passes).into());
+                }
+                s.passes = passes;
+                Ok(())
+            })
+            .with_get_set("jitter", |s: &mut Self| Dynamic::from(s.jitter), |s: &mut Self, jitter: Dynamic| -> RhaiResult<()> {
+                let jitter = float("style.jitter", "the jitter", &jitter)?;
+                if jitter < 0.0 {
+                    return Err(format!("style.jitter: can't be negative, got {}", jitter).into());
+                }
+                s.jitter = jitter;
+                Ok(())
+            })
         ;
     }
 }
