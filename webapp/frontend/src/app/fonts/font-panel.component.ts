@@ -15,7 +15,7 @@ import { FALLBACK_GLYPH, fallbackLoop, fallbackOf, optionRaw, parseFonts, withOp
         <button type="button" class="primary" (click)="editor.export()" [disabled]="!editor.file() || editor.problems().length > 0"
                 title="Save the whole fonts file: back where it came from in Chromium browsers, else as a download. Put it in config/fonts.json.">Export fonts.json</button>
         <button type="button" (click)="editor.open()" title="Open a fonts file">Open…</button>
-        <button type="button" (click)="revert()" [disabled]="editor.unchanged()" title="Start again from config/fonts.json as built in">Revert</button>
+        <button type="button" (click)="revert()" [disabled]="editor.unchanged()" title="Throw away every font's edits: start again from config/fonts.json as built in">Revert all</button>
       </div>
       @if (editor.loadError(); as error) { <p class="note-error">{{ error }}</p> }
       <p class="hint">
@@ -47,7 +47,11 @@ import { FALLBACK_GLYPH, fallbackLoop, fallbackOf, optionRaw, parseFonts, withOp
           <button type="button" (click)="add(true)" [disabled]="!newName()" title="A copy of this font">Duplicate</button>
         </div>
         @if (fontError(); as error) { <p class="problem">{{ error }}</p> }
-        <button type="button" class="danger" (click)="editor.deleteFont()" [disabled]="file.length < 2">Delete {{ editor.fontName() }}</button>
+        <div class="row">
+          <button type="button" (click)="editor.revertFont()" [disabled]="editor.fontUnchanged()"
+                  [title]="editor.builtinFont() ? 'Put ' + editor.fontName() + ' back as it is in config/fonts.json; other fonts keep their edits' : editor.fontName() + ' is not in config/fonts.json, so has nothing to revert to'">Revert {{ editor.fontName() }}</button>
+          <button type="button" class="danger" (click)="editor.deleteFont()" [disabled]="file.length < 2">Delete {{ editor.fontName() }}</button>
+        </div>
       </section>
 
       @if (editor.font(); as font) {

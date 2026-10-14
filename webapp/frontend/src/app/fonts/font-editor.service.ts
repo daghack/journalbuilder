@@ -1,7 +1,8 @@
-import { Injectable, computed, effect, inject, signal } from '@angular/core';
+import { Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FileService, JSON_FILES, type OpenedFile } from '../services/file.service';
 import { ToolsService } from '../services/tools.service';
 import { WorkspaceService, hash } from '../services/workspace.service';
+import { ShellService } from '../shell/shell.service';
 import { checkFonts, parseFonts, serializeFonts, withOption, type Font, type FontsFile, type Glyph } from './font-file';
 import * as edit from './glyph-edit';
 import type { PointRef, SegmentRef } from './glyph-edit';
@@ -46,6 +47,7 @@ export class FontEditorService {
   private readonly tools = inject(ToolsService);
   private readonly files = inject(FileService);
   private readonly workspace = inject(WorkspaceService);
+  private readonly shell = inject(ShellService);
 
   readonly file = signal<FontsFile | null>(null);
   readonly fileName = signal('fonts.json');
@@ -80,6 +82,19 @@ export class FontEditorService {
   });
   /** Whether the fonts are the built-in ones, unchanged. */
   readonly unchanged = computed(() => this.text() !== null && this.text() === this.builtin());
+  /** The built-in fonts, read; null until fetched. */
+  private readonly builtinFile = computed(() => {
+    const builtin = this.builtin();
+    return builtin === null ? null : parseFonts(builtin);
+  });
+  /** The built-in font of the shown font's name; null if there's none. */
+  readonly builtinFont = computed(() => this.builtinFile()?.find((font) => font.name === this.fontName()) ?? null);
+  /** Whether the font shown is as built in (or isn't built in, so has nothing to go back to). */
+  readonly fontUnchanged = computed(() => {
+    const font = this.font();
+    const builtin = this.builtinFont();
+    return !font || !builtin || serializeFonts([font]) === serializeFonts([builtin]);
+  });
 
   readonly font = computed<Font | null>(() => this.file()?.find((font) => font.name === this.fontName()) ?? null);
   readonly glyph = computed<Glyph | null>(() => {
@@ -162,6 +177,16 @@ export class FontEditorService {
       } catch {
         // No storage: the draft lasts this visit.
       }
+    });
+    // Another editor asked for a font: show it, once the fonts are loaded.
+    effect(() => {
+      const name = this.shell.fontRequest();
+      const file = this.file();
+      if (name === null || !file) return;
+      untracked(() => {
+        if (file.some((font) => font.name === name)) this.pickFont(name);
+        this.shell.fontRequest.set(null);
+      });
     });
     // A different glyph or variant: nothing of it is picked.
     effect(() => {
@@ -288,7 +313,16 @@ export class FontEditorService {
     if (opened) this.load(opened.text, opened.name, opened.handle);
   }
 
-  /** Start again from config/fonts.json as built in. */
+  /** Put the font shown back as it is in config/fonts.json, as one undo step; the other fonts keep their edits. */
+  revertFont() {
+    const builtin = this.builtinFont();
+    if (!builtin || this.fontUnchanged()) return;
+    this.updateFont(() => structuredClone(builtin));
+    this.settle();
+    this.keepSelection();
+  }
+
+  /** Start again from config/fonts.json as built in, every font. */
   revert() {
     const builtin = this.builtin();
     if (builtin === null) return;

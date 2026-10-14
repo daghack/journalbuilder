@@ -14,6 +14,8 @@ function fromHash(): Mode {
 @Injectable({ providedIn: 'root' })
 export class ShellService {
   readonly mode = signal<Mode>(fromHash());
+  /** A font for the font editor to show, once it has; null once it does. */
+  readonly fontRequest = signal<string | null>(null);
 
   constructor() {
     addEventListener('hashchange', () => this.mode.set(fromHash()));
@@ -22,5 +24,11 @@ export class ShellService {
       const hash = mode === 'journal' ? '' : `#${mode}`;
       if (location.hash !== hash) history.replaceState(null, '', hash || location.pathname + location.search);
     });
+  }
+
+  /** Show the font editor, with font `name`. */
+  openFont(name: string) {
+    this.fontRequest.set(name);
+    this.mode.set('fonts');
   }
 }

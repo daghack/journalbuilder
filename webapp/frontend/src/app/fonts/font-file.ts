@@ -329,3 +329,23 @@ export function coveredKeys(fonts: FontsFile, name: string): Set<string> {
 export function isTernary(font: Font): boolean {
   return font.glyphs.length > 0 && font.glyphs.every((glyph) => /^-?\d+$/.test(glyph.key) && Math.abs(Number(glyph.key)) <= 13);
 }
+
+/** How a font in an edited fonts file differs from the built-in one. */
+export interface FontChange {
+  name: string;
+  change: 'edited' | 'added' | 'removed';
+}
+
+/** The fonts `edited` changes from `builtin`: in `edited`'s order, then those it removes. */
+export function fontChanges(edited: FontsFile, builtin: FontsFile): FontChange[] {
+  const before = new Map(builtin.map((font) => [font.name, serializeFonts([font])]));
+  const changes: FontChange[] = [];
+  for (const font of edited) {
+    const was = before.get(font.name);
+    if (was === undefined) changes.push({ name: font.name, change: 'added' });
+    else if (was !== serializeFonts([font])) changes.push({ name: font.name, change: 'edited' });
+  }
+  const names = new Set(edited.map((font) => font.name));
+  for (const font of builtin) if (!names.has(font.name)) changes.push({ name: font.name, change: 'removed' });
+  return changes;
+}

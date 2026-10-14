@@ -1,5 +1,5 @@
 import fontsJson from '../../../generated/fixtures/fonts-json';
-import { checkFonts, fallbackLoop, jsonString, parseFonts, serializeFonts, withOption, type FontsFile } from './font-file';
+import { checkFonts, fallbackLoop, fontChanges, jsonString, parseFonts, serializeFonts, withOption, type FontsFile } from './font-file';
 import { formatPath, parsePath } from './glyph-path';
 
 describe('the fonts file', () => {
@@ -66,5 +66,19 @@ describe('checking fonts', () => {
       'fonts fall back in a loop: c -> b -> c',
     ]);
     expect(fallbackLoop(fonts('{"x": {"fallback": "x", "glyphs": {}}}'), 'x')).toEqual(['x', 'x']);
+  });
+
+  it('names the fonts an edit changes, adds and removes', () => {
+    const builtin = parseFonts(fontsJson);
+    expect(fontChanges(parseFonts(fontsJson), builtin)).toEqual([]);
+    const edited = parseFonts(fontsJson).filter((font) => font.name !== 'eldritch');
+    const plain = edited.find((font) => font.name === 'plain')!;
+    plain.glyphs.find((glyph) => glyph.key === 'A')!.variants = ['M 0 0 L 1 1'];
+    edited.push({ name: 'new_font', options: [], glyphs: [] });
+    expect(fontChanges(edited, builtin)).toEqual([
+      { name: 'plain', change: 'edited' },
+      { name: 'new_font', change: 'added' },
+      { name: 'eldritch', change: 'removed' },
+    ]);
   });
 });
