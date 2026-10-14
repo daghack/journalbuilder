@@ -62,6 +62,7 @@ cd webapp/frontend && npm install && npm start
 |---|---|
 | `journals/<name>/journal_entry.rhai` | one journal per directory |
 | `journals/showcase` | a page each of every brush, font, glyph, art tool, text layout and lock type, with the calls that make them |
+| `journals/api_reference` | the API reference: an entry for every function scripts can call, with its arguments, options and defaults |
 | `locks/` | lock types, one rhai file each; see [locks/README.md](locks/README.md) |
 | `layouts/` | page layouts, one rhai file each; see [layouts/README.md](layouts/README.md) |
 | `config/fonts.json` | every font: its glyphs' SVG paths by character (a list for variants), `character_padding`, `space_width` and `fallback`; sets of symbols are fonts too |
@@ -229,6 +230,10 @@ What to know:
 `journals/showcase` shows everything there is to draw with, each example
 labelled with the calls that make it: render it with
 `target/release/journalbuild showcase`.
+
+`journals/api_reference` lists every function scripts can call, with its
+arguments, options and defaults: render it with
+`target/release/journalbuild api_reference --pdf`.
 
 The module docs in `src/journal/rhaientries/` cover each area in more
 detail: `style.rs` (brushes and styles, passes and jitter), `path.rs`

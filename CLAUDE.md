@@ -48,6 +48,37 @@ has capitals, digits and punctuation, and headings in loche (`LOCHE`);
 inks are red and near-black; text blocks are lorem ipsum; sections are
 labelled with the calls they show.
 
+## Keep the API reference up to date
+
+`journals/api_reference` is a book with an entry for every function
+journal scripts can call: its signature, its arguments and options with
+their defaults, and what it gives back. The showcase shows what calls
+draw; the reference says what they take. It must match the API exactly.
+
+Whenever a change adds, removes or changes anything scripts can call (a
+function, a method, an overload, an argument, an option or its default,
+a property, an operator, an `art::` tool, layout box styles or role
+settings, markdown span settings, what lock or layout files define or
+can call, or a `journalbuild` flag), update its `api("signature",
+"description")` entry in the same change, or add one in the section it
+belongs to. Remove entries for what's gone. Signatures can't contain a
+double quote, and both parts are written as plain text (markdown marks
+are escaped for you).
+
+`tests/api_reference.rs` fails when a function scripts can call isn't in
+any entry's signature, but it can't see options, defaults or changed
+behaviour: keep those right by hand.
+
+Then render it and look at the pages you changed (it uses only `plain`
+and `loche`, so every character must have a glyph):
+
+```bash
+./target/release/journalbuild api_reference --strict-glyphs --parchment --output-dir /tmp/api_reference
+```
+
+Body text is plain at size 26 with a constant-pressure pen: smaller, the
+plain font's dots and colons don't render.
+
 ## Checking changes
 
 `./scripts/smoke.sh` builds in release mode, runs the tests (every journal
