@@ -20,6 +20,10 @@ pub use sources::Sources;
 #[cfg(feature = "embedded-assets")]
 pub use sources::embedded;
 pub use locks::{LockLibrary, DEFAULT_LOCKS_DIR};
+/// What the web editor's lock editor asks of lock types.
+pub mod lock_inspection {
+    pub use super::locks::{from_json, to_json, value_from_test, value_view, OptionInfo, Ports, RunResult, TypeInfo, ValueView};
+}
 pub use canvas::{CanvasData, Stroke};
 pub use entry::{Entry, Page};
 pub use style::{BrushSettings, StrokeStyle};

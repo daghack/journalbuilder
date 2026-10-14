@@ -16,6 +16,9 @@ directory.
 | `unlock(o, outputs)` | `unlock` | the inputs it recovers |
 | `examples()` *(optional)* | `--check-locks`, `cargo test` | test cases, see below |
 
+A composite lock file defines `options()` and `chain(o)` instead; see
+[Composite lock files](#composite-lock-files).
+
 `o` is the options, checked against their declared types first.
 
 An input that is also an output, such as a cipher's `key`, is passed
@@ -52,7 +55,8 @@ Lock functions get and return plain rhai values. A value's type is a string:
   making, which only connects to inputs of the same type.
 
 What `lock` and `unlock` return is checked against these types, so a stray
-symbol or a missing output is reported with the lock's name and file.
+symbol or a missing output is reported with the lock's name and file. In a
+chain, an output only connects to an input of the same type (or `"Any"`).
 
 ## What a lock file can call
 
@@ -69,6 +73,50 @@ The standard rhai library (arrays, maps, strings, math), plus:
 
 There's nothing random and nothing to draw with: a lock is a function of its
 options and values alone.
+
+## Composite lock files
+
+A lock type can be other lock types wired together: a chain, as
+`new_lock(...).add(...).connect(...)` builds in a journal, saved as a lock
+file of its own. It defines `options()` and `chain(o)` instead of `inputs`,
+`outputs`, `lock` and `unlock`; `check(o)` and `examples()` work as above.
+`shift_vigenere.rhai` is one:
+
+```rhai
+fn options() {
+	#{ shift: integer(3) }
+}
+
+fn chain(o) {
+	#{
+		locks: #{
+			shift: #{ type: "shift_cipher", options: #{ base: 27, shift: o.shift } },
+			vig: #{ type: "vigenere_cipher", options: #{ cipher_base: 27, key_base: 27, plain_base: 27 } },
+		},
+		connect: [
+			["shift.cipher_text", "vig.key"],
+		],
+		fixed: #{},
+		inputs: #{ key: "shift.plain_text", plain_text: "vig.plain_text" },
+		outputs: #{ cipher_text: "vig.cipher_text", shifted_key: "vig.key" },
+	}
+}
+```
+
+- `locks`: each part's name and its `type`, with its `options` (which can
+  use the composite's own, `o`). A part can be a composite itself, but not
+  one that includes the type being defined.
+- `connect`: `[output, input]` pairs, as `.connect` takes them.
+- `fixed`: values for inputs, as `.set_input` sets them.
+- `inputs` and `outputs`: the lock type's own names for the chain's open
+  ports, those neither connected nor fixed. Every open port needs one,
+  except an output passing a fixed input straight through (a fixed key, say),
+  which unlocking puts back by itself. An input and an output can share a
+  name only when they're the same port, a value passed through.
+
+`fn layout()`, if there is one, is where the web editor's lock editor draws
+each part; the lock file is otherwise free to ignore it. The lock editor
+writes composite lock files like this one.
 
 ## Shared helpers
 

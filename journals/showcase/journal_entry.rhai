@@ -783,6 +783,8 @@ let rows = [
 	["keyed_doublering", new_lock("keyed").add("k", "keyed_doublering", #{ base: 26 }), #{ "k.plain_text": symbols(26, letters), "k.base_ordering": ordering }, "k.cipher_text"],
 	["merge_alpha", new_lock("merge").add("m", "merge_alpha", #{ base_n: 27, input_count: 2 }), #{ "m.input_0": symbols(27, "EVERY LOCK"), "m.input_1": symbols(27, " OPENS") }, "m.merged_output"],
 	["split_symbols", new_lock("split").add("s", "split_symbols", #{ base_n: 27, output_count: 2 }), #{ "s.plain_text": symbols(27, plain) }, "s.output_1"],
+	// A composite lock file: shift_cipher wired into vigenere_cipher.
+	["shift_vigenere (composite)", new_lock("composite").add("c", "shift_vigenere", #{ shift: 3 }), #{ "c.key": symbols(27, "KEY"), "c.plain_text": symbols(27, plain) }, "c.cipher_text"],
 ];
 locks.add_canvas(caption("new_lock(name).add(part, lock type, options), run: " + plain + " becomes", TOP));
 let y = TOP + 60;

@@ -1,7 +1,13 @@
 //! Lock types written in rhai, one file per type: `<locks dir>/<type>.rhai`.
 //! Lock files run in an engine of their own and work with plain rhai
 //! values; locks/README.md describes what a lock file defines. Helpers
-//! they share live in `<locks dir>/lib/`, for `import "lib/<name>"`.
+//! they share live in `<locks dir>/lib/`, for `import "lib/<name>"`. A
+//! composite lock file wires other lock types together instead (`chain`).
+
+mod chain;
+mod inspect;
+
+pub use inspect::{from_json, to_json, value_from_test, value_view, OptionInfo, Ports, RunResult, TypeInfo, ValueView};
 
 use super::{parse_type, register_maze, Maze};
 use crate::lockbuilder::{base_n_symbols, symbols_to_string, InfoVar, InfoVarSet, InfoVarType, InfoVarTypeSet, Lock};
@@ -12,6 +18,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use chain::Chain;
 
 type RhaiResult<T> = Result<T, Box<EvalAltResult>>;
 
@@ -28,6 +35,12 @@ const REQUIRED_FNS: &[(&str, usize, &str)] = &[
     ("unlock", 2, "unlock(o, outputs)"),
 ];
 
+/// The functions a composite lock file defines in their place.
+const CHAIN_FNS: &[(&str, usize, &str)] = &[
+    ("options", 0, "options()"),
+    ("chain", 1, "chain(o)"),
+];
+
 /// Each lock type's name, with its example count or its first failure.
 pub type ExampleResults = Vec<(String, Result<usize, String>)>;
 
@@ -36,6 +49,9 @@ pub struct LockLibrary {
     sources: Sources,
     engine: Engine,
     types: RefCell<HashMap<String, Rc<LockType>>>,
+    /// The composite types being built, outermost first, to catch one
+    /// that includes itself.
+    building: RefCell<Vec<String>>,
 }
 
 /// A loaded lock file.
@@ -45,6 +61,8 @@ struct LockType {
     ast: AST,
     /// The options it declares, by name.
     options: BTreeMap<String, OptionSpec>,
+    /// Whether it's a composite lock file, defining `chain(o)`.
+    composite: bool,
 }
 
 /// An option as options() declares it, with `integer()`, `string("x")`,
@@ -152,7 +170,7 @@ impl LockLibrary {
 
     /// The lock types in `sources`, with their helpers in `lib/`.
     pub fn with_sources(sources: Sources) -> Self {
-        LockLibrary { engine: lock_engine(&sources), sources, types: RefCell::default() }
+        LockLibrary { engine: lock_engine(&sources), sources, types: RefCell::default(), building: RefCell::default() }
     }
 
     /// The lock types in the directory, sorted.
@@ -178,14 +196,38 @@ impl LockLibrary {
             options: Map::new(),
             inputs: InfoVarTypeSet::new(),
             outputs: InfoVarTypeSet::new(),
+            chain: None,
         };
         lock.options = lock.checked_options(options)?;
         if lock.lock_type.defines("check", 1) {
             let _ = lock.call("check", (lock.options.clone(),))?;
         }
-        lock.inputs = lock.types("inputs")?;
-        lock.outputs = lock.types("outputs")?;
+        if lock.lock_type.composite {
+            let (chain, inputs, outputs) = self.build_chain(&lock)?;
+            lock.chain = Some(chain);
+            lock.inputs = inputs;
+            lock.outputs = outputs;
+        } else {
+            lock.inputs = lock.types("inputs")?;
+            lock.outputs = lock.types("outputs")?;
+        }
         Ok(lock)
+    }
+
+    /// The chain a composite lock's `chain(o)` describes, with its inputs
+    /// and outputs.
+    fn build_chain(self: &Rc<Self>, lock: &RhaiLock) -> Result<(Chain, InfoVarTypeSet, InfoVarTypeSet), String> {
+        let type_name = &lock.lock_type.name;
+        if let Some(start) = self.building.borrow().iter().position(|t| t == type_name) {
+            let mut path: Vec<String> = self.building.borrow()[start..].to_vec();
+            path.push(type_name.clone());
+            return Err(lock.error(format!("lock type '{}' includes itself: {}", type_name, path.join(" → "))));
+        }
+        self.building.borrow_mut().push(type_name.clone());
+        let built = lock.call("chain", (lock.options.clone(),))
+            .and_then(|spec| Chain::build(self, &lock.name, spec).map_err(|e| lock.error(format!("chain(o): {}", e))));
+        self.building.borrow_mut().pop();
+        built
     }
 
     /// Run every lock file's examples (see `check_examples`).
@@ -292,13 +334,28 @@ impl LockLibrary {
     fn load(&self, type_name: &str) -> Result<LockType, String> {
         let file = format!("{}.rhai", type_name);
         let ast = self.sources.compile(&self.engine, type_name).map_err(|e| format!("{}: {}", file, e))?;
-        let mut lock_type = LockType { name: type_name.to_string(), file, ast, options: BTreeMap::new() };
-        let missing: Vec<&str> = REQUIRED_FNS.iter()
-            .filter(|(function, params, _)| !lock_type.defines(function, *params))
-            .map(|(_, _, shown)| *shown)
-            .collect();
-        if !missing.is_empty() {
-            return Err(format!("{} doesn't define {}", lock_type.file, missing.join(", ")));
+        let mut lock_type = LockType { name: type_name.to_string(), file, ast, options: BTreeMap::new(), composite: false };
+        lock_type.composite = lock_type.defines("chain", 1);
+        let defined = |fns: &[(&str, usize, &'static str)], wanted: bool| -> Vec<&'static str> {
+            fns.iter()
+                .filter(|(function, params, _)| lock_type.defines(function, *params) == wanted)
+                .map(|(_, _, shown)| *shown)
+                .collect()
+        };
+        if lock_type.composite {
+            let missing = defined(CHAIN_FNS, false);
+            if !missing.is_empty() {
+                return Err(format!("{} doesn't define {}", lock_type.file, missing.join(", ")));
+            }
+            let extra: Vec<&str> = defined(&REQUIRED_FNS[1..], true);
+            if !extra.is_empty() {
+                return Err(format!("{} defines chain(o), so it can't also define {}", lock_type.file, extra.join(", ")));
+            }
+        } else {
+            let missing = defined(REQUIRED_FNS, false);
+            if !missing.is_empty() {
+                return Err(format!("{} doesn't define {}", lock_type.file, missing.join(", ")));
+            }
         }
         let declared = self.call(&lock_type, "options", ())
             .map_err(|e| e.located(&lock_type.file))?
@@ -364,6 +421,8 @@ pub struct RhaiLock {
     options: Map,
     inputs: InfoVarTypeSet,
     outputs: InfoVarTypeSet,
+    /// A composite lock's chain.
+    chain: Option<Chain>,
 }
 
 impl RhaiLock {
@@ -464,6 +523,9 @@ impl Lock for RhaiLock {
         self.outputs.clone()
     }
     fn lock_info(&self, inputs: &InfoVarSet) -> Result<InfoVarSet, Box<dyn Error>> {
+        if let Some(chain) = &self.chain {
+            return chain.lock(inputs).map(|(outputs, _)| outputs).map_err(|e| self.error(e).into());
+        }
         let args = self.script_values(inputs, &self.inputs)?;
         let returned = self.call("lock", (self.options.clone(), args))?;
         let outputs = self.returned_values("lock", returned, &self.outputs, "output")?;
@@ -473,6 +535,9 @@ impl Lock for RhaiLock {
         Ok(outputs)
     }
     fn unlock_info(&self, outputs: &InfoVarSet) -> Result<InfoVarSet, Box<dyn Error>> {
+        if let Some(chain) = &self.chain {
+            return chain.unlock(outputs).map(|(inputs, _)| inputs).map_err(|e| self.error(e).into());
+        }
         let args = self.script_values(outputs, &self.outputs)?;
         let returned = self.call("unlock", (self.options.clone(), args))?;
         let mut inputs = self.returned_values("unlock", returned, &self.inputs, "input")?;
@@ -504,6 +569,9 @@ fn lock_engine(sources: &Sources) -> Engine {
     // Option types for options(): integer() is a required integer,
     // integer(3) one that defaults to 3, and so on.
     engine.register_type_with_name::<OptionSpec>("OptionSpec");
+    // What chain(o) sees in place of each option when the editor reads a
+    // composite lock file back (LockLibrary::read_chain).
+    engine.register_type_with_name::<inspect::OptionRef>("OptionRef");
     let kinds = [
         // Not int(): rhai's int(x) is the integral part of a float.
         ("integer", OptionKind::Int),
@@ -727,6 +795,131 @@ fn lock(o, i) {{
 }}
 fn unlock(o, out) {{ #{{ text: out.out }} }}
 "#, body)
+    }
+
+    #[test]
+    fn any_connects_to_every_type() {
+        const ANY: &str = r#"
+            fn options() { #{} }
+            fn inputs(o) { #{ value: "Any" } }
+            fn outputs(o) { #{ value: "Any" } }
+            fn lock(o, i) { #{ value: i.value } }
+            fn unlock(o, out) { #{ value: out.value } }
+        "#;
+        let dir = TempLocks::new("any", &[("echo", ECHO), ("any", ANY)]);
+        let library = dir.library();
+        let mut locks: HashMap<String, Rc<dyn Lock>> = HashMap::new();
+        locks.insert("e".into(), Rc::new(library.build("e", "echo", base(27)).unwrap()));
+        locks.insert("a".into(), Rc::new(library.build("a", "any", Map::new()).unwrap()));
+        locks.insert("b".into(), Rc::new(library.build("b", "echo", base(10)).unwrap()));
+        let wires = vec![("e.out".to_string(), "a.value".to_string()), ("a.value".to_string(), "b.text".to_string())];
+        let chain = crate::lockbuilder::CompositeLock::new("c".into(), locks.clone(), wires).expect("Any fits every type");
+        let given = values(&[("e.text", syms(27, "HI")), ("e.key", syms(27, "K")), ("b.key", syms(10, "1"))]);
+        assert!(chain.lock_info(&given).is_ok());
+        let mismatched = vec![("e.out".to_string(), "b.text".to_string())];
+        let err = crate::lockbuilder::CompositeLock::new("c".into(), locks, mismatched).err().unwrap().to_string();
+        assert_eq!(err, "can't connect e.out (Base27Symbol) to b.text (Base10Symbol)");
+    }
+
+    const SHIFT: &str = include_str!("../../../../locks/shift_cipher.rhai");
+    const VIGENERE: &str = include_str!("../../../../locks/vigenere_cipher.rhai");
+
+    /// A composite lock file: `options` and `chain`, with `chain`'s body.
+    fn chain_file(options: &str, body: &str) -> String {
+        format!("fn options() {{ #{{ {} }} }}\nfn chain(o) {{\n{}\n}}\n", options, body)
+    }
+
+    const KEYED: &str = r#"
+        #{
+            locks: #{
+                shift: #{ type: "shift_cipher", options: #{ base: 27, shift: o.shift } },
+                vig: #{ type: "vigenere_cipher", options: #{ cipher_base: 27, key_base: 27, plain_base: 27 } },
+            },
+            connect: [["shift.cipher_text", "vig.key"]],
+            inputs: #{ key: "shift.plain_text", text: "vig.plain_text" },
+            outputs: #{ cipher: "vig.cipher_text", shifted: "vig.key" },
+        }
+    "#;
+
+    fn chain_dir(test: &str, extra: &[(&str, &str)]) -> TempLocks {
+        let keyed = chain_file("shift: integer(1)", KEYED);
+        let mut files = vec![("shift_cipher", SHIFT), ("vigenere_cipher", VIGENERE), ("keyed", keyed.as_str())];
+        files.extend_from_slice(extra);
+        TempLocks::new(test, &files)
+    }
+
+    #[test]
+    fn composite_lock_files_lock_and_unlock() {
+        let dir = chain_dir("chain", &[]);
+        let library = dir.library();
+        let lock = library.build("k", "keyed", options(&[("shift", Dynamic::from_int(2))])).unwrap();
+        let mut inputs: Vec<(&String, String)> = lock.inputs.iter().map(|(k, t)| (k, t.to_string())).collect();
+        inputs.sort();
+        assert_eq!(format!("{:?}", inputs), r#"[("key", "Base27Symbol"), ("text", "Base27Symbol")]"#);
+        let mut outputs: Vec<&String> = lock.outputs.keys().collect();
+        outputs.sort();
+        assert_eq!(outputs, ["cipher", "shifted"]);
+
+        let given = values(&[("key", syms(27, "AB")), ("text", syms(27, "HELLO"))]);
+        let locked = lock.lock_info(&given).unwrap();
+        assert_eq!(text(&locked["shifted"]), "CD");
+        assert_eq!(text(&locked["cipher"]), "KIOPR");
+        let back = lock.unlock_info(&locked).unwrap();
+        assert_eq!((text(&back["key"]), text(&back["text"])), ("AB".to_string(), "HELLO".to_string()));
+    }
+
+    #[test]
+    fn composite_lock_files_nest_and_fix_values() {
+        let outer = chain_file("", r#"
+            #{
+                locks: #{
+                    inner: #{ type: "keyed", options: #{ shift: 1 } },
+                    again: #{ type: "vigenere_cipher", options: #{ cipher_base: 27, key_base: 27, plain_base: 27 } },
+                },
+                connect: [["inner.cipher", "again.plain_text"]],
+                fixed: #{ "again.key": symbols(27, "Z") },
+                inputs: #{ key: "inner.key", text: "inner.text" },
+                outputs: #{ cipher: "again.cipher_text", shifted: "inner.shifted" },
+            }
+        "#);
+        let dir = chain_dir("nest", &[("outer", outer.as_str())]);
+        let library = dir.library();
+        let lock = library.build("o", "outer", Map::new()).unwrap();
+        let given = values(&[("key", syms(27, "A")), ("text", syms(27, "HI"))]);
+        let locked = lock.lock_info(&given).unwrap();
+        // again.key passes the fixed Z through, unshown; unlocking puts it back.
+        assert_eq!(locked.len(), 2);
+        let back = lock.unlock_info(&locked).unwrap();
+        assert_eq!(text(&back["text"]), "HI");
+    }
+
+    #[test]
+    fn composite_lock_files_reject_mistakes() {
+        let cases = [
+            ("loops", r#"#{ locks: #{ a: #{ type: "loops" } }, inputs: #{}, outputs: #{} }"#, "lock type 'loops' includes itself: loops → loops"),
+            ("extra_key", r#"#{ locks: #{}, inputs: #{}, outputs: #{}, wires: [] }"#, "chain(o) returned 'wires'; it returns locks, connect, fixed, inputs, outputs"),
+            ("no_type", r#"#{ locks: #{ a: #{} }, inputs: #{}, outputs: #{} }"#, "locks: 'a' needs its type"),
+            ("unshown", r#"#{ locks: #{ a: #{ type: "shift_cipher", options: #{ base: 27, shift: 1 } } }, inputs: #{}, outputs: #{ c: "a.cipher_text" } }"#, "inputs: the chain's open input a.plain_text needs a name here"),
+            ("not_open", r#"#{ locks: #{ a: #{ type: "shift_cipher", options: #{ base: 27, shift: 1 } } }, inputs: #{ p: "a.plain_text", q: "a.nope" }, outputs: #{ c: "a.cipher_text" } }"#, "inputs: 'q' is a.nope, which isn't an open input of the chain; open: a.plain_text"),
+            ("twice", r#"#{ locks: #{ a: #{ type: "shift_cipher", options: #{ base: 27, shift: 1 } } }, inputs: #{ p: "a.plain_text" }, outputs: #{ c: "a.cipher_text", d: "a.cipher_text" } }"#, "outputs: a.cipher_text is shown twice, as 'c' and 'd'"),
+            ("bad_fixed", r#"#{ locks: #{ a: #{ type: "shift_cipher", options: #{ base: 27, shift: 1 } } }, fixed: #{ "a.plain_text": [99] }, inputs: #{}, outputs: #{ c: "a.cipher_text" } }"#, "fixed: 'a.plain_text': symbol 99 (item 0) is outside Base27's 0-26"),
+            ("clash", r#"#{ locks: #{ a: #{ type: "shift_cipher", options: #{ base: 27, shift: 1 } } }, inputs: #{ x: "a.plain_text" }, outputs: #{ x: "a.cipher_text" } }"#, "'x' is both an input (a.plain_text) and an output (a.cipher_text)"),
+            ("bad_option", r#"#{ locks: #{ a: #{ type: "shift_cipher", options: #{ base: 27 } } }, inputs: #{}, outputs: #{} }"#, "lock 'c.a' (shift_cipher.rhai): missing option 'shift' (an integer)"),
+        ];
+        let files: Vec<(String, String)> = cases.iter().map(|(name, body, _)| (name.to_string(), chain_file("", body))).collect();
+        let extra: Vec<(&str, &str)> = files.iter().map(|(name, source)| (name.as_str(), source.as_str())).collect();
+        let dir = chain_dir("chain_mistakes", &extra);
+        let library = dir.library();
+        for (name, _, expected) in cases {
+            let err = library.build("c", name, Map::new()).err().unwrap_or_else(|| panic!("{} should fail", name));
+            assert!(err.contains(expected), "{}: expected {:?} in: {}", name, expected, err);
+            assert!(err.starts_with(&format!("lock 'c' ({}.rhai): chain(o): ", name)), "{}: {}", name, err);
+        }
+
+        let both = format!("{}\nfn lock(o, i) {{ i }}", chain_file("", KEYED));
+        let dir = chain_dir("chain_and_lock", &[("both", both.as_str())]);
+        let err = dir.library().build("b", "both", Map::new()).err().unwrap();
+        assert_eq!(err, "both.rhai defines chain(o), so it can't also define lock(o, inputs)");
     }
 
     #[test]

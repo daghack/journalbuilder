@@ -16,10 +16,11 @@
 mod library;
 
 pub use library::{LockLibrary, DEFAULT_LOCKS_DIR};
+pub use library::{from_json, to_json, value_from_test, value_view, OptionInfo, Ports, RunResult, TypeInfo, ValueView};
 
 use rhai::{Array, CustomType, Dynamic, Engine, EvalAltResult, Map, TypeBuilder};
 use crate::lockbuilder::{
-    base_n_symbols, symbols_to_string, CompositeLock, InfoVar, InfoVarSet, InfoVarType, Lock,
+    base_n_symbols, compatible, symbols_to_string, CompositeLock, InfoVar, InfoVarSet, InfoVarType, Lock,
 };
 use crate::journal::canvas::artistic::{BuiltMaze, MazeTraversalStrategy};
 use rand::Fill;
@@ -87,18 +88,7 @@ impl LockBuilder {
     }
 
     fn compile(&self) -> Result<CompositeLock, String> {
-        let mut lock = CompositeLock::new(self.name.clone(), self.locks.clone(), self.connections.clone())
-            .map_err(|e| e.to_string())?;
-        let open = lock.inputs();
-        for (name, value) in &self.fixed_inputs {
-            let expected = open.get(name)
-                .ok_or_else(|| format!("'{}' isn't an open input; open inputs: {}", name, sorted_names_of(open.keys())))?;
-            if *expected != InfoVarType::MatchAll && value.var_type != *expected {
-                return Err(format!("'{}' expects {}, got {}", name, type_name(expected), type_name(&value.var_type)));
-            }
-            lock.add_static_input(name.clone(), value.clone());
-        }
-        Ok(lock)
+        compose(&self.name, self.locks.clone(), self.connections.clone(), &self.fixed_inputs)
     }
 
     fn add(&mut self, name: &str, type_name: &str, options: Map) -> RhaiResult<Self> {
@@ -116,10 +106,9 @@ impl LockBuilder {
     }
 
     fn connect(&mut self, from: &str, to: &str) -> RhaiResult<Self> {
+        // CompositeLock::new checks the ports exist, their types match, the
+        // input isn't already wired and nothing loops.
         self.update("connect", |next| {
-            if next.connections.iter().any(|(_, input)| input == to) {
-                return Err(format!("input '{}' is already connected", to));
-            }
             next.connections.push((from.to_string(), to.to_string()));
             Ok(())
         })
@@ -184,6 +173,22 @@ impl CustomType for LockBuilder {
             .with_fn("unlock", Self::unlock)
             .with_fn("unlock", Self::unlock_map);
     }
+}
+
+/// A chain of `locks` wired by `connections`, with `fixed` values for some
+/// of its open inputs: what `new_lock` builds, and composite lock files too.
+pub(crate) fn compose(name: &str, locks: HashMap<String, Rc<dyn Lock>>, connections: Vec<(String, String)>, fixed: &[(String, InfoVar)]) -> Result<CompositeLock, String> {
+    let mut lock = CompositeLock::new(name.to_string(), locks, connections).map_err(|e| e.to_string())?;
+    let open = lock.inputs();
+    for (name, value) in fixed {
+        let expected = open.get(name)
+            .ok_or_else(|| format!("'{}' isn't an open input; open inputs: {}", name, sorted_names_of(open.keys())))?;
+        if !compatible(&value.var_type, expected) {
+            return Err(format!("'{}' expects {}, got {}", name, type_name(expected), type_name(&value.var_type)));
+        }
+        lock.add_static_input(name.clone(), value.clone());
+    }
+    Ok(lock)
 }
 
 /// A value flowing through a lock: symbols in some base, a maze, or a
@@ -412,11 +417,7 @@ fn symbols(base: i64, text: &str) -> RhaiResult<LockValue> {
 }
 
 fn type_name(var_type: &InfoVarType) -> String {
-    match var_type {
-        InfoVarType::BaseNSymbol(base) => format!("Base{}Symbol", base),
-        InfoVarType::MatchAll => "Any".to_string(),
-        InfoVarType::Named(name) => name.clone(),
-    }
+    var_type.to_string()
 }
 
 /// The type a lock file names, the reverse of `type_name`: "Base27Symbol",
@@ -748,6 +749,67 @@ mod tests {
     fn maze_rejects_non_maze_values() {
         let err = error("let ok = 1;\nsymbols(27, \"HI\").maze();");
         assert!(err.contains("isn't a maze") && err.contains("line 2"), "{}", err);
+    }
+
+    #[test]
+    fn one_output_feeds_several_inputs_of_one_lock() {
+        let script = r#"
+            let lock = new_lock("fan")
+                .add("s", "shift_cipher", #{ base: 27, shift: 1 })
+                .add("m", "merge_alpha", #{ base_n: 27, input_count: 2 })
+                .connect("s.cipher_text", "m.input_0")
+                .connect("s.cipher_text", "m.input_1");
+            let result = lock.run(#{ "s.plain_text": symbols(27, "AB") });
+            [result.text("m.merged_output"), lock.unlock(result).text("s.plain_text")]
+        "#;
+        let parts: Vec<String> = eval::<Array>(script).into_iter().map(|v| v.cast::<String>()).collect();
+        assert_eq!(parts, vec!["BCBC", "AB"]);
+    }
+
+    #[test]
+    fn diamonds_run_and_unlock() {
+        let script = r#"
+            let lock = new_lock("diamond")
+                .add("a", "shift_cipher", #{ base: 27, shift: 1 })
+                .add("b", "shift_cipher", #{ base: 27, shift: 1 })
+                .add("c", "shift_cipher", #{ base: 27, shift: 2 })
+                .add("m", "merge_alpha", #{ base_n: 27, input_count: 2 })
+                .connect("a.cipher_text", "b.plain_text")
+                .connect("a.cipher_text", "c.plain_text")
+                .connect("b.cipher_text", "m.input_0")
+                .connect("c.cipher_text", "m.input_1");
+            let result = lock.run(#{ "a.plain_text": symbols(27, "AB") });
+            [result.text("m.merged_output"), lock.unlock(result).text("a.plain_text")]
+        "#;
+        let parts: Vec<String> = eval::<Array>(script).into_iter().map(|v| v.cast::<String>()).collect();
+        assert_eq!(parts, vec!["CDDE", "AB"]);
+    }
+
+    #[test]
+    fn connections_need_matching_types_one_wire_per_input_and_no_loops() {
+        let cases = [
+            (
+                "let l = new_lock(\"x\").add(\"d\", \"doublering\", #{ canonical_order: \"ABCDEFGHIJKLMNOPQRSTUVWXYZ\" })\n    .add(\"v\", \"vigenere_cipher\", #{ plain_base: 27, key_base: 27, cipher_base: 27 });\nl.connect(\"d.cipher_text\", \"v.key\");",
+                "can't connect d.cipher_text (Base26Symbol) to v.key (Base27Symbol)",
+            ),
+            (
+                "let l = new_lock(\"x\").add(\"a\", \"shift_cipher\", #{ base: 27, shift: 1 }).add(\"b\", \"shift_cipher\", #{ base: 27, shift: 1 })\n    .connect(\"a.cipher_text\", \"b.plain_text\");\nl.connect(\"b.cipher_text\", \"a.plain_text\");",
+                "the connections make a loop through lock",
+            ),
+            (
+                "let ok = 1;\nlet l = new_lock(\"x\").add(\"a\", \"shift_cipher\", #{ base: 27, shift: 1 });\nl.connect(\"a.cipher_text\", \"a.plain_text\");",
+                "the connections make a loop through lock 'a'",
+            ),
+            (
+                "let l = new_lock(\"x\").add(\"a\", \"shift_cipher\", #{ base: 27, shift: 1 }).add(\"b\", \"shift_cipher\", #{ base: 27, shift: 1 })\n    .connect(\"a.cipher_text\", \"b.plain_text\");\nl.connect(\"a.cipher_text\", \"b.plain_text\");",
+                "input 'b.plain_text' is already connected",
+            ),
+        ];
+        for (script, expected) in cases {
+            let err = error(script);
+            assert!(err.contains(expected), "expected {:?} in: {}", expected, err);
+            assert!(err.contains("line 3"), "expected line 3 in: {}", err);
+        }
     }
 
     #[test]

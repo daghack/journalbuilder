@@ -2,11 +2,12 @@
 //! values and backward to unlock them. Lock types are rhai lock files (see
 //! `journal::rhaientries::LockLibrary`); values are rhai values.
 
+use petgraph::algo::toposort;
 use petgraph::graph::{DiGraph, NodeIndex};
-use petgraph::visit::{DfsPostOrder, Walker};
+use petgraph::visit::DfsPostOrder;
 use rhai::Dynamic;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::rc::Rc;
 
@@ -36,6 +37,23 @@ pub enum InfoVarType {
     MatchAll,
     /// Any other type, by the name lock files give it, e.g. "Maze".
     Named(String),
+}
+
+impl std::fmt::Display for InfoVarType {
+    /// The type's name as lock files write it: "Base27Symbol", "Any", "Maze".
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InfoVarType::BaseNSymbol(base) => write!(f, "Base{}Symbol", base),
+            InfoVarType::MatchAll => write!(f, "Any"),
+            InfoVarType::Named(name) => write!(f, "{}", name),
+        }
+    }
+}
+
+/// Whether a value of type `a` can go where `b` is expected: the same type,
+/// or either is Any.
+pub fn compatible(a: &InfoVarType, b: &InfoVarType) -> bool {
+    a == b || *a == InfoVarType::MatchAll || *b == InfoVarType::MatchAll
 }
 
 /// A value in a lock chain: its type, and the rhai value itself.
@@ -145,9 +163,12 @@ impl LockExecutionGraph {
         let mut current_variable_values = HashMap::new();
         let mut hashmap_trace = HashMap::new();
         let mut computed_variable_values : HashMap<String, InfoVar> = HashMap::new();
+        // One walk over every start, so each node runs once and a value wired
+        // to several inputs is there for all of them.
+        let mut walk = DfsPostOrder::empty(&self.graph);
         for start_node in &self.starts {
-            let nodewalker = DfsPostOrder::new(&self.graph, *start_node);
-            for node_id in nodewalker.iter(&self.graph) {
+            walk.move_to(*start_node);
+            while let Some(node_id) = walk.next(&self.graph) {
                 let node = self.graph.node_weight(node_id).ok_or("Node not found while executiong lock.")?;
                 match &node.node_type {
                     LockNodeType::Input((input_name, input_type)) => {
@@ -177,7 +198,7 @@ impl LockExecutionGraph {
                         }
                     },
                     LockNodeType::Remap((output, input)) => {
-                        let output = current_variable_values.remove(output).ok_or(format!("Output {} not found in current variable values", output))?;
+                        let output = current_variable_values.get(output).cloned().ok_or(format!("Output {} not found in current variable values", output))?;
                         current_variable_values.insert(input.clone(), output.clone());
                         hashmap_trace.insert(input.clone(), output.clone());
                     },
@@ -245,16 +266,20 @@ impl CompositeLock {
         }
         let mut remaining_inputs = input_set.clone();
         let mut remaining_outputs = output_set.clone();
+        let mut wired = HashSet::new();
         for (output, input) in &connections {
-            if !output_set.contains_key(output) {
-                return Err(format!("Output {} does not exist", output).into());
+            let output_type = output_set.get(output).ok_or_else(|| format!("Output {} does not exist", output))?;
+            let input_type = input_set.get(input).ok_or_else(|| format!("Input {} does not exist", input))?;
+            if !compatible(output_type, input_type) {
+                return Err(format!("can't connect {} ({}) to {} ({})", output, output_type, input, input_type).into());
             }
-            if !input_set.contains_key(input) {
-                return Err(format!("Input {} does not exist", input).into());
+            if !wired.insert(input) {
+                return Err(format!("input '{}' is already connected", input).into());
             }
             remaining_inputs.remove(input);
             remaining_outputs.remove(output);
         }
+        check_for_loops(&locks, &connections)?;
         let mut cl = CompositeLock {
             name,
             locks,
@@ -275,12 +300,18 @@ impl CompositeLock {
         let mut graph = LockExecutionGraph::new();
         let mut input_indices = HashMap::new();
         let mut output_indices = HashMap::new();
-        for (lock_name, lock) in &self.locks {
+        let mut locks: Vec<(&String, &Rc<dyn Lock>)> = self.locks.iter().collect();
+        locks.sort_by(|a, b| a.0.cmp(b.0));
+        for (lock_name, lock) in locks {
+            let mut lock_inputs: Vec<(String, InfoVarType)> = lock.inputs().into_iter().collect();
+            lock_inputs.sort_by(|a, b| a.0.cmp(&b.0));
+            let mut lock_outputs: Vec<(String, InfoVarType)> = lock.outputs().into_iter().collect();
+            lock_outputs.sort_by(|a, b| a.0.cmp(&b.0));
             // add the lock node
             let lock_node = LockNode{ name: lock_name.clone(), node_type: LockNodeType::Lock(lock.clone(), false) };
             let lock_node_index = graph.add_node(lock_node);
             // add the inputs as produce nodes
-            for (input_name, input_type) in lock.inputs() {
+            for (input_name, input_type) in lock_inputs {
                 let input_name = format!("{}.{}", lock_name, input_name);
                 let input_node = LockNode{name: input_name.clone(), node_type: LockNodeType::Input((input_name.to_string(), input_type))};
                 let input_node_index = graph.add_node(input_node);
@@ -288,7 +319,7 @@ impl CompositeLock {
                 graph.add_edge(lock_node_index, input_node_index, ());
             }
             // add the outputs as produce nodes
-            for (output_name, output_type) in lock.outputs() {
+            for (output_name, output_type) in lock_outputs {
                 let output_name = format!("{}.{}", lock_name, output_name);
                 let output_node = LockNode{name: output_name.clone(), node_type: LockNodeType::Output((output_name.to_string(), output_type))};
                 let output_node_index = graph.add_node(output_node);
@@ -313,19 +344,14 @@ impl CompositeLock {
             graph.add_edge(remap_node_index, *output_index, ());
             graph.add_edge(*input_index, remap_node_index, ());
         }
-        let starts = output_indices.values().cloned().collect();
-        graph.set_starts(starts);
+        graph.set_starts(by_name(&output_indices, output_indices.keys()));
         (graph, input_indices, output_indices)
     }
     pub fn generate_unlock_graph(&self) -> LockExecutionGraph {
         let (mut exec_graph, input_indices, _output_indices) = self.generate_lock_graph();
         exec_graph.graph.reverse();
-        let mut starts = Vec::new();
         let inputs = self.inputs();
-        for (input_name, _) in inputs {
-            let input_index = input_indices.get(&input_name).unwrap();
-            starts.push(*input_index);
-        }
+        let starts = by_name(&input_indices, inputs.keys());
         // we also need to loop over all the nodes and if they are a remap node, we need to reverse the remap
         // so that it is Remap((input, output)) instead of Remap((output, input))
         // we also need to change the input and output nodes to be the opposite
@@ -371,7 +397,7 @@ impl CompositeLock {
             if !resulting_vars.contains_key(output_name) {
                 return Err(format!("Output {} is missing", output_name).into());
             }
-            if resulting_vars.get(output_name).ok_or("Output not found")?.var_type != *output_type {
+            if !compatible(&resulting_vars.get(output_name).ok_or("Output not found")?.var_type, output_type) {
                 return Err(format!("Output {} has the wrong type", output_name).into());
             }
             let output_var = resulting_vars.get(output_name).ok_or("Output not found")?.clone();
@@ -403,7 +429,7 @@ impl CompositeLock {
             if !resulting_vars.contains_key(input_name) {
                 return Err(format!("Input {} is missing", input_name).into());
             }
-            if resulting_vars.get(input_name).ok_or("Input not found")?.var_type != *input_type {
+            if !compatible(&resulting_vars.get(input_name).ok_or("Input not found")?.var_type, input_type) {
                 return Err(format!("Input {} has the wrong type", input_name).into());
             }
             let input_var = resulting_vars.get(input_name).ok_or("Input not found")?.clone();
@@ -411,6 +437,32 @@ impl CompositeLock {
         }
         Ok((input_vars, var_trace))
     }
+}
+
+/// The nodes for `names`, sorted by name, so runs walk the graph in the same
+/// order every time.
+fn by_name<'a>(indices: &HashMap<String, NodeIndex>, names: impl Iterator<Item = &'a String>) -> Vec<NodeIndex> {
+    let mut names: Vec<&String> = names.collect();
+    names.sort();
+    names.into_iter().filter_map(|name| indices.get(name).copied()).collect()
+}
+
+/// An error if the connections feed a lock's outputs back into itself,
+/// directly or through other locks.
+fn check_for_loops(locks: &HashMap<String, Rc<dyn Lock>>, connections: &[(String, String)]) -> Result<(), Box<dyn Error>> {
+    let mut names: Vec<&String> = locks.keys().collect();
+    names.sort();
+    let mut graph = DiGraph::<&str, ()>::new();
+    let nodes: HashMap<&str, NodeIndex> = names.iter().map(|name| (name.as_str(), graph.add_node(name.as_str()))).collect();
+    let lock_of = |port: &str| port.split_once('.').map(|(lock, _)| lock).and_then(|lock| nodes.get(lock).copied());
+    for (output, input) in connections {
+        if let (Some(from), Some(to)) = (lock_of(output), lock_of(input)) {
+            graph.add_edge(from, to, ());
+        }
+    }
+    toposort(&graph, None).map(|_| ()).map_err(|cycle| {
+        format!("the connections make a loop through lock '{}'", graph[cycle.node_id()]).into()
+    })
 }
 
 impl std::fmt::Debug for CompositeLock {
