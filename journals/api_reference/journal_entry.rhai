@@ -352,7 +352,7 @@ let pages = new_layout("reference", Fn("reference_page")).typeset(#{
 		heading: #{ font: LOCHE, style: HEADING, size: 90, align: "center", valign: "center" },
 		subtitle: #{ font: PLAIN, style: TEXT, size: 30 },
 		head: #{ font: LOCHE, style: HEADING, size: 40 },
-		body: #{ font: PLAIN, style: TEXT, size: 26, line_height: 1.3, paragraph_gap: 0.6 },
+		body: #{ font: PLAIN, style: TEXT, size: 26, line_height: 1.3, paragraph_gap: 0.6, spacing: 0.04 },
 		rule: #{ style: CAPTION },
 		folio: #{ font: PLAIN, style: TEXT, size: 26 },
 	},
