@@ -13,8 +13,7 @@ import { ShellService } from '../shell/shell.service';
     @if (journal.evaluating()) { <span class="busy" title="Running the script">running…</span> }
     <button type="button" (click)="newJournal()" title="Start a new, blank journal">New</button>
     <button type="button" (click)="journal.open()" title="Open a script (Ctrl/⌘ O)">Open</button>
-    <button type="button" (click)="journal.save()" title="Save (Ctrl/⌘ S)">Save</button>
-    <button type="button" (click)="journal.save(true)" title="Save as (Ctrl/⌘ Shift S)">Save as</button>
+    <button type="button" (click)="journal.save()" title="Save to a file you pick (Ctrl/⌘ S)">Save</button>
     <select aria-label="Open an example" (change)="pick($any($event.target))">
       <option value="">Examples…</option>
       @for (name of examples(); track name) { <option [value]="name">{{ name }}</option> }
@@ -50,7 +49,7 @@ export class TopBarComponent {
     if (!name) return;
     if (!this.discard()) return;
     const source = await loadExample(name);
-    if (source !== null) this.journal.load(`${name}.rhai`, source, null);
+    if (source !== null) this.journal.load(`${name}.rhai`, source);
   }
 
   /** Whether it's fine to replace the script: it's saved, or the user says to throw its changes away. */
@@ -63,7 +62,7 @@ export class TopBarComponent {
     const key = event.key.toLowerCase();
     if (key === 's') {
       event.preventDefault();
-      void this.journal.save(event.shiftKey);
+      void this.journal.save();
     } else if (key === 'o') {
       event.preventDefault();
       void this.journal.open();

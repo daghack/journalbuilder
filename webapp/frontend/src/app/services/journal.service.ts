@@ -1,7 +1,7 @@
 import { Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
 import type { Evaluation, PageView, ScriptError } from '../scribe';
 import { ShellService } from '../shell/shell.service';
-import { FileService, type OpenedFile } from './file.service';
+import { FileService } from './file.service';
 import { RenderService } from './render.service';
 import { WorkspaceService } from './workspace.service';
 
@@ -38,7 +38,6 @@ export class JournalService {
   /** The source as last opened or saved; null if never. */
   private readonly savedSource = signal<string | null>(null);
   readonly dirty = computed(() => this.source() !== (this.savedSource() ?? ''));
-  private fileHandle: OpenedFile['handle'] = null;
 
   readonly pages = signal<Page[]>([]);
   readonly selectedIndex = signal(0);
@@ -88,7 +87,7 @@ export class JournalService {
       this.setSource(draft.source, true);
     } else {
       const { name, source } = await fallback();
-      this.load(name, source, null);
+      this.load(name, source);
     }
   }
 
@@ -110,8 +109,7 @@ export class JournalService {
   }
 
   /** Show `source` as a newly opened script, `name`. */
-  load(name: string, source: string, handle: OpenedFile['handle']) {
-    this.fileHandle = handle;
+  load(name: string, source: string) {
     this.fileName.set(name);
     this.savedSource.set(source);
     this.selectedIndex.set(0);
@@ -120,7 +118,6 @@ export class JournalService {
 
   /** Start a new, unsaved journal with one blank page. */
   newJournal() {
-    this.fileHandle = null;
     this.fileName.set('untitled.rhai');
     this.savedSource.set(null);
     this.selectedIndex.set(0);
@@ -129,15 +126,14 @@ export class JournalService {
 
   async open() {
     const file = await this.files.open();
-    if (file) this.load(file.name, file.text, file.handle);
+    if (file) this.load(file.name, file.text);
   }
 
-  /** Save to the file it came from, or (`as`, or if there isn't one) where the user picks. */
-  async save(as = false) {
+  /** Save where the user picks, suggesting the script's name. */
+  async save() {
     const source = this.source();
-    const saved = await this.files.save(source, this.fileName(), as ? null : this.fileHandle);
+    const saved = await this.files.save(source, this.fileName(), null);
     if (!saved) return;
-    this.fileHandle = saved.handle;
     this.fileName.set(saved.name);
     this.savedSource.set(source);
     this.saveDraft();
