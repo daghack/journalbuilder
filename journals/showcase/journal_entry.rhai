@@ -7,7 +7,8 @@
 //   fonts     every font, its alphabet and a line, font settings,
 //             italics and spacing by outlines, and glyphs placed by hand
 //   glyphs    every variant of every glyph of every font
-//   art       shapes and paths, hatching, vectors, mazes, snakes, brambles
+//   art       shapes and paths, hatching, vectors, mazes, snakes, brambles,
+//             eyes
 //   text      text boxes, text kept clear of drawings, text along paths
 //             (turned to them or held at an angle), scattered notes,
 //             words split round drawings
@@ -603,6 +604,39 @@ art.add_path(along.leaves, new_style(1, GREEN, PEN));
 art.add_path(along.flowers, LINE);
 art.add_canvas(caption("art::snake_along the same maze", 860));
 art.add_path(art::snake_along(maze_lines.copy().translate_by(new_vec(LEFT + 110, 940)), 40, 2), LINE);
+book.bind("art", art);
+
+// Eyes as sketched in a journal, inked and washed with a colour:
+// art::eye(center, length, color, gaze_angle, messiness, seed) gives a
+// canvas. Messiness runs from 0 (each line once, true) to 1 (gone over and
+// over, overshooting); the gaze angle is on the page, in radians.
+let art = sheet("art");
+art.add_canvas(caption("art::eye(center, length, color, gaze_angle, messiness, seed): messiness 0, 0.25, 0.5, 0.75, 1", TOP));
+for (m, i) in [0.0, 0.25, 0.5, 0.75, 1.0] {
+	art.add_canvas(art::eye(new_vec(LEFT + 95 + i * 205, TOP + 110), 150, BLUE, -PI() / 4.0, m, 3 + i));
+}
+art.add_canvas(caption("gaze angles: right, down, left, up; the same seed looking each way", TOP + 220));
+for (g, i) in [0.0, PI() / 2.0, PI(), -PI() / 2.0] {
+	art.add_canvas(art::eye(new_vec(LEFT + 115 + i * 255, TOP + 330), 200, BLUE, g, 0.4, 11));
+}
+// Options: angle tilts the eye, gaze is how far it looks (0 to 1),
+// openness is its height over its length, and ink styles its lines. Where
+// the lids cover the iris, it's hidden.
+art.add_canvas(caption("#{ angle, gaze, openness, ink }", TOP + 440));
+art.add_canvas(art::eye(new_vec(LEFT + 150, TOP + 610), 300, BLUE, 0.0, 0.5, 4, #{ angle: -0.5, gaze: 0.0 }));
+art.add_canvas(art::eye(new_vec(LEFT + 490, TOP + 610), 300, BLUE, PI(), 0.5, 4, #{ gaze: 1.0, openness: 0.22 }));
+art.add_canvas(art::eye(new_vec(LEFT + 830, TOP + 610), 280, RED, 0.3, 0.6, 4, #{ angle: 1.3, openness: 0.5, ink: new_style(1, INK, PEN) }));
+art.add_canvas(write("angle -0.5, gaze 0", LEFT + 40, TOP + 790, 20));
+art.add_canvas(write("gaze 1, openness 0.22", LEFT + 380, TOP + 790, 20));
+art.add_canvas(write("angle 1.3, openness 0.5, ink", LEFT + 690, TOP + 790, 20));
+// A crowd of them, overlapping as they come.
+art.add_canvas(caption("a page of eyes, messy and overlapping", TOP + 850));
+seed(5);
+for i in 0..10 {
+	let at = new_vec(LEFT + 110 + (i % 5) * 195 + random_range(-30, 30), TOP + 980 + (i / 5) * 190 + random_range(-30, 30));
+	let colour = if i % 4 == 3 { RED } else { BLUE };
+	art.add_canvas(art::eye(at, random_range(150, 240), colour, random_range(-PI(), PI()), random_range(0.5, 1.0), i, #{ angle: random_range(-1.0, 1.0), gaze: random() }));
+}
 book.bind("art", art);
 
 // ---- text ----
