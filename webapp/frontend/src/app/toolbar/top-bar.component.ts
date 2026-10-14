@@ -2,7 +2,7 @@ import { Component, inject, signal } from '@angular/core';
 import { JournalService } from '../services/journal.service';
 import { ShellService } from '../shell/shell.service';
 
-/** Above the editor: the file's name, open and save, and the repository's journals as examples. */
+/** Above the editor: the file's name, new, open and save, and the repository's journals as examples. */
 @Component({
   selector: 'app-top-bar',
   host: { '(window:keydown)': 'onKey($event)' },
@@ -11,6 +11,7 @@ import { ShellService } from '../shell/shell.service';
       {{ journal.fileName() }}@if (journal.dirty()) {<span class="dirty" title="Unsaved changes"> ●</span>}
     </span>
     @if (journal.evaluating()) { <span class="busy" title="Running the script">running…</span> }
+    <button type="button" (click)="newJournal()" title="Start a new, blank journal">New</button>
     <button type="button" (click)="journal.open()" title="Open a script (Ctrl/⌘ O)">Open</button>
     <button type="button" (click)="journal.save()" title="Save (Ctrl/⌘ S)">Save</button>
     <button type="button" (click)="journal.save(true)" title="Save as (Ctrl/⌘ Shift S)">Save as</button>
@@ -39,13 +40,22 @@ export class TopBarComponent {
       .catch(() => this.examples.set([]));
   }
 
+  protected newJournal() {
+    if (this.discard()) this.journal.newJournal();
+  }
+
   protected async pick(select: HTMLSelectElement) {
     const name = select.value;
     select.value = '';
     if (!name) return;
-    if (this.journal.dirty() && !confirm(`Discard unsaved changes to ${this.journal.fileName()}?`)) return;
+    if (!this.discard()) return;
     const source = await loadExample(name);
     if (source !== null) this.journal.load(`${name}.rhai`, source, null);
+  }
+
+  /** Whether it's fine to replace the script: it's saved, or the user says to throw its changes away. */
+  private discard(): boolean {
+    return !this.journal.dirty() || confirm(`Discard unsaved changes to ${this.journal.fileName()}?`);
   }
 
   protected onKey(event: KeyboardEvent) {

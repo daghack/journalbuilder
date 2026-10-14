@@ -8,6 +8,8 @@ import { WorkspaceService } from './workspace.service';
 /** How long typing pauses before the script runs again. */
 const DEBOUNCE_MS = 250;
 const DRAFT_KEY = 'journal-editor.draft';
+/** A new journal's script: one blank page. */
+const BLANK_JOURNAL = 'let page = new_page();\njournal_entry.add_page(page);\n';
 
 /** A page as the editor shows it. */
 export interface Page extends PageView {
@@ -114,6 +116,15 @@ export class JournalService {
     this.savedSource.set(source);
     this.selectedIndex.set(0);
     this.setSource(source, true);
+  }
+
+  /** Start a new, unsaved journal with one blank page. */
+  newJournal() {
+    this.fileHandle = null;
+    this.fileName.set('untitled.rhai');
+    this.savedSource.set(null);
+    this.selectedIndex.set(0);
+    this.setSource(BLANK_JOURNAL, true);
   }
 
   async open() {
