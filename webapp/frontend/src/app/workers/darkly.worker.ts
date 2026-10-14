@@ -3,13 +3,16 @@
 // for the preview and PNG exports, and PDFs. One render at a time; the app
 // cancels one by ending the worker.
 
-import init, { Renderer, lastPanic } from '../../../wasm-pkg/scribe_wasm.js';
-import type { DarklyReply, DarklyRequest } from '../scribe';
+import init, { Renderer, lastPanic, setWorkspace } from '../../../wasm-pkg/scribe_wasm.js';
+import type { DarklyReply, DarklyRequest, WorkspacePayload } from '../scribe';
 
 const post = (reply: DarklyReply, transfer: Transferable[] = []) => postMessage(reply, transfer);
 
 let renderer: Promise<Renderer> | null = null;
 let wasmUrl = '';
+/** The workspace to render with, and the one the renderer has. */
+let workspace: WorkspacePayload | null = null;
+let applied: WorkspacePayload | null = null;
 
 function getRenderer(): Promise<Renderer> {
   if (!renderer) {
@@ -55,15 +58,24 @@ addEventListener('message', ({ data }: MessageEvent<DarklyRequest>) => {
     wasmUrl = data.wasmUrl;
     return;
   }
+  if (data.type === 'workspace') {
+    // Taken up by the next render, not one under way.
+    workspace = data.workspace;
+    return;
+  }
   // One at a time: the renderer has one GPU canvas.
   queue = queue.then(() => handle(data)).catch(() => {});
 });
 
-async function handle(request: Exclude<DarklyRequest, { type: 'init' }>) {
+async function handle(request: Exclude<DarklyRequest, { type: 'init' | 'workspace' }>) {
   const { id } = request;
   current = id;
   try {
     const r = await getRenderer();
+    if (workspace !== applied) {
+      setWorkspace(workspace?.fonts ?? null, workspace?.locks ?? {});
+      applied = workspace;
+    }
     if (request.type === 'renderPages') {
       const pages = request.indices.length;
       for (const [n, index] of request.indices.entries()) {

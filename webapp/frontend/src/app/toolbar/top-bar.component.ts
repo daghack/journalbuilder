@@ -1,5 +1,6 @@
 import { Component, inject, signal } from '@angular/core';
 import { JournalService } from '../services/journal.service';
+import { ShellService } from '../shell/shell.service';
 
 /** Above the editor: the file's name, open and save, and the repository's journals as examples. */
 @Component({
@@ -28,6 +29,7 @@ import { JournalService } from '../services/journal.service';
 })
 export class TopBarComponent {
   protected readonly journal = inject(JournalService);
+  private readonly shell = inject(ShellService);
   protected readonly examples = signal<string[]>([]);
 
   constructor() {
@@ -47,7 +49,7 @@ export class TopBarComponent {
   }
 
   protected onKey(event: KeyboardEvent) {
-    if (!(event.ctrlKey || event.metaKey)) return;
+    if (!(event.ctrlKey || event.metaKey) || this.shell.mode() !== 'journal') return;
     const key = event.key.toLowerCase();
     if (key === 's') {
       event.preventDefault();

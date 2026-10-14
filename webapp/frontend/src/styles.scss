@@ -109,6 +109,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 html,
 body {
   margin: 0;
@@ -151,4 +155,101 @@ input:focus-visible {
 }
 progress {
   accent-color: var(--accent);
+}
+
+input[type='text'],
+input[type='number'],
+input:not([type]),
+textarea {
+  font: inherit;
+  font-size: 12px;
+  color: var(--fg);
+  background: var(--editor-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  min-width: 0;
+}
+input.invalid,
+textarea.invalid {
+  border-color: var(--danger);
+}
+
+// Panels on the right of the font and lock editors: headed sections of
+// labelled fields.
+.panel-section {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.panel-section > h3 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+.field {
+  display: grid;
+  grid-template-columns: 9em 1fr;
+  gap: 4px 8px;
+  align-items: center;
+}
+.field > .hint,
+.field > .problem {
+  grid-column: 2;
+  font-size: 11px;
+}
+.hint {
+  color: var(--muted);
+}
+.problem {
+  color: var(--danger);
+}
+.note-warning {
+  color: var(--warning);
+  background: var(--warning-bg);
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.note-error {
+  color: var(--danger);
+  background: var(--danger-bg);
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+.row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+// A bar of tools along the top of an editor's middle.
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+.toolbar button.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+.toolbar .sep {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border);
+  margin: 0 4px;
 }

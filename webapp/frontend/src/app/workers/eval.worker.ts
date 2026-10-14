@@ -3,7 +3,7 @@
 // with its pages, then sends each page's SVG, the page the editor shows
 // first. A newer script stops the SVGs of an older one.
 
-import init, { apiNames, evaluate, lastPanic, pageSvg } from '../../../wasm-pkg/scribe_wasm.js';
+import init, { apiNames, evaluate, lastPanic, pageSvg, setWorkspace } from '../../../wasm-pkg/scribe_wasm.js';
 import type { EvalReply, EvalRequest, Evaluation } from '../scribe';
 
 const post = (reply: EvalReply) => postMessage(reply);
@@ -21,6 +21,17 @@ addEventListener('message', ({ data }: MessageEvent<EvalRequest>) => {
         () => post({ type: 'ready', apiNames: apiNames() }),
         (err) => post({ type: 'failed', message: String(err) }),
       );
+      break;
+    case 'workspace':
+      // The app sends it just before the script that needs it: both wait
+      // on `ready`, and run in the order they came.
+      void ready?.then(() => {
+        try {
+          setWorkspace(data.workspace.fonts, data.workspace.locks);
+        } catch (err) {
+          crashed(err);
+        }
+      });
       break;
     case 'evaluate':
       generation = data.generation;

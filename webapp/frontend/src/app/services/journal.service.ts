@@ -1,7 +1,9 @@
-import { Injectable, computed, inject, signal } from '@angular/core';
+import { Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
 import type { Evaluation, PageView, ScriptError } from '../scribe';
+import { ShellService } from '../shell/shell.service';
 import { FileService, type OpenedFile } from './file.service';
 import { RenderService } from './render.service';
+import { WorkspaceService } from './workspace.service';
 
 /** How long typing pauses before the script runs again. */
 const DEBOUNCE_MS = 250;
@@ -26,6 +28,8 @@ interface Draft {
 export class JournalService {
   private readonly render = inject(RenderService);
   private readonly files = inject(FileService);
+  private readonly workspace = inject(WorkspaceService);
+  private readonly shell = inject(ShellService);
 
   readonly source = signal('');
   readonly fileName = signal('untitled.rhai');
@@ -51,6 +55,8 @@ export class JournalService {
   private runs = new Map<number, string>();
   private debounce: ReturnType<typeof setTimeout> | null = null;
   private draftTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The workspace the script last ran with. */
+  private ranWith = -1;
 
   constructor() {
     this.render.connect({
@@ -59,6 +65,15 @@ export class JournalService {
     });
     addEventListener('beforeunload', (event) => {
       if (this.dirty()) event.preventDefault();
+    });
+    // Edited fonts or lock files: run the script again with them, once the
+    // journal editor shows (no need to while another editor's in use).
+    effect(() => {
+      const version = this.workspace.version();
+      if (this.shell.mode() !== 'journal' || this.ranWith < 0 || version === this.ranWith) return;
+      untracked(() => {
+        if (!this.debounce) this.run();
+      });
     });
   }
 
@@ -124,6 +139,7 @@ export class JournalService {
     this.debounce = null;
     this.evaluating.set(true);
     const source = this.source();
+    this.ranWith = this.workspace.version();
     this.latest = this.render.evaluate(source, this.selectedIndex());
     this.runs.set(this.latest, source);
   }

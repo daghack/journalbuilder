@@ -11,7 +11,25 @@ type FilePickerWindow = Window & {
   showSaveFilePicker?: (options?: object) => Promise<FileHandle>;
 };
 
-const RHAI_TYPES = [{ description: 'Journal script', accept: { 'text/plain': ['.rhai'] } }];
+/** What a file picker offers: a description and the file types. */
+export interface FileKind {
+  types: { description: string; accept: Record<string, string[]> }[];
+  /** The same, for a plain file input. */
+  accept: string;
+  mime: string;
+}
+
+export const RHAI_FILES: FileKind = {
+  types: [{ description: 'Rhai script', accept: { 'text/plain': ['.rhai'] } }],
+  accept: '.rhai,text/plain',
+  mime: 'text/plain',
+};
+
+export const JSON_FILES: FileKind = {
+  types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }],
+  accept: '.json,application/json',
+  mime: 'application/json',
+};
 
 /** A script opened or saved: its name, and where to save it back, if the browser can. */
 export interface OpenedFile {
@@ -28,10 +46,10 @@ export class FileService {
   }
 
   /** Let the user pick a script; null if they don't. */
-  async open(): Promise<OpenedFile | null> {
+  async open(kind: FileKind = RHAI_FILES): Promise<OpenedFile | null> {
     if (this.picker.showOpenFilePicker) {
       try {
-        const [handle] = await this.picker.showOpenFilePicker({ types: RHAI_TYPES, multiple: false });
+        const [handle] = await this.picker.showOpenFilePicker({ types: kind.types, multiple: false });
         const file = await handle.getFile();
         return { name: file.name, text: await file.text(), handle };
       } catch (err) {
@@ -39,7 +57,7 @@ export class FileService {
         throw err;
       }
     }
-    const file = await pickWithInput('.rhai,text/plain');
+    const file = await pickWithInput(kind.accept);
     return file ? { name: file.name, text: await file.text(), handle: null } : null;
   }
 
@@ -48,10 +66,10 @@ export class FileService {
    * there's no handle. Returns where it went, or null if the user didn't
    * pick anywhere. Without the File System Access API it downloads.
    */
-  async save(text: string, name: string, handle: FileHandle | null): Promise<OpenedFile | null> {
+  async save(text: string, name: string, handle: FileHandle | null, kind: FileKind = RHAI_FILES): Promise<OpenedFile | null> {
     if (!handle && this.picker.showSaveFilePicker) {
       try {
-        handle = await this.picker.showSaveFilePicker({ suggestedName: name, types: RHAI_TYPES });
+        handle = await this.picker.showSaveFilePicker({ suggestedName: name, types: kind.types });
       } catch (err) {
         if (isAbort(err)) return null;
         throw err;
@@ -63,7 +81,7 @@ export class FileService {
       await writable.close();
       return { name: handle.name, text, handle };
     }
-    this.download(new Blob([text], { type: 'text/plain' }), name);
+    this.download(new Blob([text], { type: kind.mime }), name);
     return { name, text, handle: null };
   }
 

@@ -24,12 +24,13 @@ import { RenderService } from '../services/render.service';
         @if (journal.error(); as error) {
           <pre class="error" (click)="line(error.line)">{{ error.message }}</pre>
         }
+        @if (workspaceNote(); as note) { <pre class="print">{{ note }}</pre> }
         @if (evaluation()?.missingGlyphs; as missing) { <pre class="warning">{{ missing }}</pre> }
         @for (warning of evaluation()?.warnings ?? []; track $index) {
           <pre class="warning" (click)="line(lineOf(warning))">{{ warning }}</pre>
         }
         @for (text of evaluation()?.prints ?? []; track $index) { <pre class="print">{{ text }}</pre> }
-        @if (!count()) { <p class="muted">Nothing to report.</p> }
+        @if (!count() && !workspaceNote()) { <p class="muted">Nothing to report.</p> }
       </div>
     }
   `,
@@ -57,6 +58,16 @@ export class DiagnosticsComponent {
   protected readonly open = signal(false);
   /** Asked to show a line of the script. */
   readonly goTo = output<number>();
+
+  /** What the workspace changes from the repository's files, which only this browser has. */
+  protected readonly workspaceNote = computed(() => {
+    const workspace = this.evaluation()?.workspace;
+    const parts = [
+      workspace?.editedFonts ? 'the fonts as edited in the font editor' : '',
+      workspace?.locks.length ? `the workspace's lock files (${workspace.locks.join(', ')})` : '',
+    ].filter(Boolean);
+    return parts.length ? `Ran with ${parts.join(' and ')}, which only this browser has.` : null;
+  });
 
   protected readonly count = computed(() => {
     const e = this.evaluation();

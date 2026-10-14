@@ -37,6 +37,9 @@ COPY webapp/frontend/package.json webapp/frontend/package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
 COPY webapp/frontend ./
 COPY journals /src/journals
+# examples.mjs also copies these, for the unit tests' fixtures.
+COPY config /src/config
+COPY locks /src/locks
 COPY --from=wasm /out/wasm-pkg wasm-pkg
 # Gzipped copies sit beside the files for nginx's gzip_static: the
 # renderer is 17 MB, 9 MB gzipped, and isn't worth compressing per request.
