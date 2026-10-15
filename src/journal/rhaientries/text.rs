@@ -18,6 +18,13 @@
 //!                                   // a piece may have (true is 2)
 //!     split_padding: 0.3,           // pieces keep this much further from it, in symbol scales
 //! });
+//!
+//! // Or fill any closed shape, on lines at an angle (radians; default 0,
+//! // left to right, each line below the last). Each subpath of the path is
+//! // an outline, closed back to its start; one inside another is a hole.
+//! // A rectangle shape at angle 0 fills just as center/width/height do.
+//! let round = new_textbox(#{ shape: new_circle(b.center, 300.0), angle: 0.3, symbol_scale: 20.0 });
+//!
 //! let res = tb.fill(font.glyphs(msg));   // #{ placed: [..], unplaced: [..] }
 //! let blocks = tb.place_all(glyphs);     // one array per filled box
 //!
@@ -49,11 +56,11 @@ use std::rc::Rc;
 
 use super::glyphs::{add_glyph, glyph_array, Glyph};
 use super::random::SharedRng;
-use super::{Canvas, CanvasData, StrokeStyle, Vec2};
+use super::{Canvas, CanvasData, Path, StrokeStyle, Vec2};
 use crate::journal::canvas::artistic::{jitter_symbols, scatter_notes, ScatterOptions};
 use crate::journal::fonts::Font;
 use crate::journal::fonts::FontBook;
-use crate::journal::canvas::textbox::{TextBox as CoreTextBox, TextBoxLineMode, TextBoxOptions};
+use crate::journal::canvas::textbox::{rectangle, TextBox as CoreTextBox, TextBoxLineMode, TextBoxOptions};
 use crate::journal::canvas::Canvas as JournalCanvas;
 use crate::journal::symbol::{Symbol, WordSplit};
 use super::avoid::{Avoid, AvoidOption};
@@ -61,10 +68,11 @@ use super::options::{check_keys, number, positive, range};
 
 use super::RhaiResult;
 
-/// A box that glyphs flow into, line by line.
+/// A box (or any closed shape) that glyphs flow into, line by line.
 #[derive(Clone)]
 pub struct TextBox {
-    bounds: Aabb,
+    shape: Rc<Vec<Vec<PVec>>>,
+    angle: f32,
     symbol_scale: f32,
     jagged_edge: f32,
     layout: TextBoxLineMode,
@@ -73,7 +81,7 @@ pub struct TextBox {
     spacing: f32,
 }
 
-const TEXTBOX_KEYS: [&str; 11] = ["center", "width", "height", "symbol_scale", "layout", "jagged_edge", "avoid", "clearance", "spacing", "split_words", "split_padding"];
+const TEXTBOX_KEYS: [&str; 13] = ["center", "width", "height", "shape", "angle", "symbol_scale", "layout", "jagged_edge", "avoid", "clearance", "spacing", "split_words", "split_padding"];
 
 /// The `spacing` option: extra space between glyphs, as a fraction of the
 /// symbol scale. Negative tightens, down to glyphs touching their
@@ -126,18 +134,43 @@ impl TextBox {
     fn new(options: Map) -> RhaiResult<TextBox> {
         const CALLER: &str = "new_textbox";
         check_keys(CALLER, &options, &TEXTBOX_KEYS)?;
-        let center: PVec = options.get("center")
-            .ok_or("new_textbox: missing 'center'")?
-            .clone().try_cast::<Vec2>()
-            .ok_or("new_textbox: 'center' should be a vec")?
-            .into();
-        let half = PVec::new(positive(CALLER, &options, "width")?, positive(CALLER, &options, "height")?) / 2.0;
         let symbol_scale = positive(CALLER, &options, "symbol_scale")?;
+        let shape = match options.get("shape") {
+            Some(_) if ["center", "width", "height"].iter().any(|k| options.contains_key(*k)) =>
+                return Err("new_textbox: give either a 'shape' or a 'center', 'width' and 'height', not both".into()),
+            Some(shape) => {
+                let path = shape.clone().try_cast::<Path>()
+                    .ok_or_else(|| format!("new_textbox: 'shape' should be a path, got {}", shape.type_name()))?;
+                // Curves flattened finely next to the glyphs.
+                let rings: Vec<Vec<PVec>> = path.borrow().flattened(symbol_scale * 0.01).into_iter()
+                    .map(|(points, _)| points)
+                    .filter(|points| points.len() >= 3)
+                    .collect();
+                if rings.is_empty() {
+                    return Err("new_textbox: 'shape' encloses nothing: it needs a subpath of at least three points".into());
+                }
+                rings
+            }
+            None => {
+                let center: PVec = options.get("center")
+                    .ok_or("new_textbox: missing 'center' (or give a 'shape')")?
+                    .clone().try_cast::<Vec2>()
+                    .ok_or("new_textbox: 'center' should be a vec")?
+                    .into();
+                let half = PVec::new(positive(CALLER, &options, "width")?, positive(CALLER, &options, "height")?) / 2.0;
+                rectangle(Aabb::new(center - half, center + half))
+            }
+        };
+        let angle = number(CALLER, &options, "angle")?.unwrap_or(0.0);
+        if !angle.is_finite() {
+            return Err(format!("new_textbox: 'angle' must be a finite number, got {}", angle).into());
+        }
         let jagged_edge = number(CALLER, &options, "jagged_edge")?.unwrap_or(0.0);
         let layout = line_mode(CALLER, &options)?;
         let avoid = AvoidOption::parse(CALLER, &options, false)?;
         Ok(TextBox {
-            bounds: Aabb::new(center - half, center + half),
+            shape: Rc::new(shape),
+            angle,
             symbol_scale,
             jagged_edge,
             layout,
@@ -152,7 +185,8 @@ impl TextBox {
         let core = CoreTextBox::new(TextBoxOptions {
             jagged_edge: self.jagged_edge,
             layout: self.layout.clone(),
-            bounds: self.bounds,
+            shape: self.shape.to_vec(),
+            angle: self.angle,
             symbol_scale: self.symbol_scale,
             avoid: tree.as_deref(),
             padding: self.padding,
@@ -469,6 +503,10 @@ mod tests {
         let c = "new_vec(0.0, 0.0)";
         for (opts, want) in [
             (format!("#{{ center: {}, width: 10, height: 10, symbol_scale: 2, colour: 1 }}", c), "unknown option 'colour'"),
+            (format!("#{{ center: {}, shape: new_circle({}, 5.0), symbol_scale: 2 }}", c, c), "either a 'shape' or a 'center'"),
+            ("#{ shape: 3, symbol_scale: 2 }".to_string(), "'shape' should be a path, got i64"),
+            (format!("#{{ shape: new_line({}, new_vec(1.0, 1.0)), symbol_scale: 2 }}", c), "'shape' encloses nothing"),
+            (format!("#{{ center: {}, width: 10, height: 10, symbol_scale: 2, angle: \"up\" }}", c), "'angle'"),
             ("#{ width: 10, height: 10, symbol_scale: 2 }".to_string(), "missing 'center'"),
             (format!("#{{ center: {}, width: 0, height: 10, symbol_scale: 2 }}", c), "'width' must be positive"),
             (format!("#{{ center: {}, width: 10, height: 10 }}", c), "missing 'symbol_scale'"),
@@ -483,5 +521,45 @@ mod tests {
             let err = fails(&format!("let ok = 1;\nnew_textbox({});", opts));
             assert!(err.contains(want) && err.contains("line 2"), "{}: {}", want, err);
         }
+    }
+    #[test]
+    fn a_rectangle_shape_fills_as_a_box_does() {
+        let same: bool = eval(r#"
+            let blot = new_canvas();
+            blot.add_path(new_circle(new_vec(10.0, 5.0), 30.0), style);
+            let same = true;
+            for layout in ["flat", "words"] {
+                let opts = #{ symbol_scale: 12.0, layout: layout, jagged_edge: 0.7, avoid: blot, spacing: 0.1 };
+                let positions = [];
+                for shaped in [false, true] {
+                    seed(3);
+                    let o = opts;
+                    if shaped { o.shape = new_rectangle(new_vec(3.0, -7.0), 230, 150); o.angle = 0; }
+                    else { o.center = new_vec(3.0, -7.0); o.width = 230; o.height = 150; }
+                    let out = [];
+                    for g in new_textbox(o).fill(font.glyphs(text)).placed { out.push([g.position.x, g.position.y, g.rotation]); }
+                    positions.push(out);
+                }
+                if positions[0].len() < 20 || positions[0] != positions[1] { same = false; }
+            }
+            same
+        "#);
+        assert!(same);
+    }
+
+    #[test]
+    fn a_shape_keeps_glyphs_inside_it_on_turned_lines() {
+        let ok: bool = eval(r#"
+            let tb = new_textbox(#{ shape: new_circle(new_vec(0.0, 0.0), 80.0), angle: PI() / 6.0, symbol_scale: 10.0 });
+            let placed = tb.fill(font.glyphs(text)).placed;
+            if placed.len() < 40 { throw "too few placed: " + placed.len(); }
+            for g in placed {
+                let p = g.position;
+                if p.x * p.x + p.y * p.y > 82.0 * 82.0 { throw "outside the circle: " + p; }
+                if (g.rotation - PI() / 6.0).abs() > 0.3 { throw "not turned to the lines: " + g.rotation; }
+            }
+            true
+        "#);
+        assert!(ok);
     }
 }

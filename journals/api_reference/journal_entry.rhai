@@ -485,10 +485,12 @@ doc += api("glyph.copy()", "An independent copy of the glyph.");
 
 doc += heading("Text");
 doc += para("Text layouts place glyphs, scaling each by the symbol scale and turning it to its line on top of any scale and rotation it has.");
-doc += api("new_textbox(options)", "A box glyphs flow into, line by line.", [
-	req("options.center", "The box's centre.", "a vec."),
-	req("options.width", "Its width.", "a positive number."),
-	req("options.height", "Its height.", "a positive number."),
+doc += api("new_textbox(options)", "A box, or any closed shape, glyphs flow into, line by line. Each line holds glyphs only where the band they take up, from a quarter of the symbol scale above it to three quarters below, is inside the shape (a line by the shape's top or bottom looks at the shape just inside it, so a box's lines run its full width).", [
+	opt("options.center", "none: give center, width and height, or shape", "The box's centre.", "a vec."),
+	opt("options.width", "none: needed with center", "Its width.", "a positive number."),
+	opt("options.height", "none: needed with center", "Its height.", "a positive number."),
+	opt("options.shape", "none: give it, or center, width and height", "The shape to fill instead of a box. Each subpath is an outline, closed back to its start, filled where it winds round (so one drawn on past its start, as circles are, is still filled); a place inside an even number of outlines, as in one inside another, is outside. A rectangle at angle 0 fills just as a box does.", "a path with a subpath of at least three points."),
+	opt("options.angle", "0", "Which way the lines run: 0 left to right, each below the last; other angles turn them, the next line always to their right-hand side. Glyphs turn with their lines.", "a finite number, in radians."),
 	req("options.symbol_scale", "The size glyphs are set at, in canvas units.", "a positive number."),
 	layout_opt("wrapping at spaces"),
 	opt("options.jagged_edge", "0", "How much further in each line starts, at most, at random, in symbol scales.", "a number."),
@@ -612,6 +614,7 @@ doc += api("art::eye(center, length, color, gaze_angle, messiness, seed, options
 	opt("options.angle", "0", "The eye's tilt; 0 keeps the corners level.", "a number, in radians."),
 	opt("options.gaze", "0.5", "How far it looks toward gaze_angle: 0 straight ahead, 1 as far as it goes.", "a number from 0 to 1."),
 	opt("options.openness", "0.32", "Its height over its length.", "a number above 0.05 and at most 1."),
+	opt("options.flat", "false", "Lids of straight lines from each corner to a point above and below the middle, as the symbols font's eye has, rather than arcs.", "true or false."),
 	opt("options.ink", "a near-black ink pen", "The style of its lines.", "a style."),
 ]);
 

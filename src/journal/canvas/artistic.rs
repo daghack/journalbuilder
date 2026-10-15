@@ -1,7 +1,7 @@
 use parry2d::math::{Vec2};
 
 use crate::journal::avoid::AvoidanceTree;
-use crate::journal::canvas::{Canvas, textbox::{TextBox, TextBoxOptions, TextBoxLineMode}};
+use crate::journal::canvas::{Canvas, textbox::{rectangle, TextBox, TextBoxOptions, TextBoxLineMode}};
 use crate::journal::symbol::Symbol;
 use crate::journal::paths::StrokePath;
 
@@ -68,7 +68,8 @@ fn scatter_one(bounds: &Canvas, avoid: &AvoidanceTree, symbols: &[Symbol], opts:
         let textbox = TextBox::new(TextBoxOptions {
             jagged_edge: opts.jagged_edge,
             layout: opts.layout.clone(),
-            bounds: random_bounding_box(bounds, opts.width_range, opts.height_range, rng),
+            shape: rectangle(random_bounding_box(bounds, opts.width_range, opts.height_range, rng)),
+            angle: 0.0,
             symbol_scale: opts.symbol_scale,
             avoid: Some(avoid),
             padding: opts.clearance,

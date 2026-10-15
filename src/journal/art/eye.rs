@@ -40,11 +40,14 @@ pub struct EyeShape {
     pub gaze: f32,
     /// How open the eye is: its height over its length.
     pub openness: f32,
+    /// Lids of straight lines, from each corner to a point above and below
+    /// the middle, as the `symbols` font's eye has, rather than arcs.
+    pub flat: bool,
 }
 
 impl Default for EyeShape {
     fn default() -> Self {
-        EyeShape { angle: 0.0, gaze: 0.5, openness: 0.32 }
+        EyeShape { angle: 0.0, gaze: 0.5, openness: 0.32, flat: false }
     }
 }
 
@@ -73,6 +76,7 @@ pub fn eye(center: Vec2, length: f32, gaze_angle: f32, messiness: f32, shape: Ey
         m: messiness as f64,
         half: length as f64 / 2.0,
         lid: length as f64 * shape.openness as f64 / 2.0,
+        flat: shape.flat,
     };
     // Drawn about the origin along +x, then turned and moved into place.
     let place = Place { center: center.into(), turn: shape.angle as f64 };
@@ -80,8 +84,9 @@ pub fn eye(center: Vec2, length: f32, gaze_angle: f32, messiness: f32, shape: Ey
     let iris_radius = drawing.lid * 1.0 * (1.0 + drawing.wobble(&mut rng, 0.05));
     // Looking all the way, the iris goes as far toward the corner as the
     // lids are still open to most of its height (they close as 1 - t² from
-    // the middle), and a little toward the lid.
-    let along = (1.0 - 0.8 * iris_radius / drawing.lid).max(0.0).sqrt();
+    // the middle, or 1 - t when straight), and a little toward the lid.
+    let open = (1.0 - 0.8 * iris_radius / drawing.lid).max(0.0);
+    let along = if shape.flat { open } else { open.sqrt() };
     let room = V::new(drawing.half * along, drawing.lid * 0.3);
     let iris_center = V::new(looking.cos() * room.x, looking.sin() * room.y) * shape.gaze as f64;
 
@@ -94,12 +99,12 @@ pub fn eye(center: Vec2, length: f32, gaze_angle: f32, messiness: f32, shape: Ey
     // The iris is cut off where the lids cover it: its rings clipped to the
     // almond, and the wash and its rim kept a little further in (their
     // colour still bleeds a little past the lids, as watercolour does).
-    let almond = Almond { half: drawing.half, lid: drawing.lid };
+    let almond = Almond { half: drawing.half, lid: drawing.lid, flat: shape.flat };
     for _ in 0..drawing.times(&mut rng, 5.0).max(2) {
-        lines.extend(almond.clip(&drawing.ring(&mut rng, iris_center, iris_radius), 0.0));
+        lines.extend(almond.clip(&drawing.ring(&mut rng, iris_center, iris_radius), 0.0).into_iter().map(|points| vec![points]));
     }
     let toward = if room.x > 0.0 { (iris_center.x / room.x).clamp(-1.0, 1.0) } else { 0.0 };
-    lines.extend(drawing.meridian(&mut rng, iris_center, iris_radius, toward));
+    lines.extend(drawing.meridian(&mut rng, iris_center, iris_radius, toward).into_iter().map(|points| vec![points]));
 
     let mut accent = Vec::new();
     for side in [-1.0, 1.0] {
@@ -109,17 +114,22 @@ pub fn eye(center: Vec2, length: f32, gaze_angle: f32, messiness: f32, shape: Ey
     }
     accent.push(drawing.lid_stroke(&mut rng, 1.0, 0.8, 0.82));
 
-    let wash = almond.clip(&drawing.wash(&mut rng, iris_center, iris_radius), iris_radius * 0.15);
+    let wash = almond.clip(&drawing.wash(&mut rng, iris_center, iris_radius), iris_radius * 0.15).into_iter().map(|points| vec![points]).collect();
     // Watercolour dries darkest at its edge: rings of it round the iris.
-    let rim: Vec<Vec<V>> = (0..drawing.times(&mut rng, 2.0) + 1)
+    let rim: Vec<Stroke> = (0..drawing.times(&mut rng, 2.0) + 1)
         .map(|_| {
             let radius = iris_radius * rng.random_range(0.8..0.88);
             almond.clip(&drawing.ring(&mut rng, iris_center, radius), iris_radius * 0.06)
         })
         .flatten()
+        .map(|points| vec![points])
         .collect();
 
-    let path = |strokes: Vec<Vec<V>>| strokes.iter().fold(StrokePath::new(), |path, points| spline(path, &place.all(points), false));
+    // Each stroke's pieces drawn on from one another, turning sharply
+    // where they meet.
+    let path = |strokes: Vec<Stroke>| strokes.iter().fold(StrokePath::new(), |path, pieces| {
+        pieces.iter().enumerate().fold(path, |path, (i, points)| spline(path, &place.all(points), i > 0))
+    });
     Ok(Eye {
         lines: path(lines),
         accent: path(accent),
@@ -142,16 +152,28 @@ fn lid_arc(half: f64, height: f64, x: f64) -> f64 {
     }
 }
 
+/// How far a straight lid is off the axis `x` along it: `height` in the
+/// middle, falling straight to the corners `half` either side, and on
+/// past them.
+fn lid_line(half: f64, height: f64, x: f64) -> f64 {
+    height * (1.0 - x.abs() / half)
+}
+
+/// A line drawn in pieces, each going on from the last's end with a corner.
+type Stroke = Vec<Vec<V>>;
+
 /// The eye's opening, between true lids, about the origin along +x.
 struct Almond {
     half: f64,
     lid: f64,
+    flat: bool,
 }
 
 impl Almond {
     /// How far `p` is inside the opening, across the axis: negative outside.
     fn margin(&self, p: V) -> f64 {
-        lid_arc(self.half, self.lid, p.x) - p.y.abs()
+        let lid = if self.flat { lid_line(self.half, self.lid, p.x) } else { lid_arc(self.half, self.lid, p.x) };
+        lid - p.y.abs()
     }
     /// The runs of `points` at least `inset` inside the opening, each cut
     /// where it crosses out (found by bisection between the points either
@@ -207,6 +229,8 @@ struct Drawing {
     half: f64,
     /// Half its height, centre to lid.
     lid: f64,
+    /// Straight lids, meeting in a point above and below the middle.
+    flat: bool,
 }
 
 impl Drawing {
@@ -230,25 +254,27 @@ impl Drawing {
     /// One lid, the upper (`side` -1) or lower (+1), `bulge` times as far
     /// from the axis as the eye is open and `reach` times as long: an arc
     /// meeting the other lid in a point at each corner and running on past
-    /// them, as a hand sweeping through the corner does.
-    fn lid_stroke(&self, rng: &mut StdRng, side: f64, bulge: f64, reach: f64) -> Vec<V> {
+    /// them, as a hand sweeping through the corner does. Straight lids
+    /// turn sharply in the middle: two pieces, meeting there.
+    fn lid_stroke(&self, rng: &mut StdRng, side: f64, bulge: f64, reach: f64) -> Stroke {
         let height = self.lid * bulge * (1.0 + self.wobble(rng, 0.18));
         let overshoot = 0.03 + 0.2 * self.m;
         let (t0, t1) = (-reach - rng.random_range(0.0..=overshoot), reach + rng.random_range(0.0..=overshoot));
         let tilt = self.wobble(rng, 0.05);
         let shift = V::new(self.wobble(rng, 0.03 * self.half), self.wobble(rng, 0.12 * self.lid));
         let wander = self.wander(rng, 0.06 * self.lid);
-        let half = self.half;
-        let arc = move |x: f64| lid_arc(half, height, x);
-        let steps = 24;
-        (0..=steps)
-            .map(|i| {
-                let s = i as f64 / steps as f64;
-                let t = t0 + (t1 - t0) * s;
-                let p = V::new(self.half * t, side * arc(self.half * t) + wander(s));
-                V::new(p.x - p.y * tilt, p.y + p.x * tilt) + shift
-            })
-            .collect()
+        let (half, flat) = (self.half, self.flat);
+        let lid = move |x: f64| if flat { lid_line(half, height, x) } else { lid_arc(half, height, x) };
+        let point = |t: f64| {
+            let p = V::new(self.half * t, side * lid(self.half * t) + wander((t - t0) / (t1 - t0)));
+            V::new(p.x - p.y * tilt, p.y + p.x * tilt) + shift
+        };
+        let piece = |from: f64, to: f64, steps: usize| (0..=steps).map(|i| point(from + (to - from) * i as f64 / steps as f64)).collect();
+        if flat {
+            vec![piece(t0, 0.0, 12), piece(0.0, t1, 12)]
+        } else {
+            vec![piece(t0, t1, 24)]
+        }
     }
 
     /// One ring round the iris: a loop a little lumpy, a little off the
@@ -321,5 +347,27 @@ impl Drawing {
                 center + V::angle(a) * r
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// How far the line work strays from the axis from 40 to 60 out, of the
+/// 100 to the corners.
+    fn lid_height_half_way(flat: bool) -> f32 {
+        let shape = EyeShape { gaze: 0.0, flat, ..EyeShape::default() };
+        let e = eye(Vec2::new(0.0, 0.0), 200.0, 0.0, 0.0, shape, 1).expect("an eye");
+        e.lines.points_within().iter().filter(|p| (40.0..=60.0).contains(&p.x.abs())).map(|p| p.y.abs()).fold(0.0, f32::max)
+    }
+
+    #[test]
+    fn flat_lids_run_straight_from_the_corners() {
+        // 32 from the axis in the middle: straight lids are 19.2 off it
+        // at most from 40 out, arcs 27.3.
+        let (flat, arc) = (lid_height_half_way(true), lid_height_half_way(false));
+        assert!(flat < 19.5, "{}", flat);
+        assert!(arc > 26.0, "{}", arc);
     }
 }

@@ -73,11 +73,13 @@
 //!
 //! Options: `angle`, the eye's tilt (default 0, corners level); `gaze`,
 //! how far it looks from 0 (ahead) to 1 (as far as it goes; default 0.5);
-//! `openness`, its height over its length (default 0.32); and `ink`, the
-//! style of its lines (default a near-black ink pen).
+//! `openness`, its height over its length (default 0.32); `flat`, lids
+//! of straight lines meeting in a point above and below the middle, as
+//! the `symbols` font's eye has, rather than arcs (default false); and
+//! `ink`, the style of its lines (default a near-black ink pen).
 //!
 //! ```rhai
-//! let e = art::eye(new_vec(0.0, 0.0), 300.0, "#2a9bb8", PI(), 0.8, 7, #{ angle: 1.2, gaze: 1.0, openness: 0.6, ink: ink });
+//! let e = art::eye(new_vec(0.0, 0.0), 300.0, "#2a9bb8", PI(), 0.8, 7, #{ angle: 1.2, gaze: 1.0, openness: 0.6, flat: true, ink: ink });
 //! ```
 
 use rhai::{Dynamic, Engine, EvalAltResult, Map, Module, NativeCallContext};
@@ -109,7 +111,7 @@ fn parts(bramble: art::Bramble) -> Map {
     parts
 }
 
-const EYE_KEYS: [&str; 4] = ["angle", "gaze", "openness", "ink"];
+const EYE_KEYS: [&str; 5] = ["angle", "gaze", "openness", "flat", "ink"];
 
 /// A style for an eye's strokes: `brush` at `size`, in `color`.
 /// Tapered at both ends, as quick strokes are.
@@ -127,7 +129,12 @@ fn eye(ctx: &NativeCallContext, center: Vec2, length: &Dynamic, color: Dynamic, 
     let color = colour_or_gradient(CALLER, color).map_err(fail)?;
     let defaults = art::EyeShape::default();
     let option = |key: &str, default: f32| number(CALLER, options, key).map(|n| n.unwrap_or(default)).map_err(fail);
-    let shape = art::EyeShape { angle: option("angle", defaults.angle)?, gaze: option("gaze", defaults.gaze)?, openness: option("openness", defaults.openness)? };
+    let flat = match options.get("flat") {
+        None => defaults.flat,
+        Some(flat) => flat.as_bool()
+            .map_err(|type_name| error(ctx, format!("{}: 'flat' should be true or false, got {}", CALLER, type_name)))?,
+    };
+    let shape = art::EyeShape { angle: option("angle", defaults.angle)?, gaze: option("gaze", defaults.gaze)?, openness: option("openness", defaults.openness)?, flat };
     let ink = match options.get("ink") {
         None => eye_style(&crate::journal::canvas::StrokeColor::Solid("#1e1915".into()), "Ink Pen", 0.25, 0.7, 1.1),
         Some(ink) => ink.clone().try_cast::<StrokeStyle>()
@@ -297,6 +304,7 @@ mod tests {
             if b.width < 190.0 || b.width > 320.0 || (b.center - new_vec(100.0, 100.0)).length() > 40.0 { throw "the eye should be where asked: " + b; }
             let tilted = art::eye(new_vec(0.0, 0.0), 200.0, RED_INK, PI(), 0.0, 1, #{ angle: PI() / 2.0, gaze: 1.0, openness: 0.3, ink: new_style(1.0, "#222", new_brush("Pencil", 0.3, 0.7, 1.0)) });
             if tilted.bounds().height < 190.0 { throw "turned upright, the eye should be tall: " + tilted.bounds(); }
+            art::eye(new_vec(0.0, 0.0), 200.0, "#123", 0.0, 0.5, 1, #{ flat: true });
             let p = new_page();
             p.add_canvas(e);
             journal_entry.add_page(p);
@@ -307,6 +315,7 @@ mod tests {
             ("art::eye(new_vec(0.0, 0.0), 0.0, \"#123\", 0.0, 0.5, 1);", "art::eye: length must be a positive number"),
             ("art::eye(new_vec(0.0, 0.0), 200.0, \"#123\", 0.0, 0.5, 1, #{ squint: 1 });", "art::eye: unknown option 'squint'"),
             ("art::eye(new_vec(0.0, 0.0), 200.0, \"#123\", 0.0, 0.5, 1, #{ ink: 3 });", "art::eye: 'ink' should be a style"),
+            ("art::eye(new_vec(0.0, 0.0), 200.0, \"#123\", 0.0, 0.5, 1, #{ flat: 1 });", "art::eye: 'flat' should be true or false"),
         ] {
             let err = engine().build_entry_str(&format!("let ok = 1;\n{}", call)).expect_err(call).to_string();
             assert!(err.contains(message) && err.contains("line 2"), "{}", err);

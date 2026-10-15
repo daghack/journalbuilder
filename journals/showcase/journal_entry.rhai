@@ -620,22 +620,26 @@ for (g, i) in [0.0, PI() / 2.0, PI(), -PI() / 2.0] {
 	art.add_canvas(art::eye(new_vec(LEFT + 115 + i * 255, TOP + 330), 200, BLUE, g, 0.4, 11));
 }
 // Options: angle tilts the eye, gaze is how far it looks (0 to 1),
-// openness is its height over its length, and ink styles its lines. Where
-// the lids cover the iris, it's hidden.
-art.add_canvas(caption("#{ angle, gaze, openness, ink }", TOP + 440));
-art.add_canvas(art::eye(new_vec(LEFT + 150, TOP + 610), 300, BLUE, 0.0, 0.5, 4, #{ angle: -0.5, gaze: 0.0 }));
-art.add_canvas(art::eye(new_vec(LEFT + 490, TOP + 610), 300, BLUE, PI(), 0.5, 4, #{ gaze: 1.0, openness: 0.22 }));
-art.add_canvas(art::eye(new_vec(LEFT + 830, TOP + 610), 280, RED, 0.3, 0.6, 4, #{ angle: 1.3, openness: 0.5, ink: new_style(1, INK, PEN) }));
-art.add_canvas(write("angle -0.5, gaze 0", LEFT + 40, TOP + 790, 20));
-art.add_canvas(write("gaze 1, openness 0.22", LEFT + 380, TOP + 790, 20));
-art.add_canvas(write("angle 1.3, openness 0.5, ink", LEFT + 690, TOP + 790, 20));
+// openness is its height over its length, flat draws its lids as straight
+// lines meeting above and below the middle (as the symbols font's eye
+// has), and ink styles its lines. Where the lids cover the iris, it's
+// hidden.
+art.add_canvas(caption("#{ angle, gaze, openness, flat, ink }", TOP + 440));
+art.add_canvas(art::eye(new_vec(LEFT + 105, TOP + 610), 200, BLUE, 0.0, 0.5, 4, #{ angle: -0.5, gaze: 0.0 }));
+art.add_canvas(art::eye(new_vec(LEFT + 370, TOP + 610), 200, BLUE, PI(), 0.5, 4, #{ gaze: 1.0, openness: 0.22 }));
+art.add_canvas(art::eye(new_vec(LEFT + 635, TOP + 610), 200, BLUE, PI() / 4.0, 0.4, 6, #{ flat: true, openness: 0.45 }));
+art.add_canvas(art::eye(new_vec(LEFT + 890, TOP + 610), 200, RED, 0.3, 0.6, 4, #{ angle: 1.3, openness: 0.5, ink: new_style(1, INK, PEN) }));
+art.add_canvas(write("angle -0.5, gaze 0", LEFT + 10, TOP + 790, 20));
+art.add_canvas(write("gaze 1, openness 0.22", LEFT + 265, TOP + 790, 20));
+art.add_canvas(write("flat, openness 0.45", LEFT + 530, TOP + 790, 20));
+art.add_canvas(write("angle 1.3, openness 0.5, ink", LEFT + 730, TOP + 790, 20));
 // A crowd of them, overlapping as they come.
 art.add_canvas(caption("a page of eyes, messy and overlapping", TOP + 850));
 seed(5);
 for i in 0..10 {
 	let at = new_vec(LEFT + 110 + (i % 5) * 195 + random_range(-30, 30), TOP + 980 + (i / 5) * 190 + random_range(-30, 30));
 	let colour = if i % 4 == 3 { RED } else { BLUE };
-	art.add_canvas(art::eye(at, random_range(150, 240), colour, random_range(-PI(), PI()), random_range(0.5, 1.0), i, #{ angle: random_range(-1.0, 1.0), gaze: random() }));
+	art.add_canvas(art::eye(at, random_range(150, 240), colour, random_range(-PI(), PI()), random_range(0.5, 1.0), i, #{ angle: random_range(-1.0, 1.0), gaze: random(), flat: i % 3 == 1 }));
 }
 book.bind("art", art);
 
@@ -766,6 +770,60 @@ for (angle, i) in [(), 0, 0.3] {
 	let options = if angle == () { #{} } else { #{ angle: angle } };
 	text.add_canvas(path.fill_with_text("lorem ipsum dolor sit", PLAIN, 28, TEXT, options)[0]);
 }
+book.bind("text", text);
+
+// Text boxes of any closed shape: #{ shape: path } in place of center,
+// width and height. Each subpath is an outline, closed back to its start,
+// and one inside another is a hole. #{ angle } turns the lines (radians;
+// lines follow on to their right). A rectangle at angle 0 is a plain box.
+let text = sheet("text");
+text.add_canvas(subhead("shaped text boxes", TOP));
+text.add_canvas(caption("new_textbox #{ shape }: a circle; a ring (a circle in a circle); a star", TOP + 50));
+fn star(c, outer, inner) {
+	let p = new_path();
+	for i in 0..10 {
+		let a = -PI() / 2.0 + i * PI() / 5.0;
+		let r = if i % 2 == 0 { outer } else { inner };
+		let at = c + new_vec(r * a.cos(), r * a.sin());
+		if i == 0 { p.move_to(at); } else { p.line_to(at); }
+	}
+	p.close()
+}
+let y = TOP + 250;
+let shapes = [
+	new_circle(new_vec(LEFT + 150, y), 150),
+	new_circle(new_vec(LEFT + 500, y), 150).append(new_circle(new_vec(LEFT + 500, y), 60)),
+	star(new_vec(LEFT + 850, y + 10), 170, 80),
+];
+for shape in shapes {
+	text.add_path(shape, CAPTION);
+	text.add_glyphs(new_textbox(#{ shape: shape, symbol_scale: 16 }).fill(PLAIN.glyphs(LOREM + LOREM)).placed, TEXT);
+}
+text.add_canvas(caption("#{ angle }: 0.4 in a square; -PI() / 4 in a circle; PI() / 2, lines down the page", TOP + 470));
+let y = TOP + 680;
+for (options, i) in [
+	#{ shape: new_rectangle(new_vec(LEFT + 150, y), 280, 280), angle: 0.4 },
+	#{ shape: new_circle(new_vec(LEFT + 500, y), 150), angle: -PI() / 4.0, layout: "words" },
+	#{ shape: new_rectangle(new_vec(LEFT + 850, y), 280, 280), angle: PI() / 2.0, jagged_edge: 0.8 },
+] {
+	text.add_path(options.shape, CAPTION);
+	options.symbol_scale = 16;
+	text.add_glyphs(new_textbox(options).fill(PLAIN.glyphs(LOREM + LOREM + LOREM)).placed, TEXT);
+}
+// An oval round a flat-lidded eye, words kept whole and clear of it.
+text.add_canvas(caption("an oval, words at an angle of 0.15, avoiding an eye", TOP + 900));
+let centre = new_vec(W / 2.0, TOP + 1100);
+let oval = new_path();
+for i in 0..72 {
+	let a = i * PI() / 36.0;
+	let at = centre + new_vec(480 * a.cos(), 170 * a.sin());
+	if i == 0 { oval.move_to(at); } else { oval.line_to(at); }
+}
+oval.close();
+let eye = art::eye(centre, 260, BLUE, 0.0, 0.3, 2, #{ flat: true, openness: 0.4, gaze: 0.0 });
+text.add_canvas(eye);
+text.add_path(oval, CAPTION);
+text.add_glyphs(new_textbox(#{ shape: oval, angle: 0.15, symbol_scale: 18, layout: "words", avoid: eye, clearance: 10 }).fill(PLAIN.glyphs(LOREM + LOREM + LOREM)).placed, TEXT);
 book.bind("text", text);
 
 // ---- locks ----
