@@ -7,11 +7,11 @@ dependencies, so it's written down rather than fixed.
 
 ## Where the time goes
 
-Rendering every journal takes about 550 s on Darkly's `dev` and about
-210 s on its `offline-render-perf` branch (below), with the same pixels. A
-render of `journal_entry_18` (one 2,800 x 3,200 page, ~6,000 glyph strokes,
-default `--supersample 1.2`) takes about 19 s on `dev` and 8 s on the
-branch. Its main thread on the branch:
+Rendering every journal takes about 210 s on the pinned Darkly (the fork's
+`offline-render-perf` branch, below), down from about 550 s on its `dev`,
+with the same pixels. A render of `journal_entry_18` (one 2,800 x 3,200
+page, ~6,000 glyph strokes, default `--supersample 1.2`) takes about 8 s,
+down from 19 s. Its main thread:
 
 | | share |
 |---|---|
@@ -29,8 +29,7 @@ evaluation for every journal together takes about 0.2 s.
 
 ### Fixed on the `offline-render-perf` branch
 
-Not yet in a pinned Darkly; once it lands on the fork's `dev`, move the pin
-in `Cargo.toml` to it.
+Pinned in `Cargo.toml`; not yet on the fork's `dev` or upstream.
 
 - **Every stroke read the whole layer back for undo** (60% on `dev`). The
   undo rect came from a GPU diff that only a frame collects, so back-to-back

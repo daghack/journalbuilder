@@ -502,11 +502,12 @@ impl Pen<'_> {
                 });
             }
             self.engine.end_stroke();
-            // Darkly finishes each stroke's bookkeeping (its undo snapshot)
-            // asynchronously, on the next frame. Offline we never draw frames
-            // until the export, so without this every stroke's ~4 MB of GPU
-            // readbacks piles up: journal_entry_18 peaked at 14 GB and was
-            // killed. Ticking every few strokes keeps it near 250 MB.
+            // Darkly reads each stroke's undo entry back from the GPU
+            // asynchronously, landing on the next frame. Offline we never draw
+            // frames until the export, so without this every stroke's
+            // readback piles up (when those were whole-layer copies,
+            // journal_entry_18 peaked at 14 GB and was killed). Ticking every
+            // few strokes lands them as they go.
             if self.drawn.is_multiple_of(FRAME_EVERY_STROKES) {
                 catch_up(self.engine).await?;
             }
