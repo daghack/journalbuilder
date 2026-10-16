@@ -299,12 +299,13 @@ mod tests {
 
     #[test]
     fn fonts_list_their_glyphs() {
-        let names: Array = eval(r#"font("archangel").characters()"#);
+        let names: Array = eval(r#"font("symbols").characters()"#);
         let names: Vec<String> = names.into_iter().map(|n| n.into_string().unwrap()).collect();
-        assert_eq!(names, (0..7).map(|i| i.to_string()).collect::<Vec<_>>());
+        let archangel: Vec<String> = (0..7).map(|i| format!("archangel_{}", i)).collect();
+        assert!(archangel.iter().all(|name| names.contains(name)), "{:?}", names);
         let ok: bool = eval(r#"
             font_names().contains("copper") && font("copper").name == "copper"
-                && font("copper").variants("a").len() == 4 && font("archangel").glyph(3).scale == 1.0
+                && font("copper").variants("a").len() == 4 && font("balanced_ternary").glyph(3).scale == 1.0 && font("symbols").glyph("archangel_3").scale == 1.0
         "#);
         assert!(ok);
     }

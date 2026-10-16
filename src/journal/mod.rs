@@ -1,6 +1,7 @@
 pub mod art;
 pub mod avoid;
 pub mod canvas;
+pub mod clip;
 pub mod compose;
 pub mod distribute;
 pub mod fonts;

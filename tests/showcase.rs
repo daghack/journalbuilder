@@ -45,8 +45,8 @@ fn every_function_scripts_can_call_is_in_the_showcase() {
 
 #[test]
 fn every_font_is_in_the_showcase() {
-    // Fonts of 20 glyphs or more; smaller sets (archangel's seven, the
-    // symbols) are only in the glyph catalogue, which draws every glyph.
+    // Fonts of 20 glyphs or more; smaller sets (the symbols) are only in
+    // the glyph catalogue, which draws every glyph.
     let book = FontBook::from_file(DEFAULT_FONTS).unwrap();
     let script = showcase();
     let missing: Vec<String> = book.names().into_iter()

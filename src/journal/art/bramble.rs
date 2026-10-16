@@ -40,6 +40,30 @@ pub struct Bramble {
     pub flowers: StrokePath,
 }
 
+/// Canes thickening toward a point, the bramble's growth origin, as if
+/// it had grown out from there and the oldest wood was thickest.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Thickening {
+    pub origin: Vec2,
+    /// How many times their usual width canes are at the origin.
+    pub thickness: f32,
+    /// How far from the origin they're back to their usual width, or
+    /// `None` for the farthest a cane reaches.
+    pub reach: Option<f32>,
+}
+
+impl Thickening {
+    fn check(&self) -> Result<(), String> {
+        if !(self.origin.is_finite() && self.thickness.is_finite() && self.thickness >= 1.0) {
+            return Err(format!("thickness must be a number of at least 1, got {}", self.thickness));
+        }
+        match self.reach {
+            Some(reach) if !(reach.is_finite() && reach > 0.0) => Err(format!("reach must be a positive number, got {}", reach)),
+            _ => Ok(()),
+        }
+    }
+}
+
 /// How far open a flower is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Stage {
@@ -89,7 +113,9 @@ const FLOWER_DEPTH: f64 = 20.0;
 /// 0 is +x, -pi/2 up the page), `length` long, with flowers about
 /// `flower_size` across; everything else is sized to the flowers. `seed`
 /// picks how it grows.
-pub fn bramble(base: Vec2, angle: f32, length: f32, flower_size: f32, seed: u64) -> Result<Bramble, String> {
+///
+/// With `thickening`, canes and branches are thicker toward its origin.
+pub fn bramble(base: Vec2, angle: f32, length: f32, flower_size: f32, seed: u64, thickening: Option<Thickening>) -> Result<Bramble, String> {
     let (base, angle, length, size) = (V::from(base), angle as f64, length as f64, flower_size as f64);
     if !(base.is_finite() && angle.is_finite() && length.is_finite() && size.is_finite()) {
         return Err("every argument must be a finite number".into());
@@ -101,6 +127,8 @@ pub fn bramble(base: Vec2, angle: f32, length: f32, flower_size: f32, seed: u64)
         return Err(format!("length must be at least {} times flower_size ({}), got {}", MIN_LENGTH, MIN_LENGTH * size, length));
     }
     let mut grower = Grower::new(size, seed);
+    // Reaching, by default, as far as the cane could.
+    grower.thicken(thickening, |origin| (origin - base).len() + length)?;
     let turn = grower.rng.random_range(0.5..1.1) * grower.sign();
     let bend = grower.bend(length, turn, 0.3);
     let halves = (CANE_HALF_WIDTH.0 * size, CANE_HALF_WIDTH.1 * size);
@@ -113,8 +141,9 @@ pub fn bramble(base: Vec2, angle: f32, length: f32, flower_size: f32, seed: u64)
 /// wandering a little off them, carrying straight on through its junctions
 /// with branches up the other ways, with leaves and flowers along them,
 /// keeping clear of the other vines, and a flower or bud at each dead end.
-/// Lines that don't touch grow separate vines. Sizes are as `bramble`'s.
-pub fn bramble_along(path: &StrokePath, flower_size: f32, seed: u64) -> Result<Bramble, String> {
+/// Lines that don't touch grow separate vines. Sizes and `thickening` are
+/// as `bramble`'s.
+pub fn bramble_along(path: &StrokePath, flower_size: f32, seed: u64, thickening: Option<Thickening>) -> Result<Bramble, String> {
     let size = flower_size as f64;
     if !(size > 0.0) || !size.is_finite() {
         return Err(format!("flower_size must be a positive number, got {}", size));
@@ -127,6 +156,10 @@ pub fn bramble_along(path: &StrokePath, flower_size: f32, seed: u64) -> Result<B
         return Err("the path has no lines to follow".into());
     }
     let mut grower = Grower::new(size, seed);
+    // Reaching, by default, the farthest point of the path.
+    grower.thicken(thickening, |origin| {
+        path.points_within().iter().map(|p| (V::from(*p) - origin).len()).fold(0.0, f64::max)
+    })?;
     let mut stems: Vec<Stem> = Vec::new();
     for chain in &chains {
         let mut points = trail::wander(&chain.points, size / 12.0, 0.35 * size, 0.12 * size, 2.0 * size, &mut grower.rng);
@@ -148,6 +181,8 @@ pub fn bramble_along(path: &StrokePath, flower_size: f32, seed: u64) -> Result<B
                     let t = (1.0 - s / blend).max(0.0);
                     points[k] = points[k] + (attach - points[0]) * (t * t);
                 }
+                // The parent's half width is thickened already.
+                let half = half / grower.thickness_at(attach);
                 let halves = ((0.8 * half).max(0.7 * CANE_HALF_WIDTH.1 * size), 0.8 * CANE_HALF_WIDTH.1 * size);
                 let stem = grower.stem_through(&points, halves, depth);
                 grower.scene.join(parent.shape, stem.shape, attach, 8.0 * half);
@@ -228,6 +263,9 @@ struct Grower {
     /// The flowers' size, which everything is sized by.
     size: f64,
     scene: Scene<Part>,
+    /// Canes thickening toward a point: the origin, how much thicker they
+    /// are there, less 1, and how far it reaches.
+    thickening: Option<(V, f64, f64)>,
     /// The room leaves, flowers and buds take up, as discs.
     room: Vec<(V, f64)>,
     /// Vines that leaves and flowers keep clear of (other than the one
@@ -241,8 +279,33 @@ impl Grower {
             rng: StdRng::seed_from_u64(seed),
             size,
             scene: Scene::new(0.004 * size, 0.25 * size, 0.02 * size),
+            thickening: None,
             room: Vec::new(),
             vines: Vec::new(),
+        }
+    }
+
+    /// Thicken canes toward `thickening`'s origin, reaching `farthest`
+    /// from it unless it says how far.
+    fn thicken(&mut self, thickening: Option<Thickening>, farthest: impl Fn(V) -> f64) -> Result<(), String> {
+        if let Some(t) = thickening {
+            t.check()?;
+            let origin = V::from(t.origin);
+            let reach = t.reach.map_or_else(|| farthest(origin), |r| r as f64).max(self.size);
+            self.thickening = Some((origin, t.thickness as f64 - 1.0, reach));
+        }
+        Ok(())
+    }
+
+    /// How many times its usual width a cane is at `p`: easing from the
+    /// thickness at the origin to 1 at its reach.
+    fn thickness_at(&self, p: V) -> f64 {
+        match self.thickening {
+            Some((origin, extra, reach)) => {
+                let u = 1.0 - ((p - origin).len() / reach).min(1.0);
+                1.0 + extra * u * u
+            }
+            None => 1.0,
         }
     }
 
@@ -325,7 +388,9 @@ impl Grower {
         let taper = 4.0 * halves.1;
         let halves: Vec<f64> = (0..=n).map(|i| {
             let s = i as f64 * step;
-            let half = halves.0 + (halves.1 - halves.0) * s / length;
+            // Canes and branches (pointed, unlike stalks) thicken.
+            let thickness = if pointed { self.thickness_at(points[i]) } else { 1.0 };
+            let half = thickness * (halves.0 + (halves.1 - halves.0) * s / length);
             if pointed && length - s < taper { half * ((length - s) / taper).sqrt() } else { half }
         }).collect();
         let left = |i: usize| V::angle(headings[i]).perp();
@@ -454,7 +519,8 @@ impl Grower {
         let turn = side * self.rng.random_range(-0.4..1.2);
         let bend = self.bend(length, turn, 0.5);
         let depth_in_drawing = VINE_DEPTH + self.rng.random_range(0.0..5.0);
-        let halves = (0.8 * half, 0.8 * CANE_HALF_WIDTH.1 * self.size);
+        // The stem's half width is thickened already.
+        let halves = (0.8 * half / self.thickness_at(at), 0.8 * CANE_HALF_WIDTH.1 * self.size);
         let branch = self.stem((at, heading), length, halves, &bend, depth_in_drawing, true);
         self.scene.join(stem.shape, branch.shape, at, 8.0 * half);
         self.grow(&branch, depth + 1, Growth::Free);
@@ -604,11 +670,13 @@ impl Grower {
         // Below, `along` runs back towards the base, away from the hook.
         let along = V::angle(heading + PI);
         let edge = at + out * half;
-        let length = half * self.rng.random_range(1.6..2.4) + 0.008 * self.size;
-        let base = half * self.rng.random_range(0.8..1.1);
+        // Thorns keep the size they'd have on a cane not thickened.
+        let thorn_half = half / self.thickness_at(at);
+        let length = thorn_half * self.rng.random_range(1.6..2.4) + 0.008 * self.size;
+        let base = thorn_half * self.rng.random_range(0.8..1.1);
         // The base sits a little inside the stem.
-        let back = edge - along * base - out * (0.4 * half);
-        let front = edge + along * base - out * (0.4 * half);
+        let back = edge - along * base - out * (0.4 * thorn_half);
+        let front = edge + along * base - out * (0.4 * thorn_half);
         let tip = edge + out * length - along * (length * self.rng.random_range(0.5..0.8));
         // The edge facing the stem's tip curves in, the other bows out.
         let inner = edge - along * (base / 2.0 + 0.45 * length) + out * (0.2 * length);
@@ -644,7 +712,18 @@ mod tests {
     }
 
     fn grow(seed: u64) -> Bramble {
-        bramble(Vec2::new(0.0, 0.0), -1.3, 1400.0, 200.0, seed).expect("the bramble should grow")
+        bramble(Vec2::new(0.0, 0.0), -1.3, 1400.0, 200.0, seed, None).expect("the bramble should grow")
+    }
+
+    #[test]
+    fn canes_thicken_toward_the_origin() {
+        let mut grower = Grower::new(40.0, 1);
+        grower.thicken(Some(Thickening { origin: Vec2::new(0.0, 0.0), thickness: 5.0, reach: Some(400.0) }), |_| 0.0).unwrap();
+        let points: Vec<V> = (0..=10).map(|i| V::new(i as f64 * 60.0, 0.0)).collect();
+        let stem = grower.stem_through(&points, (2.0, 2.0), 0.0);
+        let near = stem.halves[0];
+        let far = stem.halves[stem.points.iter().position(|p| p.x >= 450.0).unwrap()];
+        assert!((near - 10.0).abs() < 1e-9 && (far - 2.0).abs() < 1e-9, "{} {}", near, far);
     }
 
     #[test]
@@ -670,7 +749,7 @@ mod tests {
 
     #[test]
     fn bad_arguments_are_errors() {
-        let err = |length: f32, size: f32| bramble(Vec2::new(0.0, 0.0), 0.0, length, size, 1).err().expect("should fail");
+        let err = |length: f32, size: f32| bramble(Vec2::new(0.0, 0.0), 0.0, length, size, 1, None).err().expect("should fail");
         assert!(err(1000.0, 0.0).contains("flower_size must be positive"));
         assert!(err(300.0, 200.0).contains("at least 2 times flower_size (400), got 300"));
         assert!(err(f32::NAN, 200.0).contains("finite"));

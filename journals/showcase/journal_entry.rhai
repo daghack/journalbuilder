@@ -8,7 +8,7 @@
 //             italics and spacing by outlines, and glyphs placed by hand
 //   glyphs    every variant of every glyph of every font
 //   art       shapes and paths, hatching, vectors, mazes, snakes, brambles,
-//             eyes
+//             eyes, paths cut by shapes, brambles thickening toward an origin
 //   generators  point distributions, vec3 and vec4, spanning trees by
 //             algorithm and metric, balanced ternary, angles in degrees
 //   text      text boxes, text kept clear of drawings, text along paths
@@ -643,6 +643,51 @@ for i in 0..10 {
 	let colour = if i % 4 == 3 { RED } else { BLUE };
 	art.add_canvas(art::eye(at, random_range(150, 240), colour, random_range(-PI(), PI()), random_range(0.5, 1.0), i, #{ angle: random_range(-1.0, 1.0), gaze: random(), flat: i % 3 == 1 }));
 }
+book.bind("art", art);
+
+// Cutting paths by a closed shape: erase_inside takes away what the shape
+// covers (lines behind a figure), erase_outside what it doesn't. The
+// shape's subpaths close as for hatching, with the same fill rules, and
+// curves are cut as curves.
+let art = sheet("art");
+art.add_canvas(caption("path.erase_inside(shape): lines behind a disc; path.erase_outside(shape, #{ fill_rule })", TOP));
+let rays = new_path();
+for i in 0..18 {
+	let y = TOP + 80 + i * 22;
+	rays.append(wave(LEFT, LEFT + 440, y, 8));
+}
+let disc = new_circle(vec2(LEFT + 220, TOP + 270), 120);
+art.add_path(rays.erase_inside(disc), LINE);
+art.add_path(disc, CAPTION);
+// A star drawn in one line: with evenodd its middle is outside, so the
+// waves inside the star keep to its points.
+let star = new_path();
+let hub = vec2(LEFT + 760, TOP + 270);
+for i in 0..5 {
+	let a = -PI() / 2.0 + i * 4.0 * PI() / 5.0;
+	let p = hub + vec2(190, 0).rotated(a);
+	if i == 0 { star.move_to(p); } else { star.line_to(p); }
+}
+star.close();
+let waves = new_path();
+for i in 0..18 {
+	waves.append(wave(LEFT + 560, LEFT + 960, TOP + 80 + i * 22, 8));
+}
+art.add_path(waves.erase_outside(star, #{ fill_rule: "evenodd" }), new_style(1, BLUE, PEN));
+art.add_path(star, CAPTION);
+
+// Brambles grow thicker toward an origin, as old wood is: canes thickness
+// times as wide there, easing to their usual width reach away.
+art.add_canvas(caption("art::bramble_along(path, flower_size, seed, #{ origin, thickness, reach }): the origin ringed", TOP + 560));
+let maze_lines = new_maze(8, 5, 3).path();
+maze_lines.scale_by(900 / maze_lines.bounds().width);
+maze_lines.translate_by(vec2(LEFT + 50, TOP + 720));
+let origin = maze_lines.bounds().min;
+let grown = art::bramble_along(maze_lines, 45, 6, #{ origin: origin, thickness: 10, reach: 1000 });
+art.add_path(grown.vines, new_style(1, BARK, PEN));
+art.add_path(grown.leaves, new_style(1, GREEN, PEN));
+art.add_path(grown.flowers, LINE);
+art.add_path(new_circle(origin, 10), CAPTION);
 book.bind("art", art);
 
 // ---- generators: scattered points, trees, digits ----

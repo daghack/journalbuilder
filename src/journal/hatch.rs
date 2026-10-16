@@ -202,7 +202,7 @@ fn scanlines(rings: &[Vec<Vec2>], spacing: f32, rule: FillRule) -> Vec<(f32, f32
 
 /// Whether a point is inside, given the rings' total winding round it and
 /// how many rings it's inside.
-fn inside(depth: i32, rings_inside: i32, rule: FillRule) -> bool {
+pub(crate) fn inside(depth: i32, rings_inside: i32, rule: FillRule) -> bool {
     match rule {
         FillRule::Holes => rings_inside % 2 != 0,
         FillRule::EvenOdd => depth % 2 != 0,

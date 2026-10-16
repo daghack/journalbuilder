@@ -34,6 +34,16 @@
 //! counters. "evenodd" also leaves out where a single subpath crosses over
 //! itself (the middle of a star drawn in one line); "nonzero" merges
 //! overlapping shapes, as SVG fills do.
+//!
+//! ```rhai
+//! // Cut a path where a closed shape covers it: lines behind a figure.
+//! background.erase_inside(figure_outline);
+//! frame.erase_outside(new_circle(vec2(0, 0), 100), #{ fill_rule: "evenodd" });
+//! ```
+//!
+//! The shape's subpaths are closed shapes as for hatching, with the same
+//! fill rules. Lines and curves are cut where they cross its outline and
+//! stay lines and curves.
 
 use rhai::{Dynamic, Engine, EvalAltResult, Map};
 use super::RhaiResult;
@@ -44,6 +54,7 @@ use super::text::{line_mode, spacing};
 use super::canvas::bounds_map;
 use super::random::SharedRng;
 use super::{avoid, random, Canvas, CanvasData, Path, StrokeStyle, Vec2};
+use crate::journal::clip::{clip, Keep};
 use crate::journal::hatch::{FillRule, HatchOptions};
 use crate::journal::canvas::textbox::TextBoxLineMode;
 use crate::journal::paths::StrokePath;
@@ -258,6 +269,10 @@ pub(super) fn register(engine: &mut Engine, text: TextSource) {
             let other = other.get();
             path.update(|p| p.append(other))
         })
+        .register_fn("erase_inside", |path: &mut Path, shape: Path| -> RhaiResult<Path> { erase(path, &shape, &Map::new(), Keep::Outside) })
+        .register_fn("erase_inside", |path: &mut Path, shape: Path, options: Map| -> RhaiResult<Path> { erase(path, &shape, &options, Keep::Outside) })
+        .register_fn("erase_outside", |path: &mut Path, shape: Path| -> RhaiResult<Path> { erase(path, &shape, &Map::new(), Keep::Inside) })
+        .register_fn("erase_outside", |path: &mut Path, shape: Path, options: Map| -> RhaiResult<Path> { erase(path, &shape, &options, Keep::Inside) })
         .register_fn("new_circle", |center: Vec2, radius: Dynamic| -> RhaiResult<Path> {
             let radius = float("new_circle", "the radius", &radius)?;
             Ok(Path::new(StrokePath::circle(center.into(), radius as f32)))
@@ -304,15 +319,7 @@ fn hatch_options(options: &Map) -> RhaiResult<HatchOptions> {
             Some(n) => Err(format!("{}: '{}' can't be negative, got {}", CALLER, key, n).into()),
         }
     };
-    let fill_rule = match options.get("fill_rule") {
-        None => FillRule::default(),
-        Some(rule) => {
-            let name = rule.to_string();
-            FillRule::from_name(&name).ok_or_else(|| -> Box<EvalAltResult> {
-                format!("{}: unknown fill_rule '{}'; expected one of {}", CALLER, name, FillRule::NAMES.join(", ")).into()
-            })?
-        }
-    };
+    let fill_rule = fill_rule(CALLER, options)?;
     Ok(HatchOptions {
         spacing,
         angles,
@@ -321,6 +328,33 @@ fn hatch_options(options: &Map) -> RhaiResult<HatchOptions> {
         inset: at_least_zero("inset")?,
         fill_rule,
     })
+}
+
+/// The `fill_rule` option, by default "holes".
+fn fill_rule(caller: &str, options: &Map) -> RhaiResult<FillRule> {
+    match options.get("fill_rule") {
+        None => Ok(FillRule::default()),
+        Some(rule) => {
+            let name = rule.to_string();
+            FillRule::from_name(&name).ok_or_else(|| -> Box<EvalAltResult> {
+                format!("{}: unknown fill_rule '{}'; expected one of {}", caller, name, FillRule::NAMES.join(", ")).into()
+            })
+        }
+    }
+}
+
+/// `path.erase_inside(shape[, #{ fill_rule }])` and `erase_outside`: the
+/// path cut to the parts on the `keep` side of the shape, in place.
+fn erase(path: &mut Path, shape: &Path, options: &Map, keep: Keep) -> RhaiResult<Path> {
+    let caller = if keep == Keep::Outside { "erase_inside" } else { "erase_outside" };
+    check_keys(caller, options, &["fill_rule"])?;
+    let rule = fill_rule(caller, options)?;
+    // Copy first: `p.erase_inside(p)` shares one value.
+    let shape = shape.get();
+    if !shape.points_within().iter().chain(path.borrow().points_within().iter()).all(|p| p.is_finite()) {
+        return Err(format!("{}: the paths have a non-finite (infinite or NaN) coordinate", caller).into());
+    }
+    Ok(path.update(|p| *p = clip(p, &shape, rule, keep)))
 }
 
 /// The hatching of a path's inside, as a new path; the path itself is
@@ -350,6 +384,28 @@ mod tests {
 
     fn fails(script: &str) -> String {
         engine().engine.run(script).expect_err("script should fail").to_string()
+    }
+
+    #[test]
+    fn erasing_cuts_paths_by_a_shape() {
+        let ok: bool = eval(r#"
+            let square = new_rectangle(vec2(0, 0), 10, 10);
+            let line = new_line(vec2(-20, 0), vec2(20, 0));
+            let same = line.erase_inside(square);
+            let outside = line.bounds();
+            let inner = new_line(vec2(-20, 0), vec2(20, 0)).erase_outside(square, #{ fill_rule: "nonzero" }).bounds();
+            same.bounds().width == 40.0 && outside.width == 40.0 && inner.width > 9.99 && inner.width < 10.01
+                && `${line}`.contains("M 5 0")
+        "#);
+        assert!(ok);
+        let e = engine();
+        for (script, want) in [
+            ("new_line(vec2(0, 0), vec2(1, 0)).erase_inside(new_circle(vec2(0, 0), 1), #{ rule: 1 })", "erase_inside: unknown option 'rule'"),
+            ("new_line(vec2(0, 0), vec2(1, 0)).erase_outside(new_circle(vec2(0, 0), 1), #{ fill_rule: \"odd\" })", "erase_outside: unknown fill_rule 'odd'"),
+        ] {
+            let err = e.engine.eval::<rhai::Dynamic>(script).expect_err(script).to_string();
+            assert!(err.contains(want), "{}: {}", want, err);
+        }
     }
 
     #[test]

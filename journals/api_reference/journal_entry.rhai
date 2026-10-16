@@ -371,6 +371,14 @@ doc += api("path.hatch(options)", "Hatching with options.", [
 	opt("options.inset", "0", "How far inside the outline lines stop.", "a number of at least 0."),
 	opt("options.fill_rule", "holes", "Which parts of overlapping shapes are inside.", "holes (shapes inside or across others cut holes in them), evenodd (which also leaves out where a single subpath crosses itself) or nonzero (overlapping shapes merge, as SVG fills do)."),
 ]);
+doc += api("path.erase_inside(shape), path.erase_inside(shape, options)", "Cuts away the parts of the path a closed shape covers, as lines behind a figure are, in place; gives the same path. Lines and curves are cut where they cross the shape's outline and stay lines and curves; pieces that run on stay one stroke, and a closed subpath the shape doesn't touch stays closed.", [
+	arg("shape", "What covers the path. Every subpath is taken as a closed shape, as for hatching.", "a path, all its points finite."),
+	opt("options.fill_rule", "holes", "Which parts of overlapping shapes are inside.", "holes, evenodd or nonzero, as for hatch."),
+]);
+doc += api("path.erase_outside(shape), path.erase_outside(shape, options)", "Cuts away the parts of the path outside a closed shape, keeping what it covers, in place; gives the same path. Cut as erase_inside cuts.", [
+	arg("shape", "What to keep the path inside. Every subpath is taken as a closed shape, as for hatching.", "a path, all its points finite."),
+	opt("options.fill_rule", "holes", "Which parts of overlapping shapes are inside.", "holes, evenodd or nonzero, as for hatch."),
+]);
 doc += api("path.to_string(), path.to_debug()", "The path's commands as text, for print and debug.");
 
 // ---- brushes and styles ----
@@ -642,17 +650,23 @@ doc += api("art::snake_along(path, max_width, seed)", "A many-headed serpent alo
 	arg("max_width", "How wide it is at its widest.", "a positive number."),
 	seed_arg("serpent"),
 ]);
-doc += api("art::bramble(base, angle, length, flower_size, seed)", "A blackberry bramble. Gives #{ vines, leaves, flowers }: canes, thorns and stalks; leaflets and veins; flowers, buds and sepals, as paths to stroke in different colours. Parts in front hide the lines behind them.", [
+doc += api("art::bramble(base, angle, length, flower_size, seed), art::bramble(base, angle, length, flower_size, seed, options)", "A blackberry bramble. Gives #{ vines, leaves, flowers }: canes, thorns and stalks; leaflets and veins; flowers, buds and sepals, as paths to stroke in different colours. Parts in front hide the lines behind them.", [
 	vec_arg("base", "Where the cane grows from."),
 	arg("angle", "Which way it grows: 0 is +x, -PI() / 2 up the page.", "a number, in radians."),
 	arg("length", "How far it grows.", "a number at least 2 times flower_size."),
 	arg("flower_size", "About how wide its flowers are, which everything else is sized by.", "a positive number."),
 	seed_arg("bramble"),
+	req("options.origin", "A growth origin: canes and branches are thicker toward it, as old wood is. Thorns, stalks, leaves and flowers keep their size.", "a vec."),
+	opt("options.thickness", "3", "How many times their usual width canes are at the origin, easing back to it at the reach.", "a number of at least 1."),
+	opt("options.reach", "as far as the cane could grow from the origin", "How far from the origin canes are back to their usual width.", "a positive number."),
 ]);
-doc += api("art::bramble_along(path, flower_size, seed)", "A bramble grown along a path, such as a maze's: vines follow its lines, branch at junctions and flower at its dead ends. Gives #{ vines, leaves, flowers }.", [
+doc += api("art::bramble_along(path, flower_size, seed), art::bramble_along(path, flower_size, seed, options)", "A bramble grown along a path, such as a maze's: vines follow its lines, branch at junctions and flower at its dead ends. Gives #{ vines, leaves, flowers }.", [
 	arg("path", "The lines its vines follow.", "a path with lines, all its points finite."),
 	arg("flower_size", "About how wide its flowers are, which everything else is sized by.", "a positive number."),
 	seed_arg("bramble"),
+	req("options.origin", "A growth origin: vines are thicker toward it, as old wood is. Thorns, stalks, leaves and flowers keep their size.", "a vec."),
+	opt("options.thickness", "3", "How many times their usual width vines are at the origin, easing back to it at the reach.", "a number of at least 1."),
+	opt("options.reach", "the farthest point of the path from the origin", "How far from the origin vines are back to their usual width.", "a positive number."),
 ]);
 doc += api("art::eye(center, length, color, gaze_angle, messiness, seed)", "An eye as a hand sketches one, as a canvas: lids gone over and running past the corners, an iris ringed and washed with color, and a line through the iris bowed toward where it looks.", [
 	vec_arg("center", "Its centre."),
