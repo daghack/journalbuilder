@@ -7,88 +7,68 @@ dependencies, so it's written down rather than fixed.
 
 ## Where the time goes
 
-A full render of `journal_entry_18` (one 2,800 x 3,200 page, ~6,000 glyph
-strokes, default `--supersample 1.2`) takes about 18 s. Of the main
-thread's ~11,500 samples:
+Rendering every journal takes about 550 s on Darkly's `dev` and about
+210 s on its `offline-render-perf` branch (below), with the same pixels. A
+render of `journal_entry_18` (one 2,800 x 3,200 page, ~6,000 glyph strokes,
+default `--supersample 1.2`) takes about 19 s on `dev` and 8 s on the
+branch. Its main thread on the branch:
 
-| | samples | share |
-|---|---|---|
-| Darkly reading back undo snapshots (`DarklyEngine::render` → `drain_readbacks` → `ReadbackRequest::extract_pixels`, nearly all `memmove`) | 6,860 | 60% |
-| Darkly committing undo regions (`commit_undo_region`: buffer creation, encoding, submit) and freeing them (`IOGPUMetalBuffer dealloc`) | ~760 | 7% |
-| Darkly compiling the brush graph for every stroke (`brush::compile_graph`) | ~620 | 5% |
-| Darkly finishing and submitting a command encoder per stroke and dab batch | ~565 | 5% |
-| Darkly formatting strings per dab (`BrushGraphRunner::build_slot_outputs` → `format!`) | ~220 | 2% |
-| Darkly diffing each stroke for its undo rect (`end_stroke` → `DiffRectPass::request`) | ~190 | 2% |
-| Darkly requesting layer thumbnails (`request_thumbnail_readbacks`) | ~180 | 2% |
-| Darkly creating a scratch texture per stroke (`StrokeBuffer::new` → `create_texture`) | ~140 | 1% |
-| This repository's code (sampling strokes, filtering, PNG encoding) | <100 | <1% |
+| | share |
+|---|---|
+| Darkly finishing and submitting command encoders, about four per stroke (`BrushGpuContext::submit_final`) | 34% |
+| Darkly rendering the dabs (`render_from_stabilized_range_to`) | 21% |
+| Darkly formatting strings per dab (`BrushGraphRunner::build_slot_outputs` → `format!`) | 11% |
+| Darkly committing each stroke's undo region (`commit_undo_region`) | 7% |
+| Darkly creating staging buffers and a scratch texture per stroke (`create_buffer`, `create_texture`) | 8% |
+| This repository's code (sampling strokes, filtering, PNG encoding) | <1% |
 
 Other threads are idle or submitting Metal command buffers. Script
 evaluation for every journal together takes about 0.2 s.
 
 ## Darkly
 
-All of these are in Darkly's interactive-editor machinery, which an offline
-batch render doesn't need. Most would go away with a headless "batch"
-mode on `DarklyEngine` (no undo, no thumbnails), the single biggest win.
+### Fixed on the `offline-render-perf` branch
 
-### 1. Every stroke reads the whole canvas back for undo (60%)
+Not yet in a pinned Darkly; once it lands on the fork's `dev`, move the pin
+in `Cargo.toml` to it.
 
-`stroke_path` ends each stroke by committing an undo entry. The undo rect
-comes from a GPU diff (`DiffRectPass`) that's polled without waiting
-(`flush_pending_undo_commit`, `painting.rs`): when the next stroke starts
-before the GPU has finished, it falls back to the whole saved area. Offline
-strokes arrive back to back, so it nearly always falls back, and every
-stroke copies the whole canvas into a staging buffer and then into memory
-(~4 MB per stroke on a 1,000 x 1,000 canvas; this is also why renders used
-to run out of memory until `render_canvas` ticked a frame every 25
-strokes).
+- **Every stroke read the whole layer back for undo** (60% on `dev`). The
+  undo rect came from a GPU diff that only a frame collects, so back-to-back
+  offline strokes fell back to committing the whole layer. Each stroke now
+  commits the union of its dabs' footprints when it ends.
+- **The brush graph compiled for every stroke** (18% of the main thread
+  once the above was fixed). It's now compiled once per change. That saves
+  CPU but no wall time here: the render is bound by the submissions below.
 
-Waiting on the device before each stroke (tried from this repo, which owns
-the `wgpu::Device`) makes the diff ready but doubles the render time with
-stalls. Ticking frames more or less often doesn't help either.
+### Stabilization is tuned for the screen
 
-Fixes, in Darkly:
-- An option to turn undo history off, skipping `commit_undo_region` and
-  `push_undo` for strokes. The cheapest and biggest fix.
-- Otherwise, take the undo rect from the stroke engine's own bounds of the
-  dabs it placed (it knows them on the CPU) rather than a GPU diff, so it's
-  never the whole canvas.
-- Reuse staging buffers for undo readbacks rather than creating and
-  freeing one per stroke (the `create_buffer`/`dealloc` cost above).
+Darkly's stabilizer resamples a stroke every 6 screen pixels and smooths it
+at that scale. A headless engine has no screen (zoom 1), so glyph-sized
+strokes at a brush's own `stabilize` (0.6 for Rough Ink) came out as short
+straight lines. Our points are already smooth curves, so `Pen::draw` turns
+stabilization off for every brush.
 
-### 2. The brush graph is compiled for every stroke (5%)
+### Remaining
 
-`brush_stroke_to` calls `brush::compile_graph` (and builds a
-`BrushGraphRunner`) for each stroke, though the brush and its settings
-rarely change between strokes. Caching the compiled graph per brush,
-invalidated by `brush_load` and `brush_set_exposed_port`, would remove it.
+1. **A command encoder and submit per stroke phase** (34%). Each stroke
+   submits about four command buffers (`stroke-buffer-init`,
+   `brush-begin-stroke`, `brush-render-tail`, `brush-commit`). One encoder
+   per pen-up flush would cut that.
+2. **Per-dab string formatting** (11%). `build_slot_outputs` builds a map of
+   `format!`ed names for every dab; resolving them to slot indices once per
+   compile would remove both the strings and the map.
+3. **Per-stroke textures and copies** (8%). Each stroke creates a
+   layer-sized scratch and pre-stroke texture, and copies the whole layer
+   twice (once for undo, once for the commit). Reusing the textures and
+   sharing one copy would cut both.
+4. **Peak memory.** With the readback copies gone, the CPU runs further
+   ahead of the GPU, and peak memory rose on several journals (1.5 to 2.7
+   GB for `journal_entry_18`). `catch_up` waits for the GPU only in a
+   browser; waiting natively too every so many strokes would bound it.
+5. **SipHash in hot maps** (<1%). Darkly's id-keyed maps use the default
+   hasher; FxHash or ahash would help a little.
 
-### 3. Per-dab string formatting (2%)
-
-`BrushGraphRunner::build_slot_outputs` builds output names with `format!`
-for every dab. Precomputing the slot keys when the graph is compiled (or
-using interned ids) would remove the allocations.
-
-### 4. A command encoder and submit per stroke (5%)
-
-Each stroke finishes and submits its own command encoders
-(`BrushGpuContext::submit_final`, `CommandEncoder::finish`), and creates a
-scratch texture (`Scratch::create_write_texture`). A batch API (several
-strokes, one submission) and a pool of scratch textures by size would cut
-both.
-
-### 5. Thumbnails nobody looks at (2%)
-
-`DarklyEngine::render` requests layer thumbnail readbacks every frame. A
-headless engine never shows them; making thumbnails opt-in (or off with no
-display) would skip them.
-
-### 6. SipHash in hot maps (<1%)
-
-Darkly's internal hash maps keyed by ids use the default SipHash
-(`Sip13Rounds` shows up on its own). A faster hasher (FxHash, ahash) for
-id-keyed maps would help a little.
+Thumbnails, which cost 2% on `dev`, no longer register.
 
 ## resvg (`--svg` output)
 

@@ -411,6 +411,12 @@ impl Pen<'_> {
                 .unwrap_or_else(|e| panic!("Failed to load brush '{}': {}", brush.name, e));
             self.loaded_name = Some(brush.name.clone());
             self.loaded_size = None;
+            // Stabilization smooths a hand's jitter, and these points are
+            // already smooth curves. Darkly also tunes it to screen pixels,
+            // which on a headless engine smooths glyph-sized strokes into
+            // short straight lines.
+            self.engine.brush_set_exposed_port("brush_settings", "stabilize", 0.0)
+                .unwrap_or_else(|e| panic!("Unable to turn off stabilization for brush '{}': {}", brush.name, e));
         }
         let size = brush.size * self.brush_scale;
         if self.loaded_size != Some(size) {
@@ -460,10 +466,9 @@ impl Pen<'_> {
             self.engine.set_stroke_seed(Some(stroke_seed));
             self.drawn = self.drawn.wrapping_add(1);
             let variation = brush.variation(stroke_seed);
-            // One stroke_path call per substroke: Darkly stabilizes and draws
-            // the whole stroke at once, instead of re-rendering and
-            // committing on every point as live stroke_to does.
-            let mut ops = Vec::new();
+            // One Darkly stroke per substroke. With no frame drawn between
+            // its points, Darkly draws the whole stroke at once when it ends.
+            self.engine.begin_stroke(layer).expect("begin_stroke failed");
             let sample_count = samples.len();
             let mut distance = 0.0;
             let mut last = samples.first().map(|s| s.point);
@@ -481,7 +486,7 @@ impl Pen<'_> {
                 let y = (point.y - self.page_origin.y) * h_ratio - self.offset.1;
                 let down = if bottom > top { (point.y - top) / (bottom - top) } else { 0.5 };
                 points.push((Vec2::new(x, y), i as f32 / (sample_count - 1).max(1) as f32, down));
-                ops.push(StrokeOp::BrushStroke {
+                self.engine.stroke_to(StrokeOp::BrushStroke {
                     x,
                     y,
                     pressure,
@@ -496,7 +501,7 @@ impl Pen<'_> {
                     ca,
                 });
             }
-            self.engine.stroke_path(layer, &ops).expect("stroke_path failed");
+            self.engine.end_stroke();
             // Darkly finishes each stroke's bookkeeping (its undo snapshot)
             // asynchronously, on the next frame. Offline we never draw frames
             // until the export, so without this every stroke's ~4 MB of GPU
