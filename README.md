@@ -87,12 +87,12 @@ let brush = new_brush("Calligraphy", 0.15, 0.25, 2.0);
 let ink = new_style(2.5, "rgba(0, 0, 0, 0.8)", brush);
 
 let canvas = new_canvas();
-canvas.add_path(new_circle(new_vec(0.0, 0.0), 100.0), ink);
+canvas.add_path(new_circle(vec2(0.0, 0.0), 100.0), ink);
 
 let font = font("copper");
 for (g, i) in font.glyphs("ink") {
 	g.scale = 50.0;
-	g.position = new_vec(i * 50.0 - 50.0, 0.0);
+	g.position = vec2(i * 50.0 - 50.0, 0.0);
 	canvas.add_glyph(g, ink);
 }
 
@@ -112,10 +112,11 @@ What to know:
   canvas is cropped to its strokes, plus `page.margin` (by default half the
   largest brush size).
 - **Numbers and vectors.** Numbers can be whole or decimal anywhere
-  (`new_circle(new_vec(0, 0), 20)`). Vecs add, subtract, negate, and
+  (`new_circle(vec2(0, 0), 20)`). Vecs add, subtract, negate, and
   multiply or divide by numbers (`(a + b) / 2`), and have `length()`,
   `distance(other)`, `dot(other)`, `angle()`, `normalized()` and
-  `rotated(angle)`. `path.bounds()` and `canvas.bounds()` give
+  `rotated(angle)`; `vec3` and `vec4` do the same in more coordinates.
+  Angles are radians: `degrees(45)` converts. `path.bounds()` and `canvas.bounds()` give
   `#{ min, max, center, width, height }`.
 - **Brushes and widths.** `new_brush(name, min_pressure, max_pressure,
   size)` picks a Darkly brush; `size` is how wide its marks are. In
@@ -204,7 +205,7 @@ What to know:
   grows one along a path, such as a maze's, and `art::snake_along(path,
   max_width, random_seed)` makes a many-headed serpent of one.
 - **Page sizes.** A page is as big as its strokes, plus `page.margin`;
-  with `page.size = new_vec(1200, 1600)` it's exactly that, from the
+  with `page.size = vec2(1200, 1600)` it's exactly that, from the
   origin, and strokes past its edges are cut off. The showcase is a book
   of such pages.
 - **Splitting pages.** `page.split(columns, rows)` cuts a named page into a
@@ -282,7 +283,7 @@ journal_entry.add_pages(layout("two_column_article").typeset(#{
 		rule: #{ style: red },
 		divider: #{ style: red },
 	},
-	art: #{ divider: new_circle(new_vec(0, 0), 10), illustration: moon_canvas },
+	art: #{ divider: new_circle(vec2(0, 0), 10), illustration: moon_canvas },
 }));
 ```
 

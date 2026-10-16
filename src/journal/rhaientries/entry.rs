@@ -166,7 +166,7 @@ impl Page {
     fn get_size(&mut self) -> Dynamic {
         self.size.map_or(Dynamic::UNIT, |s| Dynamic::from(Vec2::new(s.x as f64, s.y as f64)))
     }
-    /// `page.size = new_vec(width, height)`: the page is the region from
+    /// `page.size = vec2(width, height)`: the page is the region from
     /// the origin to there, whatever is drawn on it, and strokes past its
     /// edges are cut off; `()` for as big as its strokes (the default).
     fn set_size(&mut self, size: Dynamic) -> RhaiResult<()> {

@@ -331,7 +331,7 @@ mod tests {
     fn fill_places_glyphs_inside_the_box_and_returns_the_rest() {
         let ok: bool = eval(r#"
             let glyphs = font.glyphs(text);
-            let tb = new_textbox(#{ center: new_vec(0.0, 0.0), width: 100, height: 40, symbol_scale: 10.0 });
+            let tb = new_textbox(#{ center: vec2(0.0, 0.0), width: 100, height: 40, symbol_scale: 10.0 });
             let res = tb.fill(glyphs);
             if res.placed.len() == 0 || res.unplaced.len() == 0 { throw "expected a partial fill"; }
             if res.placed.len() + res.unplaced.len() != glyphs.len() { throw "glyphs went missing"; }
@@ -348,7 +348,7 @@ mod tests {
     fn place_all_spreads_glyphs_over_boxes() {
         let ok: bool = eval(r#"
             let glyphs = font.glyphs(text);
-            let tb = new_textbox(#{ center: new_vec(0.0, 0.0), width: 60, height: 30, symbol_scale: 10.0, layout: "words", jagged_edge: 0.5 });
+            let tb = new_textbox(#{ center: vec2(0.0, 0.0), width: 60, height: 30, symbol_scale: 10.0, layout: "words", jagged_edge: 0.5 });
             let blocks = tb.place_all(glyphs);
             let total = 0;
             for b in blocks { total += b.len(); }
@@ -356,7 +356,7 @@ mod tests {
         "#);
         assert!(ok);
         let err = fails(r#"
-            let tb = new_textbox(#{ center: new_vec(0.0, 0.0), width: 5, height: 5, symbol_scale: 50.0 });
+            let tb = new_textbox(#{ center: vec2(0.0, 0.0), width: 5, height: 5, symbol_scale: 50.0 });
             tb.place_all(font("loche_upper").glyphs("ab"));
         "#);
         assert!(err.contains("2 glyph(s) don't fit"), "{}", err);
@@ -366,8 +366,8 @@ mod tests {
     fn avoid_keeps_glyphs_off_a_canvas() {
         let counts: rhai::Array = eval(r#"
             let blot = new_canvas();
-            for i in 0..10 { blot.add_path(new_circle(new_vec(0.0, 0.0), 4.0 * i), style); }
-            let opts = #{ center: new_vec(0.0, 0.0), width: 100, height: 100, symbol_scale: 10.0 };
+            for i in 0..10 { blot.add_path(new_circle(vec2(0.0, 0.0), 4.0 * i), style); }
+            let opts = #{ center: vec2(0.0, 0.0), width: 100, height: 100, symbol_scale: 10.0 };
             let free = new_textbox(opts).fill(font.glyphs(text)).placed;
             opts.avoid = blot;
             opts.clearance = 0.0;
@@ -391,8 +391,8 @@ mod tests {
                 for g in glyphs { if g.position.x < x && g.position.x > m { m = g.position.x; } }
                 m
             }
-            let bar = new_line(new_vec(-150.0, -100.0), new_vec(-150.0, 100.0));
-            let opts = #{ center: new_vec(0.0, 0.0), width: 400, height: 10, symbol_scale: 10.0, layout: "words", avoid: bar, clearance: 2.0 };
+            let bar = new_line(vec2(-150.0, -100.0), vec2(-150.0, 100.0));
+            let opts = #{ center: vec2(0.0, 0.0), width: 400, height: 10, symbol_scale: 10.0, layout: "words", avoid: bar, clearance: 2.0 };
             let whole = new_textbox(opts).fill(font.glyphs("abcdefghijklmnop")).placed;
             opts.split_words = true;
             let split = new_textbox(opts).fill(font.glyphs("abcdefghijklmnop")).placed;
@@ -414,8 +414,8 @@ mod tests {
     const SPLAT_SETUP: &str = r#"
         let style = new_style(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
         let base = new_canvas();
-        base.add_path(new_rectangle(new_vec(0.0, 0.0), 800.0, 800.0), style);
-        base.add_path(new_circle(new_vec(0.0, 0.0), 150.0), style);
+        base.add_path(new_rectangle(vec2(0.0, 0.0), 800.0, 800.0), style);
+        base.add_path(new_circle(vec2(0.0, 0.0), 150.0), style);
         let msgs = ["ash and oak", "a quiet note", "the last word"];
         let opts = #{ symbol_scale: 20.0, width_range: [150, 250], height_range: [100, 200] };
     "#;
@@ -500,12 +500,12 @@ mod tests {
 
     #[test]
     fn bad_options_fail_at_their_line() {
-        let c = "new_vec(0.0, 0.0)";
+        let c = "vec2(0.0, 0.0)";
         for (opts, want) in [
             (format!("#{{ center: {}, width: 10, height: 10, symbol_scale: 2, colour: 1 }}", c), "unknown option 'colour'"),
             (format!("#{{ center: {}, shape: new_circle({}, 5.0), symbol_scale: 2 }}", c, c), "either a 'shape' or a 'center'"),
             ("#{ shape: 3, symbol_scale: 2 }".to_string(), "'shape' should be a path, got i64"),
-            (format!("#{{ shape: new_line({}, new_vec(1.0, 1.0)), symbol_scale: 2 }}", c), "'shape' encloses nothing"),
+            (format!("#{{ shape: new_line({}, vec2(1.0, 1.0)), symbol_scale: 2 }}", c), "'shape' encloses nothing"),
             (format!("#{{ center: {}, width: 10, height: 10, symbol_scale: 2, angle: \"up\" }}", c), "'angle'"),
             ("#{ width: 10, height: 10, symbol_scale: 2 }".to_string(), "missing 'center'"),
             (format!("#{{ center: {}, width: 0, height: 10, symbol_scale: 2 }}", c), "'width' must be positive"),
@@ -526,7 +526,7 @@ mod tests {
     fn a_rectangle_shape_fills_as_a_box_does() {
         let same: bool = eval(r#"
             let blot = new_canvas();
-            blot.add_path(new_circle(new_vec(10.0, 5.0), 30.0), style);
+            blot.add_path(new_circle(vec2(10.0, 5.0), 30.0), style);
             let same = true;
             for layout in ["flat", "words"] {
                 let opts = #{ symbol_scale: 12.0, layout: layout, jagged_edge: 0.7, avoid: blot, spacing: 0.1 };
@@ -534,8 +534,8 @@ mod tests {
                 for shaped in [false, true] {
                     seed(3);
                     let o = opts;
-                    if shaped { o.shape = new_rectangle(new_vec(3.0, -7.0), 230, 150); o.angle = 0; }
-                    else { o.center = new_vec(3.0, -7.0); o.width = 230; o.height = 150; }
+                    if shaped { o.shape = new_rectangle(vec2(3.0, -7.0), 230, 150); o.angle = 0; }
+                    else { o.center = vec2(3.0, -7.0); o.width = 230; o.height = 150; }
                     let out = [];
                     for g in new_textbox(o).fill(font.glyphs(text)).placed { out.push([g.position.x, g.position.y, g.rotation]); }
                     positions.push(out);
@@ -550,7 +550,7 @@ mod tests {
     #[test]
     fn a_shape_keeps_glyphs_inside_it_on_turned_lines() {
         let ok: bool = eval(r#"
-            let tb = new_textbox(#{ shape: new_circle(new_vec(0.0, 0.0), 80.0), angle: PI() / 6.0, symbol_scale: 10.0 });
+            let tb = new_textbox(#{ shape: new_circle(vec2(0.0, 0.0), 80.0), angle: PI() / 6.0, symbol_scale: 10.0 });
             let placed = tb.fill(font.glyphs(text)).placed;
             if placed.len() < 40 { throw "too few placed: " + placed.len(); }
             for g in placed {

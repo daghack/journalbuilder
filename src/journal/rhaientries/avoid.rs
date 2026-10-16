@@ -5,11 +5,11 @@
 //! avoid.add(border, 8.0);           // keep 8 units from a path's lines
 //! avoid.add(drawing, 4.0);          // from a canvas's marks (their edges, not their middles)
 //! avoid.add(glyphs, 2.0);           // from glyphs' outlines, insides included
-//! avoid.add_region(new_circle(new_vec(0.0, 0.0), 80.0));   // out of a closed shape
+//! avoid.add_region(new_circle(vec2(0.0, 0.0), 80.0));   // out of a closed shape
 //! avoid.add_hull(drawing, 10.0);   // out of everything inside a drawing's outline
 //! avoid.add(other_tree);            // everything another tree avoids
 //! avoid.add([border, drawing], 3.0);   // arrays of any of these
-//! avoid.blocks(new_vec(10.0, 0.0)); // whether a point is too close to something
+//! avoid.blocks(vec2(10.0, 0.0)); // whether a point is too close to something
 //! avoid.blocks(glyph);              // whether a placed glyph is
 //! ```
 //!
@@ -226,16 +226,16 @@ mod tests {
         let ok: bool = eval(r#"
             let style = new_style(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 2.0));
             let c = new_canvas();
-            c.add_path(new_line(new_vec(0.0, 100.0), new_vec(100.0, 100.0)), style);
+            c.add_path(new_line(vec2(0.0, 100.0), vec2(100.0, 100.0)), style);
             let avoid = new_avoidance_tree();
             if !avoid.is_empty { throw "should start empty"; }
-            avoid.add(new_line(new_vec(0.0, 0.0), new_vec(100.0, 0.0)), 5)
+            avoid.add(new_line(vec2(0.0, 0.0), vec2(100.0, 0.0)), 5)
                 .add(c, 3.0)
-                .add_region(new_circle(new_vec(500.0, 0.0), 50.0));
+                .add_region(new_circle(vec2(500.0, 0.0), 50.0));
             // The canvas's brush reaches 1 either side of its line.
-            [avoid.blocks(new_vec(50.0, 4.0)), !avoid.blocks(new_vec(50.0, 6.0)),
-             avoid.blocks(new_vec(50.0, 103.5)), !avoid.blocks(new_vec(50.0, 104.5)),
-             avoid.blocks(new_vec(500.0, 0.0)), !avoid.blocks(new_vec(600.0, 0.0))]
+            [avoid.blocks(vec2(50.0, 4.0)), !avoid.blocks(vec2(50.0, 6.0)),
+             avoid.blocks(vec2(50.0, 103.5)), !avoid.blocks(vec2(50.0, 104.5)),
+             avoid.blocks(vec2(500.0, 0.0)), !avoid.blocks(vec2(600.0, 0.0))]
                 .all(|b| b)
         "#);
         assert!(ok);
@@ -247,12 +247,12 @@ mod tests {
             let a = new_avoidance_tree();
             let b = a;
             let g = font("symbols").glyph("basic_eye").scale_by(20.0);
-            b.add([g, new_line(new_vec(100.0, 0.0), new_vec(200.0, 0.0))]);
+            b.add([g, new_line(vec2(100.0, 0.0), vec2(200.0, 0.0))]);
             let c = a.copy();
-            c.add(new_line(new_vec(0.0, 500.0), new_vec(10.0, 500.0)), 1.0);
+            c.add(new_line(vec2(0.0, 500.0), vec2(10.0, 500.0)), 1.0);
             a.add(a);   // adding itself doesn't hang or fail
-            [a.blocks(new_vec(0.0, 0.0)), a.blocks(g), a.blocks(new_vec(150.0, 0.0)),
-             !a.blocks(new_vec(5.0, 500.0)), c.blocks(new_vec(5.0, 500.0))].all(|b| b)
+            [a.blocks(vec2(0.0, 0.0)), a.blocks(g), a.blocks(vec2(150.0, 0.0)),
+             !a.blocks(vec2(5.0, 500.0)), c.blocks(vec2(5.0, 500.0))].all(|b| b)
         "#);
         assert!(ok);
     }
@@ -262,13 +262,13 @@ mod tests {
         let ok: bool = eval(r#"
             let style = new_style(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 2.0));
             let c = new_canvas();
-            c.add_path(new_line(new_vec(0.0, 0.0), new_vec(100.0, 0.0)), style);
-            c.add_path(new_line(new_vec(0.0, 100.0), new_vec(100.0, 100.0)), style);
+            c.add_path(new_line(vec2(0.0, 0.0), vec2(100.0, 0.0)), style);
+            c.add_path(new_line(vec2(0.0, 100.0), vec2(100.0, 100.0)), style);
             let lines = new_avoidance_tree().add(c);
             let hull = new_avoidance_tree().add_hull(c, 5.0);
             // Brush reach (1) plus the clearance.
-            [!lines.blocks(new_vec(50.0, 50.0)), hull.blocks(new_vec(50.0, 50.0)),
-             hull.blocks(new_vec(50.0, -5.5)), !hull.blocks(new_vec(50.0, -6.5))].all(|b| b)
+            [!lines.blocks(vec2(50.0, 50.0)), hull.blocks(vec2(50.0, 50.0)),
+             hull.blocks(vec2(50.0, -5.5)), !hull.blocks(vec2(50.0, -6.5))].all(|b| b)
         "#);
         assert!(ok);
         assert!(fails("let a = new_avoidance_tree();\na.add_hull(a);").contains("add_hull: an avoidance tree has no outline"));
@@ -278,10 +278,10 @@ mod tests {
     fn bad_items_and_clearances_fail_at_their_line() {
         for (script, want) in [
             ("let a = new_avoidance_tree();\na.add(3);", "add: can't avoid a i64"),
-            ("let a = new_avoidance_tree();\na.add(new_line(new_vec(0.0, 0.0), new_vec(1.0, 0.0)), -1.0);", "clearance must be a finite number of at least 0"),
-            ("let a = new_avoidance_tree();\na.add(new_line(new_vec(0.0, 0.0), new_vec(1.0, 0.0)), \"far\");", "clearance should be a number"),
-            ("let ok = 1;\nnew_textbox(#{ center: new_vec(0.0, 0.0), width: 10, height: 10, symbol_scale: 2, avoid: [1] });", "new_textbox 'avoid': can't avoid a i64"),
-            ("let ok = 1;\nnew_textbox(#{ center: new_vec(0.0, 0.0), width: 10, height: 10, symbol_scale: 2, clearance: 3 });", "'clearance' needs 'avoid'"),
+            ("let a = new_avoidance_tree();\na.add(new_line(vec2(0.0, 0.0), vec2(1.0, 0.0)), -1.0);", "clearance must be a finite number of at least 0"),
+            ("let a = new_avoidance_tree();\na.add(new_line(vec2(0.0, 0.0), vec2(1.0, 0.0)), \"far\");", "clearance should be a number"),
+            ("let ok = 1;\nnew_textbox(#{ center: vec2(0.0, 0.0), width: 10, height: 10, symbol_scale: 2, avoid: [1] });", "new_textbox 'avoid': can't avoid a i64"),
+            ("let ok = 1;\nnew_textbox(#{ center: vec2(0.0, 0.0), width: 10, height: 10, symbol_scale: 2, clearance: 3 });", "'clearance' needs 'avoid'"),
         ] {
             let err = fails(script);
             assert!(err.contains(want) && err.contains("line 2"), "{}: {}", want, err);

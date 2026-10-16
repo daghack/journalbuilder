@@ -37,7 +37,7 @@ let cells = [];
 for cell in maze.cells() {
 	let g = font("balanced_ternary").glyph((cell.symbol - 13));
 	g.scale = cell_size;
-	g.position = new_vec(cell.x * cell_size, cell.y * cell_size);
+	g.position = vec2(cell.x * cell_size, cell.y * cell_size);
 	cells.push(g);
 	avoid.add_glyph(g, new_style(2.0, "black", maze_brush));
 }
@@ -59,7 +59,7 @@ if filled.unplaced.len() > 0 {
 let key_style = new_style(1.5, "darkred", maze_brush);
 for g in filled.placed {
 	g.scale_by(1.0 + random_range(-0.025, 0.025));
-	g.translate_by(new_vec(random_range(-2.5, 2.5), random_range(-2.5, 2.5)));
+	g.translate_by(vec2(random_range(-2.5, 2.5), random_range(-2.5, 2.5)));
 	g.rotate_by(random_range(-PI() / 32.0, PI() / 32.0));
 	page_canvas.add_glyph(g, key_style);
 }
@@ -83,7 +83,7 @@ let brush = dial_brush;
 
 fn ring_point(count, step, radius) {
 	let angle = step * 2.0 * PI() / count - PI() / 2.0;
-	#{ angle: angle, center: new_vec(radius * angle.cos(), radius * angle.sin()) }
+	#{ angle: angle, center: vec2(radius * angle.cos(), radius * angle.sin()) }
 }
 
 fn add_digit(digit, at, style) {
@@ -112,8 +112,8 @@ for (ring, r) in rings {
 			// From this circle's inner edge to the outer edge of the circle
 			// for the digit rounded to the next ring's step.
 			let inner = ring_point(rings[r + 1].count, (i / 3.0).round(), radius - ring_step);
-			let from = new_vec(at.center.x - circle_radius * at.angle.cos(), at.center.y - circle_radius * at.angle.sin());
-			let to = new_vec(inner.center.x + circle_radius * inner.angle.cos(), inner.center.y + circle_radius * inner.angle.sin());
+			let from = vec2(at.center.x - circle_radius * at.angle.cos(), at.center.y - circle_radius * at.angle.sin());
+			let to = vec2(inner.center.x + circle_radius * inner.angle.cos(), inner.center.y + circle_radius * inner.angle.sin());
 			dial.add_path(new_line(from, to), style);
 		}
 	}
@@ -123,7 +123,7 @@ for (ring, r) in rings {
 let hub_style = new_style(6.75, "black", brush);
 let hub_max = outer_ring - 2.0 * ring_step - symbol_radius / 2.0;
 for i in 0..5 {
-	dial.add_path(new_circle(new_vec(0.0, 0.0), 15.0 + i / 5.0 * (hub_max - 15.0)), hub_style);
+	dial.add_path(new_circle(vec2(0.0, 0.0), 15.0 + i / 5.0 * (hub_max - 15.0)), hub_style);
 }
 
 let shorts = [

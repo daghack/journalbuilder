@@ -2,6 +2,7 @@ mod art;
 mod avoid;
 mod canvas;
 mod entry;
+mod generate;
 mod glyphs;
 mod gradient;
 mod layout;
@@ -196,6 +197,7 @@ impl JournalEngine {
         markdown::register(&mut engine);
         glyphs::register(&mut engine, symdict.clone(), rng.clone());
         gradient::register(&mut engine);
+        generate::register(&mut engine, rng.clone());
         text::register(&mut engine, symdict.clone(), rng.clone());
         locks::register(&mut engine, Rc::new(LockLibrary::with_sources(locks)));
 
@@ -296,9 +298,9 @@ mod tests {
         let entry = engine().build_entry_str(&format!(r#"{}
             let style = new_style(1.0, "red", brush);
             let a = new_canvas();
-            a.add_path(new_path().move_to(new_vec(0.0, 0.0)).line_to(new_vec(10.0, 0.0)), style);
+            a.add_path(new_path().move_to(vec2(0.0, 0.0)).line_to(vec2(10.0, 0.0)), style);
             let b = new_canvas();
-            b.add_path(new_path().move_to(new_vec(0.0, 20.0)).line_to(new_vec(30.0, 20.0)), style);
+            b.add_path(new_path().move_to(vec2(0.0, 20.0)).line_to(vec2(30.0, 20.0)), style);
             let page = new_page();
             page.add_canvas(a);
             page.add_canvas(b);
@@ -386,29 +388,29 @@ mod tests {
         // Statement form mutates the variable...
         let statements = path_string(r#"
             let p = new_path();
-            p.move_to(new_vec(0.0, 0.0));
-            p.line_to(new_vec(1.0, 0.0));
+            p.move_to(vec2(0.0, 0.0));
+            p.line_to(vec2(1.0, 0.0));
             p.scale_by(2.0);
-            p.translate_by(new_vec(1.0, 1.0));
+            p.translate_by(vec2(1.0, 1.0));
             p
         "#);
         // ...and chaining (including on temporaries) gives the same result.
         let chained = path_string(r#"
-            new_path().move_to(new_vec(0.0, 0.0)).line_to(new_vec(1.0, 0.0))
-                .scale_by(2.0).translate_by(new_vec(1.0, 1.0))
+            new_path().move_to(vec2(0.0, 0.0)).line_to(vec2(1.0, 0.0))
+                .scale_by(2.0).translate_by(vec2(1.0, 1.0))
         "#);
         let reassigned = path_string(r#"
             let p = new_path();
-            p = p.move_to(new_vec(0.0, 0.0));
-            p = p.line_to(new_vec(1.0, 0.0));
+            p = p.move_to(vec2(0.0, 0.0));
+            p = p.line_to(vec2(1.0, 0.0));
             p = p.scale_by(2.0);
-            p = p.translate_by(new_vec(1.0, 1.0));
+            p = p.translate_by(vec2(1.0, 1.0));
             p
         "#);
         // Chains on a variable change the variable by every call.
         let chained_variable = path_string(r#"
             let p = new_path();
-            p.move_to(new_vec(0.0, 0.0)).line_to(new_vec(1.0, 0.0)).scale_by(2.0).translate_by(new_vec(1.0, 1.0));
+            p.move_to(vec2(0.0, 0.0)).line_to(vec2(1.0, 0.0)).scale_by(2.0).translate_by(vec2(1.0, 1.0));
             p
         "#);
         assert_eq!(statements, "M 1 1 L 3 1 ");
@@ -420,18 +422,18 @@ mod tests {
     #[test]
     fn copies_share_until_copied_and_adding_takes_a_snapshot() {
         let script = r#"
-            let a = new_line(new_vec(0.0, 0.0), new_vec(1.0, 0.0));
+            let a = new_line(vec2(0.0, 0.0), vec2(1.0, 0.0));
             let b = a;
-            b.translate_by(new_vec(5.0, 0.0));
+            b.translate_by(vec2(5.0, 0.0));
             if a.to_string() != b.to_string() { throw "assignment should share"; }
             let c = a.copy();
-            c.translate_by(new_vec(5.0, 0.0));
+            c.translate_by(vec2(5.0, 0.0));
             if a.to_string() == c.to_string() { throw "copy() should be independent"; }
 
             let style = new_style(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
             let canvas = new_canvas();
             canvas.add_path(a, style);
-            a.translate_by(new_vec(100.0, 0.0));   // after adding: the canvas keeps its copy
+            a.translate_by(vec2(100.0, 0.0));   // after adding: the canvas keeps its copy
             let page = new_page();
             page.add_canvas(canvas);
             canvas.add_path(a, style);        // after adding: the page keeps its copy
@@ -452,30 +454,30 @@ mod tests {
 
     #[test]
     fn shape_and_curve_functions_build_paths() {
-        assert_eq!(path_string("new_line(new_vec(0.0, 0.0), new_vec(2.0, 3.0))"), "M 0 0 L 2 3 ");
-        assert_eq!(path_string("new_rectangle(new_vec(0.0, 0.0), 2.0, 4.0)"), "M -1 -2 L 1 -2 L 1 2 L -1 2 Z ");
+        assert_eq!(path_string("new_line(vec2(0.0, 0.0), vec2(2.0, 3.0))"), "M 0 0 L 2 3 ");
+        assert_eq!(path_string("new_rectangle(vec2(0.0, 0.0), 2.0, 4.0)"), "M -1 -2 L 1 -2 L 1 2 L -1 2 Z ");
         assert_eq!(
-            path_string("new_path().move_to(new_vec(0.0, 0.0)).quad_to(new_vec(1.0, 1.0), new_vec(2.0, 0.0)).cubic_to(new_vec(3.0, 1.0), new_vec(4.0, 1.0), new_vec(5.0, 0.0)).close()"),
+            path_string("new_path().move_to(vec2(0.0, 0.0)).quad_to(vec2(1.0, 1.0), vec2(2.0, 0.0)).cubic_to(vec2(3.0, 1.0), vec2(4.0, 1.0), vec2(5.0, 0.0)).close()"),
             "M 0 0 Q 1 1 2 0 C 3 1 4 1 5 0 Z ",
         );
         // A circle is four cubic quarter-arcs.
-        assert_eq!(path_string("new_circle(new_vec(0.0, 0.0), 1.0)").matches('C').count(), 4);
+        assert_eq!(path_string("new_circle(vec2(0.0, 0.0), 1.0)").matches('C').count(), 4);
     }
 
     #[test]
     fn sized_pages_are_their_size_whatever_is_drawn() {
         let entry = engine().build_entry_str(r#"
             let c = new_canvas();
-            c.add_path(new_line(new_vec(10, 10), new_vec(500, 10)), new_style(1, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0)));
+            c.add_path(new_line(vec2(10, 10), vec2(500, 10)), new_style(1, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0)));
             let p = new_page();
             p.name = "sized";
-            p.size = new_vec(200, 100);
+            p.size = vec2(200, 100);
             p.add_canvas(c);
             if p.size.x != 200.0 || p.size.y != 100.0 { throw "the size reads back"; }
             journal_entry.add_page(p);
             journal_entry.add_pages(p.split(2, 1));
             let q = new_page();
-            q.size = new_vec(10, 10);
+            q.size = vec2(10, 10);
             q.size = ();
             if q.size != () { throw "() clears the size"; }
         "#).expect("script should run");
@@ -486,7 +488,7 @@ mod tests {
         // Its tiles divide the size, not the strokes.
         let (_, tile) = entry.pages[2].rendered_canvases().next().unwrap();
         assert_eq!((tile.frame().unwrap().page, tile.frame().unwrap().column), (whole, 1));
-        for (script, want) in [("p.size = 3;", "page.size: expected a vec"), ("p.size = new_vec(0, 10);", "at least 1")] {
+        for (script, want) in [("p.size = 3;", "page.size: expected a vec"), ("p.size = vec2(0, 10);", "at least 1")] {
             let err = engine().build_entry_str(&format!("let p = new_page();\n{}", script)).expect_err(script);
             assert!(err.contains(want) && err.contains("line 2"), "{}: {}", want, err);
         }
@@ -497,7 +499,7 @@ mod tests {
         let script = r#"
             let style = new_style(1.5, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
             let font = font("copper");
-            let canvas = new_line(new_vec(0.0, 0.0), new_vec(400.0, 0.0)).fit_text("a~b~", font, style);
+            let canvas = new_line(vec2(0.0, 0.0), vec2(400.0, 0.0)).fit_text("a~b~", font, style);
             let missing = missing_glyphs();
             if missing["~"].count != 2 { throw "expected ~ twice, got " + missing; }
             // The font, then its fallback.
@@ -521,7 +523,7 @@ mod tests {
             seed({});
             let style = new_style(1.5, "black", brush);
             let font = font("copper");
-            let path = new_path().move_to(new_vec(0.0, 0.0)).line_to(new_vec(2000.0, 0.0));
+            let path = new_path().move_to(vec2(0.0, 0.0)).line_to(vec2(2000.0, 0.0));
             let page = new_page();
             page.add_canvas(path.fit_text("a banana and an aardvark", font, style));
             journal_entry.add_page(page);
@@ -535,7 +537,7 @@ mod tests {
     const NAMED: &str = r#"
         let style = new_style(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
         let ring = new_canvas();
-        ring.add_path(new_circle(new_vec(0.0, 0.0), 10.0), style);
+        ring.add_path(new_circle(vec2(0.0, 0.0), 10.0), style);
         let named = ring.copy();
         named.name = "ring";
         let maze = new_page();
@@ -566,18 +568,18 @@ mod tests {
         let setup = r#"
             let s = new_style(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
             let font = font("copper");
-            let short = new_line(new_vec(0.0, 0.0), new_vec(10.0, 0.0));
+            let short = new_line(vec2(0.0, 0.0), vec2(10.0, 0.0));
         "#;
         for (script, want) in [
             ("short.fill_with_text(\"abc\", font, 50.0, s);", "fill_with_text: glyph 1 of 3 doesn't fit"),
             ("short.fill_with_text(\"abc\", font, 0.0, s);", "font size must be positive"),
-            ("new_line(new_vec(0.0, 0.0), new_vec(0.01, 0.0)).fit_text(\"a long message\", font, s);", "fit_text: the text doesn't fit"),
+            ("new_line(vec2(0.0, 0.0), vec2(0.01, 0.0)).fit_text(\"a long message\", font, s);", "fit_text: the text doesn't fit"),
         ] {
             let err = engine().build_entry_str(&format!("{}\n{}", setup, script)).expect_err(script).to_string();
             assert!(err.contains(want), "{}: {}", want, err);
         }
         // A path that fits a few glyphs at a time still gets the whole message.
-        let parts: rhai::Array = engine().engine.eval(&format!("{}\nnew_line(new_vec(0.0, 0.0), new_vec(60.0, 0.0)).fill_with_text(\"abcdefghijklmnopqrstuvwxyz\", font, 10.0, s)", setup)).unwrap();
+        let parts: rhai::Array = engine().engine.eval(&format!("{}\nnew_line(vec2(0.0, 0.0), vec2(60.0, 0.0)).fill_with_text(\"abcdefghijklmnopqrstuvwxyz\", font, 10.0, s)", setup)).unwrap();
         assert!(parts.len() > 1);
     }
 
@@ -587,7 +589,7 @@ mod tests {
         let script = format!(r#"
             let s = new_style(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
             let font = font("loche_upper");
-            let line = new_line(new_vec(0.0, 0.0), new_vec(2000.0, 0.0));
+            let line = new_line(vec2(0.0, 0.0), vec2(2000.0, 0.0));
             let page = new_page();
             for c in line.fill_with_text("{}", font, 20.0, s{}) {{ page.add_canvas(c); }}
             journal_entry.add_page(page);
@@ -615,7 +617,7 @@ mod tests {
         let spaced = glyph_xs("iiii", ", #{ spacing: 0.5 }");
         let spaced_gaps: Vec<f32> = spaced.windows(2).map(|w| w[1] - w[0]).collect();
         assert!(spaced_gaps.iter().zip(&gaps).all(|(s, g)| (s - g - 10.0).abs() < 0.5), "{:?} vs {:?}", spaced_gaps, gaps);
-        let err = engine().build_entry_str("new_line(new_vec(0.0, 0.0), new_vec(9.0, 0.0)).fill_with_text(\"a\", font(\"loche_upper\"), 2.0, new_style(1.0, \"black\", new_brush(\"Ink Pen\", 0.3, 0.7, 1.0)), #{ spacng: 1 });")
+        let err = engine().build_entry_str("new_line(vec2(0.0, 0.0), vec2(9.0, 0.0)).fill_with_text(\"a\", font(\"loche_upper\"), 2.0, new_style(1.0, \"black\", new_brush(\"Ink Pen\", 0.3, 0.7, 1.0)), #{ spacng: 1 });")
             .expect_err("unknown option").to_string();
         assert!(err.contains("unknown option 'spacng'"), "{}", err);
     }
@@ -627,7 +629,7 @@ mod tests {
         let script = r#"
             let s = new_style(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
             let font = font("loche_upper");
-            let ring = new_circle(new_vec(0.0, 0.0), 30.0);
+            let ring = new_circle(vec2(0.0, 0.0), 30.0);
             ring.fill_with_text("abcdefghijklmnopqrstuvwxyz", font, 20.0, s).len()
         "#;
         let copies: i64 = engine().engine.eval(script).expect("should run");
@@ -642,8 +644,8 @@ mod tests {
         let script = |layout: &str| format!(r#"
             let s = new_style(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
             let font = font("loche_upper");
-            let post = new_line(new_vec(300.0, -100.0), new_vec(300.0, 100.0));
-            let line = new_line(new_vec(0.0, 0.0), new_vec(2000.0, 0.0));
+            let post = new_line(vec2(300.0, -100.0), vec2(300.0, 100.0));
+            let line = new_line(vec2(0.0, 0.0), vec2(2000.0, 0.0));
             let page = new_page();
             page.add_canvas(line.fill_with_text("abcdefghijklmnopqrstuvwxyz the quick brown fox jumps over the lazy dog", font, 20.0, s, #{{ avoid: post, clearance: 2.0, layout: "{}" }})[0]);
             journal_entry.add_page(page);
@@ -675,12 +677,12 @@ mod tests {
         let pen = new_brush("Ink Pen", 0.3, 0.7, 3.0);
         let c = new_canvas();
         for i in 0..8 {
-            c.add_path(new_line(new_vec(i * 30.0, 0.0), new_vec(300.0 - i * 20.0, 200.0)), new_style(2.0, "#203040", pen));
+            c.add_path(new_line(vec2(i * 30.0, 0.0), vec2(300.0 - i * 20.0, 200.0)), new_style(2.0, "#203040", pen));
         }
-        c.add_path(new_circle(new_vec(150.0, 100.0), 90.0), new_style(3.0, "darkred", pen));
+        c.add_path(new_circle(vec2(150.0, 100.0), 90.0), new_style(3.0, "darkred", pen));
         let other = new_canvas();
         other.name = "dot";
-        other.add_path(new_circle(new_vec(20.0, 20.0), 5.0), new_style(1.0, "black", pen));
+        other.add_path(new_circle(vec2(20.0, 20.0), 5.0), new_style(1.0, "black", pen));
         let p = new_page();
         p.name = "big";
         p.svg_style = #{ roughness: 1.5, noise_amplitude: 1.0 };
@@ -784,7 +786,7 @@ mod tests {
         let script = r#"
             let s = new_style(0.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
             let line = new_canvas();
-            line.add_path(new_line(new_vec(0.0, 0.0), new_vec(0.0, 100.0)), s);
+            line.add_path(new_line(vec2(0.0, 0.0), vec2(0.0, 100.0)), s);
             let p = new_page();
             p.add_canvas(line);
             p.add_canvas(new_canvas());
@@ -808,11 +810,11 @@ mod tests {
             let c = new_canvas();
         "#;
         for (script, want) in [
-            ("new_vec(1.0 / 0.0, 0.0);", "new_vec: x must be finite"),
-            ("new_vec(0.0, 0.0 / 0.0);", "new_vec: y must be finite"),
-            ("new_circle(new_vec(0.0, 0.0), 5.0).scale_by(0.0 / 0.0);", "scale_by: the scale must be finite"),
+            ("vec2(1.0 / 0.0, 0.0);", "vec2: x must be finite"),
+            ("vec2(0.0, 0.0 / 0.0);", "vec2: y must be finite"),
+            ("new_circle(vec2(0.0, 0.0), 5.0).scale_by(0.0 / 0.0);", "scale_by: the scale must be finite"),
             // Finite, but past what paths hold.
-            ("c.add_path(new_circle(new_vec(0.0, 0.0), 5.0).scale_by(1e300), s);", "add_path: the path has a non-finite"),
+            ("c.add_path(new_circle(vec2(0.0, 0.0), 5.0).scale_by(1e300), s);", "add_path: the path has a non-finite"),
             ("c.add_glyph(font(\"symbols\").glyph(\"basic_eye\").scale_by(1e300), s);", "add_glyph: the path has a non-finite"),
         ] {
             let err = engine().build_entry_str(&format!("{}\n{}", setup, script)).expect_err(script).to_string();
@@ -826,8 +828,8 @@ mod tests {
             let thin = new_style(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
             let wide = new_style(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 6.0));
             let c = new_canvas();
-            c.add_path(new_line(new_vec(0.0, 0.0), new_vec(10.0, 10.0)), thin);
-            c.add_path(new_line(new_vec(0.0, 0.0), new_vec(10.0, 0.0)), wide);
+            c.add_path(new_line(vec2(0.0, 0.0), vec2(10.0, 10.0)), thin);
+            c.add_path(new_line(vec2(0.0, 0.0), vec2(10.0, 0.0)), wide);
             let auto = new_page();
             if auto.margin != () { throw "default margin should read as ()"; }
             auto.add_canvas(c);
@@ -919,7 +921,7 @@ mod tests {
             if b.pressure_profile != "ramp" { throw "default should be ramp"; }
             b.pressure_profile = "taper";
             let c = new_canvas();
-            c.add_path(new_line(new_vec(0.0, 0.0), new_vec(10.0, 0.0)), new_style(1.0, "black", b));
+            c.add_path(new_line(vec2(0.0, 0.0), vec2(10.0, 0.0)), new_style(1.0, "black", b));
             let p = new_page();
             p.add_canvas(c);
             journal_entry.add_page(p);
@@ -942,7 +944,7 @@ mod tests {
             b.pressure_variation = 0.25;
             b.variation_length = 6;
             let c = new_canvas();
-            c.add_path(new_line(new_vec(0.0, 0.0), new_vec(10.0, 0.0)), new_style(1.0, "black", b));
+            c.add_path(new_line(vec2(0.0, 0.0), vec2(10.0, 0.0)), new_style(1.0, "black", b));
             let p = new_page();
             p.add_canvas(c);
             journal_entry.add_page(p);
@@ -970,7 +972,7 @@ mod tests {
         // glyph's, moved.
         let script = r#"
             let s = new_style(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
-            let line = new_line(new_vec(0.0, 0.0), new_vec(300.0, -400.0));
+            let line = new_line(vec2(0.0, 0.0), vec2(300.0, -400.0));
             [line.fill_with_text("ll", font("plain"), 20.0, s, #{ angle: 0.0 })[0], line.fit_text("ll", font("plain"), s, #{ angle: 0 })]
         "#;
         let canvases: rhai::Array = engine().engine.eval(script).expect("should run");
@@ -984,7 +986,7 @@ mod tests {
                 assert!(spread(&xs) < spread(&ys) / 3.0, "an upright l: {} across, {} down", spread(&xs), spread(&ys));
             }
         }
-        let err = engine().build_entry_str("let ok = 1;\nnew_line(new_vec(0.0, 0.0), new_vec(90.0, 0.0)).fit_text(\"a\", font(\"plain\"), new_style(1.0, \"black\", new_brush(\"Ink Pen\", 0.3, 0.7, 1.0)), #{ angle: \"up\" });")
+        let err = engine().build_entry_str("let ok = 1;\nnew_line(vec2(0.0, 0.0), vec2(90.0, 0.0)).fit_text(\"a\", font(\"plain\"), new_style(1.0, \"black\", new_brush(\"Ink Pen\", 0.3, 0.7, 1.0)), #{ angle: \"up\" });")
             .expect_err("a bad angle").to_string();
         assert!(err.contains("fit_text") && err.contains("angle") && err.contains("line 2"), "{}", err);
     }
@@ -999,9 +1001,9 @@ mod tests {
             manic.jitter = 3;
             if manic.passes != 5 || manic.jitter != 3.0 || s.passes != 1 { throw "styles are values"; }
             let c = new_canvas();
-            let line = new_line(new_vec(0, 0), new_vec(100, 0));
+            let line = new_line(vec2(0, 0), vec2(100, 0));
             c.add_path(line, s);
-            c.add_path(line.copy().append(new_circle(new_vec(50, 50), 20)), manic);
+            c.add_path(line.copy().append(new_circle(vec2(50, 50), 20)), manic);
             // Bounds take in where the passes stray.
             let b = c.bounds();
             if b.max.x <= 101.0 && b.min.x >= -1.0 { throw "bounds miss the passes: " + b; }
@@ -1033,7 +1035,7 @@ mod tests {
         let script = r#"
             let ink = new_style(1.5, "black", new_brush("Rough Ink", 0.25, 0.5, 1.0));
             let calli = new_style(1.5, "darkred", new_brush("Calligraphy", 1.0, 1.0, 0.8));
-            let path = new_path().move_to(new_vec(0.0, 0.0)).line_to(new_vec(10.0, 10.0));
+            let path = new_path().move_to(vec2(0.0, 0.0)).line_to(vec2(10.0, 10.0));
             let canvas = new_canvas();
             canvas.add_path(path, ink);
             canvas.add_path(path, calli);

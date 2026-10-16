@@ -155,7 +155,7 @@ as it is, for art made to measure:
 
 ```rhai
 fn bramble_in(b) {
-	let plant = art::bramble(new_vec(b.center.x, b.y + b.height), -PI() / 2.0, b.height, b.height * 0.2, 5);
+	let plant = art::bramble(vec2(b.center.x, b.y + b.height), -PI() / 2.0, b.height, b.height * 0.2, 5);
 	...
 }
 art: #{ illustration: Fn("bramble_in") }

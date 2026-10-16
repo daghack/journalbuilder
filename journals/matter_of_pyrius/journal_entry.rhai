@@ -101,7 +101,7 @@ for paragraph in letter {
 
 // A glyph set a little off true, as a hand sets it.
 fn jostle(g, size) {
-	g.translate_by(new_vec(random_range(-0.04, 0.04) * size, random_range(-0.06, 0.06) * size));
+	g.translate_by(vec2(random_range(-0.04, 0.04) * size, random_range(-0.06, 0.06) * size));
 	g.rotate_by(random_range(-0.07, 0.07));
 	g.scale_by(random_range(0.93, 1.07));
 }
@@ -110,13 +110,13 @@ fn jostle(g, size) {
 // little ragged. Returns where a line after them would go.
 fn lines(canvas, text, font, size, style, x, y, width, pitch, layout) {
 	let tb = new_textbox(#{
-		center: new_vec(x + width / 2.0, 0), width: width, height: size * 0.5,
+		center: vec2(x + width / 2.0, 0), width: width, height: size * 0.5,
 		symbol_scale: size, layout: layout, jagged_edge: 0.3,
 	});
 	let rows = tb.place_all(font.glyphs(text));
 	for (row, i) in rows {
 		for g in row {
-			g.translate_by(new_vec(0, y + i * pitch));
+			g.translate_by(vec2(0, y + i * pitch));
 			jostle(g, size);
 		}
 		canvas.add_glyphs(row, style);
@@ -161,10 +161,10 @@ fn eye(c, centre, width) {
 	// Lids that just meet the iris, their corners not quite closed.
 	let half = width / 2.0;
 	let rise = (outer + 6.0) / 0.75;
-	let upper = new_path().move_to(centre + new_vec(-half, -3))
-		.cubic_to(centre + new_vec(-half * 0.45, -rise), centre + new_vec(half * 0.45, -rise), centre + new_vec(half, -3));
-	let lower = new_path().move_to(centre + new_vec(-half + 8, 9))
-		.cubic_to(centre + new_vec(-half * 0.45, rise), centre + new_vec(half * 0.45, rise), centre + new_vec(half - 8, 9));
+	let upper = new_path().move_to(centre + vec2(-half, -3))
+		.cubic_to(centre + vec2(-half * 0.45, -rise), centre + vec2(half * 0.45, -rise), centre + vec2(half, -3));
+	let lower = new_path().move_to(centre + vec2(-half + 8, 9))
+		.cubic_to(centre + vec2(-half * 0.45, rise), centre + vec2(half * 0.45, rise), centre + vec2(half - 8, 9));
 	c.add_path(upper, lids);
 	c.add_path(lower, lids);
 	c.add_path(new_circle(centre, outer), rings);
@@ -174,7 +174,7 @@ fn eye(c, centre, width) {
 	for (g, i) in global::TERNARY.glyphs(global::ORDERING) {
 		let angle = -PI() / 2.0 + i * 2.0 * PI() / 27.0;
 		g.scale = (outer - inner) * 0.8;
-		g.position = centre + new_vec(ring * angle.cos(), ring * angle.sin());
+		g.position = centre + vec2(ring * angle.cos(), ring * angle.sin());
 		g.rotation = angle + PI() / 2.0;
 		jostle(g, 6);
 		c.add_glyph(g, key);
@@ -189,7 +189,7 @@ let x = [LEFT, LEFT + COLUMN + GUTTER, LEFT + 2.0 * (COLUMN + GUTTER), LEFT + 3.
 let ends = [];
 
 // One: the eye and its key, then the first of the letter.
-eye(c, new_vec(x[0] + COLUMN / 2.0, TOP + 120), 560);
+eye(c, vec2(x[0] + COLUMN / 2.0, TOP + 120), 560);
 let y = TOP + 270;
 y = prose(c, "He turned me away at the chapel door and called it mercy. I bowed, as one bows to a shepherd, and kept my tongue behind my teeth. The candles did not gutter. Nothing in that place knew that anything had been decided.", x[0], y);
 y = manic(c, "The wheel does not ask", x[0], y);
@@ -239,6 +239,6 @@ for (end, i) in ends {
 
 let page = new_page();
 page.name = "entry";
-page.size = new_vec(W, H);
+page.size = vec2(W, H);
 page.add_canvas(page_canvas);
 journal_entry.add_page(page);
