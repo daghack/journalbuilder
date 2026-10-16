@@ -14,7 +14,7 @@
 //!
 //! // Hatch the inside of a closed path: lines `spacing` apart at `angle`
 //! // (radians), their ends jittered by up to `roughness`.
-//! let shading = new_circle(new_vec(0.0, 0.0), 20.0).hatch(3.0, random_range(0.0, 6.28), 1.0);
+//! let shading = new_circle(vec2(0.0, 0.0), 20.0).hatch(3.0, random_range(0.0, 6.28), 1.0);
 //! // Or with options; only `spacing` is needed.
 //! let shading = outline.hatch(#{
 //!     spacing: 4.0,
@@ -356,7 +356,7 @@ mod tests {
     fn hatch_fills_inside_the_path_and_follows_the_seed() {
         let hatching = |seed: i64| -> String {
             let path: super::super::Path = eval(&format!(
-                "seed({}); new_circle(new_vec(0.0, 0.0), 20.0).hatch(3.0, 0.7, 1.0)", seed));
+                "seed({}); new_circle(vec2(0.0, 0.0), 20.0).hatch(3.0, 0.7, 1.0)", seed));
             let path = path.get();
             for p in path.points_within() {
                 assert!(p.length() < 22.0, "hatch point {:?} outside the circle", p);
@@ -372,7 +372,7 @@ mod tests {
     fn hatch_options_cross_hatch_and_keep_holes() {
         let lines = |options: &str| -> usize {
             let path: super::super::Path = eval(&format!(
-                "let ring = new_circle(new_vec(0.0, 0.0), 20.0); ring.append(new_circle(new_vec(0.0, 0.0), 10.0)); ring.hatch({})", options));
+                "let ring = new_circle(vec2(0.0, 0.0), 20.0); ring.append(new_circle(vec2(0.0, 0.0), 10.0)); ring.hatch({})", options));
             let hatching = path.get();
             for (points, _) in hatching.flattened(0.1) {
                 let middle = (points[0] + *points.last().unwrap()) / 2.0;
@@ -387,7 +387,7 @@ mod tests {
 
     #[test]
     fn bad_hatch_options_fail_at_their_line() {
-        let err = fails("let ok = 1;\nnew_circle(new_vec(0.0, 0.0), 5.0).hatch(0.0, 0.0, 1.0);");
+        let err = fails("let ok = 1;\nnew_circle(vec2(0.0, 0.0), 5.0).hatch(0.0, 0.0, 1.0);");
         assert!(err.contains("'spacing' must be positive") && err.contains("line 2"), "{}", err);
         for (opts, want) in [
             ("#{ angle: 1.0 }", "missing 'spacing'"),
@@ -397,7 +397,7 @@ mod tests {
             ("#{ spacing: 2, fill_rule: \"winding\" }", "unknown fill_rule 'winding'"),
             ("#{ spacing: 2, colour: 1 }", "unknown option 'colour'"),
         ] {
-            let err = fails(&format!("let ok = 1;\nnew_circle(new_vec(0.0, 0.0), 5.0).hatch({});", opts));
+            let err = fails(&format!("let ok = 1;\nnew_circle(vec2(0.0, 0.0), 5.0).hatch({});", opts));
             assert!(err.contains(want) && err.contains("line 2"), "{}: {}", want, err);
         }
     }

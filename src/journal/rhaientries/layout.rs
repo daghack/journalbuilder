@@ -1139,7 +1139,7 @@ mod tests {
             text = text + text + text;
             journal_entry.add_pages(book.typeset(#{
                 width: 400, height: 300, flows: #{ title: "Title", body: text }, roles: roles,
-                art: #{ divider: new_circle(new_vec(0.0, 0.0), 3.0) },
+                art: #{ divider: new_circle(vec2(0.0, 0.0), 3.0) },
             }));
         "#).expect("script should run");
         assert!(entry.pages.len() > 1, "{} pages", entry.pages.len());
@@ -1167,7 +1167,7 @@ mod tests {
             let text = words + words + words + words + words + words;
             journal_entry.add_pages(book.typeset(#{
                 width: 400, height: 300, flows: #{ title: "Title", body: text }, roles: roles,
-                art: #{ divider: new_circle(new_vec(0.0, 0.0), 3.0) },
+                art: #{ divider: new_circle(vec2(0.0, 0.0), 3.0) },
             }));
         "#).expect("script should run");
         // The drop cap's box is 40 x 40 at the column's corner, (20, 70).
@@ -1185,7 +1185,7 @@ mod tests {
             let pages = layout("captioned_figure").typeset(#{
                 flows: #{ caption: "a circle" },
                 roles: #{ caption: #{ font: font, style: red, size: 40.0 }, figure: #{ style: ink } },
-                art: #{ figure: new_circle(new_vec(0.0, 0.0), 1.0) },
+                art: #{ figure: new_circle(vec2(0.0, 0.0), 1.0) },
             });
             if pages.len() != 1 { throw "one page"; }
             journal_entry.add_pages(pages);
@@ -1205,7 +1205,7 @@ mod tests {
     fn bands_repeat_their_art_along_the_box() {
         let entry = build(r#"
             let strip = new_layout("strip", |n, info| column(#{ padding: 10 }, [band("dot", #{ height: 20 })]));
-            journal_entry.add_pages(strip.typeset(#{ width: 220, height: 40, roles: #{ dot: #{ style: ink } }, art: #{ dot: new_circle(new_vec(0.0, 0.0), 5.0) } }));
+            journal_entry.add_pages(strip.typeset(#{ width: 220, height: 40, roles: #{ dot: #{ style: ink } }, art: #{ dot: new_circle(vec2(0.0, 0.0), 5.0) } }));
         "#).expect("script should run");
         // 200 long, 20 across: ten circles 20 across.
         assert_eq!(entry.pages[0].canvases()[0].strokes.len(), 10);
@@ -1213,7 +1213,7 @@ mod tests {
 
     #[test]
     fn mistakes_fail_with_what_went_wrong() {
-        let typeset = |content: &str| format!("journal_entry.add_pages(book.typeset(#{{ width: 400, height: 300, roles: roles, art: #{{ divider: new_circle(new_vec(0.0, 0.0), 3.0) }}, {} }}));", content);
+        let typeset = |content: &str| format!("journal_entry.add_pages(book.typeset(#{{ width: 400, height: 300, roles: roles, art: #{{ divider: new_circle(vec2(0.0, 0.0), 3.0) }}, {} }}));", content);
         for (script, want) in [
             ("let ok = 1;\nrow(#{ colour: 1 }, []);", "row: unknown option 'colour'"),
             ("let ok = 1;\nflow(\"a\", #{ width: \"wide\" });", "'width' should be a number, \"N%\" or \"auto\""),
@@ -1253,7 +1253,7 @@ mod tests {
     #[test]
     fn typeset_pages_split_into_tiles() {
         let entry = build(r#"
-            let pages = book.typeset(#{ width: 400, height: 300, flows: #{ title: "Title", body: words }, roles: roles, art: #{ divider: new_circle(new_vec(0.0, 0.0), 3.0) } });
+            let pages = book.typeset(#{ width: 400, height: 300, flows: #{ title: "Title", body: words }, roles: roles, art: #{ divider: new_circle(vec2(0.0, 0.0), 3.0) } });
             journal_entry.add_pages(pages[0].split(2, 1));
         "#).expect("script should run");
         let tile: JournalCanvas = entry.pages[1].canvases()[0].clone().into();

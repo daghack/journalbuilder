@@ -139,7 +139,7 @@ fn eye_in(b) {
 	eye.position = b.center;
 	c.add_glyph(eye, global::HEADING);
 	for i in 0..16 {
-		let d = new_vec(0, -1).rotated(i * PI() / 8.0);
+		let d = vec2(0, -1).rotated(i * PI() / 8.0);
 		c.add_path(new_line(b.center + d * (r * 1.05), b.center + d * (r * (if i % 2 == 0 { 1.35 } else { 1.2 }))), global::CAPTION);
 	}
 	c

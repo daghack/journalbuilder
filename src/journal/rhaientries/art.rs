@@ -5,7 +5,7 @@
 //! // (angles are radians; 0 faces +x and PI() / 2.0 faces down the page),
 //! // the tip of its tail at (40, 400), 900 units long along its spine and 36
 //! // across at its widest. The last argument is the seed for its winding.
-//! let snake = art::snake_path(new_vec(0.0, 0.0), -PI() / 2.0, new_vec(40.0, 400.0), 900.0, 36.0, 7);
+//! let snake = art::snake_path(vec2(0.0, 0.0), -PI() / 2.0, vec2(40.0, 400.0), 900.0, 36.0, 7);
 //! canvas.add_path(snake, ink);
 //! ```
 //!
@@ -19,7 +19,7 @@
 //! line from the back of its head to the tip of its tail, to write along:
 //!
 //! ```rhai
-//! let back = art::snake_spine(new_vec(0.0, 0.0), -PI() / 2.0, new_vec(40.0, 400.0), 900.0, 36.0, 7);
+//! let back = art::snake_spine(vec2(0.0, 0.0), -PI() / 2.0, vec2(40.0, 400.0), 900.0, 36.0, 7);
 //! canvas.add_canvas(back.fill_with_text("a snake", font, 30.0, ink)[0]);
 //! ```
 //!
@@ -29,7 +29,7 @@
 //! sized by).
 //!
 //! ```rhai
-//! let plant = art::bramble(new_vec(0.0, 0.0), -PI() / 2.0, 1400.0, 200.0, 7);
+//! let plant = art::bramble(vec2(0.0, 0.0), -PI() / 2.0, 1400.0, 200.0, 7);
 //! canvas.add_path(plant.vines, bark);     // canes, thorns and stalks
 //! canvas.add_path(plant.leaves, green);   // leaflets and their veins
 //! canvas.add_path(plant.flowers, white);  // flowers, buds and sepals
@@ -68,7 +68,7 @@
 //! between neat (0) and as messy as it gets (1).
 //!
 //! ```rhai
-//! canvas.add_canvas(art::eye(new_vec(0.0, 0.0), 300.0, "#2a9bb8", -PI() / 4.0, 0.5, 7));
+//! canvas.add_canvas(art::eye(vec2(0.0, 0.0), 300.0, "#2a9bb8", -PI() / 4.0, 0.5, 7));
 //! ```
 //!
 //! Options: `angle`, the eye's tilt (default 0, corners level); `gaze`,
@@ -79,7 +79,7 @@
 //! `ink`, the style of its lines (default a near-black ink pen).
 //!
 //! ```rhai
-//! let e = art::eye(new_vec(0.0, 0.0), 300.0, "#2a9bb8", PI(), 0.8, 7, #{ angle: 1.2, gaze: 1.0, openness: 0.6, flat: true, ink: ink });
+//! let e = art::eye(vec2(0.0, 0.0), 300.0, "#2a9bb8", PI(), 0.8, 7, #{ angle: 1.2, gaze: 1.0, openness: 0.6, flat: true, ink: ink });
 //! ```
 
 use rhai::{Dynamic, Engine, EvalAltResult, Map, Module, NativeCallContext};
@@ -208,11 +208,11 @@ mod tests {
     #[test]
     fn snake_path_draws_a_snake_from_its_seed() {
         let script = r##"
-            let draw = |seed| art::snake_path(new_vec(0.0, 0.0), -PI() / 2.0, new_vec(20.0, 300.0), 900.0, 30.0, seed);
+            let draw = |seed| art::snake_path(vec2(0.0, 0.0), -PI() / 2.0, vec2(20.0, 300.0), 900.0, 30.0, seed);
             let snake = draw.call(7);
             if snake.to_string() != draw.call(7).to_string() { throw "the same seed should draw the same snake"; }
             if snake.to_string() == draw.call(8).to_string() { throw "another seed should draw another snake"; }
-            let spine = art::snake_spine(new_vec(0.0, 0.0), -PI() / 2.0, new_vec(20.0, 300.0), 900.0, 30.0, 7);
+            let spine = art::snake_spine(vec2(0.0, 0.0), -PI() / 2.0, vec2(20.0, 300.0), 900.0, 30.0, 7);
             if spine.to_string() == snake.to_string() { throw "the spine should be another path"; }
             let c = new_canvas();
             c.add_path(snake, new_style(1.0, "#f2ead8", new_brush("Ink Pen", 0.3, 0.7, 1.0)));
@@ -235,7 +235,7 @@ mod tests {
     #[test]
     fn bramble_gives_its_three_parts() {
         let script = r##"
-            let plant = art::bramble(new_vec(0.0, 0.0), -PI() / 2.0, 1000.0, 150.0, 5);
+            let plant = art::bramble(vec2(0.0, 0.0), -PI() / 2.0, 1000.0, 150.0, 5);
             let pen = new_brush("Ink Pen", 0.3, 0.7, 1.0);
             let c = new_canvas();
             c.add_path(plant.vines, new_style(1.0, "#c8a27a", pen));
@@ -247,7 +247,7 @@ mod tests {
             journal_entry.add_page(p);
         "##;
         engine().build_entry_str(script).expect("script should run");
-        let err = engine().build_entry_str("let ok = 1;\nart::bramble(new_vec(0.0, 0.0), 0.0, 100.0, 150.0, 1);")
+        let err = engine().build_entry_str("let ok = 1;\nart::bramble(vec2(0.0, 0.0), 0.0, 100.0, 150.0, 1);")
             .expect_err("too short a cane should fail").to_string();
         assert!(err.contains("art::bramble: length must be at least") && err.contains("line 2"), "{}", err);
     }
@@ -287,7 +287,7 @@ mod tests {
             journal_entry.add_page(p);
         "##;
         engine().build_entry_str(script).expect("script should run");
-        let err = engine().build_entry_str("let ok = 1;\nart::snake_along(new_line(new_vec(0.0, 0.0), new_vec(100.0, 0.0)), 0.0, 1);")
+        let err = engine().build_entry_str("let ok = 1;\nart::snake_along(new_line(vec2(0.0, 0.0), vec2(100.0, 0.0)), 0.0, 1);")
             .expect_err("a zero width should fail").to_string();
         assert!(err.contains("art::snake_along: max_width must be a positive number") && err.contains("line 2"), "{}", err);
     }
@@ -295,27 +295,27 @@ mod tests {
     #[test]
     fn eye_draws_an_eye_from_its_seed() {
         let script = r##"
-            let draw = |seed| art::eye(new_vec(100.0, 100.0), 200.0, "#2a9bb8", 0.5, 0.6, seed);
+            let draw = |seed| art::eye(vec2(100.0, 100.0), 200.0, "#2a9bb8", 0.5, 0.6, seed);
             let e = draw.call(7);
             if e.bounds().to_string() != draw.call(7).bounds().to_string() { throw "the same seed should draw the same eye"; }
             if e.bounds().to_string() == draw.call(8).bounds().to_string() { throw "another seed should draw another eye"; }
             // About as long as asked, round its centre.
             let b = e.bounds();
-            if b.width < 190.0 || b.width > 320.0 || (b.center - new_vec(100.0, 100.0)).length() > 40.0 { throw "the eye should be where asked: " + b; }
-            let tilted = art::eye(new_vec(0.0, 0.0), 200.0, RED_INK, PI(), 0.0, 1, #{ angle: PI() / 2.0, gaze: 1.0, openness: 0.3, ink: new_style(1.0, "#222", new_brush("Pencil", 0.3, 0.7, 1.0)) });
+            if b.width < 190.0 || b.width > 320.0 || (b.center - vec2(100.0, 100.0)).length() > 40.0 { throw "the eye should be where asked: " + b; }
+            let tilted = art::eye(vec2(0.0, 0.0), 200.0, RED_INK, PI(), 0.0, 1, #{ angle: PI() / 2.0, gaze: 1.0, openness: 0.3, ink: new_style(1.0, "#222", new_brush("Pencil", 0.3, 0.7, 1.0)) });
             if tilted.bounds().height < 190.0 { throw "turned upright, the eye should be tall: " + tilted.bounds(); }
-            art::eye(new_vec(0.0, 0.0), 200.0, "#123", 0.0, 0.5, 1, #{ flat: true });
+            art::eye(vec2(0.0, 0.0), 200.0, "#123", 0.0, 0.5, 1, #{ flat: true });
             let p = new_page();
             p.add_canvas(e);
             journal_entry.add_page(p);
         "##.replace("RED_INK", "\"#9b2318\"");
         engine().build_entry_str(&script).expect("script should run");
         for (call, message) in [
-            ("art::eye(new_vec(0.0, 0.0), 200.0, \"#123\", 0.0, 1.5, 1);", "art::eye: messiness runs from 0 to 1"),
-            ("art::eye(new_vec(0.0, 0.0), 0.0, \"#123\", 0.0, 0.5, 1);", "art::eye: length must be a positive number"),
-            ("art::eye(new_vec(0.0, 0.0), 200.0, \"#123\", 0.0, 0.5, 1, #{ squint: 1 });", "art::eye: unknown option 'squint'"),
-            ("art::eye(new_vec(0.0, 0.0), 200.0, \"#123\", 0.0, 0.5, 1, #{ ink: 3 });", "art::eye: 'ink' should be a style"),
-            ("art::eye(new_vec(0.0, 0.0), 200.0, \"#123\", 0.0, 0.5, 1, #{ flat: 1 });", "art::eye: 'flat' should be true or false"),
+            ("art::eye(vec2(0.0, 0.0), 200.0, \"#123\", 0.0, 1.5, 1);", "art::eye: messiness runs from 0 to 1"),
+            ("art::eye(vec2(0.0, 0.0), 0.0, \"#123\", 0.0, 0.5, 1);", "art::eye: length must be a positive number"),
+            ("art::eye(vec2(0.0, 0.0), 200.0, \"#123\", 0.0, 0.5, 1, #{ squint: 1 });", "art::eye: unknown option 'squint'"),
+            ("art::eye(vec2(0.0, 0.0), 200.0, \"#123\", 0.0, 0.5, 1, #{ ink: 3 });", "art::eye: 'ink' should be a style"),
+            ("art::eye(vec2(0.0, 0.0), 200.0, \"#123\", 0.0, 0.5, 1, #{ flat: 1 });", "art::eye: 'flat' should be true or false"),
         ] {
             let err = engine().build_entry_str(&format!("let ok = 1;\n{}", call)).expect_err(call).to_string();
             assert!(err.contains(message) && err.contains("line 2"), "{}", err);
@@ -324,7 +324,7 @@ mod tests {
 
     #[test]
     fn snake_path_errors_name_the_function_and_line() {
-        let err = engine().build_entry_str("let ok = 1;\nart::snake_path(new_vec(0.0, 0.0), 0.0, new_vec(5000.0, 0.0), 900.0, 30.0, 1);")
+        let err = engine().build_entry_str("let ok = 1;\nart::snake_path(vec2(0.0, 0.0), 0.0, vec2(5000.0, 0.0), 900.0, 30.0, 1);")
             .expect_err("a tail end out of reach should fail").to_string();
         assert!(err.contains("art::snake_path: the tail end is") && err.contains("line 2"), "{}", err);
     }

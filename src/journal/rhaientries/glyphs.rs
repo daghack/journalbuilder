@@ -22,7 +22,7 @@
 //! // -1..1, drawn at half its scale, so scale is its size in canvas units.
 //! for (g, i) in ternary.glyphs("abc") {
 //!     g.scale = 30.0;
-//!     g.position = new_vec(i * 40.0, 0.0);
+//!     g.position = vec2(i * 40.0, 0.0);
 //!     g.rotate_by(0.1);
 //!     g.skew = 0.3;                             // leant about its centre, before it's turned
 //!     canvas.add_glyph(g, style);
@@ -33,9 +33,9 @@
 //! // Glyphs, like paths and canvases, are shared: every copy of one (a
 //! // variable, an array element, a loop variable) is the same glyph, so
 //! // chains and loops change it. `.copy()` makes an independent one.
-//! g.translate_by(new_vec(1.0, 0.0)).scale_by(2.0);
+//! g.translate_by(vec2(1.0, 0.0)).scale_by(2.0);
 //! let word = copper.glyphs("ink");
-//! for (g, i) in word { g.position = new_vec(i * 20.0, 0.0); }
+//! for (g, i) in word { g.position = vec2(i * 20.0, 0.0); }
 //! canvas.add_glyphs(word, style);   // adds copies of the glyphs' strokes
 //! ```
 //!
@@ -359,7 +359,7 @@ mod tests {
         // is longer by about one glyph's lean, not every glyph's.
         let widths: Array = eval(r#"
             let s = new_style(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
-            let line = new_line(new_vec(0.0, 0.0), new_vec(4000.0, 0.0));
+            let line = new_line(vec2(0.0, 0.0), vec2(4000.0, 0.0));
             let text = "the quick brown fox jumps over the lazy dog";
             [line.fill_with_text(text, font("plain"), 20.0, s)[0].bounds().width,
              line.fill_with_text(text, font("plain", #{ skew: 0.3 }), 20.0, s)[0].bounds().width]
@@ -384,9 +384,9 @@ mod tests {
         let values: Array = eval(r#"
             let g = font("symbols").glyph("basic_eye");
             g.scale = 10.0;
-            g.position = new_vec(1.0, 2.0);
+            g.position = vec2(1.0, 2.0);
             g.rotation = 0.5;
-            g = g.translate_by(new_vec(1.0, 1.0)).scale_by(3.0).rotate_by(0.25);
+            g = g.translate_by(vec2(1.0, 1.0)).scale_by(3.0).rotate_by(0.25);
             [g.scale, g.position.x, g.position.y, g.rotation]
         "#);
         let values: Vec<f64> = values.into_iter().map(|v| v.as_float().unwrap()).collect();

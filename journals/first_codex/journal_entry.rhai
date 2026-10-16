@@ -18,7 +18,7 @@ let ink = new_style(2.5, "rgba(0, 0, 0, 0.7)", brush);
 let wash = new_style(2.0, "hsla(150, 30%, 70%, 0.3)", brush);
 
 let font = ternary_font("balanced_ternary");
-let origin = new_vec(0.0, 0.0);
+let origin = vec2(0.0, 0.0);
 let codex = new_canvas();
 
 for (ring_size, ring) in ring_sizes {
@@ -36,7 +36,7 @@ for (ring_size, ring) in ring_sizes {
 	let glyphs = font.glyphs(letters);
 	for (g, i) in glyphs {
 		let angle = i * 2.0 * PI() / glyphs.len() - PI() / 2.0 + rotation;
-		let center = new_vec(radius * angle.cos(), radius * angle.sin());
+		let center = vec2(radius * angle.cos(), radius * angle.sin());
 
 		// A washed disc behind each glyph, hatched three ways.
 		let disc = new_circle(center, fill_radius);

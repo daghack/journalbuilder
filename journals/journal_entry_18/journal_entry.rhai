@@ -25,7 +25,7 @@ let box_size = 150.0;
 let symbol_scale = 19.0;
 let font = font("loche_upper");
 let boxes = new_textbox(#{
-	center: new_vec(0.0, 0.0), width: box_size, height: box_size,
+	center: vec2(0.0, 0.0), width: box_size, height: box_size,
 	symbol_scale: symbol_scale, layout: "words", jagged_edge: 0.5,
 });
 let fateful = boxes.place_all(font.glyphs(fateful_pages));
@@ -61,7 +61,7 @@ for cell in new_maze(1043, nodes, nodes).cells() {
 	} else {
 		break;
 	}
-	let offset = new_vec(cell.x * spacing, cell.y * spacing);
+	let offset = vec2(cell.x * spacing, cell.y * spacing);
 	for g in block {
 		canvas.add_glyph(g.translate_by(offset), style);
 	}

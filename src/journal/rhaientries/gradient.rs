@@ -11,9 +11,9 @@
 //! // ink darkening where it pools.
 //! let pooled = new_gradient(["#9b2318", "#2b1d12"], #{ vertical: true });
 //! // Across the page, from one point to another...
-//! let across = new_gradient(["red", "blue"], #{ from: new_vec(0.0, 0.0), to: new_vec(500.0, 0.0) });
+//! let across = new_gradient(["red", "blue"], #{ from: vec2(0.0, 0.0), to: vec2(500.0, 0.0) });
 //! // ...or out from a centre.
-//! let glow = new_gradient(["white", "rgba(255, 200, 0, 0)"], #{ center: new_vec(0.0, 0.0), radius: 120.0 });
+//! let glow = new_gradient(["white", "rgba(255, 200, 0, 0)"], #{ center: vec2(0.0, 0.0), radius: 120.0 });
 //!
 //! let style = new_style(1.0, fade, brush);   // in place of a colour
 //! style.color = across;                            // or set it later
@@ -187,9 +187,9 @@ mod tests {
 
     #[test]
     fn options_lay_gradients_across_the_page() {
-        let g = gradient(r#"new_gradient(["red", "blue"], #{ from: new_vec(0.0, 0.0), to: new_vec(10.0, 0.0) })"#);
+        let g = gradient(r#"new_gradient(["red", "blue"], #{ from: vec2(0.0, 0.0), to: vec2(10.0, 0.0) })"#);
         assert!(matches!(g.kind, GradientKind::Linear { .. }));
-        let g = gradient(r#"new_gradient(["red", "blue"], #{ center: new_vec(1.0, 1.0), radius: 5 })"#);
+        let g = gradient(r#"new_gradient(["red", "blue"], #{ center: vec2(1.0, 1.0), radius: 5 })"#);
         assert!(matches!(g.kind, GradientKind::Radial { radius: 5.0, .. }));
         let g = gradient(r#"new_gradient(["red", "blue"], #{ vertical: true })"#);
         assert_eq!(g.kind, GradientKind::Vertical);
@@ -220,8 +220,8 @@ mod tests {
             (r#"new_gradient(["red", 3])"#, "colour 1 is a i64, not a colour string"),
             (r#"new_gradient([[0.6, "red"], [0.2, "blue"]])"#, "positions must not go back"),
             (r#"new_gradient([[1.5, "red"], "blue"])"#, "positions run from 0 to 1"),
-            (r#"new_gradient(["red", "blue"], #{ from: new_vec(0.0, 0.0) })"#, "give 'from' and 'to'"),
-            (r#"new_gradient(["red", "blue"], #{ center: new_vec(0.0, 0.0), radius: 0 })"#, "'radius' must be a positive"),
+            (r#"new_gradient(["red", "blue"], #{ from: vec2(0.0, 0.0) })"#, "give 'from' and 'to'"),
+            (r#"new_gradient(["red", "blue"], #{ center: vec2(0.0, 0.0), radius: 0 })"#, "'radius' must be a positive"),
             (r#"new_gradient(["red", "blue"], #{ angle: 1 })"#, "unknown option 'angle'"),
             (r#"new_gradient(["red", "blue"], #{ vertical: 1 })"#, "'vertical' should be true or false"),
             (r#"new_gradient(["red", "blue"], #{ vertical: true, radius: 3 })"#, "'vertical' runs down each path"),

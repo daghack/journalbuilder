@@ -9,6 +9,8 @@
 //   glyphs    every variant of every glyph of every font
 //   art       shapes and paths, hatching, vectors, mazes, snakes, brambles,
 //             eyes
+//   generators  point distributions, vec3 and vec4, spanning trees by
+//             algorithm and metric, balanced ternary, angles in degrees
 //   text      text boxes, text kept clear of drawings, text along paths
 //             (turned to them or held at an angle), scattered notes,
 //             words split round drawings
@@ -68,7 +70,7 @@ fn write(text, x, y, size) {
 
 fn write_in(text, x, y, size, style, font, options) {
 	let c = new_canvas();
-	let line = new_line(new_vec(x, y), new_vec(x + 5000.0, y));
+	let line = new_line(vec2(x, y), vec2(x + 5000.0, y));
 	for part in line.fill_with_text(text, font, size, style, options) {
 		c.add_canvas(part);
 	}
@@ -88,10 +90,10 @@ fn subhead(text, y) {
 // A wave from x0 to x1 about y.
 fn wave(x0, x1, y, rise) {
 	let step = (x1 - x0) / 3.0;
-	let path = new_path().move_to(new_vec(x0, y));
+	let path = new_path().move_to(vec2(x0, y));
 	for i in 0..3 {
 		let a = x0 + i * step;
-		path.cubic_to(new_vec(a + step / 3.0, y - rise), new_vec(a + 2.0 * step / 3.0, y + rise), new_vec(a + step, y));
+		path.cubic_to(vec2(a + step / 3.0, y - rise), vec2(a + 2.0 * step / 3.0, y + rise), vec2(a + step, y));
 	}
 	path
 }
@@ -111,7 +113,7 @@ fn padded(n) {
 fn sheet(section) {
 	let c = new_canvas();
 	c.add_canvas(write_in(section, global::LEFT, 105, 48, global::HEADING, global::LOCHE, #{}));
-	c.add_path(new_line(new_vec(global::LEFT, 150), new_vec(global::RIGHT, 150)), global::CAPTION);
+	c.add_path(new_line(vec2(global::LEFT, 150), vec2(global::RIGHT, 150)), global::CAPTION);
 	c
 }
 
@@ -130,7 +132,7 @@ fn bind(section, canvas) {
 	let number = this.pages.len() + 3;
 	canvas.add_canvas(write_in(`${number}`, global::W / 2 - 8, global::H - 80, 24, global::CAPTION, global::PLAIN, #{}));
 	let page = new_page();
-	page.size = new_vec(global::W, global::H);
+	page.size = vec2(global::W, global::H);
 	page.add_canvas(canvas);
 	this.bind_page(section, page);
 }
@@ -146,7 +148,7 @@ pens.add_canvas(caption("brush_names(), new_brush(name, min_pressure, max_pressu
 let y = TOP + 70;
 for name in brush_names() {
 	pens.add_canvas(write(name, LEFT, y, 24));
-	pens.add_path(new_rectangle(new_vec(910, y), 380, 54).hatch(7.0, 0.8, 0.6), CAPTION);
+	pens.add_path(new_rectangle(vec2(910, y), 380, 54).hatch(7.0, 0.8, 0.6), CAPTION);
 	let brush = new_brush(name, 0.3, 0.9, 6);
 	brush.size = 9;
 	pens.add_path(wave(380, RIGHT, y, 24), new_style(1, INK, brush));
@@ -165,7 +167,7 @@ for profile in ["ramp", "taper", "constant"] {
 	brush.pressure_profile = profile;
 	if brush.min_pressure != 0.05 || brush.max_pressure != 1.0 || brush.brush_style != "Ink Pen" { throw "unexpected brush " + brush; }
 	pens.add_canvas(write(profile, LEFT, y, 24));
-	pens.add_path(new_line(new_vec(380, y), new_vec(RIGHT, y)), new_style(1, GOLD, brush));
+	pens.add_path(new_line(vec2(380, y), vec2(RIGHT, y)), new_style(1, GOLD, brush));
 	y += 60;
 }
 
@@ -197,7 +199,7 @@ for (colour, i) in colours {
 	pens.add_path(wave(x, x + 170, y + 45, 14), style);
 }
 // A stroke built from a path and a style, then added.
-pens.add_stroke(new_stroke(new_line(new_vec(LEFT, y + 100), new_vec(RIGHT, y + 100)), CAPTION));
+pens.add_stroke(new_stroke(new_line(vec2(LEFT, y + 100), vec2(RIGHT, y + 100)), CAPTION));
 
 // Gradients, in place of a colour: along each stroke from start to end,
 // across the page from one point to another, or out from a centre.
@@ -209,20 +211,20 @@ pens.add_canvas(caption("new_gradient(colours): along each stroke", y));
 pens.add_path(wave(640, RIGHT, y, 22), new_style(1, new_gradient([RED, GOLD, BLUE]), new_brush("Rough Ink", 0.4, 0.8, 9)));
 y += 75;
 pens.add_canvas(caption("#{ from, to }: across, colours placed", y));
-let across = new_gradient([GREEN, [0.7, GOLD], RED], #{ from: new_vec(640, 0), to: new_vec(RIGHT, 0) });
-pens.add_path(new_rectangle(new_vec(870, y), 460, 50).hatch(#{ spacing: 8.0, angle: 1.1 }), new_style(1, across, PEN));
+let across = new_gradient([GREEN, [0.7, GOLD], RED], #{ from: vec2(640, 0), to: vec2(RIGHT, 0) });
+pens.add_path(new_rectangle(vec2(870, y), 460, 50).hatch(#{ spacing: 8.0, angle: 1.1 }), new_style(1, across, PEN));
 y += 75;
 let words = new_style(1, RED, PEN);
-words.color = new_gradient([BLUE, INK, RED], #{ from: new_vec(640, 0), to: new_vec(RIGHT, 0) });
+words.color = new_gradient([BLUE, INK, RED], #{ from: vec2(640, 0), to: vec2(RIGHT, 0) });
 pens.add_canvas(caption("style.color = a gradient", y));
 pens.add_canvas(write_in("Lorem ipsum dolor sit amet", 640, y, 28, words, PLAIN, #{}));
 y += 130;
 pens.add_canvas(caption("#{ center, radius }: out from a point", y));
-let glow = new_gradient([INK, GOLD, "rgba(155, 35, 24, 0.3)"], #{ center: new_vec(870, y), radius: 100 });
-let spiral = new_path().move_to(new_vec(870, y));
+let glow = new_gradient([INK, GOLD, "rgba(155, 35, 24, 0.3)"], #{ center: vec2(870, y), radius: 100 });
+let spiral = new_path().move_to(vec2(870, y));
 for i in 1..220 {
 	let a = i * 0.11;
-	spiral.line_to(new_vec(870 + a * 4.0 * a.cos(), y + a * 4.0 * a.sin()));
+	spiral.line_to(vec2(870 + a * 4.0 * a.cos(), y + a * 4.0 * a.sin()));
 }
 pens.add_path(spiral, new_style(1, glow, new_brush("Ink Pen", 0.4, 0.8, 3)));
 book.bind("pens", pens);
@@ -242,7 +244,7 @@ for row in [[1, 0, "clean"], [1, 2.5, "a rough hand"], [3, 4, "gone over"], [7, 
 	if style.passes != row[0] || style.jitter != row[1] { throw "passes and jitter read back"; }
 	pens.add_canvas(write(`${row[2]}: ${row[0]}, ${row[1]}`, LEFT, y, 24));
 	pens.add_path(wave(380, 760, y, 22), style);
-	pens.add_path(new_circle(new_vec(850, y), 30), style);
+	pens.add_path(new_circle(vec2(850, y), 30), style);
 	pens.add_canvas(write_in("lorem", 920, y, 56, style, LOCHE, #{}));
 	y += 110;
 }
@@ -307,7 +309,7 @@ for profile in ["ramp", "taper", "constant"] {
 		brush.pressure_variation = variation;
 		brush.variation_length = 70;
 		if brush.pressure_variation != variation || brush.variation_length != 70 { throw "variation reads back"; }
-		pens.add_path(new_line(new_vec(330 + i * 400, y), new_vec(690 + i * 400, y)), new_style(1, GOLD, brush));
+		pens.add_path(new_line(vec2(330 + i * 400, y), vec2(690 + i * 400, y)), new_style(1, GOLD, brush));
 	}
 	y += 55;
 }
@@ -426,17 +428,17 @@ let word = font("copper").glyphs("turning");
 for (g, i) in word {
 	if g.is_blank { continue; }
 	g.scale = 50;
-	g.position = new_vec(LEFT + 40 + i * 70, y);
+	g.position = vec2(LEFT + 40 + i * 70, y);
 	g.rotation = i * 0.2;
 	g.skew = 0.3 - 0.1 * i;
-	g.translate_by(new_vec(0, 8 * i)).scale_by(1 + 0.05 * i).rotate_by(0.05);
+	g.translate_by(vec2(0, 8 * i)).scale_by(1 + 0.05 * i).rotate_by(0.05);
 }
 fonts.add_glyphs(word, SAMPLE);
 let eye = font("symbols").glyph("basic_eye").copy();
 eye.scale = 80;
-eye.position = new_vec(800, y);
+eye.position = vec2(800, y);
 fonts.add_glyph(eye, new_style(1, GOLD, PEN));
-fonts.add_path(eye.path().translate_by(new_vec(140, 0)), new_style(1, BLUE, PEN));
+fonts.add_path(eye.path().translate_by(vec2(140, 0)), new_style(1, BLUE, PEN));
 book.bind("fonts", fonts);
 
 // ---- glyphs: every glyph of every font ----
@@ -468,7 +470,7 @@ for name in font_names() {
 				}
 			}
 			g.scale = 38;
-			g.position = new_vec(LEFT + 20 + column * 52, y);
+			g.position = vec2(LEFT + 20 + column * 52, y);
 			catalogue.add_glyph(g, SAMPLE);
 			column += 1;
 		}
@@ -485,23 +487,23 @@ let art = sheet("art");
 // Shapes and curves, moved, scaled and turned.
 art.add_canvas(caption("new_circle, new_rectangle, new_line, new_arc, new_path with quad_to and cubic_to", TOP));
 let y = TOP + 120;
-art.add_path(new_circle(new_vec(160, y), 50), LINE);
-art.add_path(new_rectangle(new_vec(300, y), 100, 80).rotate_around(new_vec(300, y), 0.2), LINE);
-art.add_path(new_line(new_vec(370, y - 50), new_vec(470, y + 50)), LINE);
-art.add_path(new_arc(new_vec(550, y), 50, 0, 4.5), LINE);
+art.add_path(new_circle(vec2(160, y), 50), LINE);
+art.add_path(new_rectangle(vec2(300, y), 100, 80).rotate_around(vec2(300, y), 0.2), LINE);
+art.add_path(new_line(vec2(370, y - 50), vec2(470, y + 50)), LINE);
+art.add_path(new_arc(vec2(550, y), 50, 0, 4.5), LINE);
 art.add_path(
-	new_path().move_to(new_vec(620, y + 50))
-		.quad_to(new_vec(670, y - 70), new_vec(720, y + 50))
-		.cubic_to(new_vec(760, y + 110), new_vec(660, y + 130), new_vec(620, y + 50))
+	new_path().move_to(vec2(620, y + 50))
+		.quad_to(vec2(670, y - 70), vec2(720, y + 50))
+		.cubic_to(vec2(760, y + 110), vec2(660, y + 130), vec2(620, y + 50))
 		.close()
-		.scale_by(1).translate_by(new_vec(10, 0)),
+		.scale_by(1).translate_by(vec2(10, 0)),
 	new_style(1, BLUE, PEN));
 
 // Hatching fills a closed path's inside with lines: hatch(spacing, angle,
 // roughness), here at a random slant.
-art.add_path(new_circle(new_vec(880, y), 50), LINE);
-art.add_path(new_circle(new_vec(880, y), 50).hatch(5, random_range(0.0, PI()), 1), CAPTION);
-art.add_path(new_rectangle(new_vec(1020, y), 90, 90).hatch(6, random() * PI(), 0.5), new_style(1, GOLD, PEN));
+art.add_path(new_circle(vec2(880, y), 50), LINE);
+art.add_path(new_circle(vec2(880, y), 50).hatch(5, random_range(0.0, PI()), 1), CAPTION);
+art.add_path(new_rectangle(vec2(1020, y), 90, 90).hatch(6, random() * PI(), 0.5), new_style(1, GOLD, PEN));
 
 // Hatching with options. Each line is a stroke of its own, inside the
 // shape: a ring (two circles appended into one path) keeps its hole, and
@@ -512,16 +514,16 @@ art.add_path(new_rectangle(new_vec(1020, y), 90, 90).hatch(6, random() * PI(), 0
 y += 160;
 art.add_canvas(caption("hatch(#{ ... }): a ring, angles, roughness, bow, inset, and fill rules", y));
 y += 150;
-let ring = new_circle(new_vec(180, y), 80).append(new_circle(new_vec(180, y), 40));
+let ring = new_circle(vec2(180, y), 80).append(new_circle(vec2(180, y), 40));
 art.add_path(ring, LINE);
 art.add_path(ring.hatch(#{ spacing: 9.0, angle: [0.6, 2.2], roughness: 1.0 }), CAPTION);
 fn discs(x, y) {
-	new_circle(new_vec(x - 35, y), 60).append(new_circle(new_vec(x + 35, y), 60))
+	new_circle(vec2(x - 35, y), 60).append(new_circle(vec2(x + 35, y), 60))
 }
 let star = new_path();
 for i in 0..5 {
 	let a = -PI() / 2.0 + i * 4.0 * PI() / 5.0;
-	let p = new_vec(880 + 85 * a.cos(), y + 5 + 85 * a.sin());
+	let p = vec2(880 + 85 * a.cos(), y + 5 + 85 * a.sin());
 	if i == 0 { star.move_to(p); } else { star.line_to(p); }
 }
 star.close();
@@ -535,7 +537,7 @@ for shape in [
 	art.add_canvas(write(shape[1], shape[3], y + 120, 20));
 }
 y += 200;
-let coiled = art::snake_path(new_vec(180, y), 0, new_vec(560, y + 120), 700, 50, 5);
+let coiled = art::snake_path(vec2(180, y), 0, vec2(560, y + 120), 700, 50, 5);
 art.add_path(coiled, LINE);
 art.add_path(coiled.hatch(#{ spacing: 7.0, angle: 1.2, bow: 2.5, inset: 2.0 }), new_style(1, GREEN, PEN));
 
@@ -546,15 +548,15 @@ art.add_path(coiled.hatch(#{ spacing: 7.0, angle: 1.2, bow: 2.5, inset: 2.0 }), 
 y += 220;
 art.add_canvas(caption("vecs: + - * /, length, distance, dot, angle, normalized, rotated; path bounds", y));
 y += 150;
-let hub = new_vec(190, y);
-let spoke = new_vec(0, -85);
+let hub = vec2(190, y);
+let spoke = vec2(0, -85);
 let star = new_path().move_to(hub + spoke);
 for i in 1..=7 {
 	star.line_to(hub + spoke.rotated(i * 6 * PI() / 7));
 }
 art.add_path(star, new_style(1, GOLD, PEN));
-let tail = new_vec(380, y + 60);
-let tip = new_vec(700, y - 70);
+let tail = vec2(380, y + 60);
+let tip = vec2(700, y - 70);
 let along = (tip - tail).normalized();
 let arrow = new_line(tail, tip);
 arrow.append(new_line(tip, tip - along.rotated(0.45) * 28));
@@ -573,20 +575,20 @@ let art = sheet("art");
 art.add_canvas(caption("new_maze(seed, width, height): a maze's corridors", TOP));
 let maze = new_maze(4, 8, 3);
 if maze.width() < 1 || maze.height() < 1 { throw "a maze has a size"; }
-art.add_path(maze.path().scale_by(30).translate_by(new_vec(LEFT + 20, TOP + 50)), LINE);
+art.add_path(maze.path().scale_by(30).translate_by(vec2(LEFT + 20, TOP + 50)), LINE);
 
 // Snakes: one with too little slack to loop, one coiled over itself, and
 // writing along a snake's spine.
 art.add_canvas(caption("art::snake_path, and text down an art::snake_spine", TOP + 250));
-art.add_path(art::snake_path(new_vec(160, 560), -PI() / 2.0, new_vec(180, 930), 480, 40, 4), LINE);
-art.add_path(art::snake_path(new_vec(400, 600), -PI() / 2.0, new_vec(410, 660), 900, 36, 7), LINE);
-let spine = art::snake_spine(new_vec(700, 520), -PI() / 2.0, new_vec(740, 930), 640, 48, 2);
-art.add_path(art::snake_path(new_vec(700, 520), -PI() / 2.0, new_vec(740, 930), 640, 48, 2), LINE);
+art.add_path(art::snake_path(vec2(160, 560), -PI() / 2.0, vec2(180, 930), 480, 40, 4), LINE);
+art.add_path(art::snake_path(vec2(400, 600), -PI() / 2.0, vec2(410, 660), 900, 36, 7), LINE);
+let spine = art::snake_spine(vec2(700, 520), -PI() / 2.0, vec2(740, 930), 640, 48, 2);
+art.add_path(art::snake_path(vec2(700, 520), -PI() / 2.0, vec2(740, 930), 640, 48, 2), LINE);
 art.add_canvas(spine.fill_with_text("lorem ipsum dolor sit amet", PLAIN, 22, new_style(1, RED, PEN))[0]);
 
 // A bramble: canes, leaves and flowers, stroked separately.
 art.add_canvas(caption("art::bramble: canes, leaves and flowers", 1010));
-let plant = art::bramble(new_vec(600, 1450), -PI() / 2.0, 400, 80, 4);
+let plant = art::bramble(vec2(600, 1450), -PI() / 2.0, 400, 80, 4);
 art.add_path(plant.vines, new_style(1, BARK, PEN));
 art.add_path(plant.leaves, new_style(1, GREEN, PEN));
 art.add_path(plant.flowers, LINE);
@@ -598,12 +600,12 @@ art.add_canvas(caption("art::bramble_along a maze", TOP));
 // Scaled to fit half the page, from its bounds.
 let maze_lines = new_maze(5, 4, 3).path();
 maze_lines.scale_by(780 / maze_lines.bounds().width);
-let along = art::bramble_along(maze_lines.copy().translate_by(new_vec(LEFT + 110, TOP + 90)), 50, 2);
+let along = art::bramble_along(maze_lines.copy().translate_by(vec2(LEFT + 110, TOP + 90)), 50, 2);
 art.add_path(along.vines, new_style(1, BARK, PEN));
 art.add_path(along.leaves, new_style(1, GREEN, PEN));
 art.add_path(along.flowers, LINE);
 art.add_canvas(caption("art::snake_along the same maze", 860));
-art.add_path(art::snake_along(maze_lines.copy().translate_by(new_vec(LEFT + 110, 940)), 40, 2), LINE);
+art.add_path(art::snake_along(maze_lines.copy().translate_by(vec2(LEFT + 110, 940)), 40, 2), LINE);
 book.bind("art", art);
 
 // Eyes as sketched in a journal, inked and washed with a colour:
@@ -613,11 +615,11 @@ book.bind("art", art);
 let art = sheet("art");
 art.add_canvas(caption("art::eye(center, length, color, gaze_angle, messiness, seed): messiness 0, 0.25, 0.5, 0.75, 1", TOP));
 for (m, i) in [0.0, 0.25, 0.5, 0.75, 1.0] {
-	art.add_canvas(art::eye(new_vec(LEFT + 95 + i * 205, TOP + 110), 150, BLUE, -PI() / 4.0, m, 3 + i));
+	art.add_canvas(art::eye(vec2(LEFT + 95 + i * 205, TOP + 110), 150, BLUE, -PI() / 4.0, m, 3 + i));
 }
 art.add_canvas(caption("gaze angles: right, down, left, up; the same seed looking each way", TOP + 220));
 for (g, i) in [0.0, PI() / 2.0, PI(), -PI() / 2.0] {
-	art.add_canvas(art::eye(new_vec(LEFT + 115 + i * 255, TOP + 330), 200, BLUE, g, 0.4, 11));
+	art.add_canvas(art::eye(vec2(LEFT + 115 + i * 255, TOP + 330), 200, BLUE, g, 0.4, 11));
 }
 // Options: angle tilts the eye, gaze is how far it looks (0 to 1),
 // openness is its height over its length, flat draws its lids as straight
@@ -625,10 +627,10 @@ for (g, i) in [0.0, PI() / 2.0, PI(), -PI() / 2.0] {
 // has), and ink styles its lines. Where the lids cover the iris, it's
 // hidden.
 art.add_canvas(caption("#{ angle, gaze, openness, flat, ink }", TOP + 440));
-art.add_canvas(art::eye(new_vec(LEFT + 105, TOP + 610), 200, BLUE, 0.0, 0.5, 4, #{ angle: -0.5, gaze: 0.0 }));
-art.add_canvas(art::eye(new_vec(LEFT + 370, TOP + 610), 200, BLUE, PI(), 0.5, 4, #{ gaze: 1.0, openness: 0.22 }));
-art.add_canvas(art::eye(new_vec(LEFT + 635, TOP + 610), 200, BLUE, PI() / 4.0, 0.4, 6, #{ flat: true, openness: 0.45 }));
-art.add_canvas(art::eye(new_vec(LEFT + 890, TOP + 610), 200, RED, 0.3, 0.6, 4, #{ angle: 1.3, openness: 0.5, ink: new_style(1, INK, PEN) }));
+art.add_canvas(art::eye(vec2(LEFT + 105, TOP + 610), 200, BLUE, 0.0, 0.5, 4, #{ angle: -0.5, gaze: 0.0 }));
+art.add_canvas(art::eye(vec2(LEFT + 370, TOP + 610), 200, BLUE, PI(), 0.5, 4, #{ gaze: 1.0, openness: 0.22 }));
+art.add_canvas(art::eye(vec2(LEFT + 635, TOP + 610), 200, BLUE, PI() / 4.0, 0.4, 6, #{ flat: true, openness: 0.45 }));
+art.add_canvas(art::eye(vec2(LEFT + 890, TOP + 610), 200, RED, 0.3, 0.6, 4, #{ angle: 1.3, openness: 0.5, ink: new_style(1, INK, PEN) }));
 art.add_canvas(write("angle -0.5, gaze 0", LEFT + 10, TOP + 790, 20));
 art.add_canvas(write("gaze 1, openness 0.22", LEFT + 265, TOP + 790, 20));
 art.add_canvas(write("flat, openness 0.45", LEFT + 530, TOP + 790, 20));
@@ -637,11 +639,124 @@ art.add_canvas(write("angle 1.3, openness 0.5, ink", LEFT + 730, TOP + 790, 20))
 art.add_canvas(caption("a page of eyes, messy and overlapping", TOP + 850));
 seed(5);
 for i in 0..10 {
-	let at = new_vec(LEFT + 110 + (i % 5) * 195 + random_range(-30, 30), TOP + 980 + (i / 5) * 190 + random_range(-30, 30));
+	let at = vec2(LEFT + 110 + (i % 5) * 195 + random_range(-30, 30), TOP + 980 + (i / 5) * 190 + random_range(-30, 30));
 	let colour = if i % 4 == 3 { RED } else { BLUE };
 	art.add_canvas(art::eye(at, random_range(150, 240), colour, random_range(-PI(), PI()), random_range(0.5, 1.0), i, #{ angle: random_range(-1.0, 1.0), gaze: random(), flat: i % 3 == 1 }));
 }
 book.bind("art", art);
+
+// ---- generators: scattered points, trees, digits ----
+
+// distribute_points_2/3/4(kind, count, [[low, high], ...]) scatters count
+// points through a box, giving vec2s, vec3s or vec4s; the random kinds
+// draw from seed(). Each panel is the same box and count.
+let gen = sheet("generators");
+gen.add_canvas(caption("distribute_points_2(kind, 120, [[low, high], [low, high]])", TOP));
+seed(8);
+for (kind, i) in ["uniform_random", "poisson_disk", "jittered_grid", "grid", "halton", "golden"] {
+	let x0 = LEFT + (i % 3) * 345;
+	let y0 = TOP + 60 + (i / 3) * 320;
+	gen.add_path(new_rectangle(vec2(x0 + 150, y0 + 115), 310, 240), new_style(1, RED, new_brush("Ink Pen", 0.2, 0.4, 1)));
+	for p in distribute_points_2(kind, 120, [[x0 + 5, x0 + 295], [y0 + 5, y0 + 225]]) {
+		gen.add_path(new_circle(p, 3), LINE);
+	}
+	gen.add_canvas(write(kind, x0, y0 + 265, 22));
+}
+
+// vec3 and vec4 work as vec2s do, and drop to fewer coordinates with
+// xy() and xyz(); vec3s cross. Here points in a box of depth, drawn
+// smaller and fainter the deeper they are, and a vec4's colour.
+let y = TOP + 720;
+gen.add_canvas(caption("vec3(x, y, z), vec4(x, y, z, w), vec3(v2, z), vec4(v3, w); .z, .w, xy(), xyz(), cross", y));
+for p in distribute_points_3("poisson_disk", 140, [[LEFT, LEFT + 460], [y + 50, y + 330], [0, 1]]) {
+	gen.add_path(new_circle(p.xy(), 2 + 6 * (1 - p.z)), if p.z < 0.5 { LINE } else { new_style(1, BLUE, PEN) });
+}
+let up = vec3(1, 0, 0).cross(vec3(0, 1, 0));
+let lifted = vec4(vec3(vec2(0.1, 0.2), up.z), 0.5);
+if up != vec3(0, 0, 1) || lifted.xyz().z != 1.0 || lifted.w != 0.5 || vec4(1, 2, 3, 4).length() != 30.0.sqrt() {
+	throw "vec3 and vec4 should measure";
+}
+for c in distribute_points_4("halton", 40, [[LEFT + 560, RIGHT - 20], [y + 50, y + 330], [0, 255], [0.3, 1]]) {
+	let colour = `rgba(${(c.z).to_int()}, 40, ${(255 - c.z).to_int()}, ${c.w})`;
+	gen.add_path(new_circle(c.xy(), 12), new_style(1, colour, PEN));
+}
+
+book.bind("generators", gen);
+
+// points.spanning_tree(algorithm, metric[, #{ root, neighbours }]) joins
+// every point, giving [parent, child] index pairs from the root out, in
+// the order they were added. The graph algorithms walk each point's
+// nearest neighbours.
+let gen = sheet("generators");
+gen.add_canvas(caption("points.spanning_tree(algorithm, \"euclidean\"), from the middle point", TOP));
+seed(3);
+let points = distribute_points_2("poisson_disk", 110, [[0, 290], [0, 220]]);
+// The point nearest the middle, for a root.
+let middle = 0;
+for (p, i) in points {
+	if p.distance(vec2(145, 110)) < points[middle].distance(vec2(145, 110)) { middle = i; }
+}
+fn draw_tree(page, points, edges, at, style) {
+	for e in edges {
+		page.add_path(new_line(points[e[0]] + at, points[e[1]] + at), style);
+	}
+}
+for (algorithm, i) in ["prim", "kruskal", "maximum", "shortest_path", "breadth_first", "depth_first", "random"] {
+	let at = vec2(LEFT + (i % 3) * 345, TOP + 60 + (i / 3) * 300);
+	let edges = points.spanning_tree(algorithm, "euclidean", #{ root: middle });
+	draw_tree(gen, points, edges, at, if algorithm == "maximum" { new_style(0.5, INK, new_brush("Ink Pen", 0.2, 0.4, 1)) } else { LINE });
+	gen.add_path(new_circle(points[middle] + at, 6), CAPTION);
+	gen.add_canvas(write(algorithm, at.x, at.y + 250, 22));
+}
+
+// The metric decides what's near: shortest paths over each.
+let y = TOP + 960;
+gen.add_canvas(caption("shortest_path by each metric, #{ neighbours: 8 }", y));
+for (metric, i) in ["euclidean", "squared_euclidean", "manhattan", "chebyshev"] {
+	let at = vec2(LEFT + i * 255, y + 50);
+	let small = [];
+	for p in points { small.push(p * 0.8); }
+	draw_tree(gen, small, small.spanning_tree("shortest_path", metric, #{ root: middle, neighbours: 8 }), at, new_style(1, BLUE, PEN));
+	gen.add_canvas(write(metric, at.x, at.y + 205, 20));
+}
+book.bind("generators", gen);
+
+// balanced_ternary(n[, width]) gives n's digits, -1, 0 and 1, most
+// significant first, padded to width; from_balanced_ternary reads them
+// back. Each number here is a column of marks: a stroke up for 1, down
+// for -1, a dot for 0.
+let gen = sheet("generators");
+gen.add_canvas(caption("balanced_ternary(n, 3), n from -13 to 13; from_balanced_ternary(digits)", TOP));
+for n in -13..=13 {
+	let x = LEFT + 25 + (n + 13) * 36;
+	let digits = balanced_ternary(n, 3);
+	if from_balanced_ternary(digits) != n { throw "balanced ternary should read back"; }
+	for (d, row) in digits {
+		let c = vec2(x, TOP + 110 + row * 70);
+		if d == 0 {
+			gen.add_path(new_circle(c, 3), LINE);
+		} else {
+			gen.add_path(new_line(c, c - vec2(0, 25 * d)), if d > 0 { LINE } else { CAPTION });
+		}
+	}
+	gen.add_canvas(write(`${n}`, x - 10, TOP + 330, 16));
+}
+gen.add_canvas(caption("balanced_ternary(2026): " + balanced_ternary(2026), TOP + 400));
+
+// Angles are radians; degrees(d) gives d degrees in radians, and
+// radians(r) says a number is radians already.
+let y = TOP + 480;
+gen.add_canvas(caption("degrees(d), radians(r): a ray every degrees(30), and every radians(PI() / 12)", y));
+let hub = vec2(LEFT + 160, y + 160);
+for i in 0..12 {
+	gen.add_path(new_line(hub, hub + vec2(110, 0).rotated(i * degrees(30))), LINE);
+}
+let hub = vec2(LEFT + 560, y + 160);
+for i in 0..24 {
+	gen.add_path(new_line(hub, hub + vec2(110, 0).rotated(i * radians(PI() / 12))), new_style(1, BLUE, PEN));
+}
+if (degrees(180) - PI()).abs() > 1e-12 { throw "degrees should be radians"; }
+book.bind("generators", gen);
 
 // ---- text ----
 
@@ -649,21 +764,21 @@ let text = sheet("text");
 
 // A text box, flat (glyph by glyph) with jagged edges.
 text.add_canvas(caption("new_textbox: flat, with jagged edges", TOP));
-let flat = new_textbox(#{ center: new_vec(340, TOP + 190), width: 460, height: 300, symbol_scale: 22, jagged_edge: 0.6 });
+let flat = new_textbox(#{ center: vec2(340, TOP + 190), width: 460, height: 300, symbol_scale: 22, jagged_edge: 0.6 });
 text.add_glyphs(flat.fill(PLAIN.glyphs(LOREM)).placed, TEXT);
 
 // Words kept whole, spaced out, spread over as many boxes as it takes.
-text.add_canvas(caption("words, spacing, place_all", TOP).translate_by(new_vec(540, 0)));
-let boxes = new_textbox(#{ center: new_vec(0, 0), width: 210, height: 300, symbol_scale: 20, layout: "words", spacing: 0.05 });
+text.add_canvas(caption("words, spacing, place_all", TOP).translate_by(vec2(540, 0)));
+let boxes = new_textbox(#{ center: vec2(0, 0), width: 210, height: 300, symbol_scale: 20, layout: "words", spacing: 0.05 });
 for (block, i) in boxes.place_all(PLAIN.glyphs(LOREM)) {
-	for g in block { g.translate_by(new_vec(760 + i * 230, TOP + 190)); }
+	for g in block { g.translate_by(vec2(760 + i * 230, TOP + 190)); }
 	text.add_glyphs(block, TEXT);
 }
 
 // Text kept clear of a drawing: of its lines, or (add_hull) of everything
 // inside its outline.
 text.add_canvas(caption("avoid a drawing: its lines, or add_hull", 600));
-let plant = art::bramble(new_vec(330, 1060), -PI() / 2.0, 380, 60, 9);
+let plant = art::bramble(vec2(330, 1060), -PI() / 2.0, 380, 60, 9);
 let drawing = new_canvas();
 drawing.add_path(plant.vines, new_style(1, BARK, PEN));
 drawing.add_path(plant.leaves, new_style(1, GREEN, PEN));
@@ -674,9 +789,9 @@ text.add_canvas(drawing.copy());
 text.add_glyphs(lines_box.fill(PLAIN.glyphs(LOREM + LOREM)).placed, TEXT);
 let hull_tree = new_avoidance_tree().add_hull(drawing, 8);
 if hull_tree.is_empty || !hull_tree.blocks(b.center) { throw "the hull should cover the drawing's middle"; }
-let shifted = drawing.copy().translate_by(new_vec(520, 0));
+let shifted = drawing.copy().translate_by(vec2(520, 0));
 text.add_canvas(shifted);
-let hull_box = new_textbox(#{ center: b.center + new_vec(520, 0), width: 460, height: b.height + 40, symbol_scale: 16, layout: "words", avoid: new_avoidance_tree().add_hull(shifted, 8) });
+let hull_box = new_textbox(#{ center: b.center + vec2(520, 0), width: 460, height: b.height + 40, symbol_scale: 16, layout: "words", avoid: new_avoidance_tree().add_hull(shifted, 8) });
 text.add_glyphs(hull_box.fill(PLAIN.glyphs(LOREM + LOREM)).placed, TEXT);
 book.bind("text", text);
 
@@ -685,37 +800,37 @@ let text = sheet("text");
 // arc, and along a spiral that keeps out of a ring and off a line, words
 // whole.
 text.add_canvas(caption("fill_with_text round a circle, as many times as it takes", TOP));
-let ring_text = new_circle(new_vec(170, TOP + 130), 60).fill_with_text(LOREM, PLAIN, 16, new_style(1, GOLD, PEN));
+let ring_text = new_circle(vec2(170, TOP + 130), 60).fill_with_text(LOREM, PLAIN, 16, new_style(1, GOLD, PEN));
 for (part, i) in ring_text {
-	text.add_canvas(part.translate_by(new_vec((i % 6) * 150, (i / 6) * 150)));
+	text.add_canvas(part.translate_by(vec2((i % 6) * 150, (i / 6) * 150)));
 }
 text.add_canvas(caption("fit_text: as large as fits the arc", 560));
-text.add_canvas(new_arc(new_vec(320, 760), 170, 3.4, 6.0).fit_text("lorem ipsum", PLAIN, new_style(1, BLUE, PEN)));
-text.add_canvas(caption("along a spiral, avoiding a ring and a line", 560).translate_by(new_vec(540, 0)));
-let centre = new_vec(840, 780);
+text.add_canvas(new_arc(vec2(320, 760), 170, 3.4, 6.0).fit_text("lorem ipsum", PLAIN, new_style(1, BLUE, PEN)));
+text.add_canvas(caption("along a spiral, avoiding a ring and a line", 560).translate_by(vec2(540, 0)));
+let centre = vec2(840, 780);
 let spiral = new_path().move_to(centre);
 for i in 1..360 {
 	let a = i * 0.05;
 	let r = 15 + a * 9;
-	spiral.line_to(centre + new_vec(r * a.cos(), r * a.sin()));
+	spiral.line_to(centre + vec2(r * a.cos(), r * a.sin()));
 }
 let keep_out = new_avoidance_tree();
-keep_out.add_region(new_circle(centre + new_vec(50, -40), 45));
-keep_out.add(new_line(centre + new_vec(-120, -150), centre + new_vec(140, 150)), 4);
-text.add_path(new_circle(centre + new_vec(50, -40), 45), CAPTION);
-text.add_path(new_line(centre + new_vec(-120, -150), centre + new_vec(140, 150)), CAPTION);
+keep_out.add_region(new_circle(centre + vec2(50, -40), 45));
+keep_out.add(new_line(centre + vec2(-120, -150), centre + vec2(140, 150)), 4);
+text.add_path(new_circle(centre + vec2(50, -40), 45), CAPTION);
+text.add_path(new_line(centre + vec2(-120, -150), centre + vec2(140, 150)), CAPTION);
 text.add_canvas(spiral.fill_with_text(LOREM, PLAIN, 14, new_style(1, GREEN, PEN), #{ avoid: keep_out, layout: "words" })[0]);
 
 // Notes scattered over a drawing, clear of it, of a line across it and of
 // each other, words kept whole.
 text.add_canvas(caption("scatter_notes, clear of a drawing, a line and each other", 1030));
 let board = new_canvas();
-board.add_path(new_rectangle(new_vec(600, 1250), 1000, 360), CAPTION);
-board.add_path(art::snake_path(new_vec(400, 1150), 0, new_vec(720, 1330), 900, 40, 3), LINE);
+board.add_path(new_rectangle(vec2(600, 1250), 1000, 360), CAPTION);
+board.add_path(art::snake_path(vec2(400, 1150), 0, vec2(720, 1330), 900, 40, 3), LINE);
 text.add_canvas(board);
 text.add_canvas(board.scatter_notes(["lorem ipsum", "dolor sit amet", "consectetur adipiscing", "sed do eiusmod", "tempor incididunt"],
 	PLAIN, new_style(1, GOLD, PEN),
-	#{ symbol_scale: 20, width_range: [240, 340], height_range: [25, 35], clearance: 24, layout: "words", avoid: new_line(new_vec(100, 1250), new_vec(1100, 1250)) }));
+	#{ symbol_scale: 20, width_range: [240, 340], height_range: [25, 35], clearance: 24, layout: "words", avoid: new_line(vec2(100, 1250), vec2(1100, 1250)) }));
 book.bind("text", text);
 
 // Words round a drawing: whole, moved past it (the default), broken
@@ -729,7 +844,7 @@ fn seal(c) {
 	let star = new_path();
 	for i in 0..=5 {
 		let a = -PI() / 2.0 + i * 4.0 * PI() / 5.0;
-		let p = c + new_vec(70 * a.cos(), 70 * a.sin());
+		let p = c + vec2(70 * a.cos(), 70 * a.sin());
 		if i == 0 { star.move_to(p); } else { star.line_to(p); }
 	}
 	s.add_path(new_circle(c, 78), global::CAPTION);
@@ -737,8 +852,8 @@ fn seal(c) {
 	s
 }
 for (options, i) in [#{}, #{ split_words: true }, #{ split_words: true, split_padding: 0.6 }] {
-	let c = new_vec(LEFT + 160 + i * 340, TOP + 330);
-	let drawing = seal(c + new_vec(-50, -60));
+	let c = vec2(LEFT + 160 + i * 340, TOP + 330);
+	let drawing = seal(c + vec2(-50, -60));
 	text.add_canvas(drawing);
 	let box = #{ center: c, width: 320, height: 420, symbol_scale: 17, layout: "words", avoid: drawing, clearance: 4 };
 	box += options;
@@ -752,12 +867,12 @@ for (options, i) in [#{ layout: "words" }, #{ layout: "words", split_words: 2 }]
 	let line_y = y + 80 + i * 110;
 	let rings = new_avoidance_tree();
 	for k in 0..3 {
-		let at = new_vec(LEFT + 210 + k * 300, line_y);
+		let at = vec2(LEFT + 210 + k * 300, line_y);
 		text.add_path(new_circle(at, 30), CAPTION);
 		rings.add_region(new_circle(at, 30), 6);
 	}
 	options.avoid = rings;
-	text.add_canvas(new_line(new_vec(LEFT, line_y), new_vec(RIGHT, line_y)).fill_with_text(LOREM, PLAIN, 22, TEXT, options)[0]);
+	text.add_canvas(new_line(vec2(LEFT, line_y), vec2(RIGHT, line_y)).fill_with_text(LOREM, PLAIN, 22, TEXT, options)[0]);
 }
 // Glyphs held at an angle, rather than turned to the path: set along it,
 // as close as their outlines at that angle allow.
@@ -765,7 +880,7 @@ y += 340;
 text.add_canvas(caption("along a curve, turned to it; then #{ angle: 0 }, upright; then #{ angle: 0.3 }", y));
 for (angle, i) in [(), 0, 0.3] {
 	let x = LEFT + i * 340;
-	let path = new_path().move_to(new_vec(x, y + 120)).cubic_to(new_vec(x + 110, y + 40), new_vec(x + 210, y + 200), new_vec(x + 320, y + 120));
+	let path = new_path().move_to(vec2(x, y + 120)).cubic_to(vec2(x + 110, y + 40), vec2(x + 210, y + 200), vec2(x + 320, y + 120));
 	text.add_path(path, CAPTION);
 	let options = if angle == () { #{} } else { #{ angle: angle } };
 	text.add_canvas(path.fill_with_text("lorem ipsum dolor sit", PLAIN, 28, TEXT, options)[0]);
@@ -784,16 +899,16 @@ fn star(c, outer, inner) {
 	for i in 0..10 {
 		let a = -PI() / 2.0 + i * PI() / 5.0;
 		let r = if i % 2 == 0 { outer } else { inner };
-		let at = c + new_vec(r * a.cos(), r * a.sin());
+		let at = c + vec2(r * a.cos(), r * a.sin());
 		if i == 0 { p.move_to(at); } else { p.line_to(at); }
 	}
 	p.close()
 }
 let y = TOP + 250;
 let shapes = [
-	new_circle(new_vec(LEFT + 150, y), 150),
-	new_circle(new_vec(LEFT + 500, y), 150).append(new_circle(new_vec(LEFT + 500, y), 60)),
-	star(new_vec(LEFT + 850, y + 10), 170, 80),
+	new_circle(vec2(LEFT + 150, y), 150),
+	new_circle(vec2(LEFT + 500, y), 150).append(new_circle(vec2(LEFT + 500, y), 60)),
+	star(vec2(LEFT + 850, y + 10), 170, 80),
 ];
 for shape in shapes {
 	text.add_path(shape, CAPTION);
@@ -802,9 +917,9 @@ for shape in shapes {
 text.add_canvas(caption("#{ angle }: 0.4 in a square; -PI() / 4 in a circle; PI() / 2, lines down the page", TOP + 470));
 let y = TOP + 680;
 for (options, i) in [
-	#{ shape: new_rectangle(new_vec(LEFT + 150, y), 280, 280), angle: 0.4 },
-	#{ shape: new_circle(new_vec(LEFT + 500, y), 150), angle: -PI() / 4.0, layout: "words" },
-	#{ shape: new_rectangle(new_vec(LEFT + 850, y), 280, 280), angle: PI() / 2.0, jagged_edge: 0.8 },
+	#{ shape: new_rectangle(vec2(LEFT + 150, y), 280, 280), angle: 0.4 },
+	#{ shape: new_circle(vec2(LEFT + 500, y), 150), angle: -PI() / 4.0, layout: "words" },
+	#{ shape: new_rectangle(vec2(LEFT + 850, y), 280, 280), angle: PI() / 2.0, jagged_edge: 0.8 },
 ] {
 	text.add_path(options.shape, CAPTION);
 	options.symbol_scale = 16;
@@ -812,11 +927,11 @@ for (options, i) in [
 }
 // An oval round a flat-lidded eye, words kept whole and clear of it.
 text.add_canvas(caption("an oval, words at an angle of 0.15, avoiding an eye", TOP + 900));
-let centre = new_vec(W / 2.0, TOP + 1100);
+let centre = vec2(W / 2.0, TOP + 1100);
 let oval = new_path();
 for i in 0..72 {
 	let a = i * PI() / 36.0;
-	let at = centre + new_vec(480 * a.cos(), 170 * a.sin());
+	let at = centre + vec2(480 * a.cos(), 170 * a.sin());
 	if i == 0 { oval.move_to(at); } else { oval.line_to(at); }
 }
 oval.close();
@@ -879,14 +994,14 @@ let ternary = font("balanced_ternary");
 for cell in grid.cells() {
 	let g = ternary.glyph(cell.symbol - 13);
 	g.scale = cell_size * 0.8;
-	g.position = new_vec(cell.x * cell_size, cell.y * cell_size);
+	g.position = vec2(cell.x * cell_size, cell.y * cell_size);
 	maze_canvas.add_glyph(g, SAMPLE);
 }
 // A maze can also be filled with symbols directly.
 let blank = new_maze(3, 2, 2);
 blank.fill(symbols(27, "HELLO").symbols());
 if blank.cells()[0].symbol != 8 { throw "fill writes symbols in walking order"; }
-locks.add_canvas(maze_canvas.translate_by(new_vec(LEFT + 30, y + 80)));
+locks.add_canvas(maze_canvas.translate_by(vec2(LEFT + 30, y + 80)));
 book.bind("locks", locks);
 
 // ---- a spread: one drawing over two pages ----
@@ -898,9 +1013,9 @@ book.bind("locks", locks);
 let spread = new_canvas();
 spread.add_canvas(write_in("a spread", LEFT, 105, 48, HEADING, LOCHE, #{}));
 spread.add_canvas(caption("page.split(2, 1): one page twice as wide, cut into two", TOP));
-let path = new_path().move_to(new_vec(250, 1300));
-path.cubic_to(new_vec(700, 200), new_vec(1700, 1500), new_vec(2150, 400));
-let serpent = art::snake_path(new_vec(2150, 400), -0.8, new_vec(260, 1250), 3200, 90, 11);
+let path = new_path().move_to(vec2(250, 1300));
+path.cubic_to(vec2(700, 200), vec2(1700, 1500), vec2(2150, 400));
+let serpent = art::snake_path(vec2(2150, 400), -0.8, vec2(260, 1250), 3200, 90, 11);
 spread.add_path(serpent, LINE);
 spread.add_path(serpent.hatch(#{ spacing: 9.0, angle: 0.7, bow: 2.0, inset: 2.0 }), new_style(1, GREEN, PEN));
 spread.add_canvas(path.fill_with_text(LOREM, PLAIN, 24, CAPTION, #{ avoid: serpent, clearance: 10, layout: "words" })[0]);
@@ -911,7 +1026,7 @@ for half in [0, 1] {
 }
 let wide = new_page();
 wide.name = "spread";
-wide.size = new_vec(2 * W, H);
+wide.size = vec2(2 * W, H);
 wide.add_canvas(spread);
 // Page margins only matter for pages without a size, which grow to their
 // strokes plus the margin.
@@ -950,9 +1065,9 @@ fn sample_page(n, info) {
 		label(if n == 0 { "an inline layout" } else { "and on" }, #{ role: "folio", align: "center", height: 30 }),
 	])
 }
-let diamond = new_path().move_to(new_vec(0, -10)).line_to(new_vec(6, 0)).line_to(new_vec(0, 10)).line_to(new_vec(-6, 0)).close();
+let diamond = new_path().move_to(vec2(0, -10)).line_to(vec2(6, 0)).line_to(vec2(0, 10)).line_to(vec2(-6, 0)).close();
 fn plant_in(b) {
-	let plant = art::bramble(new_vec(b.center.x, b.y + b.height), -PI() / 2.0, b.height * 0.95, b.height * 0.2, 5);
+	let plant = art::bramble(vec2(b.center.x, b.y + b.height), -PI() / 2.0, b.height * 0.95, b.height * 0.2, 5);
 	let c = new_canvas();
 	c.add_path(plant.vines, new_style(1, global::BARK, global::PEN));
 	c.add_path(plant.leaves, new_style(1, global::GREEN, global::PEN));
@@ -1060,7 +1175,7 @@ for page in new_layout("marked", Fn("markdown_page")).typeset(#{
 		seal: #{ style: CAPTION },
 		folio: #{ font: PLAIN, style: CAPTION, size: 20 },
 	},
-	art: #{ seal: seal(new_vec(0, 0)) },
+	art: #{ seal: seal(vec2(0, 0)) },
 }) {
 	book.bind_page("layouts", page);
 }
@@ -1068,7 +1183,7 @@ for page in new_layout("marked", Fn("markdown_page")).typeset(#{
 // ---- the title page and the contents, which go first ----
 
 // layouts/bordered_title.rhai, a framed title page.
-let leaf = new_path().move_to(new_vec(0, -22)).quad_to(new_vec(14, -4), new_vec(0, 22)).quad_to(new_vec(-14, -4), new_vec(0, -22));
+let leaf = new_path().move_to(vec2(0, -22)).quad_to(vec2(14, -4), vec2(0, 22)).quad_to(vec2(-14, -4), vec2(0, -22));
 let title = layout("bordered_title").typeset(#{
 	width: W, height: H,
 	flows: #{ title: "The Showcase", subtitle: "a sample book of everything there is to draw with", credits: "set with a layout file:\nlayouts/bordered_title.rhai" },
@@ -1088,13 +1203,13 @@ let contents = sheet("contents");
 let y = TOP + 40;
 for entry in book.contents {
 	contents.add_canvas(write_in(entry[0], LEFT + 60, y, 40, HEADING, LOCHE, #{}));
-	contents.add_path(new_line(new_vec(420, y + 12), new_vec(980, y + 12)), new_style(1, RED, new_brush("Ink Pen", 0.2, 0.4, 1)));
+	contents.add_path(new_line(vec2(420, y + 12), vec2(980, y + 12)), new_style(1, RED, new_brush("Ink Pen", 0.2, 0.4, 1)));
 	contents.add_canvas(write(`${entry[1]}`, 1010, y, 30));
 	y += 110;
 }
 let contents_page = new_page();
 contents_page.name = "02_contents";
-contents_page.size = new_vec(W, H);
+contents_page.size = vec2(W, H);
 contents_page.svg_style = #{ roughness: 1.5, noise_amplitude: 0.8 };
 contents_page.add_canvas(contents);
 journal_entry.add_page(contents_page);

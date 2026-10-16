@@ -192,7 +192,7 @@ mod tests {
     fn bounds_include_stroke_width() {
         let ok: bool = eval(r#"
             let c = new_canvas();
-            c.add_path(new_line(new_vec(0.0, 0.0), new_vec(10.0, 20.0)), style);
+            c.add_path(new_line(vec2(0.0, 0.0), vec2(10.0, 20.0)), style);
             let b = c.bounds();
             b.min.x == -1.0 && b.min.y == -1.0 && b.max.x == 11.0 && b.max.y == 21.0
                 && b.center.x == 5.0 && b.center.y == 10.0 && b.width == 12.0 && b.height == 22.0
@@ -200,8 +200,8 @@ mod tests {
         assert!(ok);
         // A path's bounds are its line's, curves included.
         let ok: bool = eval(r#"
-            let b = new_path().move_to(new_vec(0, 0)).quad_to(new_vec(10, 20), new_vec(20, 0)).bounds();
-            b.min == new_vec(0, 0) && b.max.x == 20.0 && (b.max.y - 10.0).abs() < 0.01
+            let b = new_path().move_to(vec2(0, 0)).quad_to(vec2(10, 20), vec2(20, 0)).bounds();
+            b.min == vec2(0, 0) && b.max.x == 20.0 && (b.max.y - 10.0).abs() < 0.01
         "#);
         assert!(ok);
         assert!(fails("new_canvas().bounds()").contains("bounds: the canvas is empty"));

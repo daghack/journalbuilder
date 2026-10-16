@@ -145,10 +145,10 @@ doc += heading("Reading This Reference");
 doc += para("A journal is a rhai script. It draws strokes onto canvases, puts canvases on pages, and adds the pages to journal_entry, which journalbuild renders: one image per canvas, or one per page on parchment, or a PDF. This book lists every function a script can call, by what it works on. Each entry gives a signature in red and then what it does.");
 doc += para("In signatures, receiver.method(arguments) is called on a value, as path.line_to(point); a bare name(arguments) is a global function. A name = value entry is a property: it can be read, and set unless the entry says it's read only.");
 doc += para("Under each entry, each argument has a line of its own: its name in italics, what it does, and the values it takes. An argument marked optional can be left out of the call, and is then its default; the others must be given. An argument written options is a map, #{ key: value, ... }, and its keys are listed as options.KEY: each optional, with its default, unless it's marked required. Unknown keys are errors. For a property, the line is the value it's set to. Words in the values, such as ramp or flat, are strings: write them in double quotes.");
-doc += para("Units: coordinates are canvas units, one pixel at --scale 1, with y running down the page. Angles are radians; PI() is rhai's. Numbers can be whole or decimal anywhere a number is taken, and must be finite; a whole number is needed only where the values say so. Colours are CSS colours: a name, #rgb, #rrggbb, rgb(), rgba(), hsl() or hsla().");
+doc += para("Units: coordinates are canvas units, one pixel at --scale 1, with y running down the page. Angles are radians; PI() is rhai's, and degrees(d) converts. Numbers can be whole or decimal anywhere a number is taken, and must be finite; a whole number is needed only where the values say so. Colours are CSS colours: a name, #rgb, #rrggbb, rgb(), rgba(), hsl() or hsla().");
 doc += para("Shared values: paths, glyphs, canvases and avoidance trees are shared. Assigning one, passing it or looping over it gives the same value, so changes through any copy reach it; copy() makes an independent one. Their transforms change the value and return it, so calls chain: p.move_to(a).line_to(b). Vecs, fonts, brushes, styles and pages are plain values: changing one changes that copy only.");
-doc += para("Randomness is seeded: random(), glyph variant picks, text layout and hatching all draw on one generator with a fixed seed, so a journal renders the same every run. The procedural art takes seeds of its own.");
-doc += para("Sections: the entry and its pages; canvases and strokes; vectors; paths; brushes and styles; gradients; fonts and glyphs; text; keeping text clear; randomness and messages; procedural art; page layouts; marked-up text; locks; lock and layout files; building.");
+doc += para("Randomness is seeded: random(), glyph variant picks, text layout, hatching, point distributions and random spanning trees all draw on one generator with a fixed seed, so a journal renders the same every run. The procedural art takes seeds of its own.");
+doc += para("Sections: the entry and its pages; canvases and strokes; vectors and angles; paths; brushes and styles; gradients; fonts and glyphs; text; keeping text clear; randomness and messages; generators; procedural art; page layouts; marked-up text; locks; lock and layout files; building.");
 
 // ---- the entry and its pages ----
 
@@ -168,7 +168,7 @@ doc += api("page.name = text", "The page's name in output files.", [
 	name_arg("page"),
 ]);
 doc += api("page.size = size", "A set size: the page is exactly the region from the origin to this, and strokes past its edges are cut off.", [
-	arg("size", "The page's width and height.", "a vec, new_vec(width, height), each at least 1; or () (the default) for as big as its strokes."),
+	arg("size", "The page's width and height.", "a vec, vec2(width, height), each at least 1; or () (the default) for as big as its strokes."),
 ]);
 doc += api("page.margin = number", "Space round each canvas's strokes.", [
 	arg("number", "How much space, in canvas units, 0 for none.", "a number of at least 0; or () (the default) for half the largest brush size on the canvas, enough that brush marks at the edges aren't cut off."),
@@ -241,9 +241,9 @@ doc += api("canvas.copy()", "An independent copy of the canvas.");
 
 // ---- vectors ----
 
-doc += heading("Vectors");
-doc += para("Vecs are points and directions. They're values: methods give new vecs and leave the one they're called on as it was.");
-doc += api("new_vec(x, y)", "A vec.", [
+doc += heading("Vectors and Angles");
+doc += para("Vecs are points and directions: vec2s on the page, and vec3s and vec4s for points of more coordinates, such as distribute_points_3 and distribute_points_4 give. They're values: methods give new vecs and leave the one they're called on as it was. Where an entry says a vec, it means a vec2.");
+doc += api("vec2(x, y)", "A vec2, a point or direction on the page.", [
 	arg("x", "How far across, growing to the right.", "a finite number; infinity and NaN (from a division by zero, say) are refused."),
 	arg("y", "How far down, growing down the page.", "a finite number."),
 ]);
@@ -273,6 +273,35 @@ doc += api("v.rotated(angle)", "The vec turned about the origin.", [
 	angle_arg("How far to turn."),
 ]);
 doc += api("v.to_string(), v.to_debug()", "The vec as text, (x, y), for print and debug.");
+doc += api("vec3(x, y, z), vec3(v, z)", "A vec3: three coordinates.", [
+	arg("x, y, z", "Its coordinates.", "finite numbers."),
+	arg("v", "Its x and y, from a vec2, with z after.", "a vec2."),
+]);
+doc += api("vec4(x, y, z, w), vec4(v, w)", "A vec4: four coordinates.", [
+	arg("x, y, z, w", "Its coordinates.", "finite numbers."),
+	arg("v", "Its x, y and z, from a vec3, with w after.", "a vec3."),
+]);
+doc += api("v.x = number, v.y = number, v.z = number, v.w = number", "A vec3's or vec4's coordinates; only a vec4 has w.", [
+	arg("number", "The coordinate.", "a finite number."),
+]);
+doc += api("a + b, a - b, -a, v * number, number * v, v / number, a == b, a != b", "For vec3s and vec4s as for vec2s: sums, differences, scaling and comparison, between vecs of one size.", [
+	arg("a, b", "The vecs.", "two vec3s or two vec4s."),
+	arg("number", "What it's multiplied, or divided, by.", "a finite number; not 0 to divide by."),
+]);
+doc += api("v.length(), v.distance(other), v.dot(other), v.normalized()", "For vec3s and vec4s as for vec2s: how long, how far from another, the dot product, and length 1 the same way (failing for the zero vec).", [
+	arg("other", "The other vec.", "a vec of the same size."),
+]);
+doc += api("v.xy()", "A vec3's or vec4's first two coordinates, as a vec2: to draw it.");
+doc += api("v.xyz()", "A vec4's first three coordinates, as a vec3.");
+doc += api("a.cross(b)", "The cross product of two vec3s: at right angles to both, as long as the area they span.", [
+	arg("b", "The other vec.", "a vec3."),
+]);
+doc += api("degrees(d)", "An angle given in degrees, as the radians every angle is: degrees(180) is PI().", [
+	arg("d", "The angle, in degrees.", "a finite number."),
+]);
+doc += api("radians(r)", "An angle given in radians, as it is: for saying which unit a number is in.", [
+	arg("r", "The angle, in radians.", "a finite number."),
+]);
 
 // ---- paths ----
 
@@ -576,6 +605,30 @@ doc += api("random_range(low, high)", "A number from low up to, not including, h
 ]);
 doc += api("warn(message)", "Reports something, with the script line, without stopping the script. Errors give the script line too.", [
 	arg("message", "What to report.", "a string."),
+]);
+
+// ---- generators ----
+
+doc += heading("Generators");
+doc += para("Points to draw from, the trees that join them, and digits. Distributions and the depth_first and random trees draw on the script's generator, so seed(n) fixes them.");
+doc += api("distribute_points_2(kind, count, bounds), distribute_points_3(kind, count, bounds), distribute_points_4(kind, count, bounds)", "Exactly count points scattered through a box, as an array of vec2s, vec3s or vec4s.", [
+	arg("kind", "How they're scattered. uniform_random: each anywhere, so clumps and gaps. poisson_disk: evenly at random, none close, by weighted sample elimination. jittered_grid: one at random in each of count cells of a grid. grid: the cells' centres, row by row, x fastest, every cell when count fills the grid. halton: the Halton sequence, quasi-random and even, shifted at random. golden: the generalised golden-ratio sequence, like halton but more even.", "uniform_random, poisson_disk, jittered_grid, grid, halton or golden."),
+	arg("count", "How many points.", "a whole number from 0 to 1000000."),
+	arg("bounds", "The box: the least and greatest each coordinate can be, x first.", "an array of [low, high] pairs of numbers, low below high: 2, 3 or 4 pairs, as the function's number."),
+]);
+doc += api("points.spanning_tree(algorithm, metric), points.spanning_tree(algorithm, metric, options)", "A tree joining every point by one way only, as an array of [parent, child] index pairs into points, each pointing away from the root, in the order the algorithm added them: draw them in order and the tree grows. Every pair is compared, so at most 20000 points. Under 2 points gives [].", [
+	arg("points", "What to join.", "an array of vec2s, vec3s or vec4s, all one size."),
+	arg("algorithm", "Which tree. prim (or minimum): the shortest in all, grown from the root a nearest point at a time. kruskal: the same tree, its edges shortest first, fragments joining up. maximum: the longest in all, long crossing lines. shortest_path: each point by its shortest way to the root, veins radiating out. breadth_first: by hops from the root, nearest neighbours first. depth_first: a random walk deep before it backtracks, long corridors. random: a uniformly random tree, an even maze. The last four go between neighbours only.", "prim, minimum, kruskal, maximum, shortest_path, breadth_first, depth_first or random."),
+	arg("metric", "How far apart points are. euclidean: straight. squared_euclidean: straight, squared, the same minimum tree but shortest paths take many short hops. manhattan: along the axes, as streets in a grid. chebyshev: the farthest along any one axis.", "euclidean (or euclidian), squared_euclidean, manhattan (or taxicab) or chebyshev."),
+	opt("options.root", "0", "The point the tree grows from.", "a whole number, the index of a point."),
+	opt("options.neighbours", "4 per coordinate, less 2: 6 for vec2s", "For the neighbour algorithms, how many nearest points each point is joined to (and they to it); the shortest tree's edges are added too, so it's in one piece.", "a whole number of at least 1."),
+]);
+doc += api("balanced_ternary(n), balanced_ternary(n, width)", "n in balanced ternary: an array of digits, -1, 0 and 1, most significant first, each worth three times the next. 5 is [1, -1, -1], 9 - 3 - 1; 0 is [0].", [
+	arg("n", "The number.", "a whole number."),
+	opt("width", "as many digits as n needs", "How many digits to give, with 0s in front. Fails if n needs more.", "a whole number of at least 1."),
+]);
+doc += api("from_balanced_ternary(digits)", "The number balanced-ternary digits make, most significant first.", [
+	arg("digits", "The digits.", "an array of -1, 0 and 1."),
 ]);
 
 // ---- art ----

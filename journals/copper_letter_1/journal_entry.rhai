@@ -17,7 +17,7 @@ let paragraphs = [
 ];
 
 let maze_canvases = [];
-let origin = new_vec(0.0, 0.0);
+let origin = vec2(0.0, 0.0);
 let brush_style = new_brush("Rough Ink", 0.25, 0.5, 1.0);
 let style = new_style(1.5, "darkred", brush_style);
 let copper_font = font("copper");

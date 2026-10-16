@@ -622,7 +622,7 @@ mod tests {
                 width: 600, height: 300,
                 flows: #{ body: markdown("[abcdefghijklmnopqrstuvwxyz]{underline: {color: red}}") },
                 roles: #{ body: #{ font: font("plain"), style: ink, size: 20 }, post: #{ style: ink } },
-                art: #{ post: new_line(new_vec(0, 0), new_vec(0, 10)) },
+                art: #{ post: new_line(vec2(0, 0), vec2(0, 10)) },
             }));
         "#).unwrap();
         let s = strokes(&entry);

@@ -24,7 +24,7 @@ export function previewScript(font: string, ternary: boolean, text: string, size
     // Long enough for the widest glyphs: a short path fails to fit the text.
     const length = (line.length + 2) * size * 2;
     const y = rhaiFloat(i * size * 2.4);
-    lines.push(`for part in new_line(new_vec(0.0, ${y}), new_vec(${rhaiFloat(length)}, ${y})).fill_with_text(${rhaiString(line)}, f, ${rhaiFloat(size)}, style) { page.add_canvas(part); }`);
+    lines.push(`for part in new_line(vec2(0.0, ${y}), vec2(${rhaiFloat(length)}, ${y})).fill_with_text(${rhaiString(line)}, f, ${rhaiFloat(size)}, style) { page.add_canvas(part); }`);
   });
   lines.push('journal_entry.add_page(page);');
   return lines.join('\n') + '\n';
