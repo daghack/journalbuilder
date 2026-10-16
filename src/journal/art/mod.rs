@@ -13,7 +13,7 @@ mod snake;
 mod solid;
 mod trail;
 
-pub use bramble::{bramble, bramble_along, Bramble};
+pub use bramble::{bramble, bramble_along, Bramble, Thickening};
 pub use eye::{eye, Eye, EyeShape};
 pub use hydra::snake_along;
 pub use snake::{snake_path, snake_spine};

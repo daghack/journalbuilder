@@ -50,6 +50,15 @@
 //! let plant = art::bramble_along(path, 38.0, 3);   // flowers 38 across
 //! ```
 //!
+//! Either takes `#{ origin, thickness, reach }` to grow canes thicker
+//! toward a growth origin, as old wood is: `thickness` times as wide there
+//! (default 3), easing back to their usual width `reach` away (default
+//! as far as the canes go).
+//!
+//! ```rhai
+//! let plant = art::bramble_along(path, 38.0, 3, #{ origin: vec2(0, 0), thickness: 4 });
+//! ```
+//!
 //! `snake_along` does the same for a snake, making a many-headed serpent:
 //! its body follows the path, slithering a little off it and forking where
 //! it forks, with its tail at the dead end nearest where the path starts
@@ -100,6 +109,40 @@ fn error(ctx: &NativeCallContext, message: String) -> Box<EvalAltResult> {
 /// A number argument (whole or decimal), failing at the call's line.
 fn number_arg(ctx: &NativeCallContext, caller: &str, what: &str, v: &Dynamic) -> RhaiResult<f32> {
     float(caller, what, v).map(|n| n as f32).map_err(|err| error(ctx, err.to_string()))
+}
+
+const BRAMBLE_KEYS: [&str; 3] = ["origin", "thickness", "reach"];
+
+/// A bramble's `#{ origin, thickness, reach }`: canes thicker toward a
+/// growth origin.
+fn thickening(ctx: &NativeCallContext, caller: &str, options: Option<&Map>) -> RhaiResult<Option<art::Thickening>> {
+    let Some(options) = options else { return Ok(None) };
+    check_keys(caller, options, &BRAMBLE_KEYS).map_err(|err| error(ctx, err.to_string()))?;
+    let origin = options.get("origin")
+        .ok_or_else(|| error(ctx, format!("{}: missing 'origin', the point canes thicken toward", caller)))?
+        .clone().try_cast::<Vec2>()
+        .ok_or_else(|| error(ctx, format!("{}: 'origin' should be a vec2", caller)))?;
+    let thickness = number(caller, options, "thickness").map_err(|err| error(ctx, err.to_string()))?.unwrap_or(3.0);
+    let reach = number(caller, options, "reach").map_err(|err| error(ctx, err.to_string()))?;
+    Ok(Some(art::Thickening { origin: origin.into(), thickness, reach }))
+}
+
+fn bramble(ctx: &NativeCallContext, base: Vec2, angle: &Dynamic, length: &Dynamic, flower_size: &Dynamic, seed: i64, options: Option<&Map>) -> RhaiResult<Map> {
+    const CALLER: &str = "art::bramble";
+    let n = |what: &str, v: &Dynamic| number_arg(ctx, CALLER, what, v);
+    let thickening = thickening(ctx, CALLER, options)?;
+    let bramble = art::bramble(base.into(), n("angle", angle)?, n("length", length)?, n("flower_size", flower_size)?, seed as u64, thickening)
+        .map_err(|err| error(ctx, format!("{}: {}", CALLER, err)))?;
+    Ok(parts(bramble))
+}
+
+fn bramble_along(ctx: &NativeCallContext, path: &Path, flower_size: &Dynamic, seed: i64, options: Option<&Map>) -> RhaiResult<Map> {
+    const CALLER: &str = "art::bramble_along";
+    let flower_size = number_arg(ctx, CALLER, "flower_size", flower_size)?;
+    let thickening = thickening(ctx, CALLER, options)?;
+    let bramble = art::bramble_along(&path.borrow(), flower_size, seed as u64, thickening)
+        .map_err(|err| error(ctx, format!("{}: {}", CALLER, err)))?;
+    Ok(parts(bramble))
 }
 
 /// A bramble's parts, by name.
@@ -169,16 +212,16 @@ pub fn register(engine: &mut Engine) {
             .map_err(|err| error(&ctx, format!("art::snake_spine: {}", err)))
     });
     module.set_native_fn("bramble", |ctx: NativeCallContext, base: Vec2, angle: Dynamic, length: Dynamic, flower_size: Dynamic, random_seed: i64| -> RhaiResult<Map> {
-        let n = |what: &str, v: &Dynamic| number_arg(&ctx, "art::bramble", what, v);
-        let bramble = art::bramble(base.into(), n("angle", &angle)?, n("length", &length)?, n("flower_size", &flower_size)?, random_seed as u64)
-            .map_err(|err| error(&ctx, format!("art::bramble: {}", err)))?;
-        Ok(parts(bramble))
+        bramble(&ctx, base, &angle, &length, &flower_size, random_seed, None)
+    });
+    module.set_native_fn("bramble", |ctx: NativeCallContext, base: Vec2, angle: Dynamic, length: Dynamic, flower_size: Dynamic, random_seed: i64, options: Map| -> RhaiResult<Map> {
+        bramble(&ctx, base, &angle, &length, &flower_size, random_seed, Some(&options))
     });
     module.set_native_fn("bramble_along", |ctx: NativeCallContext, path: Path, flower_size: Dynamic, random_seed: i64| -> RhaiResult<Map> {
-        let flower_size = number_arg(&ctx, "art::bramble_along", "flower_size", &flower_size)?;
-        let bramble = art::bramble_along(&path.borrow(), flower_size, random_seed as u64)
-            .map_err(|err| error(&ctx, format!("art::bramble_along: {}", err)))?;
-        Ok(parts(bramble))
+        bramble_along(&ctx, &path, &flower_size, random_seed, None)
+    });
+    module.set_native_fn("bramble_along", |ctx: NativeCallContext, path: Path, flower_size: Dynamic, random_seed: i64, options: Map| -> RhaiResult<Map> {
+        bramble_along(&ctx, &path, &flower_size, random_seed, Some(&options))
     });
     module.set_native_fn("snake_along", |ctx: NativeCallContext, path: Path, max_width: Dynamic, random_seed: i64| -> RhaiResult<Path> {
         let max_width = number_arg(&ctx, "art::snake_along", "max_width", &max_width)?;
@@ -273,6 +316,28 @@ mod tests {
         let err = engine().build_entry_str("let ok = 1;\nart::bramble_along(new_path(), 40.0, 1);")
             .expect_err("an empty path should fail").to_string();
         assert!(err.contains("art::bramble_along: the path has no lines to follow") && err.contains("line 2"), "{}", err);
+    }
+
+    #[test]
+    fn brambles_thicken_toward_their_origin() {
+        let ok: bool = engine().engine.eval(r#"
+            let path = new_maze(2, 3, 2).path().scale_by(70.0);
+            let plain = art::bramble_along(path, 40.0, 1).vines;
+            let thick = art::bramble_along(path, 40.0, 1, #{ origin: vec2(0, 0), thickness: 4, reach: 120 }).vines;
+            let free = art::bramble(vec2(0, 0), -PI() / 2.0, 400.0, 80.0, 2, #{ origin: vec2(0, 0) }).vines;
+            `${plain}` != `${thick}` && `${free}` != `${art::bramble(vec2(0, 0), -PI() / 2.0, 400.0, 80.0, 2).vines}`
+        "#).unwrap();
+        assert!(ok);
+        for (script, want) in [
+            ("art::bramble_along(new_maze(2, 3, 2).path(), 4.0, 1, #{ thickness: 2 })", "art::bramble_along: missing 'origin'"),
+            ("art::bramble(vec2(0, 0), 0.0, 400.0, 80.0, 1, #{ origin: vec2(0, 0), thickness: 0.5 })", "thickness must be a number of at least 1"),
+            ("art::bramble(vec2(0, 0), 0.0, 400.0, 80.0, 1, #{ origin: vec2(0, 0), reach: -1 })", "reach must be a positive number"),
+            ("art::bramble(vec2(0, 0), 0.0, 400.0, 80.0, 1, #{ origin: 3 })", "'origin' should be a vec2"),
+            ("art::bramble(vec2(0, 0), 0.0, 400.0, 80.0, 1, #{ origin: vec2(0, 0), girth: 2 })", "unknown option 'girth'"),
+        ] {
+            let err = engine().engine.eval::<rhai::Dynamic>(script).expect_err(script).to_string();
+            assert!(err.contains(want), "{}: {}", want, err);
+        }
     }
 
     #[test]

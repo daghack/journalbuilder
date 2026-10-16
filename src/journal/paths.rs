@@ -173,6 +173,14 @@ pub struct StrokePath {
 }
 
 impl StrokePath {
+    /// A path of these commands.
+    pub fn from_commands(commands: Vec<PathCmd>) -> Self {
+        StrokePath { commands }
+    }
+    /// Its commands, in order.
+    pub fn commands(&self) -> &[PathCmd] {
+        &self.commands
+    }
     pub fn points_within(&self) -> Vec<Vec2> {
         let mut points = Vec::new();
         for cmd in &self.commands {
