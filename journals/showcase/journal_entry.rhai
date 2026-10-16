@@ -333,6 +333,7 @@ let samples = [
 	#{ label: "font(\"copper\"): falling back to loche_upper for what it lacks", font: font("copper"), lines: [alphabet.to_upper(), alphabet, "Lorem Ipsum Dolor Sit Amet", "variants at random: aaaa eeee ssss"] },
 	#{ label: "font(\"loche_upper\"): capitals, lowercase text set in them", font: LOCHE, lines: [alphabet, lorem + ".", "punctuation . , ; : ' \" ? - —"] },
 	#{ label: "font(\"loche_lower\"): falling back to loche_upper for capitals and stops", font: font("loche_lower"), lines: [alphabet, "Lorem ipsum dolor sit amet, consectetur."] },
+	#{ label: "font(\"nivelia\"): traced from her letter, falling back to loche_upper for the capitals she never wrote", font: font("nivelia"), size: 46, lines: [alphabet, alphabet.to_upper(), "Lorem ipsum dolor sit amet, consectetur.", "A iq ixoias rx jrg, ibs A srb'z Kibz zr nc."] },
 	#{ label: "font(\"lang\")", font: font("lang"), lines: [alphabet.to_upper(), alphabet, "Lorem ipsum dolor sit amet."] },
 	#{ label: "font(\"eldritch\")", font: font("eldritch"), lines: [alphabet, "lorem ipsum dolor sit amet"] },
 	#{ label: "font(\"sharp_lower\")", font: font("sharp_lower"), lines: [alphabet, "lorem ipsum dolor sit amet"] },
@@ -341,17 +342,21 @@ let samples = [
 let fonts = sheet("fonts");
 let y = TOP;
 for f in samples {
-	let height = 50 + f.lines.len() * 54 + 30;
+	// Fonts with a small x-height are written larger, so the pen doesn't
+	// fill them in.
+	let size = if "size" in f { f.size } else { 36 };
+	let leading = 54 * size / 36;
+	let height = 50 + f.lines.len() * leading + 30;
 	if y + height > BOTTOM {
 		book.bind("fonts", fonts);
 		fonts = sheet("fonts");
 		y = TOP;
 	}
 	fonts.add_canvas(caption(f.label, y));
-	y += 50;
+	y += 50 + (leading - 54) / 2;
 	for line in f.lines {
-		fonts.add_canvas(write_in(line, LEFT, y, 36, SAMPLE, f.font, #{}));
-		y += 54;
+		fonts.add_canvas(write_in(line, LEFT, y, size, SAMPLE, f.font, #{}));
+		y += leading;
 	}
 	y += 30;
 }
