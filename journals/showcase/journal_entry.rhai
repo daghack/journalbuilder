@@ -728,29 +728,34 @@ book.bind("generators", gen);
 
 // balanced_ternary(n[, width]) gives n's digits, -1, 0 and 1, most
 // significant first, padded to width; from_balanced_ternary reads them
-// back. Each number here is a column of marks: a stroke up for 1, down
-// for -1, a dot for 0.
+// back. Three digits make a number from -13 to 13, drawn here as its
+// glyph in the balanced_ternary font, which was made for them.
 let gen = sheet("generators");
-gen.add_canvas(caption("balanced_ternary(n, 3), n from -13 to 13; from_balanced_ternary(digits)", TOP));
+let ternary = font("balanced_ternary");
+gen.add_canvas(caption("balanced_ternary(n, 3), n from -13 to 13, drawn as font(\"balanced_ternary\").glyph(n)", TOP));
 for n in -13..=13 {
-	let x = LEFT + 25 + (n + 13) * 36;
+	let x = LEFT + 18 + (n + 13) * 36.5;
 	let digits = balanced_ternary(n, 3);
 	if from_balanced_ternary(digits) != n { throw "balanced ternary should read back"; }
-	for (d, row) in digits {
-		let c = vec2(x, TOP + 110 + row * 70);
-		if d == 0 {
-			gen.add_path(new_circle(c, 3), LINE);
-		} else {
-			gen.add_path(new_line(c, c - vec2(0, 25 * d)), if d > 0 { LINE } else { CAPTION });
-		}
-	}
-	gen.add_canvas(write(`${n}`, x - 10, TOP + 330, 16));
+	let g = ternary.glyph(n);
+	g.scale = 32;
+	g.position = vec2(x, TOP + 100);
+	gen.add_glyph(g, SAMPLE);
+	gen.add_canvas(write(`${n}`, x - 10, TOP + 160, 16));
 }
-gen.add_canvas(caption("balanced_ternary(2026): " + balanced_ternary(2026), TOP + 400));
+// Longer numbers, three digits to a glyph.
+let digits = balanced_ternary(2026, 9);
+gen.add_canvas(caption(`balanced_ternary(2026, 9): ${digits}, three digits to a glyph`, TOP + 230));
+for i in 0..3 {
+	let g = ternary.glyph(from_balanced_ternary(digits.extract(i * 3, 3)));
+	g.scale = 48;
+	g.position = vec2(LEFT + 40 + i * 60, TOP + 310);
+	gen.add_glyph(g, SAMPLE);
+}
 
 // Angles are radians; degrees(d) gives d degrees in radians, and
 // radians(r) says a number is radians already.
-let y = TOP + 480;
+let y = TOP + 380;
 gen.add_canvas(caption("degrees(d), radians(r): a ray every degrees(30), and every radians(PI() / 12)", y));
 let hub = vec2(LEFT + 160, y + 160);
 for i in 0..12 {
