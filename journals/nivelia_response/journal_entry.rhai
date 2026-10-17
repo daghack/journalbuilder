@@ -23,7 +23,7 @@ seed(1043);
 // Each a substitution cipher: the ordering's symbol at a letter's place
 // (space, then A to Z) stands for it. The full one moves every letter but
 // keeps spaces.
-const WEAK = " ADCBFEGHJIKLMONPQRSXYZTUVW";
+const WEAK = " BCDEFGHIJKLMNOPQRSTUVWXYZA";
 const FULL = " QMFWOZXCKAHIEVRYGUPLDSNBTJ";
 const TERNARY = "UOLKPYCTVWQAZRFH SEDBMIXGJN";
 let lock = new_lock("nivelia_response")
