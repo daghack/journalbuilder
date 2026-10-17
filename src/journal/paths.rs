@@ -303,6 +303,19 @@ impl StrokePath {
         }
         StrokePath { commands }
     }
+    /// The path with every point, control points included, moved by its
+    /// own random offset of up to `jitter`, so curves change shape as well
+    /// as place. Subpaths stay joined: a command starts where the last one
+    /// ends, wherever that has moved to.
+    pub fn point_jittered(&self, jitter: f32, rng: &mut dyn RngCore) -> StrokePath {
+        let commands = self.commands.iter().map(|cmd| cmd.map_points(|_, p| {
+            // Uniform over the disc.
+            let r = jitter * rng.random::<f32>().sqrt();
+            let a = rng.random::<f32>() * std::f32::consts::TAU;
+            p + Vec2::new(r * a.cos(), r * a.sin())
+        })).collect();
+        StrokePath { commands }
+    }
     pub fn to_substrokes(&self) -> Vec<SubstrokePath> {
         let mut substrokes = Vec::new();
         let mut current_substroke = SubstrokePath::new(Vec::new());
@@ -1150,6 +1163,22 @@ mod tests {
             .move_to(0.0, 50.0).quadratic_curve_to(50.0, 80.0, 100.0, 50.0).close_path()
             .move_to(0.0, 50.0).quadratic_curve_to(50.0, 80.0, 100.0, 50.0).close_path();
         assert_eq!(path.retraced(2, 0.0, &mut rng).to_string(), twice.to_string());
+    }
+
+    #[test]
+    fn point_jitter_moves_every_point_on_its_own() {
+        let path = StrokePath::line(Vec2::new(0.0, 0.0), Vec2::new(100.0, 0.0))
+            .move_to(0.0, 50.0).cubic_curve_to(30.0, 80.0, 70.0, 80.0, 100.0, 50.0).close_path();
+        let jittered = path.point_jittered(5.0, &mut StdRng::seed_from_u64(3));
+        assert_eq!(jittered.commands.len(), path.commands.len());
+        let moved: Vec<Vec2> = path.points_within().iter().zip(jittered.points_within()).map(|(a, b)| b - *a).collect();
+        assert!(moved.iter().all(|d| d.length() <= 5.0 + 1e-4), "{:?}", moved);
+        // Each point its own way: the curve's control points don't move
+        // with its ends.
+        assert!(moved.windows(2).all(|w| (w[0] - w[1]).length() > 1e-3), "{:?}", moved);
+        // Seeded; and none moves nothing.
+        assert_eq!(path.point_jittered(5.0, &mut StdRng::seed_from_u64(3)).to_string(), jittered.to_string());
+        assert_eq!(path.point_jittered(0.0, &mut StdRng::seed_from_u64(3)).to_string(), path.to_string());
     }
 
     #[test]

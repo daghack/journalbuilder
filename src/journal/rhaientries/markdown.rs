@@ -98,6 +98,7 @@ pub(super) struct Ink {
     color: Option<StrokeColor>,
     passes: Option<i64>,
     jitter: Option<f64>,
+    point_jitter: Option<f64>,
 }
 
 impl Ink {
@@ -113,6 +114,9 @@ impl Ink {
         if let Some(jitter) = self.jitter {
             style.jitter = jitter;
         }
+        if let Some(jitter) = self.point_jitter {
+            style.point_jitter = jitter;
+        }
         style
     }
     /// This ink with `other`'s changes on top.
@@ -121,6 +125,7 @@ impl Ink {
             color: other.color.clone().or_else(|| self.color.clone()),
             passes: other.passes.or(self.passes),
             jitter: other.jitter.or(self.jitter),
+            point_jitter: other.point_jitter.or(self.point_jitter),
         }
     }
 }
@@ -155,10 +160,10 @@ pub(super) struct SpanStyle {
     strike: Option<Option<RuleStyle>>,
 }
 
-const SPAN_KEYS: [&str; 12] = [
-    "color", "colour", "passes", "jitter", "italic", "skew", "size", "character_padding", "word_spacing", "underline", "strike", "strikethrough",
+const SPAN_KEYS: [&str; 13] = [
+    "color", "colour", "passes", "jitter", "point_jitter", "italic", "skew", "size", "character_padding", "word_spacing", "underline", "strike", "strikethrough",
 ];
-const RULE_KEYS: [&str; 6] = ["count", "spacing", "color", "colour", "passes", "jitter"];
+const RULE_KEYS: [&str; 7] = ["count", "spacing", "color", "colour", "passes", "jitter", "point_jitter"];
 
 fn number(caller: &str, key: &str, value: &Value) -> RhaiResult<f64> {
     match value {
@@ -195,6 +200,7 @@ fn read_ink(caller: &str, ink: &mut Ink, key: &str, value: &Value) -> RhaiResult
         }
         "passes" => ink.passes = Some(whole(caller, key, value, MAX_PASSES)?),
         "jitter" => ink.jitter = Some(at_least(caller, key, value, 0.0)?),
+        "point_jitter" => ink.point_jitter = Some(at_least(caller, key, value, 0.0)?),
         _ => return Ok(false),
     }
     Ok(true)
@@ -286,7 +292,7 @@ impl SpanStyle {
     /// Strong text, unless a role says otherwise: gone over twice, astray
     /// by a twentieth of the text's `size`.
     pub(super) fn strong(size: f32) -> SpanStyle {
-        SpanStyle { ink: Ink { passes: Some(2), jitter: Some(size as f64 / 20.0), color: None }, ..SpanStyle::default() }
+        SpanStyle { ink: Ink { passes: Some(2), jitter: Some(size as f64 / 20.0), point_jitter: None, color: None }, ..SpanStyle::default() }
     }
 }
 
@@ -527,13 +533,13 @@ mod tests {
 
     #[test]
     fn spans_set_colour_passes_and_size() {
-        let entry = typeset(r#"markdown("ab [cd]{color: red, passes: 3, jitter: 2} [ef]{size: 2}")"#, "", "").unwrap();
+        let entry = typeset(r#"markdown("ab [cd]{color: red, passes: 3, jitter: 2, point_jitter: 1.5} [ef]{size: 2}")"#, "", "").unwrap();
         let s = strokes(&entry);
         // One stroke per glyph: a b c d e f.
         assert_eq!(s.len(), 6);
         let colours: Vec<String> = s.iter().map(|(_, st)| color(st)).collect();
         assert_eq!(colours, ["black", "black", "red", "red", "black", "black"]);
-        assert_eq!((s[2].1.style.passes, s[2].1.style.jitter, s[0].1.style.passes), (3, 2.0, 1));
+        assert_eq!((s[2].1.style.passes, s[2].1.style.jitter, s[2].1.style.point_jitter, s[0].1.style.passes, s[0].1.style.point_jitter), (3, 2.0, 1.5, 1, 0.0));
         let height = |points: &[Vec2]| points.iter().map(|p| p.y).fold(f32::MIN, f32::max) - points.iter().map(|p| p.y).fold(f32::MAX, f32::min);
         assert!(height(&s[4].0) > 1.8 * height(&s[0].0), "e is twice a's size: {} vs {}", height(&s[4].0), height(&s[0].0));
         // On one baseline: the big glyphs' bottoms are where the small ones' are.

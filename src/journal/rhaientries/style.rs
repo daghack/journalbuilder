@@ -25,6 +25,10 @@
 //! // to `jitter` canvas units. With one pass, jitter just roughens a hand.
 //! ink.passes = 6;      // default 1
 //! ink.jitter = 4.0;    // default 0
+//!
+//! // Every point of every pass, control points included, moved on its own
+//! // by up to `point_jitter` canvas units, so curves change shape too.
+//! ink.point_jitter = 1.5;    // default 0
 //! ```
 //!
 //! Passes are drawn when a canvas is rendered (or measured, or avoided), so
@@ -175,6 +179,9 @@ pub struct StrokeStyle {
     /// How far each pass's ends stray, in canvas units.
     #[rhai_type(skip)]
     pub(super) jitter: f64,
+    /// How far each point of each pass, control points included, strays.
+    #[rhai_type(skip)]
+    pub(super) point_jitter: f64,
 }
 
 /// The most passes a style draws its strokes in.
@@ -191,7 +198,7 @@ impl From<StrokeStyle> for JournalStrokeStyle {
 }
 
 impl StrokeStyle {
-    /// `new_style(color, brush[, #{ width, passes, jitter }])`.
+    /// `new_style(color, brush[, #{ width, passes, jitter, point_jitter }])`.
     ///
     /// `width` (1 unless given) means different things in the two outputs:
     /// - Darkly (the default render): it multiplies the brush's pressure,
@@ -210,17 +217,24 @@ impl StrokeStyle {
             brush,
             passes: 1,
             jitter: 0.0,
+            point_jitter: 0.0,
         })
     }
     /// A path as this style draws it: each subpath gone over `passes`
     /// times, each pass astray by up to `jitter` (see
-    /// `StrokePath::retraced`), seeded from the path's own points.
+    /// `StrokePath::retraced`) and each of its points by up to
+    /// `point_jitter` (see `StrokePath::point_jittered`), seeded from
+    /// the path's own points.
     pub fn retrace(&self, path: StrokePath) -> StrokePath {
-        if self.passes == 1 && self.jitter == 0.0 {
+        if self.passes == 1 && self.jitter == 0.0 && self.point_jitter == 0.0 {
             return path;
         }
         let mut rng = StdRng::seed_from_u64(path.points_hash());
-        path.retraced(self.passes as usize, self.jitter as f32, &mut rng)
+        let retraced = path.retraced(self.passes as usize, self.jitter as f32, &mut rng);
+        if self.point_jitter == 0.0 {
+            return retraced;
+        }
+        retraced.point_jittered(self.point_jitter as f32, &mut rng)
     }
     /// `style.color`: the colour string, or the gradient.
     fn get_color(&mut self) -> Dynamic {
@@ -237,7 +251,7 @@ impl StrokeStyle {
         builder
             .with_fn("new_style", Self::new)
             .with_fn("new_style", |ctx: NativeCallContext, color: Dynamic, brush: BrushSettings, options: Map| -> RhaiResult<Self> {
-                apply_props(&ctx, "new_style", Self::new(color, brush)?, options, &["width", "passes", "jitter"])
+                apply_props(&ctx, "new_style", Self::new(color, brush)?, options, &["width", "passes", "jitter", "point_jitter"])
             })
             .with_get_set("width", |s: &mut Self| Dynamic::from(s.width), |s: &mut Self, width: Dynamic| -> RhaiResult<()> {
                 s.width = float("style.width", "the width", &width)?;
@@ -258,6 +272,14 @@ impl StrokeStyle {
                     return Err(format!("style.jitter: can't be negative, got {}", jitter).into());
                 }
                 s.jitter = jitter;
+                Ok(())
+            })
+            .with_get_set("point_jitter", |s: &mut Self| Dynamic::from(s.point_jitter), |s: &mut Self, jitter: Dynamic| -> RhaiResult<()> {
+                let jitter = float("style.point_jitter", "the jitter", &jitter)?;
+                if jitter < 0.0 {
+                    return Err(format!("style.point_jitter: can't be negative, got {}", jitter).into());
+                }
+                s.point_jitter = jitter;
                 Ok(())
             })
         ;

@@ -110,10 +110,10 @@ render fixture-paper darkly_page_0.png darkly_page_1.png darkly_art_0_0.png dark
 render fixture-pdf smoke.pdf \
 	-- smoke --journals-dir tests/smoke_journals --pdf --scale 0.25
 # Every page of the showcase, every character with a glyph.
-render showcase darkly_01_title_0.png darkly_02_contents_0.png darkly_03_pens_brushes.png darkly_05_pens_0.png darkly_06_pens_0.png darkly_07_fonts_0.png \
-	darkly_10_fonts_0.png darkly_11_glyphs_0.png darkly_14_art_0.png darkly_18_art_0.png darkly_19_art_0.png darkly_20_generators_0.png \
-	darkly_21_generators_0.png darkly_22_generators_0.png darkly_23_text_0.png darkly_25_text_0.png darkly_26_text_0.png darkly_27_text_0.png \
-	darkly_28_locks_ciphers.png darkly_29_spread_0.png darkly_30_spread_0.png darkly_31_layouts_0.png \
+render showcase darkly_01_title_0.png darkly_02_contents_0.png darkly_03_pens_brushes.png darkly_05_pens_0.png darkly_06_pens_0.png darkly_07_pens_0.png darkly_08_fonts_0.png \
+	darkly_11_fonts_0.png darkly_12_glyphs_0.png darkly_15_art_0.png darkly_19_art_0.png darkly_20_art_0.png darkly_21_generators_0.png \
+	darkly_22_generators_0.png darkly_23_generators_0.png darkly_24_text_0.png darkly_26_text_0.png darkly_27_text_0.png darkly_28_text_0.png \
+	darkly_29_locks_ciphers.png darkly_30_spread_0.png darkly_31_spread_0.png darkly_32_layouts_0.png \
 	-- showcase --strict-glyphs --scale 0.25
 
 for journal in journals/*/; do
