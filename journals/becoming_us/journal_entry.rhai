@@ -13,6 +13,8 @@ let hand = #{
 	font: copper,
 	size: SIZE,
 	style: new_style(ink, pen),
+	// Letters a touch further apart than copper sets them.
+	spacing: 0.05,
 	line_height: 1.5,
 	jagged: 0.5,
 	rotation_jitter: 0.06,
@@ -44,7 +46,7 @@ const H = 1900.0;
 const MARGIN = 110.0;
 const PARAGRAPH_GAP = SIZE * 0.6;
 // How many eyes each page has: 13 in all.
-const EYES_PER_PAGE = [3, 3, 3, 2, 2];
+const EYES_PER_PAGE = [3, 2, 2, 2, 2, 2];
 // The eyes' colour, washed on thin and gone over in jittered copies.
 const EYE_TEAL = [46, 232, 214];
 const EYE_NAVY = [43, 65, 132];
@@ -355,5 +357,5 @@ canvases.push(canvas);
 for (canvas, n) in canvases {
 	let free_from = if n == canvases.len() - 1 { y } else { H };
 	canvas.add(page_brambles(n, free_from));
-	journal_entry.add(new_page(#{ name: `page_${n}`, size: vec2(W, H) }).add(canvas));
+	journal_entry.add(new_page(#{ name: `becoming_us_page_${n}`, size: vec2(W, H) }).add(canvas));
 }
