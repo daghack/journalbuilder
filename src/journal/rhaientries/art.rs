@@ -90,6 +90,18 @@
 //! ```rhai
 //! let e = art::eye(vec2(0.0, 0.0), 300.0, "#2a9bb8", PI(), 0.8, 7, #{ angle: 1.2, gaze: 1.0, openness: 0.6, flat: true, ink: ink });
 //! ```
+//!
+//! `moon` draws the moon in a phase: 0 new, 0.25 first quarter (right half
+//! lit), 0.5 full, 0.75 last quarter, wrapping round at 1. It gives its
+//! parts as paths: the disc's outline, the terminator between light and
+//! dark, and the lit and dark sides as closed shapes, to hatch or fill.
+//!
+//! ```rhai
+//! let moon = art::moon(vec2(0.0, 0.0), 80.0, 0.3);   // a waxing gibbous
+//! canvas.add_path(moon.outline, ink);
+//! canvas.add_path(moon.terminator, ink);
+//! canvas.add_path(moon.dark.hatch(4.0, 0.8, 0.5), ink);
+//! ```
 
 use rhai::{Dynamic, Engine, EvalAltResult, Map, Module, NativeCallContext};
 
@@ -197,8 +209,24 @@ fn eye(ctx: &NativeCallContext, center: Vec2, length: &Dynamic, color: Dynamic, 
     Ok(Canvas::new(canvas))
 }
 
+/// `art::moon(center, radius, phase)`: #{ outline, terminator, lit, dark }.
+fn moon(ctx: &NativeCallContext, center: Vec2, radius: &Dynamic, phase: &Dynamic) -> RhaiResult<Map> {
+    const CALLER: &str = "art::moon";
+    let n = |what: &str, v: &Dynamic| number_arg(ctx, CALLER, what, v);
+    let moon = art::moon(center.into(), n("radius", radius)?, n("phase", phase)?)
+        .map_err(|err| error(ctx, format!("{}: {}", CALLER, err)))?;
+    let mut parts = Map::new();
+    for (name, path) in [("outline", moon.outline), ("terminator", moon.terminator), ("lit", moon.lit), ("dark", moon.dark)] {
+        parts.insert(name.into(), Dynamic::from(Path::new(path)));
+    }
+    Ok(parts)
+}
+
 pub fn register(engine: &mut Engine) {
     let mut module = Module::new();
+    module.set_native_fn("moon", |ctx: NativeCallContext, center: Vec2, radius: Dynamic, phase: Dynamic| -> RhaiResult<Map> {
+        moon(&ctx, center, &radius, &phase)
+    });
     module.set_native_fn("snake_path", |ctx: NativeCallContext, head_center: Vec2, head_angle: Dynamic, tail_end: Vec2, snake_length: Dynamic, max_width: Dynamic, random_seed: i64| -> RhaiResult<Path> {
         let n = |what: &str, v: &Dynamic| number_arg(&ctx, "art::snake_path", what, v);
         art::snake_path(head_center.into(), n("head_angle", &head_angle)?, tail_end.into(), n("snake_length", &snake_length)?, n("max_width", &max_width)?, random_seed as u64)
@@ -385,6 +413,27 @@ mod tests {
             let err = engine().build_entry_str(&format!("let ok = 1;\n{}", call)).expect_err(call).to_string();
             assert!(err.contains(message) && err.contains("line 2"), "{}", err);
         }
+    }
+
+    #[test]
+    fn moon_gives_its_parts_by_phase() {
+        let ok: rhai::Array = engine().engine.eval(r#"
+            let empty = |p| `${p}` == "";
+            let quarter = art::moon(vec2(0, 0), 10, 0.25);
+            let b = quarter.lit.bounds();
+            let wrapped = art::moon(vec2(0, 0), 10, 1.25);
+            let dim = art::moon(vec2(0, 0), 10, 0);
+            let full = art::moon(vec2(0, 0), 10, 0.5);
+            [quarter.keys().len() == 4, b.min.x > -0.01 && b.max.x > 9.9,
+                `${wrapped.lit}` == `${quarter.lit}`,
+                empty.call(dim.lit) && empty.call(dim.terminator) && !empty.call(dim.dark),
+                empty.call(full.dark) && !empty.call(full.lit),
+                art::moon(vec2(0, 0), 10, 0.75).lit.bounds().max.x < 0.01]
+        "#).unwrap();
+        assert!(ok.iter().all(|b| b.as_bool().unwrap()), "{:?}", ok);
+        let err = engine().build_entry_str("let ok = 1;\nart::moon(vec2(0.0, 0.0), 0.0, 0.5);")
+            .expect_err("a zero radius should fail").to_string();
+        assert!(err.contains("art::moon: radius must be a positive number") && err.contains("line 2"), "{}", err);
     }
 
     #[test]

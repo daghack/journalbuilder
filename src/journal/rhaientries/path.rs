@@ -41,6 +41,19 @@
 //! frame.erase_outside(new_circle(vec2(0, 0), 100), #{ fill_rule: "evenodd" });
 //! ```
 //!
+//! ```rhai
+//! // Balanced-ternary digits along a path, as the balanced_ternary font
+//! // writes them down its stems: the marks, as a new path (draw the path
+//! // itself too). Digits are an array of -1, 0 and 1, or a string of
+//! // "-", "0" and "+"; the first sits at the path's start, and +1 is to
+//! // the right going from the path's start to its end.
+//! let marks = stem.ternary(balanced_ternary(42));
+//! let marks = stem.ternary("+-0+", #{
+//!     spacing: 12.0,                // from one digit to the next (default: share the path)
+//!     width: 5.0,                   // how far marks reach out (default 0.6 of the spacing)
+//! });
+//! ```
+//!
 //! The shape's subpaths are closed shapes as for hatching, with the same
 //! fill rules. Lines and curves are cut where they cross its outline and
 //! stay lines and curves.
@@ -61,6 +74,7 @@ use crate::journal::paths::StrokePath;
 use crate::journal::fonts::Font;
 use crate::journal::symbol::{place_along_path, place_words_along_path, Symbol, SymbolPlacementArgs};
 use crate::journal::fonts::FontBook;
+use crate::journal::ternary::{ternary_along, TernaryOptions};
 
 /// Where text's glyphs come from: the fonts, and the generator
 /// that picks glyph variants.
@@ -273,6 +287,8 @@ pub(super) fn register(engine: &mut Engine, text: TextSource) {
         .register_fn("erase_inside", |path: &mut Path, shape: Path, options: Map| -> RhaiResult<Path> { erase(path, &shape, &options, Keep::Outside) })
         .register_fn("erase_outside", |path: &mut Path, shape: Path| -> RhaiResult<Path> { erase(path, &shape, &Map::new(), Keep::Inside) })
         .register_fn("erase_outside", |path: &mut Path, shape: Path, options: Map| -> RhaiResult<Path> { erase(path, &shape, &options, Keep::Inside) })
+        .register_fn("ternary", |path: &mut Path, digits: Dynamic| -> RhaiResult<Path> { ternary(path, digits, Map::new()) })
+        .register_fn("ternary", |path: &mut Path, digits: Dynamic, options: Map| -> RhaiResult<Path> { ternary(path, digits, options) })
         .register_fn("new_circle", |center: Vec2, radius: Dynamic| -> RhaiResult<Path> {
             let radius = float("new_circle", "the radius", &radius)?;
             Ok(Path::new(StrokePath::circle(center.into(), radius as f32)))
@@ -289,6 +305,36 @@ pub(super) fn register(engine: &mut Engine, text: TextSource) {
             let (radius, start, end) = (number("the radius", &radius)?, number("the start angle", &start_rad)?, number("the end angle", &end_rad)?);
             Ok(Path::new(StrokePath::arc(center.into(), radius, start, end)))
         });
+}
+
+/// `path.ternary(digits[, #{ spacing, width }])`: the digits'
+/// marks along the path, as a new path; see the module docs.
+fn ternary(path: &mut Path, digits: Dynamic, options: Map) -> RhaiResult<Path> {
+    const CALLER: &str = "ternary";
+    check_keys(CALLER, &options, &["spacing", "width"])?;
+    let bad = |what: String| -> Box<EvalAltResult> { format!("{}: digits should be -1, 0 or 1 (or \"-\", \"0\", \"+\"), got {}", CALLER, what).into() };
+    let digits: Vec<i8> = if digits.is_string() {
+        digits.to_string().chars().map(|c| match c {
+            '-' => Ok(-1),
+            '0' => Ok(0),
+            '+' => Ok(1),
+            c => Err(bad(format!("'{}'", c))),
+        }).collect::<RhaiResult<_>>()?
+    } else if digits.is_array() {
+        digits.into_array().expect("checked").iter().map(|d| match d.as_int() {
+            Ok(d @ -1..=1) => Ok(d as i8),
+            _ => Err(bad(d.to_string())),
+        }).collect::<RhaiResult<_>>()?
+    } else {
+        return Err(format!("{}: digits should be an array or a string, got {}", CALLER, digits.type_name()).into());
+    };
+    let optional_positive = |key: &str| -> RhaiResult<Option<f32>> {
+        if options.contains_key(key) { positive(CALLER, &options, key).map(Some) } else { Ok(None) }
+    };
+    let options = TernaryOptions { spacing: optional_positive("spacing")?, width: optional_positive("width")? };
+    ternary_along(&path.borrow(), &digits, &options)
+        .map(Path::new)
+        .map_err(|e| format!("{}: {}", CALLER, e).into())
 }
 
 const HATCH_KEYS: [&str; 6] = ["spacing", "angle", "roughness", "bow", "inset", "fill_rule"];
@@ -402,6 +448,28 @@ mod tests {
         for (script, want) in [
             ("new_line(vec2(0, 0), vec2(1, 0)).erase_inside(new_circle(vec2(0, 0), 1), #{ rule: 1 })", "erase_inside: unknown option 'rule'"),
             ("new_line(vec2(0, 0), vec2(1, 0)).erase_outside(new_circle(vec2(0, 0), 1), #{ fill_rule: \"odd\" })", "erase_outside: unknown fill_rule 'odd'"),
+        ] {
+            let err = e.engine.eval::<rhai::Dynamic>(script).expect_err(script).to_string();
+            assert!(err.contains(want), "{}: {}", want, err);
+        }
+    }
+
+    #[test]
+    fn ternary_marks_digits_along_a_path() {
+        let ok: bool = eval(r#"
+            let stem = new_line(vec2(0, 0), vec2(0, 30));
+            let hooks = stem.ternary([1, 0, -1]);
+            let spaced = stem.ternary("+0-", #{ spacing: 10, width: 4 });
+            `${hooks}` != "" && `${spaced}` != "" && stem.bounds().width == 0.0
+        "#);
+        assert!(ok);
+        let e = engine();
+        for (script, want) in [
+            ("new_line(vec2(0, 0), vec2(0, 9)).ternary([2])", "digits should be -1, 0 or 1"),
+            ("new_line(vec2(0, 0), vec2(0, 9)).ternary(\"+x\")", "got 'x'"),
+            ("new_line(vec2(0, 0), vec2(0, 9)).ternary([1], #{ marks: \"thorns\" })", "unknown option 'marks'"),
+            ("new_line(vec2(0, 0), vec2(0, 9)).ternary([1, 1], #{ spacing: 5 })", "need a path 10 long"),
+            ("new_line(vec2(0, 0), vec2(0, 9)).ternary([1], #{ width: 0 })", "'width' must be positive"),
         ] {
             let err = e.engine.eval::<rhai::Dynamic>(script).expect_err(script).to_string();
             assert!(err.contains(want), "{}: {}", want, err);

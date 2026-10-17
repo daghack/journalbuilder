@@ -379,6 +379,11 @@ doc += api("path.erase_outside(shape), path.erase_outside(shape, options)", "Cut
 	arg("shape", "What to keep the path inside. Every subpath is taken as a closed shape, as for hatching.", "a path, all its points finite."),
 	opt("options.fill_rule", "holes", "Which parts of overlapping shapes are inside.", "holes, evenodd or nonzero, as for hatch."),
 ]);
+doc += api("path.ternary(digits), path.ternary(digits, options)", "Balanced-ternary digits written along the path from its start, as the balanced_ternary font writes them down its stems, each digit in a slot of its own (the path must be one subpath); gives the marks as a new path (the path itself is unchanged and not in it). Each mark reaches out from the path at the middle of its slot, so bars and hook tips are evenly spaced. A 0 is a bar across the path, and a -1 or 1 a stroke that runs alongside the path for most of a slot before that point, then bends sharply out to the left or right. Left and right are the traveller's, going from the path's start to its end: for a path running left to right across the page, 1 is down.", [
+	arg("digits", "The digits, first at the path's start.", "an array of -1, 0 and 1 (as balanced_ternary gives), or a string of -, 0 and +."),
+	opt("options.spacing", "the path's length over the number of digits", "How far along the path each digit's slot runs. The digits must fit on the path.", "a positive number."),
+	opt("options.width", "0.6 of the spacing", "How far the marks reach out from the path.", "a positive number."),
+]);
 doc += api("path.to_string(), path.to_debug()", "The path's commands as text, for print and debug.");
 
 // ---- brushes and styles ----
@@ -683,6 +688,11 @@ doc += api("art::eye(center, length, color, gaze_angle, messiness, seed, options
 	opt("options.openness", "0.32", "Its height over its length.", "a number above 0.05 and at most 1."),
 	opt("options.flat", "false", "Lids of straight lines from each corner to a point above and below the middle, as the symbols font's eye has, rather than arcs.", "true or false."),
 	opt("options.ink", "a near-black ink pen", "The style of its lines.", "a style."),
+]);
+doc += api("art::moon(center, radius, phase)", "The moon in a phase, seen from the northern hemisphere. Gives #{ outline, terminator, lit, dark }: the disc's outline; the terminator, the half ellipse from the top of the disc to the bottom between light and dark (an empty path at new and full); and the lit and dark sides as closed shapes, to hatch or fill (the lit side empty at new, the dark side at full). It takes no seed: the same phase draws the same moon.", [
+	vec_arg("center", "Its centre."),
+	arg("radius", "Its radius.", "a positive number."),
+	arg("phase", "How far through its month it is: 0 new, 0.25 first quarter (the right half lit), 0.5 full, 0.75 last quarter (the left half lit). Phases wrap, so 1.25 is 0.25 and -0.25 is 0.75.", "a number."),
 ]);
 
 // ---- layouts ----
