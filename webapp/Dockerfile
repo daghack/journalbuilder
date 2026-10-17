@@ -11,7 +11,7 @@
 # the container behind TLS.
 
 # ---- The renderer: scribe-wasm built to WebAssembly ----
-FROM rust:1.99-trixie AS wasm
+FROM --platform=$BUILDPLATFORM rust:1.99-trixie AS wasm
 RUN rustup target add wasm32-unknown-unknown
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo install wasm-pack --version 0.13.1 --locked
@@ -30,7 +30,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     wasm-pack build webapp/wasm --target web --release --out-dir /out/wasm-pkg --out-name scribe_wasm
 
 # ---- The site: the Angular app, with the renderer and the examples ----
-FROM node:24.21-trixie-slim AS site
+FROM --platform=$BUILDPLATFORM node:24.21-trixie-slim AS site
 ENV NG_CLI_ANALYTICS=false
 WORKDIR /src/webapp/frontend
 COPY webapp/frontend/package.json webapp/frontend/package-lock.json ./

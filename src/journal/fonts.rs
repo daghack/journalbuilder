@@ -7,6 +7,7 @@
 //!         "character_padding": 0.05,
 //!         "space_width": 0.5,
 //!         "fallback": "loche_upper",
+//!         "glyph_padding": { ".": 0.2 },
 //!         "glyphs": {
 //!             "A": "M -0.6 -0.6 C ...",
 //!             "a": ["M 0.4 -0.2 C ...", "M 0.5 -0.1 C ..."]
@@ -21,6 +22,10 @@
 //! - `character_padding` is room between neighbouring glyphs' outlines and
 //!   `space_width` the width of a space, both in font sizes (default 0 and
 //!   0.5). A tab is four spaces.
+//! - `glyph_padding` gives glyphs more room than `character_padding`: the
+//!   amount, in font sizes, added to it for each glyph listed. A lone dot
+//!   needs it: drawn, its ink is as wide as the padding, so a full stop
+//!   between letters (`page.tile`) is lost in them.
 //! - `fallback` names a font to look in for characters this one hasn't.
 //!
 //! Text is set with each glyph as close to the last as their outlines (the
@@ -79,6 +84,8 @@ struct FontEntry {
     #[serde(default = "default_space_width")]
     space_width: f32,
     fallback: Option<String>,
+    #[serde(default)]
+    glyph_padding: BTreeMap<String, f32>,
     glyphs: BTreeMap<String, Variants>,
 }
 
@@ -98,6 +105,8 @@ enum Variants {
 pub struct Glyphs {
     name: String,
     glyphs: BTreeMap<String, Vec<Rc<SymbolBase>>>,
+    /// Room glyphs keep on top of the font's padding, in font sizes.
+    padding: BTreeMap<String, f32>,
 }
 
 /// How a font turns characters into glyphs.
@@ -138,10 +147,12 @@ impl Font {
     /// Every variant of the glyph for `key`, padded as the font pads them,
     /// or `None` if the font hasn't one (its fallbacks aren't looked in).
     pub fn variants(&self, key: &str) -> Option<Vec<Symbol>> {
-        self.glyphs.glyphs.get(key).map(|bases| bases.iter().map(|base| self.symbol(base)).collect())
+        self.glyphs.glyphs.get(key).map(|bases| bases.iter().map(|base| self.symbol(key, base)).collect())
     }
-    fn symbol(&self, base: &Rc<SymbolBase>) -> Symbol {
-        Symbol::new_default_from_base_rc(base.clone()).with_padding(self.character_padding).with_skew(self.skew)
+    /// The glyph `key` drawn as `base`, padded as the font pads it.
+    fn symbol(&self, key: &str, base: &Rc<SymbolBase>) -> Symbol {
+        let padding = self.character_padding + self.glyphs.padding.get(key).copied().unwrap_or(0.0);
+        Symbol::new_default_from_base_rc(base.clone()).with_padding(padding).with_skew(self.skew)
     }
     /// This font and then its fallbacks, in order.
     fn chain(&self) -> impl Iterator<Item = &Font> {
@@ -170,7 +181,7 @@ impl Font {
         if self.mapping == Mapping::BalancedTernary {
             let key = balanced_base27_symbol(c).to_string();
             return match self.find(&key) {
-                Some((font, bases)) => font.symbol(&bases[0]),
+                Some((font, bases)) => font.symbol(&key, &bases[0]),
                 None => book.fallback_symbol(c, &[self.tried(&key)]),
             };
         }
@@ -190,7 +201,7 @@ impl Font {
             if let Some((font, bases)) = self.find(key) {
                 // Always drawn from rng, one variant or many, so a font
                 // gaining variants doesn't shift every pick after it.
-                return font.symbol(&bases[rng.random_range(0..bases.len())]);
+                return font.symbol(key, &bases[rng.random_range(0..bases.len())]);
             }
         }
         let tried: Vec<String> = keys.iter().flat_map(|key| self.chain().map(move |font| font.tried(key))).collect();
@@ -238,6 +249,14 @@ impl FontBook {
                 && !entries.contains_key(fallback) {
                 return Err(bad(format!("falls back to '{}', which isn't a font", fallback)));
             }
+            for (key, extra) in &entry.glyph_padding {
+                if !entry.glyphs.contains_key(key) {
+                    return Err(bad(format!("glyph_padding gives '{}', which isn't a glyph", key)));
+                }
+                if !(extra.is_finite() && *extra >= 0.0) {
+                    return Err(bad(format!("glyph_padding for '{}' must be a number of at least 0, got {}", key, extra)));
+                }
+            }
             let mut glyphs = BTreeMap::new();
             for (key, variants) in &entry.glyphs {
                 let paths: Vec<&String> = match variants {
@@ -253,7 +272,7 @@ impl FontBook {
                 }).collect::<Result<Vec<_>, String>>()?;
                 glyphs.insert(key.clone(), bases);
             }
-            loaded.insert(name.clone(), (Rc::new(Glyphs { name: name.clone(), glyphs }), entry));
+            loaded.insert(name.clone(), (Rc::new(Glyphs { name: name.clone(), glyphs, padding: entry.glyph_padding.clone() }), entry));
         }
         // Fonts with their fallbacks, which mustn't loop.
         fn resolve(name: &str, loaded: &BTreeMap<String, (Rc<Glyphs>, &FontEntry)>, seen: &mut Vec<String>) -> Result<Font, String> {
@@ -400,6 +419,23 @@ mod tests {
         let built = f.build("a ", &b, &mut StdRng::seed_from_u64(1));
         assert!((built[0].hull_aabb().extents().x - 1.0).abs() < 0.03);
         assert!((built[1].hull_aabb().extents().x - 2.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn listed_glyphs_get_more_padding() {
+        let b = book(&format!(r#"{{ "f": {{ "character_padding": 0.25, "glyph_padding": {{ "b": 0.5 }}, "glyphs": {{ "a": "{0}", "b": "{0}" }} }} }}"#, LINE));
+        let f = b.font("f").unwrap();
+        let built = f.build("ab", &b, &mut StdRng::seed_from_u64(1));
+        assert!((built[0].hull_aabb().extents().x - 1.5).abs() < 0.03, "{:?}", built[0].hull_aabb());
+        assert!((built[1].hull_aabb().extents().x - 2.5).abs() < 0.03, "{:?}", built[1].hull_aabb());
+        assert!((f.variants("b").unwrap()[0].hull_aabb().extents().x - 2.5).abs() < 0.03);
+        for (json, error) in [
+            (r#"{ "f": { "glyph_padding": { "z": 0.1 }, "glyphs": {} } }"#, "glyph_padding gives 'z', which isn't a glyph"),
+            (r#"{ "f": { "glyph_padding": { "a": -1 }, "glyphs": { "a": "M 0 0 L 1 0" } } }"#, "glyph_padding for 'a' must be"),
+        ] {
+            let e = FontBook::from_bytes(json.as_bytes()).unwrap_err();
+            assert!(e.contains(error), "{}", e);
+        }
     }
 
     #[test]
