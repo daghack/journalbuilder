@@ -1088,6 +1088,7 @@ doc += api("journalbuild NAME [flags]", "Runs journals/NAME/journal_entry.rhai a
 	opt("--strict-glyphs", "off", "Fails before rendering if any character had no glyph, rather than drawing it as X and warning.", "a flag."),
 	opt("--parchment", "off", "Renders each page as one image, darkly_PAGE.png, its canvases layered on procedural parchment; light inks are drawn dark.", "a flag."),
 	opt("--pdf", "off", "Puts the pages in one PDF, NAME.pdf, a page each at 150 canvas units to the inch, rather than writing images; on parchment with --parchment.", "a flag."),
+	opt("--stitch N", "off", "Also lays every N pages side by side, in order, tops level, as darkly_stitched_K.png (K from 0; the last may have fewer). Pages are rendered one image each, as with --parchment, on parchment with it. Not with --pdf.", "a whole number of at least 1."),
 	opt("--journals-dir DIR", "the repository's journals/", "Where journals are.", "a directory."),
 	opt("--output-dir DIR", "the journal's output/", "Where renders go. Earlier .png, .svg and .pdf renders there are cleared first, except with --page.", "a directory."),
 	opt("--fonts FILE", "the repository's config/fonts.json", "The font file.", "a file."),

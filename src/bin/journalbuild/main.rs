@@ -42,7 +42,7 @@ const DEFAULT_SUPERSAMPLE: f32 = 1.2;
 
 const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--svg]
                     [--scale S] [--supersample K] [--strict-glyphs]
-                    [--parchment] [--pdf]
+                    [--parchment] [--pdf] [--stitch N]
                     [--journals-dir DIR] [--output-dir DIR] [--fonts FILE]
                     [--locks-dir DIR] [--layouts-dir DIR]
        journalbuild --check-locks [--locks-dir DIR]
@@ -63,6 +63,12 @@ const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--svg
                       page, rather than writing images: each page's
                       canvases layered into one image (on parchment,
                       with --parchment), 150 canvas units to the inch.
+  --stitch N          Also lay every N pages side by side, in order, as
+                      darkly_stitched_{n}.png (from 0; the last may have
+                      fewer), tops level. Pages are rendered as one image
+                      each, darkly_{page}.png, as with --parchment (which
+                      it goes with, on parchment, or without, on nothing).
+                      Not with --pdf.
   --strict-glyphs     Fail before rendering if any character had no glyph
                       (by default they're drawn as X and listed as a warning).
   --scale S           Scale output images (default 1.0), brushes included.
@@ -101,6 +107,7 @@ struct Args {
     layouts_dir: String,
     parchment: bool,
     pdf: bool,
+    stitch: Option<usize>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -123,6 +130,7 @@ fn parse_args() -> Result<Args, String> {
     let mut layouts_dir = DEFAULT_LAYOUTS_DIR.to_string();
     let mut output_dir = None;
     let mut parchment = false;
+    let mut stitch = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -141,6 +149,11 @@ fn parse_args() -> Result<Args, String> {
                     .ok_or(format!("invalid supersample '{}'; expected a number >= 1, e.g. 1.5", value))?;
             }
             "--parchment" => parchment = true,
+            "--stitch" => {
+                let value = args.next().ok_or("--stitch needs how many pages to a stitch, e.g. --stitch 6")?;
+                stitch = Some(value.parse::<usize>().ok().filter(|n| *n >= 1)
+                    .ok_or_else(|| format!("--stitch needs a whole number of at least 1, got '{}'", value))?);
+            }
             "--journals-dir" => {
                 journals_dir = args.next().ok_or("--journals-dir needs a directory")?;
             }
@@ -174,7 +187,10 @@ fn parse_args() -> Result<Args, String> {
         (Some(_), true) => return Err("--check-locks checks lock files, so it takes no journal name".to_string()),
         (None, false) => return Err("missing journal name".to_string()),
     };
-    Ok(Args { strict_glyphs, check_locks, journal_name, journals_dir, pages, svg, scale, supersample, output_dir, font_file, locks_dir, layouts_dir, parchment, pdf })
+    if stitch.is_some() && pdf {
+        return Err("--stitch lays rendered pages side by side, so it can't go with --pdf".to_string());
+    }
+    Ok(Args { strict_glyphs, check_locks, journal_name, journals_dir, pages, svg, scale, supersample, output_dir, font_file, locks_dir, layouts_dir, parchment, pdf, stitch })
 }
 
 fn main() {
@@ -242,8 +258,8 @@ fn run(args: &Args) -> Result<(), String> {
         let path = format!("{}/{}.pdf", output_dir, journal_name);
         publish::pdf(&entry, &mut darkly_engine, &path, journal_name, &render, only)?;
         println!("Wrote {}", path);
-    } else if render.parchment {
-        publish::page_images(&entry, &mut darkly_engine, &output_dir, &render, only)?;
+    } else if render.parchment || args.stitch.is_some() {
+        publish::page_images(&entry, &mut darkly_engine, &output_dir, &render, only, args.stitch)?;
     } else {
         publish::canvas_images(&entry, &mut darkly_engine, &output_dir, &render, only)?;
     }

@@ -39,6 +39,10 @@ Useful flags (`journalbuild` with no arguments lists them all):
 - `--pdf`: put the pages in one PDF, `{journal}.pdf`, instead of images:
   each page's canvases layered into one image (on parchment, with
   `--parchment`), at 150 canvas units to the inch whatever the scale.
+- `--stitch N`: also lay every N pages side by side, tops level, as
+  `darkly_stitched_{n}.png` (from 0; the last may have fewer). Pages are
+  rendered one image each, as with `--parchment`, on parchment with it.
+  Not with `--pdf`.
 - `--journals-dir`, `--output-dir`, `--fonts`, `--locks-dir`,
   `--layouts-dir`: read or write somewhere other than the repository's
   defaults.
