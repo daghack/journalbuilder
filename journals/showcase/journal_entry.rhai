@@ -14,7 +14,8 @@
 //   text      text boxes, text kept clear of drawings, text along paths
 //             (turned to them or held at an angle), scattered notes,
 //             words split round drawings
-//   locks     every lock type, and a lock chain drawn as a maze
+//   locks     every lock type, Huffman codes between bases, and a lock
+//             chain drawn as a maze
 //   spread    one drawing across two pages: a page split into tiles
 //   layouts   pages typeset from layouts: an inline one, the layout files
 //             (the title page is one too), and marked-up text, markdown()
@@ -1022,6 +1023,30 @@ for row in rows {
 	if result.get(row[3]).base() < 26 || result.get(row[3]).type_name() == "" { throw "unexpected output type"; }
 	locks.add_canvas(write(row[0], LEFT, y, 22));
 	locks.add_canvas(write(result.text(row[3]), 450, y, 22));
+	y += 52;
+}
+
+// Huffman codes: a corpus in one base sets the code, which rewrites text
+// in another base, the corpus's commonest symbols getting the shortest
+// codes. The corpus is passed through, for unlocking to rebuild the code.
+y += 20;
+let corpus = "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG";
+locks.add_canvas(caption("huffman (input_base 27, output_base 2, then 3): the letters commonest in the corpus", y));
+locks.add_canvas(caption(`${corpus} get the shortest codes.`, y + 34));
+locks.add_canvas(caption(`${plain}, letter by letter:`, y + 68));
+y += 134;
+let fine = new_style(1.0, INK, new_brush("Ink Pen", 0.3, 0.7, 1.2));
+for base in [2, 3] {
+	let huffman = new_lock("huffman").add("h", "huffman", #{ input_base: 27, output_base: base }).set_input("h.corpus", symbols(27, corpus));
+	let result = huffman.run(#{ "h.plain_text": symbols(27, plain) });
+	if huffman.unlock(result).text("h.plain_text") != plain { throw "huffman should unlock"; }
+	let codes = [];
+	for c in plain.chars() {
+		let code = huffman.run(#{ "h.plain_text": symbols(27, c.to_string()) }).get("h.cipher_text").value();
+		codes.push(code.reduce(|t, d| t + d, ""));
+	}
+	if codes.reduce(|t, c| t + c, "") != result.get("h.cipher_text").value().reduce(|t, d| t + d, "") { throw "codes should join up"; }
+	locks.add_canvas(write_in(codes.reduce(|t, c| if t == "" { c } else { t + " " + c }, ""), LEFT, y, 22, fine, PLAIN, #{}));
 	y += 52;
 }
 
