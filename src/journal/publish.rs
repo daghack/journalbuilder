@@ -70,20 +70,45 @@ pub fn canvas_images(entry: &Entry, engine: &mut DarklyEngine, dir: &str, render
 }
 
 /// A Darkly render of each page, its canvases layered into one image (see
-/// `page_image`), `darkly_{page}.png`.
+/// `page_image`), `darkly_{page}.png`; and with `stitch`, every `stitch`
+/// of them in turn side by side, `darkly_stitched_{n}.png` (see `stitched`).
 #[cfg(not(target_arch = "wasm32"))]
-pub fn page_images(entry: &Entry, engine: &mut DarklyEngine, dir: &str, render: &Render, only: Option<&[usize]>) -> Result<(), String> {
+pub fn page_images(entry: &Entry, engine: &mut DarklyEngine, dir: &str, render: &Render, only: Option<&[usize]>, stitch: Option<usize>) -> Result<(), String> {
     let mut progress = pages_progress(entry, "Rendering", only);
+    let mut images = Vec::new();
     for (i, page) in entry.selected_pages(only) {
         let label = page.label(i);
         progress.start(&label);
         if let Some(image) = page_image(page, &label, engine, render) {
             let filename = format!("{}/darkly_{}.png", dir, label);
             image.save(&filename).map_err(|e| write_error(&filename, e))?;
+            if stitch.is_some() {
+                images.push(image);
+            }
         }
         progress.step();
     }
+    if let Some(n) = stitch {
+        for (k, group) in images.chunks(n).enumerate() {
+            let filename = format!("{}/darkly_stitched_{}.png", dir, k);
+            stitched(group).save(&filename).map_err(|e| write_error(&filename, e))?;
+        }
+    }
     Ok(())
+}
+
+/// Images side by side, left to right in order, their tops level; where
+/// one is shorter than the tallest, it's transparent below.
+pub fn stitched(images: &[RgbaImage]) -> RgbaImage {
+    let width = images.iter().map(|i| i.width()).sum();
+    let height = images.iter().map(|i| i.height()).max().unwrap_or(0);
+    let mut out = RgbaImage::new(width, height);
+    let mut x = 0;
+    for image in images {
+        image::imageops::replace(&mut out, image, x as i64, 0);
+        x += image.width();
+    }
+    out
 }
 
 /// The pages' images (see `page_image`) as the pages of one PDF at `path`,
@@ -269,6 +294,18 @@ pub fn svgs(entry: &Entry, dir: &str, scale: f32, only: Option<&[usize]>) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stitching_lays_images_side_by_side_tops_level() {
+        let red = RgbaImage::from_pixel(2, 3, image::Rgba([255, 0, 0, 255]));
+        let blue = RgbaImage::from_pixel(4, 1, image::Rgba([0, 0, 255, 255]));
+        let both = stitched(&[red, blue]);
+        assert_eq!((both.width(), both.height()), (6, 3));
+        assert_eq!(both.get_pixel(1, 2).0, [255, 0, 0, 255]);
+        assert_eq!(both.get_pixel(2, 0).0, [0, 0, 255, 255]);
+        // Below the shorter image, nothing.
+        assert_eq!(both.get_pixel(5, 2).0[3], 0);
+    }
 
     #[test]
     fn decimals_are_cut_and_nothing_else() {
