@@ -35,40 +35,28 @@ let cell_size = 50.0;
 let avoid = new_canvas();
 let cells = [];
 for cell in maze.cells() {
-	let g = font("balanced_ternary").glyph((cell.symbol - 13));
-	g.scale = cell_size;
-	g.position = vec2(cell.x * cell_size, cell.y * cell_size);
+	let g = font("balanced_ternary").glyph(cell.symbol - 13, #{ scale: cell_size, position: vec2(cell.x * cell_size, cell.y * cell_size) });
 	cells.push(g);
-	avoid.add_glyph(g, new_style(2.0, "black", maze_brush));
+	avoid.add(g, new_style("black", maze_brush, #{ width: 2.0 }));
 }
 let b = avoid.bounds();
 
-let page_canvas = new_canvas();
-page_canvas.add_glyphs(cells, new_style(5.0, "black", maze_brush));
+let page_canvas = new_canvas().add(cells, new_style("black", maze_brush, #{ width: 5.0 }));
 
 // The key, flowed through a box a little larger than the maze, each glyph
 // nudged a little off true.
 let around = new_textbox(#{
 	center: b.center, width: b.width * 1.2, height: b.height * 1.2,
-	symbol_scale: 52.0, avoid: avoid,
+	size: 52.0, avoid: avoid,
+	position_jitter: 2.5 / 52.0, rotation_jitter: PI() / 32.0, scale_jitter: 0.025,
 });
 let filled = around.fill(ternary_font("balanced_ternary").glyphs(key));
 if filled.unplaced.len() > 0 {
 	warn(filled.unplaced.len() + " key symbols didn't fit around the maze");
 }
-let key_style = new_style(1.5, "darkred", maze_brush);
-for g in filled.placed {
-	g.scale_by(1.0 + random_range(-0.025, 0.025));
-	g.translate_by(vec2(random_range(-2.5, 2.5), random_range(-2.5, 2.5)));
-	g.rotate_by(random_range(-PI() / 32.0, PI() / 32.0));
-	page_canvas.add_glyph(g, key_style);
-}
+page_canvas.add(filled.placed, new_style("darkred", maze_brush, #{ width: 1.5 }));
 
-let maze_page = new_page();
-maze_page.name = "maze";
-maze_page.svg_style = svg_look;
-maze_page.add_canvas(page_canvas);
-journal_entry.add_page(maze_page);
+journal_entry.add(new_page(#{ name: "maze", svg_style: svg_look }).add(page_canvas));
 
 // ---- page two: the balanced-ternary dial ----
 
@@ -87,12 +75,8 @@ fn ring_point(count, step, radius) {
 }
 
 fn add_digit(digit, at, style) {
-	let g = font("balanced_ternary").glyph(digit);
-	g.scale = 50.0;
-	g.position = at.center;
-	g.rotation = at.angle + PI() / 2.0;
-	this.add_path(new_circle(at.center, 50.0 / 1.5), style);
-	this.add_glyph(g, style);
+	this.add(new_circle(at.center, 50.0 / 1.5), style);
+	this.add(font("balanced_ternary").glyph(digit, #{ scale: 50.0, position: at.center, rotation: at.angle + PI() / 2.0 }), style);
 }
 
 let dial = new_canvas();
@@ -103,7 +87,7 @@ let rings = [
 ];
 for (ring, r) in rings {
 	let radius = outer_ring - r * ring_step;
-	let style = new_style(ring.width, "black", brush);
+	let style = new_style("black", brush, #{ width: ring.width });
 	let half = ring.count / 2;
 	for i in -half..=half {
 		let at = ring_point(ring.count, i, radius);
@@ -114,16 +98,16 @@ for (ring, r) in rings {
 			let inner = ring_point(rings[r + 1].count, (i / 3.0).round(), radius - ring_step);
 			let from = vec2(at.center.x - circle_radius * at.angle.cos(), at.center.y - circle_radius * at.angle.sin());
 			let to = vec2(inner.center.x + circle_radius * inner.angle.cos(), inner.center.y + circle_radius * inner.angle.sin());
-			dial.add_path(new_line(from, to), style);
+			dial.add(new_line(from, to), style);
 		}
 	}
 }
 
 // Concentric circles at the hub.
-let hub_style = new_style(6.75, "black", brush);
+let hub_style = new_style("black", brush, #{ width: 6.75 });
 let hub_max = outer_ring - 2.0 * ring_step - symbol_radius / 2.0;
 for i in 0..5 {
-	dial.add_path(new_circle(vec2(0.0, 0.0), 15.0 + i / 5.0 * (hub_max - 15.0)), hub_style);
+	dial.add(new_circle(vec2(0.0, 0.0), 15.0 + i / 5.0 * (hub_max - 15.0)), hub_style);
 }
 
 let shorts = [
@@ -147,11 +131,6 @@ let shorts = [
 	"Do you see this world for what it is?",
 	"There is no number of walking sticks I could retrieve to balance out the ruin I have wrought",
 ];
-dial.add_canvas(dial.scatter_notes(shorts, font("loche_upper"), new_style(2.0, "darkred", brush),
-	#{ symbol_scale: 30.0, width_range: [200, 500], height_range: [300, 600] }));
+dial.add(dial.scatter_notes(shorts, [200, 500], [300, 600], #{ font: font("loche_upper"), style: new_style("darkred", brush, #{ width: 2.0 }), size: 30.0 }));
 
-let dial_page = new_page();
-dial_page.name = "balanced_ternary";
-dial_page.svg_style = svg_look;
-dial_page.add_canvas(dial);
-journal_entry.add_page(dial_page);
+journal_entry.add(new_page(#{ name: "balanced_ternary", svg_style: svg_look }).add(dial));

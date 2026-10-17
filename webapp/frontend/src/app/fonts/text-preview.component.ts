@@ -9,24 +9,21 @@ const TEXT_KEY = 'journal-editor.preview-text';
 
 /**
  * A journal script that sets `text` in `font`, a line of the text to a
- * line of the page, as journals do (fill_with_text): the font editor's
+ * line of the page, as journals do (write_line): the font editor's
  * preview.
  */
 export function previewScript(font: string, ternary: boolean, text: string, size: number, seed: number): string {
   const lines = [
     `seed(${Math.round(seed)});`,
-    'let style = new_style(1.0, "#2b1d12", new_brush("Ink Pen", 0.4, 0.8, 2.2));',
+    `let hand = #{ font: ${ternary ? 'ternary_font' : 'font'}(${rhaiString(font)}), size: ${rhaiFloat(size)}, style: new_style("#2b1d12", new_brush("Ink Pen", 0.4, 0.8, 2.2)) };`,
     'let page = new_page();',
-    `let f = ${ternary ? 'ternary_font' : 'font'}(${rhaiString(font)});`,
   ];
   text.split('\n').forEach((line, i) => {
     if (!line.trim()) return;
-    // Long enough for the widest glyphs: a short path fails to fit the text.
-    const length = (line.length + 2) * size * 2;
     const y = rhaiFloat(i * size * 2.4);
-    lines.push(`for part in new_line(vec2(0.0, ${y}), vec2(${rhaiFloat(length)}, ${y})).fill_with_text(${rhaiString(line)}, f, ${rhaiFloat(size)}, style) { page.add_canvas(part); }`);
+    lines.push(`page.add(write_line(${rhaiString(line)}, vec2(0.0, ${y}), hand));`);
   });
-  lines.push('journal_entry.add_page(page);');
+  lines.push('journal_entry.add(page);');
   return lines.join('\n') + '\n';
 }
 

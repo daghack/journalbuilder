@@ -27,9 +27,9 @@ the same change:
 
 The showcase is a sample book: every page is `W` x `H`, drawn on a
 `sheet(section)` (running head) and bound with `book.bind(section,
-canvas)` (folio, name, contents entry); typeset pages go in with
-`book.bind_page`. When a page fills up, bind it and start another sheet;
-the contents follow.
+canvas)` (folio, then `new_book`'s `book.add`: name, contents entry);
+typeset pages go in with `book.add(section, pages)`. When a page fills
+up, bind it and start another sheet; the contents follow.
 
 `tests/showcase.rs` fails when a function scripts can call, a font (of
 20 glyphs or more), or a lock type isn't in the showcase. Don't
@@ -47,6 +47,28 @@ Conventions there: labels and body text are in plain (`PLAIN`), which
 has capitals, digits and punctuation, and headings in loche (`LOCHE`);
 inks are red and near-black; text blocks are lorem ipsum; sections are
 labelled with the calls they show.
+
+## Keep the API's shape
+
+Everything scripts can call follows the same rules; new functions and
+options should too:
+
+- What a call needs comes first, positionally; everything optional goes
+  in one trailing options map, which can always be left out (register the
+  call with and without it). No positional optionals, no second overload
+  doing the same thing another way.
+- A constructor's options take every property its value can be set by,
+  applied through the property's own setter (`options::apply_props`), so
+  `new_X(..., #{ prop })` and `x.prop = ...` check alike. A new settable
+  property goes in its constructor's list too.
+- Text calls take one text-settings map with the layout role keys
+  (`text_settings.rs`): role keys a call doesn't use are ignored, so a
+  role can be passed straight in. A new text setting is a role key too.
+- Things are put in containers with `add`, which returns the container.
+- Cheap read-only facts are properties; computations are methods.
+
+Lock-file option types (`integer(3)`, `one_of(choices, default)`) keep
+their default positional: `default` is a reserved word in rhai.
 
 ## Keep the API reference up to date
 

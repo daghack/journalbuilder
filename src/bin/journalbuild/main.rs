@@ -213,7 +213,7 @@ fn run(args: &Args) -> Result<(), String> {
     let entry = entry?;
     check_missing_glyphs(&symd, args.strict_glyphs)?;
     if entry.page_count() == 0 {
-        return Err(format!("{} produced no pages; add them with journal_entry.add_page(page)", journal_path));
+        return Err(format!("{} produced no pages; add them with journal_entry.add(page)", journal_path));
     }
     let empty = entry.empty_canvases();
     if !empty.is_empty() {

@@ -51,7 +51,7 @@ pub struct ScatterOptions {
     pub jagged_edge: f32,
     /// Boxes to try for each message before backing off.
     pub max_attempts: usize,
-    /// Extra space between glyphs, as a fraction of `symbol_scale`.
+    /// Extra space between glyphs, as a fraction of `size`.
     pub spacing: f32,
     /// How far messages keep from the canvas's strokes and from each other.
     pub clearance: f32,

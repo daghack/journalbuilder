@@ -23,59 +23,22 @@ const COLUMN = (W - 2.0 * LEFT - 3.0 * GUTTER) / 4.0;
 const INK = "#253443";
 
 // The hand: a fine pen, each stroke a little astray.
-let pen = new_brush("Ink Pen", 0.55, 0.9, 1.05);
-pen.pressure_profile = "constant";
-let hand = new_style(1.0, INK, pen);
-hand.jitter = 1.2;
-const HAND = hand;
-
+const HAND = new_style(INK, new_brush("Ink Pen", 0.55, 0.9, 1.05, #{ pressure_profile: "constant" }), #{ jitter: 1.2 });
 // The cipher's glyphs, a touch heavier.
-let cipher_pen = new_brush("Ink Pen", 0.55, 0.9, 1.0);
-cipher_pen.pressure_profile = "constant";
-let cipher = new_style(1.0, INK, cipher_pen);
-cipher.jitter = 1.0;
-const CIPHER = cipher;
-
+const CIPHER = new_style(INK, new_brush("Ink Pen", 0.55, 0.9, 1.0, #{ pressure_profile: "constant" }), #{ jitter: 1.0 });
 // The manic hand: every stroke gone over seven times, each pass astray.
-let manic_pen = new_brush("Ink Pen", 0.5, 0.95, 1.1);
-manic_pen.pressure_profile = "taper";
-let manic = new_style(1.0, INK, manic_pen);
-manic.passes = 7;
-manic.jitter = 9.0;
-const MANIC = manic;
-
+let manic_pen = new_brush("Ink Pen", 0.5, 0.95, 1.1, #{ pressure_profile: "taper" });
+const MANIC = new_style(INK, manic_pen, #{ passes: 7, jitter: 9.0 });
 // Larger letters gone over just twice.
-let firm = new_style(1.0, INK, manic_pen);
-firm.passes = 2;
-firm.jitter = 3.0;
-const FIRM = firm;
+const FIRM = new_style(INK, manic_pen, #{ passes: 2, jitter: 3.0 });
 
 const CAPS = font("loche_upper", #{ character_padding: 0.1 });
 const LOWER = font("loche_lower", #{ character_padding: 0.38, space_width: 0.7 });
-let ternary = ternary_font("balanced_ternary");
-ternary.character_padding = 0.32;
-const TERNARY = ternary;
+const TERNARY = ternary_font("balanced_ternary", #{ character_padding: 0.32 });
 
 seed(1043);
 
 // ---- the cipher ----
-
-// Letters and spaces only, in capitals: a base-27 symbol each.
-fn letters_only(text) {
-	let out = "";
-	let space = true;
-	for c in text.to_upper() {
-		if c >= 'A' && c <= 'Z' {
-			out += c;
-			space = false;
-		} else if (c == ' ' || c == '-' || c == '—') && !space {
-			out += ' ';
-			space = true;
-		}
-	}
-	out.trim();
-	out
-}
 
 let letter = [
 	"I have long considered what to do with the matter of Pyrius. I am not offended by rejection, and were it simply a matter of my being personally unfit for clergy, sin-laden or slave to craven habits, I would not be so malcontent",
@@ -92,53 +55,38 @@ const ORDERING = "P DZTINWOFUEYHBJVSCXGLQMAKR";
 let lock = new_lock("pyrius").add("sub", "substitution_cipher", #{ base_n: 27 });
 let blocks = [];
 for paragraph in letter {
-	let result = lock.run(#{ "sub.plain_text": symbols(27, letters_only(paragraph)), "sub.ordering": symbols(27, ORDERING) });
-	if lock.unlock(result).text("sub.plain_text") != letters_only(paragraph) { throw "the cipher should undo"; }
+	// Letters and spaces only, in capitals: a base-27 symbol each.
+	let plain = symbols(27, paragraph, #{ lenient: true });
+	let result = lock.run(#{ "sub.plain_text": plain, "sub.ordering": symbols(27, ORDERING) });
+	assert(lock.unlock(result).text("sub.plain_text") == plain.text(), "the cipher should undo");
 	blocks.push(result.text("sub.cipher_text"));
 }
 
 // ---- writing ----
 
-// A glyph set a little off true, as a hand sets it.
-fn jostle(g, size) {
-	g.translate_by(vec2(random_range(-0.04, 0.04) * size, random_range(-0.06, 0.06) * size));
-	g.rotate_by(random_range(-0.07, 0.07));
-	g.scale_by(random_range(0.93, 1.07));
+// Each column's text in lines a column wide from (x, y), left edges a
+// little ragged and every glyph set a little off true, as a hand sets it.
+// Each gives where the next text goes.
+const JOSTLED = #{ jagged: 0.3, position_jitter: [0.04, 0.06], rotation_jitter: 0.07, scale_jitter: 0.07 };
+fn lines(c, text, x, y, settings) {
+	let block = write_block(text, vec2(x, y), global::COLUMN, global::JOSTLED + settings);
+	c.add(block.canvas);
+	block.bottom
 }
-
-// `text` in lines `width` wide from (x, y), `pitch` apart, left edges a
-// little ragged. Returns where a line after them would go.
-fn lines(canvas, text, font, size, style, x, y, width, pitch, layout) {
-	let tb = new_textbox(#{
-		center: vec2(x + width / 2.0, 0), width: width, height: size * 0.5,
-		symbol_scale: size, layout: layout, jagged_edge: 0.3,
-	});
-	let rows = tb.place_all(font.glyphs(text));
-	for (row, i) in rows {
-		for g in row {
-			g.translate_by(vec2(0, y + i * pitch));
-			jostle(g, size);
-		}
-		canvas.add_glyphs(row, style);
-	}
-	y + rows.len() * pitch
-}
-
-// What each column writes.
 fn prose(c, text, x, y) {
-	lines(c, text, global::CAPS, 28, global::HAND, x, y + 16, global::COLUMN, 37, "words") + 22
+	lines(c, text, x, y + 16, #{ font: global::CAPS, size: 28, style: global::HAND, line_height: 37.0 / 28.0 }) + 22
 }
 fn lowered(c, text, x, y) {
-	lines(c, text, global::LOWER, 34, global::HAND, x, y + 22, global::COLUMN, 44, "words") + 18
+	lines(c, text, x, y + 22, #{ font: global::LOWER, size: 34, style: global::HAND, line_height: 44.0 / 34.0 }) + 18
 }
 fn manic(c, text, x, y) {
-	lines(c, text, global::CAPS, 82, global::MANIC, x, y + 46, global::COLUMN, 78, "words") + 14
+	lines(c, text, x, y + 46, #{ font: global::CAPS, size: 82, style: global::MANIC, line_height: 78.0 / 82.0 }) + 14
 }
 fn firm(c, text, x, y) {
-	lines(c, text, global::CAPS, 60, global::FIRM, x, y + 34, global::COLUMN, 64, "words") + 12
+	lines(c, text, x, y + 34, #{ font: global::CAPS, size: 60, style: global::FIRM, line_height: 64.0 / 60.0 }) + 12
 }
 fn ciphered(c, text, x, y) {
-	lines(c, text, global::TERNARY, 31, global::CIPHER, x, y + 21, global::COLUMN, 42, "flat") + 22
+	lines(c, text, x, y + 21, #{ font: global::TERNARY, size: 31, style: global::CIPHER, line_height: 42.0 / 31.0, layout: "flat" }) + 22
 }
 
 // ---- the eye ----
@@ -146,15 +94,9 @@ fn ciphered(c, text, x, y) {
 // An eye `width` across, centred on `centre`, its iris ringed with the
 // key: the glyph for each symbol of the ordering, clockwise from the top.
 fn eye(c, centre, width) {
-	let lids = new_style(1.0, global::INK, new_brush("Ink Pen", 0.55, 0.9, 1.3));
-	lids.passes = 2;
-	lids.jitter = 2.5;
-	let rings = new_style(1.0, global::INK, new_brush("Ink Pen", 0.55, 0.9, 1.4));
-	rings.passes = 3;
-	rings.jitter = 4.0;
-	let key = new_style(1.0, global::INK, new_brush("Ink Pen", 0.5, 0.9, 1.1));
-	key.passes = 4;
-	key.jitter = 2.8;
+	let lids = new_style(global::INK, new_brush("Ink Pen", 0.55, 0.9, 1.3), #{ passes: 2, jitter: 2.5 });
+	let rings = new_style(global::INK, new_brush("Ink Pen", 0.55, 0.9, 1.4), #{ passes: 3, jitter: 4.0 });
+	let key = new_style(global::INK, new_brush("Ink Pen", 0.5, 0.9, 1.1), #{ passes: 4, jitter: 2.8 });
 
 	let outer = width * 0.215;
 	let inner = outer * 0.56;
@@ -165,26 +107,26 @@ fn eye(c, centre, width) {
 		.cubic_to(centre + vec2(-half * 0.45, -rise), centre + vec2(half * 0.45, -rise), centre + vec2(half, -3));
 	let lower = new_path().move_to(centre + vec2(-half + 8, 9))
 		.cubic_to(centre + vec2(-half * 0.45, rise), centre + vec2(half * 0.45, rise), centre + vec2(half - 8, 9));
-	c.add_path(upper, lids);
-	c.add_path(lower, lids);
-	c.add_path(new_circle(centre, outer), rings);
-	c.add_path(new_circle(centre, inner), rings);
+	c.add(upper, lids);
+	c.add(lower, lids);
+	c.add(new_circle(centre, outer), rings);
+	c.add(new_circle(centre, inner), rings);
 
-	let ring = (outer + inner) / 2.0;
-	for (g, i) in global::TERNARY.glyphs(global::ORDERING) {
-		let angle = -PI() / 2.0 + i * 2.0 * PI() / 27.0;
+	// Round the ring from the top, each glyph turned to it and a little off
+	// true.
+	let glyphs = global::TERNARY.glyphs(global::ORDERING);
+	for (at, i) in new_circle(centre, (outer + inner) / 2.0).points_along(27, #{ start: 0.75 }) {
+		let g = glyphs[i];
 		g.scale = (outer - inner) * 0.8;
-		g.position = centre + vec2(ring * angle.cos(), ring * angle.sin());
-		g.rotation = angle + PI() / 2.0;
-		jostle(g, 6);
-		c.add_glyph(g, key);
+		g.position = at.position + vec2(random_range(-0.04, 0.04) * 6, random_range(-0.06, 0.06) * 6);
+		g.rotation = at.angle + random_range(-0.07, 0.07);
+		c.add(g.scale_by(random_range(0.93, 1.07)), key);
 	}
 }
 
 // ---- the page, column by column ----
 
-let page_canvas = new_canvas();
-let c = page_canvas;
+let c = new_canvas();
 let x = [LEFT, LEFT + COLUMN + GUTTER, LEFT + 2.0 * (COLUMN + GUTTER), LEFT + 3.0 * (COLUMN + GUTTER)];
 let ends = [];
 
@@ -237,8 +179,4 @@ for (end, i) in ends {
 	if end > BOTTOM { warn(`column ${i + 1} runs ${(end - BOTTOM).round()} past the bottom`); }
 }
 
-let page = new_page();
-page.name = "entry";
-page.size = vec2(W, H);
-page.add_canvas(page_canvas);
-journal_entry.add_page(page);
+journal_entry.add(new_page(#{ name: "entry", size: vec2(W, H) }).add(c));

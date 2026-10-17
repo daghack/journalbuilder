@@ -5,47 +5,53 @@
 //! let b = canvas.bounds();          // #{ min, max, center, width, height }
 //!
 //! // Flow glyphs into a box, line by line, keeping clear of a canvas.
+//! // Text calls take text settings, the keys layout roles take.
 //! let tb = new_textbox(#{
 //!     center: b.center, width: b.width * 1.2, height: b.height * 1.2,
-//!     symbol_scale: 52.0,
+//!     size: 52.0,                   // the size glyphs are set at
 //!     layout: "flat",               // or "words": wrap at blanks (spaces)
-//!     jagged_edge: 0.0,             // random line indent, in symbol scales
+//!     jagged: 0.0,                  // random line indent, in sizes
 //!     avoid: canvas,                // optional: see avoid.rs
-//!     clearance: 6.0,               // how far from it; default: symbol_scale / 8
-//!     spacing: 0.1,                 // extra space between glyphs, in symbol scales (default 0)
+//!     clearance: 6.0,               // how far from it; default: size / 8
+//!     spacing: 0.1,                 // extra space between glyphs, in sizes (default 0)
 //!     split_words: true,            // "words" only: break words round what's avoided, rather
 //!                                   // than moving them past it whole; or the fewest glyphs
 //!                                   // a piece may have (true is 2)
-//!     split_padding: 0.3,           // pieces keep this much further from it, in symbol scales
+//!     split_padding: 0.3,           // pieces keep this much further from it, in sizes
+//!     position_jitter: 0.05,        // each placed glyph off true (see text_settings.rs)
 //! });
 //!
 //! // Or fill any closed shape, on lines at an angle (radians; default 0,
 //! // left to right, each line below the last). Each subpath of the path is
 //! // an outline, closed back to its start; one inside another is a hole.
 //! // A rectangle shape at angle 0 fills just as center/width/height do.
-//! let round = new_textbox(#{ shape: new_circle(b.center, 300.0), angle: 0.3, symbol_scale: 20.0 });
+//! let round = new_textbox(#{ shape: new_circle(b.center, 300.0), angle: 0.3, size: 20.0 });
 //!
 //! let res = tb.fill(font.glyphs(msg));   // #{ placed: [..], unplaced: [..] }
 //! let blocks = tb.place_all(glyphs);     // one array per filled box
 //!
+//! // Text wrapped to a width from a point, line after line: #{ canvas, bottom },
+//! // bottom being where the next block goes.
+//! let block = write_block(msg, vec2(0, 0), 400.0, #{ font: font, size: 20.0, style: ink, line_height: 1.3 });
+//!
 //! // Scatter messages over a canvas in random boxes, clear of its strokes
-//! // and of each other. Returns a canvas with just the messages.
-//! let notes = page_canvas.scatter_notes(["first note", "second note"], font, style, #{
-//!     symbol_scale: 23.0,
-//!     width_range: [200, 500], height_range: [300, 600],   // box sizes to try
-//!     rotation_jitter: 0.196,     // radians either way (default pi/16)
-//!     scale_jitter: 0.15,         // fraction either way (default 0.15)
-//!     jagged_edge: 0.1,           // default 0.1
+//! // and of each other, box sizes tried between the ranges. Returns a
+//! // canvas with just the messages.
+//! let notes = page_canvas.scatter_notes(["first note", "second note"], [200, 500], [300, 600], #{
+//!     font: font, style: style, size: 23.0,
+//!     rotation_jitter: 0.196,     // radians either way, before placing (default pi/16)
+//!     scale_jitter: 0.15,         // fraction either way, before placing (default 0.15)
+//!     jagged: 0.1,                // default 0.1
 //!     max_attempts: 100,          // boxes per message before backing off
-//!     spacing: 0.0,               // extra space between glyphs, in symbol scales
+//!     spacing: 0.0,               // extra space between glyphs, in sizes
 //!     avoid: other,               // more to keep clear of (see avoid.rs)
-//!     clearance: 3.0,             // from the canvas, `avoid` and other messages; default symbol_scale / 8
+//!     clearance: 3.0,             // from the canvas, `avoid` and other messages; default size / 8
 //!     layout: "words",            // words whole, each note in one clear patch; default "flat", glyph by glyph
 //! });
 //!
 //! ```
 //!
-//! Placement scales each glyph by `symbol_scale` and turns it to the line,
+//! Placement scales each glyph by `size` and turns it to the line,
 //! on top of any scale and rotation it already has. Jagged edges come from
 //! the engine's seeded generator.
 
@@ -56,15 +62,15 @@ use std::rc::Rc;
 
 use super::glyphs::{add_glyph, glyph_array, Glyph};
 use super::random::SharedRng;
-use super::{Canvas, CanvasData, Path, StrokeStyle, Vec2};
+use super::{Canvas, CanvasData, Path, Vec2};
 use crate::journal::canvas::artistic::{jitter_symbols, scatter_notes, ScatterOptions};
-use crate::journal::fonts::Font;
 use crate::journal::fonts::FontBook;
 use crate::journal::canvas::textbox::{rectangle, TextBox as CoreTextBox, TextBoxLineMode, TextBoxOptions};
 use crate::journal::canvas::Canvas as JournalCanvas;
 use crate::journal::symbol::{Symbol, WordSplit};
 use super::avoid::{Avoid, AvoidOption};
-use super::options::{check_keys, number, positive, range};
+use super::options::{number, positive, range};
+use super::text_settings::{self, Jitter};
 
 use super::RhaiResult;
 
@@ -79,9 +85,10 @@ pub struct TextBox {
     avoid: Option<Avoid>,
     padding: f32,
     spacing: f32,
+    jitter: Jitter,
 }
 
-const TEXTBOX_KEYS: [&str; 13] = ["center", "width", "height", "shape", "angle", "symbol_scale", "layout", "jagged_edge", "avoid", "clearance", "spacing", "split_words", "split_padding"];
+const TEXTBOX_KEYS: [&str; 16] = ["center", "width", "height", "shape", "angle", "size", "layout", "jagged", "avoid", "clearance", "spacing", "split_words", "split_padding", "position_jitter", "rotation_jitter", "scale_jitter"];
 
 /// The `spacing` option: extra space between glyphs, as a fraction of the
 /// symbol scale. Negative tightens, down to glyphs touching their
@@ -133,8 +140,8 @@ pub(super) fn word_split(caller: &str, options: &Map) -> RhaiResult<Option<WordS
 impl TextBox {
     fn new(options: Map) -> RhaiResult<TextBox> {
         const CALLER: &str = "new_textbox";
-        check_keys(CALLER, &options, &TEXTBOX_KEYS)?;
-        let symbol_scale = positive(CALLER, &options, "symbol_scale")?;
+        let options = text_settings::settings(CALLER, options, &TEXTBOX_KEYS)?;
+        let symbol_scale = text_settings::size(CALLER, &options)?;
         let shape = match options.get("shape") {
             Some(_) if ["center", "width", "height"].iter().any(|k| options.contains_key(*k)) =>
                 return Err("new_textbox: give either a 'shape' or a 'center', 'width' and 'height', not both".into()),
@@ -165,7 +172,7 @@ impl TextBox {
         if !angle.is_finite() {
             return Err(format!("new_textbox: 'angle' must be a finite number, got {}", angle).into());
         }
-        let jagged_edge = number(CALLER, &options, "jagged_edge")?.unwrap_or(0.0);
+        let jagged_edge = number(CALLER, &options, "jagged")?.unwrap_or(0.0);
         let layout = line_mode(CALLER, &options)?;
         let avoid = AvoidOption::parse(CALLER, &options, false)?;
         Ok(TextBox {
@@ -177,7 +184,34 @@ impl TextBox {
             padding: avoid.padding(symbol_scale),
             avoid: avoid.tree,
             spacing: spacing(CALLER, &options)?,
+            jitter: Jitter::parse(CALLER, &options)?,
         })
+    }
+    /// Fill the box with what fits, jittering what's placed.
+    fn fill(&self, glyphs: Vec<Symbol>, rng: &mut dyn rand::RngCore) -> (Vec<Symbol>, Vec<Symbol>) {
+        let (mut placed, unplaced) = self.with_core(|core| core.fill_bounds_with(glyphs, rng));
+        self.jitter.apply(&mut placed, self.symbol_scale, rng);
+        (placed, unplaced)
+    }
+    /// Fill the box again and again until every glyph is placed: the
+    /// placed glyphs, box by box.
+    fn place_all(&self, caller: &str, mut to_place: Vec<Symbol>, rng: &mut dyn rand::RngCore) -> RhaiResult<Vec<Vec<Symbol>>> {
+        let mut blocks = Vec::new();
+        // A glyph that doesn't fit even in an empty box is an error rather
+        // than silently dropped.
+        while !to_place.is_empty() {
+            let (placed, rest) = self.with_core(|core| core.fill_bounds_with(std::mem::take(&mut to_place), &mut *rng));
+            if placed.is_empty() {
+                return Err(format!("{}: {} glyph(s) don't fit in the text box even when it's empty", caller, rest.len()).into());
+            }
+            blocks.push(placed);
+            to_place = rest;
+        }
+        // Jittered once all are placed, so the boxes are set as without.
+        for block in &mut blocks {
+            self.jitter.apply(block, self.symbol_scale, rng);
+        }
+        Ok(blocks)
     }
     /// Run `f` with the text box, avoiding what its tree holds now.
     fn with_core<R>(&self, f: impl FnOnce(&CoreTextBox) -> R) -> R {
@@ -204,11 +238,14 @@ fn glyphs(symbols: Vec<Symbol>) -> Array {
     symbols.into_iter().map(|s| Dynamic::from(Glyph::new(s))).collect()
 }
 
-const SCATTER_KEYS: [&str; 11] = ["symbol_scale", "width_range", "height_range", "rotation_jitter", "scale_jitter", "jagged_edge", "max_attempts", "spacing", "avoid", "clearance", "layout"];
+const SCATTER_KEYS: [&str; 14] = ["font", "size", "style", "rotation_jitter", "scale_jitter", "position_jitter", "jagged", "max_attempts", "spacing", "avoid", "clearance", "layout", "split_words", "split_padding"];
 
-fn splat(canvas: &Canvas, msgs: Array, font: &Font, style: StrokeStyle, options: Map, symdict: &FontBook, rng: &SharedRng) -> RhaiResult<Canvas> {
+/// `canvas.scatter_notes(messages, width_range, height_range, settings)`.
+fn splat(canvas: &Canvas, msgs: Array, width_range: Dynamic, height_range: Dynamic, settings: Map, symdict: &FontBook, rng: &SharedRng) -> RhaiResult<Canvas> {
     const CALLER: &str = "scatter_notes";
-    check_keys(CALLER, &options, &SCATTER_KEYS)?;
+    let options = text_settings::settings(CALLER, settings, &SCATTER_KEYS)?;
+    let font = text_settings::font(CALLER, &options)?;
+    let style = text_settings::style(CALLER, &options)?;
     if canvas.borrow().strokes.is_empty() {
         // Messages are placed in boxes within the canvas's bounds.
         return Err(format!("{}: the canvas is empty, so there's nowhere to place messages; draw on it first", CALLER).into());
@@ -220,23 +257,30 @@ fn splat(canvas: &Canvas, msgs: Array, font: &Font, style: StrokeStyle, options:
             _ => return Err(format!("{}: 'max_attempts' should be a whole number of at least 1, got {}", CALLER, n).into()),
         },
     };
-    let symbol_scale = positive(CALLER, &options, "symbol_scale")?;
+    let symbol_scale = text_settings::size(CALLER, &options)?;
     let avoid = AvoidOption::parse(CALLER, &options, true)?;
+    let ranges = Map::from_iter([("width_range".into(), width_range), ("height_range".into(), height_range)]);
     let opts = ScatterOptions {
         symbol_scale,
         layout: line_mode(CALLER, &options)?,
         clearance: avoid.padding(symbol_scale),
-        width_range: range(CALLER, &options, "width_range")?,
-        height_range: range(CALLER, &options, "height_range")?,
-        jagged_edge: number(CALLER, &options, "jagged_edge")?.unwrap_or(0.1),
+        width_range: range(CALLER, &ranges, "width_range")?,
+        height_range: range(CALLER, &ranges, "height_range")?,
+        jagged_edge: number(CALLER, &options, "jagged")?.unwrap_or(0.1),
         max_attempts,
         spacing: spacing(CALLER, &options)?,
     };
+    // Notes turn and scale before they're placed, by default a little; any
+    // position jitter is after.
     let rotation_jitter = number(CALLER, &options, "rotation_jitter")?.unwrap_or(std::f32::consts::PI / 16.0);
     let scale_jitter = number(CALLER, &options, "scale_jitter")?.unwrap_or(0.15);
     if !(rotation_jitter >= 0.0) || !(0.0..1.0).contains(&scale_jitter) {
         return Err(format!("{}: 'rotation_jitter' can't be negative and 'scale_jitter' must be in [0, 1)", CALLER).into());
     }
+    let mut after = options.clone();
+    after.remove("rotation_jitter");
+    after.remove("scale_jitter");
+    let after = Jitter::parse(CALLER, &after)?;
     let msgs = msgs.into_iter().enumerate().map(|(i, msg)| {
         msg.into_immutable_string()
             .map_err(|type_name| -> Box<EvalAltResult> { format!("{}: message {} is a {}, not a string", CALLER, i, type_name).into() })
@@ -254,10 +298,80 @@ fn splat(canvas: &Canvas, msgs: Array, font: &Font, style: StrokeStyle, options:
         .map_err(|err| format!("{}: {}", CALLER, err))?;
 
     let mut splatted = CanvasData::default();
-    for symbol in placed.into_iter().flatten() {
+    let mut placed: Vec<Symbol> = placed.into_iter().flatten().collect();
+    after.apply(&mut placed, symbol_scale, &mut *rng);
+    for symbol in placed {
         add_glyph(&mut splatted, &Glyph::new(symbol), &style)?;
     }
     Ok(Canvas::new(splatted))
+}
+
+const BLOCK_KEYS: [&str; 13] = ["font", "size", "style", "line_height", "jagged", "spacing", "layout", "avoid", "clearance", "split_words", "split_padding", "position_jitter", "rotation_jitter"];
+
+/// `write_block(text, at, width, settings)`: the text wrapped to lines
+/// `width` long, the first from `at` (on its centre line, as write_line
+/// sets it), each `line_height` sizes below the last (default 1.25), words
+/// kept whole unless `layout` is "flat". Gives `#{ canvas, bottom }`,
+/// `bottom` being where a line after them would go.
+fn write_block(msg: &str, at: Vec2, width: Dynamic, settings: Map, symdict: &FontBook, rng: &SharedRng) -> RhaiResult<Map> {
+    const CALLER: &str = "write_block";
+    let mut keys = BLOCK_KEYS.to_vec();
+    keys.push("scale_jitter");
+    let mut options = text_settings::settings(CALLER, settings, &keys)?;
+    let font = text_settings::font(CALLER, &options)?;
+    let style = text_settings::style(CALLER, &options)?;
+    let size = text_settings::size(CALLER, &options)?;
+    let width = super::options::float(CALLER, "the width", &width)? as f32;
+    if !(width > 0.0) {
+        return Err(format!("{}: the width must be positive, got {}", CALLER, width).into());
+    }
+    let line_height = match number(CALLER, &options, "line_height")? {
+        None => 1.25,
+        Some(h) if h > 0.0 && h.is_finite() => h,
+        Some(h) => return Err(format!("{}: 'line_height' must be positive, got {}", CALLER, h).into()),
+    };
+    options.entry("layout".into()).or_insert_with(|| "words".into());
+    let at: PVec = at.into();
+    // A box one line high, filled again and again: a line each.
+    let mut box_options = Map::new();
+    for key in ["jagged", "spacing", "layout", "avoid", "clearance", "split_words", "split_padding", "position_jitter", "rotation_jitter", "scale_jitter"] {
+        if let Some(v) = options.get(key) {
+            box_options.insert(key.into(), v.clone());
+        }
+    }
+    box_options.insert("size".into(), Dynamic::from(size as f64));
+    box_options.insert("center".into(), Dynamic::from(Vec2::new((at.x + width / 2.0) as f64, 0.0)));
+    box_options.insert("width".into(), Dynamic::from(width as f64));
+    box_options.insert("height".into(), Dynamic::from((size * 0.5) as f64));
+    let tb = TextBox::new(box_options).map_err(|e| format!("{}", e).replace("new_textbox", CALLER))?;
+    let mut r = rng.borrow_mut();
+    let symbols = font.build(msg, symdict, &mut *r);
+    // Placed all first, then moved down and jittered line by line.
+    let mut rows = Vec::new();
+    let mut to_place = symbols;
+    while !to_place.is_empty() {
+        let (placed, rest) = tb.with_core(|core| core.fill_bounds_with(std::mem::take(&mut to_place), &mut *r));
+        if placed.is_empty() {
+            return Err(format!("{}: {} glyph(s) don't fit a line {} wide", CALLER, rest.len(), width).into());
+        }
+        rows.push(placed);
+        to_place = rest;
+    }
+    let pitch = line_height * size;
+    let mut canvas = CanvasData::default();
+    for (i, row) in rows.iter_mut().enumerate() {
+        for g in row.iter_mut() {
+            g.translate_by(PVec::new(0.0, at.y + i as f32 * pitch));
+        }
+        tb.jitter.apply(row, size, &mut *r);
+        for g in row.iter() {
+            add_glyph(&mut canvas, &Glyph::new(g.clone()), &style)?;
+        }
+    }
+    let mut out = Map::new();
+    out.insert("canvas".into(), Dynamic::from(Canvas::new(canvas)));
+    out.insert("bottom".into(), Dynamic::from((at.y + rows.len() as f32 * pitch) as f64));
+    Ok(out)
 }
 
 pub fn register(engine: &mut Engine, symdict: Rc<FontBook>, rng: SharedRng) {
@@ -267,7 +381,7 @@ pub fn register(engine: &mut Engine, symdict: Rc<FontBook>, rng: SharedRng) {
     let r = rng.clone();
     engine.register_fn("fill", move |tb: &mut TextBox, glyphs_in: Array| -> RhaiResult<Map> {
         let glyphs_in = symbols("fill", glyphs_in)?;
-        let (placed, unplaced) = tb.with_core(|core| core.fill_bounds_with(glyphs_in, &mut *r.borrow_mut()));
+        let (placed, unplaced) = tb.fill(glyphs_in, &mut *r.borrow_mut());
         let mut result = Map::new();
         result.insert("placed".into(), Dynamic::from_array(glyphs(placed)));
         result.insert("unplaced".into(), Dynamic::from_array(glyphs(unplaced)));
@@ -276,27 +390,18 @@ pub fn register(engine: &mut Engine, symdict: Rc<FontBook>, rng: SharedRng) {
 
     let r = rng.clone();
     engine.register_fn("place_all", move |tb: &mut TextBox, glyphs_in: Array| -> RhaiResult<Array> {
-        let mut to_place = symbols("place_all", glyphs_in)?;
-        let mut blocks = Array::new();
-        let mut rng = r.borrow_mut();
-        // A glyph that doesn't fit even in an empty box is an error rather
-        // than silently dropped.
-        tb.with_core(|core| {
-            while !to_place.is_empty() {
-                let (placed, rest) = core.fill_bounds_with(std::mem::take(&mut to_place), &mut *rng);
-                if placed.is_empty() {
-                    return Err(format!("place_all: {} glyph(s) don't fit in the text box even when it's empty", rest.len()).into());
-                }
-                blocks.push(Dynamic::from_array(glyphs(placed)));
-                to_place = rest;
-            }
-            Ok(blocks)
-        })
+        let blocks = tb.place_all("place_all", symbols("place_all", glyphs_in)?, &mut *r.borrow_mut())?;
+        Ok(blocks.into_iter().map(|block| Dynamic::from_array(glyphs(block))).collect())
     });
 
     let r = rng.clone();
-    engine.register_fn("scatter_notes", move |canvas: &mut Canvas, msgs: Array, font: Font, style: StrokeStyle, options: Map| -> RhaiResult<Canvas> {
-        splat(canvas, msgs, &font, style, options, &symdict, &r)
+    let book = symdict.clone();
+    engine.register_fn("scatter_notes", move |canvas: &mut Canvas, msgs: Array, width_range: Dynamic, height_range: Dynamic, settings: Map| -> RhaiResult<Canvas> {
+        splat(canvas, msgs, width_range, height_range, settings, &book, &r)
+    });
+    let r = rng.clone();
+    engine.register_fn("write_block", move |text: &str, at: Vec2, width: Dynamic, settings: Map| -> RhaiResult<Map> {
+        write_block(text, at, width, settings, &symdict, &r)
     });
 
 }
@@ -315,7 +420,7 @@ mod tests {
     /// Run `script` after some shared setup, returning its value.
     fn eval<T: Clone + 'static>(script: &str) -> T {
         let setup = r#"
-            let style = new_style(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
+            let style = new_style("black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
             let font = font("loche_upper");
             let text = "the quick brown fox jumps over the lazy dog and keeps on running ";
             text = text + text + text + text;
@@ -331,7 +436,7 @@ mod tests {
     fn fill_places_glyphs_inside_the_box_and_returns_the_rest() {
         let ok: bool = eval(r#"
             let glyphs = font.glyphs(text);
-            let tb = new_textbox(#{ center: vec2(0.0, 0.0), width: 100, height: 40, symbol_scale: 10.0 });
+            let tb = new_textbox(#{ center: vec2(0.0, 0.0), width: 100, height: 40, size: 10.0 });
             let res = tb.fill(glyphs);
             if res.placed.len() == 0 || res.unplaced.len() == 0 { throw "expected a partial fill"; }
             if res.placed.len() + res.unplaced.len() != glyphs.len() { throw "glyphs went missing"; }
@@ -348,7 +453,7 @@ mod tests {
     fn place_all_spreads_glyphs_over_boxes() {
         let ok: bool = eval(r#"
             let glyphs = font.glyphs(text);
-            let tb = new_textbox(#{ center: vec2(0.0, 0.0), width: 60, height: 30, symbol_scale: 10.0, layout: "words", jagged_edge: 0.5 });
+            let tb = new_textbox(#{ center: vec2(0.0, 0.0), width: 60, height: 30, size: 10.0, layout: "words", jagged: 0.5 });
             let blocks = tb.place_all(glyphs);
             let total = 0;
             for b in blocks { total += b.len(); }
@@ -356,7 +461,7 @@ mod tests {
         "#);
         assert!(ok);
         let err = fails(r#"
-            let tb = new_textbox(#{ center: vec2(0.0, 0.0), width: 5, height: 5, symbol_scale: 50.0 });
+            let tb = new_textbox(#{ center: vec2(0.0, 0.0), width: 5, height: 5, size: 50.0 });
             tb.place_all(font("loche_upper").glyphs("ab"));
         "#);
         assert!(err.contains("2 glyph(s) don't fit"), "{}", err);
@@ -366,8 +471,8 @@ mod tests {
     fn avoid_keeps_glyphs_off_a_canvas() {
         let counts: rhai::Array = eval(r#"
             let blot = new_canvas();
-            for i in 0..10 { blot.add_path(new_circle(vec2(0.0, 0.0), 4.0 * i), style); }
-            let opts = #{ center: vec2(0.0, 0.0), width: 100, height: 100, symbol_scale: 10.0 };
+            for i in 0..10 { blot.add(new_circle(vec2(0.0, 0.0), 4.0 * i), style); }
+            let opts = #{ center: vec2(0.0, 0.0), width: 100, height: 100, size: 10.0 };
             let free = new_textbox(opts).fill(font.glyphs(text)).placed;
             opts.avoid = blot;
             opts.clearance = 0.0;
@@ -392,7 +497,7 @@ mod tests {
                 m
             }
             let bar = new_line(vec2(-150.0, -100.0), vec2(-150.0, 100.0));
-            let opts = #{ center: vec2(0.0, 0.0), width: 400, height: 10, symbol_scale: 10.0, layout: "words", avoid: bar, clearance: 2.0 };
+            let opts = #{ center: vec2(0.0, 0.0), width: 400, height: 10, size: 10.0, layout: "words", avoid: bar, clearance: 2.0 };
             let whole = new_textbox(opts).fill(font.glyphs("abcdefghijklmnop")).placed;
             opts.split_words = true;
             let split = new_textbox(opts).fill(font.glyphs("abcdefghijklmnop")).placed;
@@ -412,21 +517,23 @@ mod tests {
     }
 
     const SPLAT_SETUP: &str = r#"
-        let style = new_style(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
+        let style = new_style("black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
         let base = new_canvas();
-        base.add_path(new_rectangle(vec2(0.0, 0.0), 800.0, 800.0), style);
-        base.add_path(new_circle(vec2(0.0, 0.0), 150.0), style);
+        base.add(new_rectangle(vec2(0.0, 0.0), 800.0, 800.0), style);
+        base.add(new_circle(vec2(0.0, 0.0), 150.0), style);
         let msgs = ["ash and oak", "a quiet note", "the last word"];
-        let opts = #{ symbol_scale: 20.0, width_range: [150, 250], height_range: [100, 200] };
+        let widths = [150, 250];
+        let heights = [100, 200];
+        let opts = #{ font: font("loche_upper"), style: style, size: 20.0 };
     "#;
 
     fn splat_glyph_positions(seed: i64) -> Vec<(f32, f32)> {
         let script = format!(r#"{}
             seed({});
-            let notes = base.scatter_notes(msgs, font("loche_upper"), style, opts);
+            let notes = base.scatter_notes(msgs, widths, heights, opts);
             let page = new_page();
-            page.add_canvas(notes);
-            journal_entry.add_page(page);
+            page.add(notes);
+            journal_entry.add(page);
         "#, SPLAT_SETUP, seed);
         let entry = engine().build_entry_str(&script).expect("script should run");
         entry.pages[0].canvases()[0].strokes.iter().map(|stroke| {
@@ -456,45 +563,46 @@ mod tests {
         let script = format!(r#"{}
             seed(5);
             opts.layout = "words";
-            let notes = base.scatter_notes(msgs, font("loche_upper"), style, opts);
+            let notes = base.scatter_notes(msgs, widths, heights, opts);
             let page = new_page();
-            page.add_canvas(notes);
-            journal_entry.add_page(page);
+            page.add(notes);
+            journal_entry.add(page);
         "#, SPLAT_SETUP);
         let entry = engine().build_entry_str(&script).expect("script should run");
         assert_eq!(entry.pages[0].canvases()[0].strokes.len(), 30);
-        let err = fails(&format!("{}\nopts.layout = \"zigzag\";\nbase.scatter_notes(msgs, font(\"loche_upper\"), style, opts);", SPLAT_SETUP));
+        let err = fails(&format!("{}\nopts.layout = \"zigzag\";\nbase.scatter_notes(msgs, widths, heights, opts);", SPLAT_SETUP));
         assert!(err.contains("scatter_notes: unknown layout 'zigzag'"), "{}", err);
     }
 
     #[test]
     fn splat_fails_when_a_message_cannot_fit() {
         let err = fails(&format!(r#"{}
-            opts.symbol_scale = 400.0;
+            opts.size = 400.0;
             opts.max_attempts = 5;
-            base.scatter_notes(msgs, font("loche_upper"), style, opts);
+            base.scatter_notes(msgs, widths, heights, opts);
         "#, SPLAT_SETUP));
         assert!(err.contains("scatter_notes: message 0 doesn't fit in 5 tries"), "{}", err);
     }
 
     #[test]
     fn splat_needs_something_drawn() {
-        let err = fails(&format!("{}\nnew_canvas().scatter_notes(msgs, font(\"loche_upper\"), style, opts);", SPLAT_SETUP));
+        let err = fails(&format!("{}\nnew_canvas().scatter_notes(msgs, widths, heights, opts);", SPLAT_SETUP));
         assert!(err.contains("scatter_notes: the canvas is empty"), "{}", err);
     }
 
     #[test]
     fn bad_splat_options_fail_at_their_line() {
         for (change, want) in [
-            ("opts.remove(\"width_range\");", "missing 'width_range'"),
-            ("opts.height_range = [300, 100];", "'height_range' should be [low, high]"),
+            ("widths = 3;", "'width_range' should be [low, high]"),
+            ("heights = [300, 100];", "'height_range' should be [low, high]"),
+            ("opts.remove(\"font\");", "missing 'font'"),
             ("opts.max_attempts = 0;", "'max_attempts' should be a whole number"),
             ("opts.scale_jitter = 1.5;", "'scale_jitter' must be in [0, 1)"),
             ("opts.colour = 1;", "unknown option 'colour'"),
             ("msgs.push(3);", "message 3 is a i64"),
         ] {
-            let err = fails(&format!("{}\n{}\nbase.scatter_notes(msgs, font(\"loche_upper\"), style, opts);", SPLAT_SETUP, change));
-            assert!(err.contains(want) && err.contains("line 10"), "{}: {}", want, err);
+            let err = fails(&format!("{}\n{}\nbase.scatter_notes(msgs, widths, heights, opts);", SPLAT_SETUP, change));
+            assert!(err.contains(want) && err.contains("line 12"), "{}: {}", want, err);
         }
     }
 
@@ -502,21 +610,21 @@ mod tests {
     fn bad_options_fail_at_their_line() {
         let c = "vec2(0.0, 0.0)";
         for (opts, want) in [
-            (format!("#{{ center: {}, width: 10, height: 10, symbol_scale: 2, colour: 1 }}", c), "unknown option 'colour'"),
-            (format!("#{{ center: {}, shape: new_circle({}, 5.0), symbol_scale: 2 }}", c, c), "either a 'shape' or a 'center'"),
-            ("#{ shape: 3, symbol_scale: 2 }".to_string(), "'shape' should be a path, got i64"),
-            (format!("#{{ shape: new_line({}, vec2(1.0, 1.0)), symbol_scale: 2 }}", c), "'shape' encloses nothing"),
-            (format!("#{{ center: {}, width: 10, height: 10, symbol_scale: 2, angle: \"up\" }}", c), "'angle'"),
-            ("#{ width: 10, height: 10, symbol_scale: 2 }".to_string(), "missing 'center'"),
-            (format!("#{{ center: {}, width: 0, height: 10, symbol_scale: 2 }}", c), "'width' must be positive"),
-            (format!("#{{ center: {}, width: 10, height: 10 }}", c), "missing 'symbol_scale'"),
-            (format!("#{{ center: {}, width: 10, height: 10, symbol_scale: 2, layout: \"zigzag\" }}", c), "unknown layout 'zigzag'"),
-            (format!("#{{ center: {}, width: 10, height: 10, symbol_scale: 2, clearance: 3 }}", c), "'clearance' needs 'avoid'"),
-            (format!("#{{ center: {}, width: 10, height: 10, symbol_scale: 2, avoid: new_canvas(), clearance: -3 }}", c), "'clearance' must be a finite number"),
-            (format!("#{{ center: {}, width: 10, height: 10, symbol_scale: 2, split_words: true }}", c), "'split_words' needs layout: \"words\""),
-            (format!("#{{ center: {}, width: 10, height: 10, symbol_scale: 2, layout: \"words\", split_padding: 1 }}", c), "'split_padding' needs 'split_words'"),
-            (format!("#{{ center: {}, width: 10, height: 10, symbol_scale: 2, layout: \"words\", split_words: 0 }}", c), "'split_words' should be true, false"),
-            (format!("#{{ center: {}, width: 10, height: 10, symbol_scale: 2, layout: \"words\", split_words: true, split_padding: -1 }}", c), "'split_padding' must be a finite number"),
+            (format!("#{{ center: {}, width: 10, height: 10, size: 2, colour: 1 }}", c), "unknown option 'colour'"),
+            (format!("#{{ center: {}, shape: new_circle({}, 5.0), size: 2 }}", c, c), "either a 'shape' or a 'center'"),
+            ("#{ shape: 3, size: 2 }".to_string(), "'shape' should be a path, got i64"),
+            (format!("#{{ shape: new_line({}, vec2(1.0, 1.0)), size: 2 }}", c), "'shape' encloses nothing"),
+            (format!("#{{ center: {}, width: 10, height: 10, size: 2, angle: \"up\" }}", c), "'angle'"),
+            ("#{ width: 10, height: 10, size: 2 }".to_string(), "missing 'center'"),
+            (format!("#{{ center: {}, width: 0, height: 10, size: 2 }}", c), "'width' must be positive"),
+            (format!("#{{ center: {}, width: 10, height: 10 }}", c), "missing 'size'"),
+            (format!("#{{ center: {}, width: 10, height: 10, size: 2, layout: \"zigzag\" }}", c), "unknown layout 'zigzag'"),
+            (format!("#{{ center: {}, width: 10, height: 10, size: 2, clearance: 3 }}", c), "'clearance' needs 'avoid'"),
+            (format!("#{{ center: {}, width: 10, height: 10, size: 2, avoid: new_canvas(), clearance: -3 }}", c), "'clearance' must be a finite number"),
+            (format!("#{{ center: {}, width: 10, height: 10, size: 2, split_words: true }}", c), "'split_words' needs layout: \"words\""),
+            (format!("#{{ center: {}, width: 10, height: 10, size: 2, layout: \"words\", split_padding: 1 }}", c), "'split_padding' needs 'split_words'"),
+            (format!("#{{ center: {}, width: 10, height: 10, size: 2, layout: \"words\", split_words: 0 }}", c), "'split_words' should be true, false"),
+            (format!("#{{ center: {}, width: 10, height: 10, size: 2, layout: \"words\", split_words: true, split_padding: -1 }}", c), "'split_padding' must be a finite number"),
         ] {
             let err = fails(&format!("let ok = 1;\nnew_textbox({});", opts));
             assert!(err.contains(want) && err.contains("line 2"), "{}: {}", want, err);
@@ -526,10 +634,10 @@ mod tests {
     fn a_rectangle_shape_fills_as_a_box_does() {
         let same: bool = eval(r#"
             let blot = new_canvas();
-            blot.add_path(new_circle(vec2(10.0, 5.0), 30.0), style);
+            blot.add(new_circle(vec2(10.0, 5.0), 30.0), style);
             let same = true;
             for layout in ["flat", "words"] {
-                let opts = #{ symbol_scale: 12.0, layout: layout, jagged_edge: 0.7, avoid: blot, spacing: 0.1 };
+                let opts = #{ size: 12.0, layout: layout, jagged: 0.7, avoid: blot, spacing: 0.1 };
                 let positions = [];
                 for shaped in [false, true] {
                     seed(3);
@@ -550,7 +658,7 @@ mod tests {
     #[test]
     fn a_shape_keeps_glyphs_inside_it_on_turned_lines() {
         let ok: bool = eval(r#"
-            let tb = new_textbox(#{ shape: new_circle(vec2(0.0, 0.0), 80.0), angle: PI() / 6.0, symbol_scale: 10.0 });
+            let tb = new_textbox(#{ shape: new_circle(vec2(0.0, 0.0), 80.0), angle: PI() / 6.0, size: 10.0 });
             let placed = tb.fill(font.glyphs(text)).placed;
             if placed.len() < 40 { throw "too few placed: " + placed.len(); }
             for g in placed {

@@ -3,10 +3,10 @@
 
 use parry2d::bounding_volume::Aabb;
 use parry2d::math::Vec2 as PVec;
-use rhai::{CustomType, Dynamic, Engine, EvalAltResult, Map, TypeBuilder};
+use rhai::{Dynamic, Engine, EvalAltResult, Map, NativeCallContext};
 use super::RhaiResult;
 
-use super::options::float;
+use super::options::{apply_props, float};
 use super::{check_finite, check_name, Canvas, Path, StrokeStyle, Vec2};
 use crate::journal::canvas::Canvas as JournalCanvas;
 use crate::journal::canvas::Frame;
@@ -26,9 +26,6 @@ impl CanvasData {
     pub fn label(&self, index: usize) -> String {
         self.name.clone().unwrap_or_else(|| index.to_string())
     }
-    pub fn add_stroke(&mut self, stroke: Stroke) {
-        self.strokes.push(stroke)
-    }
     pub fn add_path(&mut self, path: StrokePath, style: StrokeStyle) {
         self.strokes.push(Stroke { path, style, seed: None });
     }
@@ -42,10 +39,10 @@ impl CanvasData {
 /// The canvas functions scripts call. Like the path functions, transforms
 /// change the canvas and return it, so they chain.
 pub(super) fn register(engine: &mut Engine) {
-    engine.build_type::<Stroke>();
     engine.register_fn("bounds", bounds);
     engine.register_type_with_name::<Canvas>("Canvas")
         .register_fn("new_canvas", || Canvas::new(CanvasData::default()))
+        .register_fn("new_canvas", |ctx: NativeCallContext, options: Map| apply_props(&ctx, "new_canvas", Canvas::new(CanvasData::default()), options, &["name"]))
         .register_fn("copy", Canvas::copy)
         .register_get_set("name",
             |c: &mut Canvas| c.borrow().name.clone().map_or(Dynamic::UNIT, Dynamic::from),
@@ -53,25 +50,32 @@ pub(super) fn register(engine: &mut Engine) {
                 c.borrow_mut().name = Some(check_name("canvas.name", name)?);
                 Ok(())
             })
-        // Adding copies the stroke, so later changes to the path don't reach
-        // the canvas. Paths with non-finite points are refused (see
-        // `check_finite`).
-        .register_fn("add_stroke", |c: &mut Canvas, stroke: Stroke| -> Result<(), Box<EvalAltResult>> {
-            check_finite("add_stroke", &stroke.path)?;
-            c.borrow_mut().add_stroke(stroke);
-            Ok(())
-        })
-        .register_fn("add_path", |c: &mut Canvas, path: Path, style: StrokeStyle| -> Result<(), Box<EvalAltResult>> {
+        // canvas.add(...) copies what it adds, so later changes to a path
+        // don't reach the canvas, and returns the canvas. Paths with
+        // non-finite points are refused (see `check_finite`). Glyphs are
+        // added in glyphs.rs.
+        .register_fn("add", |c: &mut Canvas, path: Path, style: StrokeStyle| -> RhaiResult<Canvas> {
             let path = path.get();
-            check_finite("add_path", &path)?;
-            c.borrow_mut().add_path(path, style);
-            Ok(())
+            check_finite("canvas.add", &path)?;
+            Ok(c.update(|data| data.add_path(path, style)))
         })
-        .register_fn("add_canvas", |c: &mut Canvas, other: Canvas| {
-            // Copy first: `c.add_canvas(c)` shares one value.
+        .register_fn("add", |c: &mut Canvas, other: Canvas| -> Canvas {
+            // Copy first: `c.add(c)` shares one value.
             let strokes = other.borrow().strokes.clone();
-            c.borrow_mut().strokes.extend(strokes);
+            c.update(|data| data.strokes.extend(strokes))
         })
+        .register_fn("add", |c: &mut Canvas, canvases: rhai::Array| -> RhaiResult<Canvas> {
+            // An array of canvases, as fill_with_text gives.
+            let mut strokes = Vec::new();
+            for (i, item) in canvases.into_iter().enumerate() {
+                let type_name = item.type_name();
+                let other = item.try_cast::<Canvas>()
+                    .ok_or_else(|| format!("canvas.add: item {} is a {}, not a canvas (glyphs need a style: canvas.add(glyphs, style))", i, type_name))?;
+                strokes.extend(other.borrow().strokes.iter().cloned());
+            }
+            Ok(c.update(|data| data.strokes.extend(strokes)))
+        })
+        .register_fn("add", |c: &mut Canvas, parts: Map, styles: Map| ->RhaiResult<Canvas> { add_parts(c, parts, styles) })
         .register_fn("translate_by", |c: &mut Canvas, v: Vec2| -> Canvas {
             let v = v.into();
             c.update(|data| data.transform(|p| p.translate_by(v)))
@@ -114,32 +118,38 @@ impl From<&Canvas> for JournalCanvas {
     }
 }
 
-#[derive(Debug, Clone, CustomType)]
-#[rhai_type(extra = Self::build_extra)]
+/// A path on a canvas, with the style it's drawn in.
+#[derive(Debug, Clone)]
 pub struct Stroke {
-    #[rhai_type(skip)]
     pub(super) path: StrokePath,
     pub(super) style: StrokeStyle,
     /// Its texture's seed, kept from the whole page in a tile (see
     /// `ColoredStroke::seed`).
-    #[rhai_type(skip)]
     pub(super) seed: Option<u32>,
 }
 
-impl Stroke {
-    /// `new_stroke(path, style)`, with a copy of the path.
-    pub fn new(path: Path, style: StrokeStyle) -> Self {
-        Self {
-            path: path.get(),
-            style,
-            seed: None,
-        }
+/// `canvas.add(parts, styles)`: each path of `parts` (as `art::bramble` or
+/// `art::moon` give them) in the style `styles` has under its name, or
+/// not at all without one; every style must name a part. In the parts'
+/// order (rhai maps are sorted), so the drawing is the same every run.
+fn add_parts(canvas: &mut Canvas, parts: Map, styles: Map) -> RhaiResult<Canvas> {
+    const CALLER: &str = "canvas.add";
+    if let Some(name) = styles.keys().find(|k| !parts.contains_key(*k)) {
+        let names: Vec<&str> = parts.keys().map(|k| k.as_str()).collect();
+        return Err(format!("{}: there's no part '{}' to style; parts: {}", CALLER, name, names.join(", ")).into());
     }
-    fn build_extra(builder: &mut TypeBuilder<Self>) {
-        builder
-            .with_fn("new_stroke", Self::new)
-        ;
+    let mut added = Vec::new();
+    for (name, part) in &parts {
+        let Some(style) = styles.get(name) else { continue };
+        let style = style.clone().try_cast::<StrokeStyle>()
+            .ok_or_else(|| format!("{}: the style for '{}' should be a style", CALLER, name))?;
+        let type_name = part.type_name();
+        let path = part.clone().try_cast::<Path>()
+            .ok_or_else(|| format!("{}: part '{}' is a {}, not a path", CALLER, name, type_name))?.get();
+        check_finite(CALLER, &path)?;
+        added.push((path, style));
     }
+    Ok(canvas.update(|data| for (path, style) in added { data.add_path(path, style) }))
 }
 
 fn vec(v: PVec) -> Dynamic {
@@ -180,7 +190,7 @@ mod tests {
     }
 
     fn eval<T: Clone + 'static>(script: &str) -> T {
-        let setup = r#"let style = new_style(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));"#;
+        let setup = r#"let style = new_style("black", new_brush("Ink Pen", 0.3, 0.7, 1.0));"#;
         engine().engine.eval::<T>(&format!("{}\n{}", setup, script)).expect("script should evaluate")
     }
 
@@ -192,7 +202,7 @@ mod tests {
     fn bounds_include_stroke_width() {
         let ok: bool = eval(r#"
             let c = new_canvas();
-            c.add_path(new_line(vec2(0.0, 0.0), vec2(10.0, 20.0)), style);
+            c.add(new_line(vec2(0.0, 0.0), vec2(10.0, 20.0)), style);
             let b = c.bounds();
             b.min.x == -1.0 && b.min.y == -1.0 && b.max.x == 11.0 && b.max.y == 21.0
                 && b.center.x == 5.0 && b.center.y == 10.0 && b.width == 12.0 && b.height == 22.0

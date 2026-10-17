@@ -10,8 +10,8 @@ fn page_size() {
 }
 
 fn page(n, info) {
-	column(#{ padding: [90, 200, 60, 200] }, [
+	column([
 		figure("figure", #{ grow: 1 }),
 		flow("caption", #{ align: "center", margin: [30, 0, 0, 0] }),
-	])
+	], #{ padding: [90, 200, 60, 200] })
 }

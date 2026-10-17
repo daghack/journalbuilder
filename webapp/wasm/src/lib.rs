@@ -173,7 +173,7 @@ fn run_with(source: &str, fonts: Rc<FontBook>) -> (Result<Entry, ScriptError>, E
     });
     if let Ok(entry) = &entry {
         if entry.page_count() == 0 {
-            warnings.push("the script made no pages; add them with journal_entry.add_page(page)".to_string());
+            warnings.push("the script made no pages; add them with journal_entry.add(page)".to_string());
         }
         let empty = entry.empty_canvases();
         if !empty.is_empty() {

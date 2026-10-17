@@ -1,8 +1,8 @@
 //! The journal entry and its pages, as rhai scripts build them.
 
-use rhai::{CustomType, Dynamic, Engine, EvalAltResult, Map, TypeBuilder};
+use rhai::{CustomType, Dynamic, Engine, EvalAltResult, Map, NativeCallContext, TypeBuilder};
 
-use super::options::{check_keys, number};
+use super::options::{apply_props, check_keys, number};
 use super::{Canvas, CanvasData, RhaiResult, Vec2};
 use parry2d::bounding_volume::Aabb;
 use parry2d::math::Vec2 as PVec;
@@ -21,25 +21,25 @@ impl Entry {
     fn add_page(&mut self, page: Page) -> Result<(), Box<EvalAltResult>> {
         let label = page.label(self.pages.len());
         if self.pages.iter().enumerate().any(|(i, p)| p.label(i) == label) {
-            return Err(format!("add_page: the entry already has a page named '{}'", label).into());
+            return Err(format!("journal_entry.add: the entry already has a page named '{}'", label).into());
         }
         self.pages.push(page);
         Ok(())
     }
-    /// `journal_entry.add_pages(pages)`, such as a split page's tiles.
+    /// `journal_entry.add(pages)`, such as a split page's tiles.
     fn add_pages(&mut self, pages: rhai::Array) -> Result<(), Box<EvalAltResult>> {
         for (i, page) in pages.into_iter().enumerate() {
             let type_name = page.type_name();
             let page = page.try_cast::<Page>()
-                .ok_or_else(|| format!("add_pages: item {} is a {}, not a page", i, type_name))?;
+                .ok_or_else(|| format!("journal_entry.add: item {} is a {}, not a page", i, type_name))?;
             self.add_page(page)?;
         }
         Ok(())
     }
     fn build_extra(builder: &mut TypeBuilder<Self>) {
         builder
-            .with_fn("add_page", Self::add_page)
-            .with_fn("add_pages", Self::add_pages);
+            .with_fn("add", Self::add_page)
+            .with_fn("add", Self::add_pages);
     }
     pub fn page_count(&self) -> usize {
         self.pages.len()
@@ -88,6 +88,9 @@ pub(super) fn check_name(caller: &str, name: Dynamic) -> Result<String, Box<Eval
 }
 
 
+/// What `new_page` takes, as the page's properties.
+const PAGE_PROPS: [&str; 4] = ["name", "size", "margin", "svg_style"];
+
 const SVG_STYLE_KEYS: [&str; 4] = ["roughness", "point_sample_distance", "trail_off_percent", "noise_amplitude"];
 
 #[derive(Debug, Clone, CustomType)]
@@ -125,15 +128,16 @@ impl Default for Page {
 }
 
 impl Page {
-    /// `page.add_canvas(canvas)` adds a copy of the canvas as it is now.
-    pub fn add_canvas(&mut self, canvas: Canvas) -> Result<(), Box<EvalAltResult>> {
+    /// `page.add(canvas)` adds a copy of the canvas as it is now, and
+    /// returns the page, so `new_page(#{ ... }).add(canvas)` chains.
+    pub fn add_canvas(&mut self, canvas: Canvas) -> Result<Page, Box<EvalAltResult>> {
         let canvas = canvas.get();
         let label = canvas.label(self.canvases.len());
         if self.canvases.iter().enumerate().any(|(i, c)| c.label(i) == label) {
-            return Err(format!("add_canvas: the page already has a canvas named '{}'", label).into());
+            return Err(format!("page.add: the page already has a canvas named '{}'", label).into());
         }
         self.canvases.push(canvas);
-        Ok(())
+        Ok(self.clone())
     }
     pub fn canvases(&self) -> &Vec<CanvasData> {
         &self.canvases
@@ -270,14 +274,6 @@ impl Page {
         });
         Ok(())
     }
-    /// `page.split(columns, rows)`: the page cut into a grid of tiles, each
-    /// a page of its own, row by row. See `split_with`.
-    fn split(&mut self, columns: i64, rows: i64) -> Result<rhai::Array, Box<EvalAltResult>> {
-        let mut options = Map::new();
-        options.insert("columns".into(), Dynamic::from(columns));
-        options.insert("rows".into(), Dynamic::from(rows));
-        self.split_with(options)
-    }
     /// `page.split(#{ columns, rows })`, or `#{ tile_width, tile_height }`
     /// for tiles of a given size (in canvas units; the grid grows evenly
     /// round the page to a whole number of them), or a mix: one option
@@ -396,13 +392,14 @@ impl Page {
     }
     fn build_extra(builder: &mut TypeBuilder<Self>) {
         builder
-            .with_fn("add_canvas", Self::add_canvas)
+            .with_fn("add", Self::add_canvas)
             .with_fn("new_page", Self::default)
+            .with_fn("new_page", |ctx: NativeCallContext, options: Map| apply_props(&ctx, "new_page", Page::default(), options, &PAGE_PROPS))
             .with_get_set("name", Self::get_name, Self::set_name)
             .with_get_set("svg_style", Self::get_svg_style, Self::set_svg_style)
             .with_get_set("margin", Self::get_margin, Self::set_margin)
             .with_get_set("size", Self::get_size, Self::set_size)
-            .with_fn("split", Self::split)
+            .with_fn("split", |page: &mut Page| page.split_with(Map::new()))
             .with_fn("split", Self::split_with)
             .with_get("tile", Self::get_tile)
         ;

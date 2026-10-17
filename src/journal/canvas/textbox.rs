@@ -25,7 +25,7 @@ pub struct TextBoxOptions<'a> {
     /// own clearances it keeps.
     pub avoid: Option<&'a AvoidanceTree>,
     pub padding: f32,
-    /// Extra space between glyphs, as a fraction of `symbol_scale`.
+    /// Extra space between glyphs, as a fraction of `size`.
     pub spacing: f32,
 }
 

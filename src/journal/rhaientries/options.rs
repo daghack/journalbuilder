@@ -56,3 +56,26 @@ pub(super) fn range(caller: &str, options: &Map, key: &str) -> RhaiResult<(f32, 
     }
     Ok((low, high))
 }
+
+/// A constructor's options: each key set on `value` exactly as
+/// `value.KEY = ...` sets it, through the property's registered setter, so
+/// constructors take every settable property with the same checks and
+/// errors. `props` are the settable properties' names; others are errors.
+pub(super) fn apply_props<T: Clone + 'static>(ctx: &rhai::NativeCallContext, caller: &str, value: T, options: Map, props: &[&str]) -> RhaiResult<T> {
+    check_keys(caller, &options, props)?;
+    let mut target = Dynamic::from(value);
+    for (key, mut v) in options {
+        let _ = ctx.call_native_fn_raw(format!("set${}", key), true, &mut [&mut target, &mut v])
+            .map_err(|err| -> Box<EvalAltResult> { format!("{}: {}", caller, unwrap_runtime(&err)).into() })?;
+    }
+    Ok(target.cast::<T>())
+}
+
+/// The message of a runtime error, without rhai's position.
+pub(super) fn unwrap_runtime(err: &EvalAltResult) -> String {
+    match err {
+        EvalAltResult::ErrorRuntime(message, _) => message.to_string(),
+        EvalAltResult::ErrorInFunctionCall(_, _, inner, _) => unwrap_runtime(inner),
+        other => other.to_string(),
+    }
+}

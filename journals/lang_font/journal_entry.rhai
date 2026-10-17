@@ -4,22 +4,20 @@
 // The book has no capital H, J, K, Q, U, X, Y or Z; those are drawn in its
 // hand rather than traced.
 
-let font = font("lang");
 // Glyphs are 0.8 units to the x-height and drawn at half their size, so at
-// size 80 the x-height is 32 canvas units.
-let nib = new_brush("Calligraphy", 0.4, 0.7, 2.3);
-nib.pressure_profile = "constant";
-let ink = new_style(1.3, "rgba(25, 20, 15, 0.92)", nib);
-
-// One line of text from `at` on its baseline. The book leaves about 0.3
+// size 80 the x-height is 32 canvas units. The book leaves about 0.3
 // x-heights between letters: 0.12 of the font size.
-fn write_line(text, at, size, style, font) {
-	let line = new_canvas();
-	// Glyphs are placed on the line through the middle of their x-height.
-	let y = at.y - size * 0.4 / 2.0;
-	let path = new_line(vec2(at.x, y), vec2(at.x + 4000.0, y));
-	for c in path.fill_with_text(text, font, size, style) { line.add_canvas(c); }
-	line
+let size = 80.0;
+let hand = #{
+	font: font("lang"), size: size,
+	style: new_style("rgba(25, 20, 15, 0.92)", new_brush("Calligraphy", 0.4, 0.7, 2.3, #{ pressure_profile: "constant" }), #{ width: 1.3 }),
+};
+let leading = size * 0.4 * 2.4;   // the book's baselines are 2.4 x-heights apart
+
+// One line of text from `at` on its baseline: glyphs are placed on the line
+// through the middle of their x-height.
+fn on_baseline(text, at, hand) {
+	write_line(text, at - vec2(0.0, hand.size * 0.4 / 2.0), hand)
 }
 
 let passage = [
@@ -33,24 +31,16 @@ let passage = [
 	"practitioners of magic access a higher",
 	"power and the true nature of Form.",
 ];
-let size = 80.0;
-let leading = size * 0.4 * 2.4;   // the book's baselines are 2.4 x-heights apart
 let page_text = new_canvas();
 for (text, n) in passage {
 	if text != "" {
-		page_text.add_canvas(write_line(text, vec2(0.0, n * leading), size, ink, font));
+		page_text.add(on_baseline(text, vec2(0.0, n * leading), hand));
 	}
 }
-let p1 = new_page();
-p1.name = "passage";
-p1.add_canvas(page_text);
-journal_entry.add_page(p1);
+journal_entry.add(new_page(#{ name: "passage" }).add(page_text));
 
-let alphabet = new_canvas();
-alphabet.add_canvas(write_line("A B C D E F G H I J K L M N O P Q R S T U V W X Y Z", vec2(0.0, 0.0), size, ink, font));
-alphabet.add_canvas(write_line("a b c d e f g h i k l m n o p q r s t u v w x y z", vec2(0.0, leading), size, ink, font));
-alphabet.add_canvas(write_line("the quick brown fox jumps over the lazy dog", vec2(0.0, leading * 2.0), size, ink, font));
-let p2 = new_page();
-p2.name = "alphabet";
-p2.add_canvas(alphabet);
-journal_entry.add_page(p2);
+let alphabet = new_canvas()
+	.add(on_baseline("A B C D E F G H I J K L M N O P Q R S T U V W X Y Z", vec2(0.0, 0.0), hand))
+	.add(on_baseline("a b c d e f g h i k l m n o p q r s t u v w x y z", vec2(0.0, leading), hand))
+	.add(on_baseline("the quick brown fox jumps over the lazy dog", vec2(0.0, leading * 2.0), hand));
+journal_entry.add(new_page(#{ name: "alphabet" }).add(alphabet));

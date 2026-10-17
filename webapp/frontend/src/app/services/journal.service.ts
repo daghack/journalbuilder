@@ -9,7 +9,7 @@ import { WorkspaceService } from './workspace.service';
 const DEBOUNCE_MS = 250;
 const DRAFT_KEY = 'journal-editor.draft';
 /** A new journal's script: one blank page. */
-const BLANK_JOURNAL = 'let page = new_page();\njournal_entry.add_page(page);\n';
+const BLANK_JOURNAL = 'let page = new_page();\njournal_entry.add(page);\n';
 
 /** A page as the editor shows it. */
 export interface Page extends PageView {

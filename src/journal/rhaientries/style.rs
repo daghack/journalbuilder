@@ -3,6 +3,8 @@
 //! ```rhai
 //! let pen = new_brush("Ink Pen", 0.4, 0.8, 2.0);    // name, min and max pressure, size
 //! pen.pressure_profile = "taper";                   // or "ramp" (the default) or "constant"
+//! // Or as the brush is made: options set any property, checked alike.
+//! let pen = new_brush("Ink Pen", 0.4, 0.8, 2.0, #{ pressure_profile: "taper", pool: 0.4 });
 //!
 //! // Ink pooling: strokes heavier toward the bottom of each path (each
 //! // glyph, for text), here 40% heavier at the very bottom, rising over the
@@ -15,7 +17,8 @@
 //! pen.pressure_variation = 0.2;  // default 0
 //! pen.variation_length = 8.0;    // default 12
 //!
-//! let ink = new_style(1.0, "#253443", pen);          // width, colour (or gradient), brush
+//! let ink = new_style("#253443", pen);          // colour (or gradient), brush; width 1
+//! let heavy = new_style("#253443", pen, #{ width: 1.5, passes: 2 });
 //!
 //! // Strokes gone over again and again, as a hand going over its writing:
 //! // each stroke drawn in `passes` passes, each pass's ends straying by up
@@ -30,10 +33,10 @@
 
 use rand::rngs::StdRng;
 use rand::SeedableRng;
-use rhai::{CustomType, Dynamic, Engine, EvalAltResult, ImmutableString, TypeBuilder};
+use rhai::{CustomType, Dynamic, Engine, EvalAltResult, ImmutableString, Map, NativeCallContext, TypeBuilder};
 
 use super::gradient;
-use super::options::float;
+use super::options::{apply_props, float};
 use super::RhaiResult;
 use crate::journal::canvas::{Brush, PressureProfile, StrokeColor};
 use crate::journal::canvas::StrokeStyle as JournalStrokeStyle;
@@ -42,7 +45,8 @@ use crate::journal::paths::StrokePath;
 #[derive(Debug, Default, Clone, CustomType)]
 #[rhai_type(extra = Self::build_extra)]
 pub struct BrushSettings {
-    pub(super) brush_style: ImmutableString,
+    /// The Darkly brush's name (`brush.name`).
+    pub(super) name: ImmutableString,
     #[rhai_type(skip)]
     pub(super) min_pressure: f64,
     #[rhai_type(skip)]
@@ -66,7 +70,7 @@ impl BrushSettings {
     /// name against Darkly's brush library.
     pub fn new_brush(brush_style: &str, min_pressure: f64, max_pressure: f64, size: f64) -> Self {
         Self {
-            brush_style: brush_style.into(),
+            name: brush_style.into(),
             min_pressure,
             max_pressure,
             size,
@@ -142,7 +146,7 @@ impl BrushSettings {
 impl From<BrushSettings> for Brush {
     fn from(bs: BrushSettings) -> Brush {
         Brush {
-            name: bs.brush_style.to_string(),
+            name: bs.name.to_string(),
             size: bs.size as f32,
             min_pressure: bs.min_pressure as f32,
             max_pressure: bs.max_pressure as f32,
@@ -187,9 +191,9 @@ impl From<StrokeStyle> for JournalStrokeStyle {
 }
 
 impl StrokeStyle {
-    /// `new_style(width, color, brush)`.
+    /// `new_style(color, brush[, #{ width, passes, jitter }])`.
     ///
-    /// `width` means different things in the two outputs:
+    /// `width` (1 unless given) means different things in the two outputs:
     /// - Darkly (the default render): it multiplies the brush's pressure,
     ///   so pressure runs from `width * min_pressure` to
     ///   `width * max_pressure`. The brush's `size` sets how wide its marks
@@ -199,9 +203,9 @@ impl StrokeStyle {
     /// - SVG (`--svg`): it's the stroke's width in canvas units.
     ///
     /// `color` is a CSS colour string, or a gradient (see gradient.rs).
-    pub fn new(width: Dynamic, color: Dynamic, brush: BrushSettings) -> Result<Self, Box<EvalAltResult>> {
+    pub fn new(color: Dynamic, brush: BrushSettings) -> Result<Self, Box<EvalAltResult>> {
         Ok(Self {
-            width: float("new_style", "the width", &width)?,
+            width: 1.0,
             color: gradient::colour_or_gradient("new_style", color)?,
             brush,
             passes: 1,
@@ -232,6 +236,9 @@ impl StrokeStyle {
     fn build_extra(builder: &mut TypeBuilder<Self>) {
         builder
             .with_fn("new_style", Self::new)
+            .with_fn("new_style", |ctx: NativeCallContext, color: Dynamic, brush: BrushSettings, options: Map| -> RhaiResult<Self> {
+                apply_props(&ctx, "new_style", Self::new(color, brush)?, options, &["width", "passes", "jitter"])
+            })
             .with_get_set("width", |s: &mut Self| Dynamic::from(s.width), |s: &mut Self, width: Dynamic| -> RhaiResult<()> {
                 s.width = float("style.width", "the width", &width)?;
                 Ok(())
@@ -271,7 +278,7 @@ pub(super) fn register(engine: &mut Engine) {
         names.into_iter().map(Dynamic::from).collect()
     };
     engine.register_fn("brush_names", move || listed.clone());
-    engine.register_fn("new_brush", move |name: &str, min_pressure: Dynamic, max_pressure: Dynamic, size: Dynamic| -> RhaiResult<BrushSettings> {
+    let new_brush = move |name: &str, min_pressure: Dynamic, max_pressure: Dynamic, size: Dynamic| -> RhaiResult<BrushSettings> {
         const CALLER: &str = "new_brush";
         if !brush_names.iter().any(|known| known == name) {
             return Err(format!("{}: unknown brush '{}'; available: {}", CALLER, name, brush_names.join(", ")).into());
@@ -279,6 +286,12 @@ pub(super) fn register(engine: &mut Engine) {
         let brush = BrushSettings::new_brush(name, float(CALLER, "min_pressure", &min_pressure)?, float(CALLER, "max_pressure", &max_pressure)?, float(CALLER, "size", &size)?);
         brush.check(CALLER)?;
         Ok(brush)
+    };
+    let brush = new_brush.clone();
+    engine.register_fn("new_brush", brush);
+    engine.register_fn("new_brush", move |ctx: NativeCallContext, name: &str, min_pressure: Dynamic, max_pressure: Dynamic, size: Dynamic, options: Map| -> RhaiResult<BrushSettings> {
+        let brush = new_brush(name, min_pressure, max_pressure, size)?;
+        apply_props(&ctx, "new_brush", brush, options, &["pressure_profile", "pressure_variation", "variation_length", "pool", "pool_depth"])
     });
     engine
         .build_type::<BrushSettings>()

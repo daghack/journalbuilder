@@ -32,18 +32,18 @@ fn page(n, info) {
 			middle.push(flow(name, #{ align: "center", margin: [0, 0, 24, 0] }));
 		}
 	}
-	let inside = column(#{ grow: 1, justify: "center", padding: [30, 60], border: "frame" }, middle);
+	let inside = column(middle, #{ grow: 1, justify: "center", padding: [30, 60], border: "frame" });
 	let framed = [
 		band("border", #{ height: 70, shrink: 0 }),
-		row(#{ grow: 1, padding: [16, 0] }, [
+		row([
 			band("border", #{ width: 70, shrink: 0 }),
-			column(#{ grow: 1, padding: [0, 16] }, [inside]),
+			column([inside], #{ grow: 1, padding: [0, 16] }),
 			band("border", #{ width: 70, shrink: 0 }),
-		]),
+		], #{ grow: 1, padding: [16, 0] }),
 		band("border", #{ height: 70, shrink: 0 }),
 	];
 	if info.art.contains("corner") {
 		framed += [corner(true, true), corner(true, false), corner(false, true), corner(false, false)];
 	}
-	column(#{ padding: [70, 150] }, [column(#{ grow: 1 }, framed)])
+	column([column(framed, #{ grow: 1 })], #{ padding: [70, 150] })
 }

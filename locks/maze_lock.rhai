@@ -25,7 +25,7 @@ fn lock(o, i) {
 	while 2 * side * side - 1 < text.len() {
 		side += 1;
 	}
-	let maze = new_maze(seed_of(i.random_seed), side, side, o.strategy);
+	let maze = new_maze(side, side, #{ seed: seed_of(i.random_seed), strategy: o.strategy });
 	maze.fill(text);
 	#{ generated_maze: maze, random_seed: i.random_seed, text_length: text.len() }
 }

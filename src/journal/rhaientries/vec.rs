@@ -201,7 +201,7 @@ impl Vec2 {
     }
 }
 
-/// The coordinates of a vec2, vec3 or vec4 (what `distribute_points_*`
+/// The coordinates of a vec2, vec3 or vec4 (what `distribute_points`
 /// gives and `spanning_tree` takes).
 pub(super) fn coordinates(caller: &str, v: &Dynamic) -> RhaiResult<Vec<f64>> {
     if let Some(v) = v.read_lock::<Vec2>() {

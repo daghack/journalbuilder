@@ -503,10 +503,10 @@ mod tests {
     /// role's settings.
     fn typeset(body: &str, role: &str, setup: &str) -> Result<Entry, String> {
         engine().build_entry_str(&format!(r#"
-            let ink = new_style(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
+            let ink = new_style("black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
             {}
-            let one = new_layout("one", |n, info| column(#{{ padding: 20 }}, [flow("body", #{{ grow: 1 }})]));
-            journal_entry.add_pages(one.typeset(#{{
+            let one = new_layout("one", |n, info| column([flow("body", #{{ grow: 1 }})], #{{ padding: 20 }}));
+            journal_entry.add(one.typeset(#{{
                 width: 600, height: 400,
                 flows: #{{ body: {} }},
                 roles: #{{ body: #{{ font: font("plain"), style: ink, size: 20 {} }} }},
@@ -564,9 +564,9 @@ mod tests {
         // Three words underlined, the line too narrow for all three: one
         // run on each line, under the words, not past them.
         let entry = engine().build_entry_str(r#"
-            let ink = new_style(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
-            let one = new_layout("one", |n, info| column(#{ padding: 20 }, [flow("body", #{ grow: 1 })]));
-            journal_entry.add_pages(one.typeset(#{
+            let ink = new_style("black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
+            let one = new_layout("one", |n, info| column([flow("body", #{ grow: 1 })], #{ padding: 20 }));
+            journal_entry.add(one.typeset(#{
                 width: 160, height: 400,
                 flows: #{ body: markdown("[lorem ipsum dolor]{underline: {color: red}} sit") },
                 roles: #{ body: #{ font: font("plain"), style: ink, size: 20 } },
@@ -613,12 +613,12 @@ mod tests {
         // A post through the line: the words split round it, and so does
         // their underline.
         let entry = engine().build_entry_str(r#"
-            let ink = new_style(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
-            let page = |n, info| column(#{ padding: 20 }, [
+            let ink = new_style("black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
+            let page = |n, info| column([
                 figure("post", #{ position: "absolute", top: 0, left: 150, width: 10, height: 300 }),
                 flow("body", #{ grow: 1, split_words: true }),
-            ]);
-            journal_entry.add_pages(new_layout("posted", page).typeset(#{
+            ], #{ padding: 20 });
+            journal_entry.add(new_layout("posted", page).typeset(#{
                 width: 600, height: 300,
                 flows: #{ body: markdown("[abcdefghijklmnopqrstuvwxyz]{underline: {color: red}}") },
                 roles: #{ body: #{ font: font("plain"), style: ink, size: 20 }, post: #{ style: ink } },

@@ -22,16 +22,13 @@ const GREEN = "#3d6b2a";
 const BARK = "#6b4423";
 
 const PEN = new_brush("Ink Pen", 0.4, 0.8, 1.6);
-const TEXT = new_style(1.0, INK, PEN);
-const RED_TEXT = new_style(1.0, RED, PEN);
-const CAPTION = new_style(1.0, RED, new_brush("Ink Pen", 0.3, 0.7, 1.2));
-const LINE = new_style(1.0, INK, new_brush("Ink Pen", 0.3, 0.7, 2.0));
-let nib = new_brush("Calligraphy", 0.4, 0.8, 1.5);
-nib.pressure_profile = "constant";
-const HEADING = new_style(1.2, RED, nib);
+const TEXT = new_style(INK, PEN);
+const RED_TEXT = new_style(RED, PEN);
+const CAPTION = new_style(RED, new_brush("Ink Pen", 0.3, 0.7, 1.2));
+const LINE = new_style(INK, new_brush("Ink Pen", 0.3, 0.7, 2.0));
+const HEADING = new_style(RED, new_brush("Calligraphy", 0.4, 0.8, 1.5, #{ pressure_profile: "constant" }), #{ width: 1.2 });
 // Loche's own hand, for the asides.
-let quill = new_brush("Calligraphy", 0.25, 0.6, 1.4);
-const HAND = new_style(1.0, RED, quill);
+const HAND = new_style(RED, new_brush("Calligraphy", 0.25, 0.6, 1.4));
 
 const PLAIN = font("plain");
 const LOCHE = font("loche_upper");
@@ -81,29 +78,18 @@ fn booklet_page(n, info) {
 	if info.art.contains("figure") {
 		parts.push(figure("figure", #{ grow: 1, margin: [20, 0, 0, 0] }));
 	}
-	column(#{ padding: [55, 100, 50, 100], gap: 6 }, [
+	column([
 		flow("000_head", #{ role: "head", height: 70 }),
 		rule(#{ role: "headrule", height: 10 }),
-		column(#{ grow: 1, gap: 8, padding: [30, 0, 0, 0] }, parts),
+		column(parts, #{ grow: 1, gap: 8, padding: [30, 0, 0, 0] }),
 		flow("999_folio", #{ role: "folio", height: 30, align: "center" }),
-	])
+	], #{ padding: [55, 100, 50, 100], gap: 6 })
 }
 
-let book = #{ pages: [], contents: [] };
+let book = new_book();
 
 fn padded(n) {
 	if n < 10 { `0${n}` } else { `${n}` }
-}
-
-fn bind_page(section, page) {
-	let number = this.pages.len() + 1;
-	let slug = section;
-	slug.replace(" ", "_");
-	page.name = `${padded(number)}_${slug}`;
-	this.pages.push(page);
-	if this.contents.len() == 0 || this.contents[this.contents.len() - 1][0] != section {
-		this.contents.push([section, number]);
-	}
 }
 
 // A page of entries, each a list of [role, text], its text scaled by `scale`.
@@ -116,7 +102,7 @@ fn entries(section, list, art, scale) {
 	for name in roles.keys() {
 		if roles[name].contains("size") && name != "head" && name != "folio" { roles[name].size *= scale; }
 	}
-	let flows = #{ "000_head": section, "999_folio": `${this.pages.len() + 1}` };
+	let flows = #{ "000_head": section, "999_folio": `${this.next}` };
 	for (parts, e) in list {
 		for (part, i) in parts {
 			flows[`${e + 1}${padded(i)}_${part[0]}`] = part[1];
@@ -125,22 +111,18 @@ fn entries(section, list, art, scale) {
 	let pages = new_layout("booklet", Fn("booklet_page")).typeset(#{
 		width: global::W, height: global::H, flows: flows, roles: roles, art: art, max_pages: 1,
 	});
-	this.bind_page(section, pages[0]);
+	this.add(section, pages[0]);
 }
 
 // ---- drawings ----
 
 // The eye of Saqir: an eye in a ring of short rays.
 fn eye_in(b) {
-	let c = new_canvas();
 	let r = b.height.min(b.width) * 0.4;
-	let eye = font("symbols").glyph("basic_eye").copy();
-	eye.scale = r * 1.2;
-	eye.position = b.center;
-	c.add_glyph(eye, global::HEADING);
+	let c = new_canvas().add(font("symbols").glyph("basic_eye", #{ scale: r * 1.2, position: b.center }), global::HEADING);
 	for i in 0..16 {
 		let d = vec2(0, -1).rotated(i * PI() / 8.0);
-		c.add_path(new_line(b.center + d * (r * 1.05), b.center + d * (r * (if i % 2 == 0 { 1.35 } else { 1.2 }))), global::CAPTION);
+		c.add(new_line(b.center + d * (r * 1.05), b.center + d * (r * (if i % 2 == 0 { 1.35 } else { 1.2 }))), global::CAPTION);
 	}
 	c
 }
@@ -257,7 +239,7 @@ book.entries("at a glance", [
 	],
 ], #{});
 
-journal_entry.add_pages(book.pages);
+journal_entry.add(book.pages);
 
 if missing_glyphs().len() > 0 {
 	warn("characters with no glyph: " + missing_glyphs());

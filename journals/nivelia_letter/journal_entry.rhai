@@ -7,26 +7,18 @@
 // X and Z; the font falls back to loche_upper for the others, its glyphs
 // drawn to loche_upper's baseline and her ascenders as tall as its capitals.
 
-let font = font("nivelia");
 // Glyphs are 1.08 units to the x-height on a baseline at 0.81 (loche_upper's),
 // and drawn at half their size, so at size 60 the x-height is 32 canvas
 // units.
-let pen = new_brush("Ink Pen", 0.6, 0.8, 2.0);
-let ink = new_style(1.0, "rgba(30, 26, 24, 0.92)", pen);
-
-// One line of text from `at` on its baseline.
-fn write_line(text, at, size, style, font) {
-	let line = new_canvas();
-	// Glyphs are placed with their origin on the line, the baseline 0.81
-	// units below it.
-	let y = at.y - size * 0.81 / 2.0;
-	let path = new_line(vec2(at.x, y), vec2(at.x + 4000.0, y));
-	for c in path.fill_with_text(text, font, size, style) { line.add_canvas(c); }
-	line
-}
-
 let size = 60.0;
 let xh = size * 1.08 / 2.0;
+let hand = #{ font: font("nivelia"), size: size, style: new_style("rgba(30, 26, 24, 0.92)", new_brush("Ink Pen", 0.6, 0.8, 2.0)) };
+
+// One line of text from `at` on its baseline: glyphs are placed with their
+// origin on the line, the baseline 0.81 units below it.
+fn on_baseline(text, at, hand) {
+	write_line(text, at - vec2(0.0, hand.size * 0.81 / 2.0), hand)
+}
 
 // The letter: [indent in x-heights, text]. Its baselines are about 3.8
 // x-heights apart.
@@ -58,13 +50,10 @@ let leading = xh * 3.8;
 let page_text = new_canvas();
 for (line, n) in letter {
 	if line.len() > 0 {
-		page_text.add_canvas(write_line(line[1], vec2(line[0] * xh, n * leading), size, ink, font));
+		page_text.add(on_baseline(line[1], vec2(line[0] * xh, n * leading), hand));
 	}
 }
-let p1 = new_page();
-p1.name = "letter";
-p1.add_canvas(page_text);
-journal_entry.add_page(p1);
+journal_entry.add(new_page(#{ name: "letter" }).add(page_text));
 
 // The slip: four lines, the last centred under the rest.
 let slip = [
@@ -75,20 +64,14 @@ let slip = [
 ];
 let slip_text = new_canvas();
 for (line, n) in slip {
-	slip_text.add_canvas(write_line(line[1], vec2(line[0] * xh, n * xh * 2.8), size, ink, font));
+	slip_text.add(on_baseline(line[1], vec2(line[0] * xh, n * xh * 2.8), hand));
 }
-let p2 = new_page();
-p2.name = "slip";
-p2.add_canvas(slip_text);
-journal_entry.add_page(p2);
+journal_entry.add(new_page(#{ name: "slip" }).add(slip_text));
 
 let alphabet = new_canvas();
-alphabet.add_canvas(write_line("a b c d e f g h i j k l m", vec2(0.0, 0.0), size, ink, font));
-alphabet.add_canvas(write_line("n o p q r s t u v w x y z", vec2(0.0, leading), size, ink, font));
-alphabet.add_canvas(write_line("A I K L R X Z . , '", vec2(0.0, leading * 2.0), size, ink, font));
-alphabet.add_canvas(write_line("B C D E F G H J M N O P Q S T U V W Y", vec2(0.0, leading * 3.0), size, ink, font));
-alphabet.add_canvas(write_line("the quick brown fox jumps over the lazy dog", vec2(0.0, leading * 4.0), size, ink, font));
-let p3 = new_page();
-p3.name = "alphabet";
-p3.add_canvas(alphabet);
-journal_entry.add_page(p3);
+alphabet.add(on_baseline("a b c d e f g h i j k l m", vec2(0.0, 0.0), hand));
+alphabet.add(on_baseline("n o p q r s t u v w x y z", vec2(0.0, leading), hand));
+alphabet.add(on_baseline("A I K L R X Z . , '", vec2(0.0, leading * 2.0), hand));
+alphabet.add(on_baseline("B C D E F G H J M N O P Q S T U V W Y", vec2(0.0, leading * 3.0), hand));
+alphabet.add(on_baseline("the quick brown fox jumps over the lazy dog", vec2(0.0, leading * 4.0), hand));
+journal_entry.add(new_page(#{ name: "alphabet" }).add(alphabet));
