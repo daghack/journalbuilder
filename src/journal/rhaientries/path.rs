@@ -14,6 +14,7 @@
 //! let upright = arc.fill_with_text("lorem ipsum", hand + #{ angle: 0.0 });
 //! let fitted = arc.fit_text("lorem", hand + #{ angle: 0.2 });   // size ignored
 //! let line = write_line("lorem", vec2(0, 0), hand);       // from a point, to the right
+//! let wavy = write_line("lorem", vec2(0, 0), hand + #{ path_jitter: 0.2 });   // the line wanders, in sizes
 //!
 //! // Shapes, and points spaced round them.
 //! new_polygon(c, 50.0, 5, #{ step: 2 });                  // a star in one line
@@ -85,7 +86,7 @@ use crate::journal::symbol::{place_along_path, place_words_along_path, Symbol, S
 use crate::journal::fonts::FontBook;
 use crate::journal::ternary::{ternary_along, TernaryOptions};
 use super::generate::BalancedTernary;
-use super::text_settings::{self, Jitter, JITTER_KEYS};
+use super::text_settings::{self, Jitter, Wander, JITTER_KEYS};
 use parry2d::math::Vec2 as PVec;
 use rhai::{Array, INT};
 
@@ -234,15 +235,23 @@ fn fit_text(path: &mut Path, msg: &str, mut settings: Map, text: &TextSource) ->
 }
 
 /// `write_line(text, at, settings)`: the text from `at` to the right,
-/// glyphs centred on the line through it, as one canvas.
-fn write_line(msg: &str, at: Vec2, settings: Map, text: &TextSource) -> RhaiResult<Canvas> {
+/// glyphs centred on the line through it, as one canvas. With
+/// `path_jitter`, the line wanders up and down from straight by up to
+/// that many sizes, and the glyphs follow it.
+fn write_line(msg: &str, at: Vec2, mut settings: Map, text: &TextSource) -> RhaiResult<Canvas> {
     const CALLER: &str = "write_line";
     let size = text_settings::size(CALLER, &settings)?;
+    let path_jitter = text_settings::path_jitter(CALLER, &settings)?;
+    settings.remove("path_jitter");
     let set = PathText::parse(CALLER, msg, settings, text)?;
     let start: PVec = at.into();
     // Long enough for any text: each glyph takes at most a few sizes.
     let length = (set.symbols.len() as f32 + 1.0) * size * 4.0;
-    let line = StrokePath::line(start, start + PVec::new(length, 0.0));
+    let line = if path_jitter > 0.0 {
+        Wander::new(path_jitter, size, length, &mut *text.1.borrow_mut()).path(start)
+    } else {
+        StrokePath::line(start, start + PVec::new(length, 0.0))
+    };
     let tree = set.avoid.tree.as_ref().map(|a| a.borrow());
     let args = SymbolPlacementArgs {
         avoid: tree.as_deref(),

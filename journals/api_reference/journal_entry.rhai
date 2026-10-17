@@ -599,14 +599,15 @@ doc += api("path.fit_text(text, settings)", "The text along the path at the larg
 	font_set(),
 	style_set(),
 ] + path_text_opts());
-doc += api("write_line(text, at, settings)", "The text written from at to the right, on the line through at, as a canvas: glyphs' centres on it, as along any path.", [
+doc += api("write_line(text, at, settings)", "The text written from at to the right, on the line through at (wandering by path_jitter), as a canvas: glyphs' centres on it, as along any path.", [
 	arg("text", "The text to write.", "a string."),
 	vec_arg("at", "Where the line starts."),
 	font_set(),
 	size_set(),
 	style_set(),
+	opt("settings.path_jitter", "0", "How far, at most, either way, in sizes, the line wanders up and down from straight: smoothly, at random, so it starts where it is put and bends every few sizes. Glyphs follow it.", "a number of at least 0."),
 ] + path_text_opts());
-doc += api("write_block(text, at, width, settings)", "The text wrapped into lines width long, the first from at (on its line, as write_line sets it) and each line_height sizes below the last (give or take line_jitter), the left edges ragged by jagged. Gives #{ canvas, bottom }: the text, and where a line after it would go, for stacking blocks.", [
+doc += api("write_block(text, at, width, settings)", "The text wrapped into lines width long, the first from at (on its line, as write_line sets it) and each line_height sizes below the last (give or take line_jitter), each wandering by path_jitter, the left edges ragged by jagged. Gives #{ canvas, bottom }: the text, and where a line after it would go, for stacking blocks.", [
 	arg("text", "The text to write.", "a string."),
 	vec_arg("at", "Where the first line starts."),
 	arg("width", "How long lines are.", "a positive number."),
@@ -615,6 +616,7 @@ doc += api("write_block(text, at, width, settings)", "The text wrapped into line
 	style_set(),
 	opt("settings.line_height", "1.25", "How far apart lines are, in sizes.", "a positive number."),
 	opt("settings.line_jitter", "0", "How much each line's distance from the last varies, at most, either way, at random, in sizes.", "a number of at least 0."),
+	opt("settings.path_jitter", "0", "How far, at most, either way, in sizes, each line wanders up and down from straight: smoothly, at random, so it starts where it is put and bends every few sizes. Glyphs follow it.", "a number of at least 0."),
 	layout_opt("words", "wrapping at spaces"),
 	jagged_opt("0"),
 	spacing_opt(),
