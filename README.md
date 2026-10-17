@@ -175,7 +175,8 @@ What to know:
   font; `ternary_font("balanced_ternary")` maps letters to
   balanced-ternary digits. Text layout: `write_line(text, at, settings)`
   writes a line from a point, `write_block(text, at, width, settings)`
-  wraps text to a width and says where the next goes, `new_textbox` flows
+  wraps text to a width and says where the next goes (both take
+  `path_jitter`, lines wandering up and down from straight), `new_textbox` flows
   glyphs into a box or any shape, `canvas.scatter_notes` scatters notes
   across a canvas, and `path.fill_with_text` / `fit_text` write along a
   path, each glyph turned to it, or held at `angle` (radians, 0 upright)

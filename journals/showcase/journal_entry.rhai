@@ -1040,6 +1040,22 @@ text.add(new_textbox(#{ center: vec2(LEFT + 230, y + 170), width: 460, height: 2
 text.add(new_arc(vec2(820, y + 300), 200, 3.6, 5.8).fit_text("lorem ipsum dolor", BODY + jostled));
 book.bind("text", text);
 
+// Lines written by hand wander: write_line and write_block bend the line
+// they write along by up to path_jitter sizes.
+let text = sheet("text");
+text.add(subhead("wandering lines", TOP));
+text.add(caption("write_line(text, at, #{ path_jitter }): the line wanders from straight, 0, 0.15 and 0.3 sizes", TOP + 50));
+for (jitter, i) in [0.0, 0.15, 0.3] {
+	text.add(write_line("lorem ipsum dolor sit amet", vec2(LEFT, TOP + 120 + i * 70), BODY + #{ font: LOCHE, size: 40, path_jitter: jitter }));
+}
+let y = TOP + 360;
+text.add(caption("write_block(text, at, width, #{ path_jitter }): each line its own way, 0.2 sizes; 0.25 and jagged (right)", y));
+let wandering = write_block(LOREM, vec2(LEFT, y + 60), 460, BODY + #{ path_jitter: 0.2 });
+text.add(wandering.canvas);
+let loose = write_block(LOREM, vec2(LEFT + 560, y + 60), 440, BODY + #{ font: LOCHE, size: 22, style: new_style(RED, PEN), layout: "flat", path_jitter: 0.25, jagged: 0.4 });
+text.add(loose.canvas);
+book.bind("text", text);
+
 // ---- locks ----
 
 let locks = sheet("locks");

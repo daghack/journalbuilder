@@ -31,8 +31,10 @@
 //! let blocks = tb.place_all(glyphs);     // one array per filled box
 //!
 //! // Text wrapped to a width from a point, line after line: #{ canvas, bottom },
-//! // bottom being where the next block goes.
+//! // bottom being where the next block goes. With path_jitter, each line
+//! // wanders up and down from straight by up to that many sizes.
 //! let block = write_block(msg, vec2(0, 0), 400.0, #{ font: font, size: 20.0, style: ink, line_height: 1.3 });
+//! let wavy = write_block(msg, vec2(0, 0), 400.0, #{ font: font, size: 20.0, style: ink, path_jitter: 0.2 });
 //!
 //! // Scatter messages over a canvas in random boxes, clear of its strokes
 //! // and of each other, box sizes tried between the ranges. Returns a
@@ -71,7 +73,7 @@ use crate::journal::canvas::Canvas as JournalCanvas;
 use crate::journal::symbol::{Symbol, WordSplit};
 use super::avoid::{Avoid, AvoidOption};
 use super::options::{number, positive, range};
-use super::text_settings::{self, Jitter};
+use super::text_settings::{self, Jitter, Wander};
 
 use super::RhaiResult;
 
@@ -307,13 +309,14 @@ fn splat(canvas: &Canvas, msgs: Array, width_range: Dynamic, height_range: Dynam
     Ok(Canvas::new(splatted))
 }
 
-const BLOCK_KEYS: [&str; 14] = ["font", "size", "style", "line_height", "line_jitter", "jagged", "spacing", "layout", "avoid", "clearance", "split_words", "split_padding", "position_jitter", "rotation_jitter"];
+const BLOCK_KEYS: [&str; 15] = ["font", "size", "style", "line_height", "line_jitter", "path_jitter", "jagged", "spacing", "layout", "avoid", "clearance", "split_words", "split_padding", "position_jitter", "rotation_jitter"];
 
 /// `write_block(text, at, width, settings)`: the text wrapped to lines
 /// `width` long, the first from `at` (on its centre line, as write_line
 /// sets it), each `line_height` sizes below the last (default 1.25), give
-/// or take up to `line_jitter` sizes at random (default 0), words
-/// kept whole unless `layout` is "flat". Gives `#{ canvas, bottom }`,
+/// or take up to `line_jitter` sizes at random (default 0), each line
+/// wandering up and down from straight by up to `path_jitter` sizes
+/// (default 0), words kept whole unless `layout` is "flat". Gives `#{ canvas, bottom }`,
 /// `bottom` being where a line after them would go.
 fn write_block(msg: &str, at: Vec2, width: Dynamic, settings: Map, symdict: &FontBook, rng: &SharedRng) -> RhaiResult<Map> {
     const CALLER: &str = "write_block";
@@ -337,6 +340,7 @@ fn write_block(msg: &str, at: Vec2, width: Dynamic, settings: Map, symdict: &Fon
         Some(j) if j >= 0.0 && j.is_finite() => j,
         Some(j) => return Err(format!("{}: 'line_jitter' must be a number of at least 0, got {}", CALLER, j).into()),
     };
+    let path_jitter = text_settings::path_jitter(CALLER, &options)?;
     options.entry("layout".into()).or_insert_with(|| "words".into());
     let at: PVec = at.into();
     // A box one line high, filled again and again: a line each.
@@ -374,6 +378,10 @@ fn write_block(msg: &str, at: Vec2, width: Dynamic, settings: Map, symdict: &Fon
         }
         for g in row.iter_mut() {
             g.translate_by(PVec::new(0.0, at.y + i as f32 * pitch + drift));
+        }
+        if path_jitter > 0.0 {
+            // A little past the width: glyphs can reach over it.
+            Wander::new(path_jitter, size, width + size * 2.0, &mut *r).bend(row, at.x);
         }
         tb.jitter.apply(row, size, &mut *r);
         for g in row.iter() {
@@ -458,6 +466,38 @@ mod tests {
         "#);
         assert!(ok);
         assert!(fails(r#"write_block("a", vec2(0, 0), 100.0, #{ font: font("loche_upper"), size: 10.0, style: new_style("black", new_brush("Ink Pen", 0.3, 0.7, 1.0)), line_jitter: -1 })"#).contains("line_jitter"));
+    }
+
+    #[test]
+    fn path_jitter_bends_lines_within_bounds() {
+        let ok: bool = eval(r#"
+            let hand = #{ font: font, size: 10.0, style: style };
+            seed(3);
+            let even = write_block(text, vec2(0, 0), 100.0, hand);
+            seed(3);
+            let wavy = write_block(text, vec2(0, 0), 100.0, hand + #{ path_jitter: 0.3 });
+            if (wavy.bottom - even.bottom).abs() > 1e-3 { throw "path_jitter shouldn't move where the next block goes"; }
+            let e = even.canvas.bounds();
+            let w = wavy.canvas.bounds();
+            if (e.height - w.height).abs() < 1e-3 { throw "path_jitter should bend the lines"; }
+            if (e.height - w.height).abs() > 2.0 * 3.0 + 3.0 { throw "lines bent too far: " + w.height; }
+            seed(3);
+            let line = write_line("the quick brown fox", vec2(0, 0), hand);
+            seed(3);
+            let bent = write_line("the quick brown fox", vec2(0, 0), hand + #{ path_jitter: 0.3 });
+            let l = line.bounds();
+            let b = bent.bounds();
+            if (l.height - b.height).abs() < 1e-3 { throw "write_line's path_jitter should bend the line"; }
+            if b.min.y < l.min.y - 3.5 || b.max.y > l.max.y + 3.5 { throw "the line bent too far"; }
+            true
+        "#);
+        assert!(ok);
+        for script in [
+            r#"write_block("a", vec2(0, 0), 100.0, #{ font: font("loche_upper"), size: 10.0, style: new_style("black", new_brush("Ink Pen", 0.3, 0.7, 1.0)), path_jitter: -1 })"#,
+            r#"write_line("a", vec2(0, 0), #{ font: font("loche_upper"), size: 10.0, style: new_style("black", new_brush("Ink Pen", 0.3, 0.7, 1.0)), path_jitter: -1 })"#,
+        ] {
+            assert!(fails(script).contains("'path_jitter' must be a number of at least 0"), "{}", script);
+        }
     }
 
     #[test]
