@@ -351,46 +351,46 @@ fn write_block(msg: &str, at: Vec2, width: Dynamic, settings: Map, symdict: &Fon
         }
     }
     box_options.insert("size".into(), Dynamic::from(size as f64));
-    box_options.insert("center".into(), Dynamic::from(Vec2::new((at.x + width / 2.0) as f64, 0.0)));
     box_options.insert("width".into(), Dynamic::from(width as f64));
     box_options.insert("height".into(), Dynamic::from((size * 0.5) as f64));
-    let tb = TextBox::new(box_options).map_err(|e| format!("{}", e).replace("new_textbox", CALLER))?;
+    // A box one line high, at the line's own height, so what it avoids is
+    // avoided where the line is: a line each.
+    let line_box = |y: f32| -> RhaiResult<TextBox> {
+        let mut options = box_options.clone();
+        options.insert("center".into(), Dynamic::from(Vec2::new((at.x + width / 2.0) as f64, y as f64)));
+        TextBox::new(options).map_err(|e| format!("{}", e).replace("new_textbox", CALLER).into())
+    };
     let mut r = rng.borrow_mut();
-    let symbols = font.build(msg, symdict, &mut *r);
-    // Placed all first, then moved down and jittered line by line.
-    let mut rows = Vec::new();
-    let mut to_place = symbols;
-    while !to_place.is_empty() {
-        let (placed, rest) = tb.with_core(|core| core.fill_bounds_with(std::mem::take(&mut to_place), &mut *r));
-        if placed.is_empty() {
-            return Err(format!("{}: {} glyph(s) don't fit a line {} wide", CALLER, rest.len(), width).into());
-        }
-        rows.push(placed);
-        to_place = rest;
-    }
+    let mut to_place = font.build(msg, symdict, &mut *r);
     let pitch = line_height * size;
     let mut canvas = CanvasData::default();
     // How far lines have strayed from their even spacing, all told.
     let mut drift = 0.0;
-    for (i, row) in rows.iter_mut().enumerate() {
-        if i > 0 && line_jitter > 0.0 {
+    let mut lines = 0;
+    while !to_place.is_empty() {
+        if lines > 0 && line_jitter > 0.0 {
             drift += r.random_range(-line_jitter..line_jitter) * size;
         }
-        for g in row.iter_mut() {
-            g.translate_by(PVec::new(0.0, at.y + i as f32 * pitch + drift));
+        let tb = line_box(at.y + lines as f32 * pitch + drift)?;
+        let (mut row, rest) = tb.with_core(|core| core.fill_bounds_with(std::mem::take(&mut to_place), &mut *r));
+        if row.is_empty() {
+            return Err(format!("{}: {} glyph(s) don't fit a line {} wide", CALLER, rest.len(), width).into());
         }
+        to_place = rest;
+        lines += 1;
         if path_jitter > 0.0 {
             // A little past the width: glyphs can reach over it.
-            Wander::new(path_jitter, size, width + size * 2.0, &mut *r).bend(row, at.x);
+            Wander::new(path_jitter, size, width + size * 2.0, &mut *r).bend(&mut row, at.x);
         }
-        tb.jitter.apply(row, size, &mut *r);
+        tb.jitter.apply(&mut row, size, &mut *r);
         for g in row.iter() {
             add_glyph(&mut canvas, &Glyph::new(g.clone()), &style)?;
         }
     }
+    let rows = lines;
     let mut out = Map::new();
     out.insert("canvas".into(), Dynamic::from(Canvas::new(canvas)));
-    out.insert("bottom".into(), Dynamic::from((at.y + rows.len() as f32 * pitch + drift) as f64));
+    out.insert("bottom".into(), Dynamic::from((at.y + rows as f32 * pitch + drift) as f64));
     Ok(out)
 }
 

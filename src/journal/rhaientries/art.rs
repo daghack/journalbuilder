@@ -70,27 +70,35 @@
 //! canvas.add(art::snake_along(path, 30.0, #{ seed: 2 }), ink);   // 30 wide
 //! ```
 //!
-//! `eye` draws an eye as a hand sketches one in a journal, and gives it as
-//! a canvas, inked and coloured: lids gone over and running on past the
-//! corners, an iris ringed and ringed again and washed with `color`
-//! (darkest round its edge), and a line down through the iris, bowed
-//! toward where the eye looks. Here it's 300 from corner to corner, looking up
+//! `eye` draws an eye as a hand sketches one in a journal, and gives its
+//! parts as paths to draw in different inks: `lines`, the lids gone over
+//! and running on past the corners, the iris ringed and ringed again, and
+//! a line down through the iris, bowed toward where the eye looks;
+//! `accent`, a second outline of the lids to go round in the iris's
+//! colour; `wash`, a spiral filling the iris; and `rim`, rings round its
+//! edge where the wash pools. `iris_radius` is the iris's radius, to size
+//! the wash's brushes by. Here it's 300 from corner to corner, looking up
 //! and to the right (the gaze angle is in radians, on the page), half way
 //! between neat (0) and as messy as it gets (1).
 //!
 //! ```rhai
-//! canvas.add(art::eye(vec2(0.0, 0.0), 300.0, #{ color: "#2a9bb8", gaze_angle: -PI() / 4.0, messiness: 0.5, seed: 7 }));
+//! let eye = art::eye(vec2(0.0, 0.0), 300.0, #{ gaze_angle: -PI() / 4.0, messiness: 0.5, seed: 7 });
+//! let r = eye.iris_radius;
+//! canvas.add(eye, #{
+//!     wash: new_style(BLUE, new_brush("Smooth Watercolor", 0.2, 0.35, r * 0.3)),
+//!     rim: new_style(BLUE, new_brush("Rough Watercolor", 0.6, 0.95, r * 0.12)),
+//!     accent: new_style(BLUE, pen), lines: ink,
+//! });
 //! ```
 //!
 //! Options: `angle`, the eye's tilt (default 0, corners level); `gaze`,
 //! how far it looks from 0 (ahead) to 1 (as far as it goes; default 0.5);
-//! `openness`, its height over its length (default 0.32); `flat`, lids
+//! `openness`, its height over its length (default 0.32); and `flat`, lids
 //! of straight lines meeting in a point above and below the middle, as
-//! the `symbols` font's eye has, rather than arcs (default false); and
-//! `ink`, the style of its lines (default a near-black ink pen).
+//! the `symbols` font's eye has, rather than arcs (default false).
 //!
 //! ```rhai
-//! let e = art::eye(vec2(0.0, 0.0), 300.0, #{ color: "#2a9bb8", gaze_angle: PI(), messiness: 0.8, seed: 7, angle: 1.2, gaze: 1.0, openness: 0.6, flat: true, ink: ink });
+//! let e = art::eye(vec2(0.0, 0.0), 300.0, #{ gaze_angle: PI(), messiness: 0.8, seed: 7, angle: 1.2, gaze: 1.0, openness: 0.6, flat: true });
 //! ```
 //!
 //! `moon` draws the moon in a phase: 0 new, 0.25 first quarter (right half
@@ -107,9 +115,8 @@
 
 use rhai::{Dynamic, Engine, EvalAltResult, Map, Module, NativeCallContext};
 
-use super::gradient::colour_or_gradient;
 use super::options::{check_keys, float, number};
-use super::{BrushSettings, Canvas, CanvasData, Path, StrokeStyle, Vec2};
+use super::{Path, Vec2};
 use crate::journal::art;
 
 use super::RhaiResult;
@@ -207,22 +214,14 @@ fn parts(bramble: art::Bramble) -> Map {
     parts
 }
 
-const EYE_KEYS: [&str; 9] = ["color", "gaze_angle", "messiness", "seed", "angle", "gaze", "openness", "flat", "ink"];
+const EYE_KEYS: [&str; 7] = ["gaze_angle", "messiness", "seed", "angle", "gaze", "openness", "flat"];
 
-/// A style for an eye's strokes: `brush` at `size`, in `color`.
-/// Tapered at both ends, as quick strokes are.
-fn eye_style(color: &crate::journal::canvas::StrokeColor, brush: &str, min: f64, max: f64, size: f32) -> StrokeStyle {
-    let mut brush = BrushSettings::new_brush(brush, min, max, size as f64);
-    brush.pressure_profile = crate::journal::canvas::PressureProfile::Taper;
-    StrokeStyle { width: 1.0, color: color.clone(), brush, passes: 1, jitter: 0.0, point_jitter: 0.0 }
-}
-
-/// `art::eye(center, length[, #{ color, gaze_angle, messiness, seed, angle, gaze, openness, flat, ink }])`.
-fn eye(ctx: &NativeCallContext, center: Vec2, length: &Dynamic, options: &Map) -> RhaiResult<Canvas> {
+/// `art::eye(center, length[, #{ gaze_angle, messiness, seed, angle, gaze, openness, flat }])`:
+/// #{ lines, accent, wash, rim, iris_radius }.
+fn eye(ctx: &NativeCallContext, center: Vec2, length: &Dynamic, options: &Map) -> RhaiResult<Map> {
     const CALLER: &str = "art::eye";
     let fail = |err: Box<EvalAltResult>| error(ctx, err.to_string());
     check_keys(CALLER, options, &EYE_KEYS).map_err(fail)?;
-    let color = colour_or_gradient(CALLER, options.get("color").cloned().unwrap_or_else(|| "#2b1d12".into())).map_err(fail)?;
     let gaze_angle = number_option(ctx, CALLER, options, "gaze_angle", 0.0)?;
     let messiness = number_option(ctx, CALLER, options, "messiness", 0.3)?;
     let seed = seed(ctx, CALLER, options)?;
@@ -234,22 +233,14 @@ fn eye(ctx: &NativeCallContext, center: Vec2, length: &Dynamic, options: &Map) -
             .map_err(|type_name| error(ctx, format!("{}: 'flat' should be true or false, got {}", CALLER, type_name)))?,
     };
     let shape = art::EyeShape { angle: option("angle", defaults.angle)?, gaze: option("gaze", defaults.gaze)?, openness: option("openness", defaults.openness)?, flat };
-    let ink = match options.get("ink") {
-        None => eye_style(&crate::journal::canvas::StrokeColor::Solid("#1e1915".into()), "Ink Pen", 0.25, 0.7, 1.1),
-        Some(ink) => ink.clone().try_cast::<StrokeStyle>()
-            .ok_or_else(|| error(ctx, format!("{}: 'ink' should be a style (new_style), got {}", CALLER, ink.type_name())))?,
-    };
     let eye = art::eye(center.into(), number_arg(ctx, CALLER, "length", length)?, gaze_angle, messiness, shape, seed)
         .map_err(|err| error(ctx, format!("{}: {}", CALLER, err)))?;
-    // The wash first, then its pooled rim, the coloured outline and the
-    // ink over them all.
-    let r = eye.iris_radius;
-    let mut canvas = CanvasData::default();
-    canvas.add_path(eye.wash, eye_style(&color, "Smooth Watercolor", 0.2, 0.35, r * 0.3));
-    canvas.add_path(eye.rim, eye_style(&color, "Rough Watercolor", 0.6, 0.95, r * 0.12));
-    canvas.add_path(eye.accent, eye_style(&color, "Ink Pen", 0.2, 0.6, 1.2));
-    canvas.add_path(eye.lines, ink);
-    Ok(Canvas::new(canvas))
+    let mut parts = Map::new();
+    for (name, path) in [("lines", eye.lines), ("accent", eye.accent), ("wash", eye.wash), ("rim", eye.rim)] {
+        parts.insert(name.into(), Dynamic::from(Path::new(path)));
+    }
+    parts.insert("iris_radius".into(), Dynamic::from(eye.iris_radius as f64));
+    Ok(parts)
 }
 
 /// `art::moon(center, radius, phase)`: #{ outline, terminator, lit, dark }.
@@ -302,10 +293,10 @@ pub fn register(engine: &mut Engine) {
     module.set_native_fn("snake_along", move |ctx: NativeCallContext, path: Path, max_width: Dynamic, options: Map| -> RhaiResult<Path> {
         snake_along(&ctx, &path, &max_width, &options)
     });
-    module.set_native_fn("eye", |ctx: NativeCallContext, center: Vec2, length: Dynamic| -> RhaiResult<Canvas> {
+    module.set_native_fn("eye", |ctx: NativeCallContext, center: Vec2, length: Dynamic| -> RhaiResult<Map> {
         eye(&ctx, center, &length, &Map::new())
     });
-    module.set_native_fn("eye", |ctx: NativeCallContext, center: Vec2, length: Dynamic, options: Map| -> RhaiResult<Canvas> {
+    module.set_native_fn("eye", |ctx: NativeCallContext, center: Vec2, length: Dynamic, options: Map| -> RhaiResult<Map> {
         eye(&ctx, center, &length, &options)
     });
     engine.register_static_module("art", module.into());
@@ -433,27 +424,30 @@ mod tests {
     #[test]
     fn eye_draws_an_eye_from_its_seed() {
         let script = r##"
-            let draw = |seed| art::eye(vec2(100.0, 100.0), 200.0, #{ color: "#2a9bb8", gaze_angle: 0.5, messiness: 0.6, seed: seed });
+            let draw = |seed| art::eye(vec2(100.0, 100.0), 200.0, #{ gaze_angle: 0.5, messiness: 0.6, seed: seed });
             let e = draw.call(7);
-            if e.bounds().to_string() != draw.call(7).bounds().to_string() { throw "the same seed should draw the same eye"; }
-            if e.bounds().to_string() == draw.call(8).bounds().to_string() { throw "another seed should draw another eye"; }
+            if e.lines.to_string() != draw.call(7).lines.to_string() { throw "the same seed should draw the same eye"; }
+            if e.lines.to_string() == draw.call(8).lines.to_string() { throw "another seed should draw another eye"; }
+            for part in ["lines", "accent", "wash", "rim"] { if e[part].is_empty { throw "the eye should have " + part; } }
+            if e.iris_radius <= 0.0 || e.iris_radius > 100.0 { throw "the iris should be inside the eye: " + e.iris_radius; }
             // About as long as asked, round its centre.
-            let b = e.bounds();
+            let b = e.lines.bounds();
             if b.width < 190.0 || b.width > 320.0 || (b.center - vec2(100.0, 100.0)).length() > 40.0 { throw "the eye should be where asked: " + b; }
-            let tilted = art::eye(vec2(0.0, 0.0), 200.0, #{ color: RED_INK, gaze_angle: PI(), messiness: 0.0, seed: 1, angle: PI() / 2.0, gaze: 1.0, openness: 0.3, ink: new_style("#222", new_brush("Pencil", 0.3, 0.7, 1.0)) });
-            if tilted.bounds().height < 190.0 { throw "turned upright, the eye should be tall: " + tilted.bounds(); }
-            art::eye(vec2(0.0, 0.0), 200.0, #{ color: "#123", gaze_angle: 0.0, messiness: 0.5, seed: 1, flat: true });
+            let tilted = art::eye(vec2(0.0, 0.0), 200.0, #{ gaze_angle: PI(), messiness: 0.0, seed: 1, angle: PI() / 2.0, gaze: 1.0, openness: 0.3 });
+            if tilted.lines.bounds().height < 190.0 { throw "turned upright, the eye should be tall: " + tilted.lines.bounds(); }
+            let flat = art::eye(vec2(0.0, 0.0), 200.0, #{ gaze_angle: 0.0, messiness: 0.5, seed: 1, flat: true });
+            let ink = new_style("#123", new_brush("Ink Pen", 0.2, 0.6, 1.2));
             let p = new_page();
-            p.add(e);
+            p.add(new_canvas().add(e, #{ lines: ink, accent: ink, wash: ink, rim: ink }).add(flat.lines, ink));
             journal_entry.add(p);
-        "##.replace("RED_INK", "\"#9b2318\"");
-        engine().build_entry_str(&script).expect("script should run");
+        "##;
+        engine().build_entry_str(script).expect("script should run");
         for (call, message) in [
-            ("art::eye(vec2(0.0, 0.0), 200.0, #{ color: \"#123\", gaze_angle: 0.0, messiness: 1.5, seed: 1 });", "art::eye: messiness runs from 0 to 1"),
-            ("art::eye(vec2(0.0, 0.0), 0.0, #{ color: \"#123\", gaze_angle: 0.0, messiness: 0.5, seed: 1 });", "art::eye: length must be a positive number"),
-            ("art::eye(vec2(0.0, 0.0), 200.0, #{ color: \"#123\", gaze_angle: 0.0, messiness: 0.5, seed: 1, squint: 1 });", "art::eye: unknown option 'squint'"),
-            ("art::eye(vec2(0.0, 0.0), 200.0, #{ color: \"#123\", gaze_angle: 0.0, messiness: 0.5, seed: 1, ink: 3 });", "art::eye: 'ink' should be a style"),
-            ("art::eye(vec2(0.0, 0.0), 200.0, #{ color: \"#123\", gaze_angle: 0.0, messiness: 0.5, seed: 1, flat: 1 });", "art::eye: 'flat' should be true or false"),
+            ("art::eye(vec2(0.0, 0.0), 200.0, #{ gaze_angle: 0.0, messiness: 1.5, seed: 1 });", "art::eye: messiness runs from 0 to 1"),
+            ("art::eye(vec2(0.0, 0.0), 0.0, #{ gaze_angle: 0.0, messiness: 0.5, seed: 1 });", "art::eye: length must be a positive number"),
+            ("art::eye(vec2(0.0, 0.0), 200.0, #{ gaze_angle: 0.0, messiness: 0.5, seed: 1, squint: 1 });", "art::eye: unknown option 'squint'"),
+            ("art::eye(vec2(0.0, 0.0), 200.0, #{ gaze_angle: 0.0, messiness: 0.5, seed: 1, color: \"#123\" });", "art::eye: unknown option 'color'"),
+            ("art::eye(vec2(0.0, 0.0), 200.0, #{ gaze_angle: 0.0, messiness: 0.5, seed: 1, flat: 1 });", "art::eye: 'flat' should be true or false"),
         ] {
             let err = engine().build_entry_str(&format!("let ok = 1;\n{}", call)).expect_err(call).to_string();
             assert!(err.contains(message) && err.contains("line 2"), "{}", err);

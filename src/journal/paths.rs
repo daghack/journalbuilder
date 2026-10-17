@@ -181,6 +181,21 @@ impl StrokePath {
     pub fn commands(&self) -> &[PathCmd] {
         &self.commands
     }
+    /// Each subpath as a path of its own, in order: a new one at every
+    /// move. Moves that draw nothing before the next are left out.
+    pub fn subpaths(&self) -> Vec<StrokePath> {
+        let mut paths: Vec<Vec<PathCmd>> = Vec::new();
+        for cmd in &self.commands {
+            if matches!(cmd, PathCmd::MoveTo(..)) || paths.is_empty() {
+                paths.push(Vec::new());
+            }
+            paths.last_mut().expect("just pushed").push(cmd.clone());
+        }
+        paths.into_iter()
+            .filter(|cmds| cmds.iter().any(|c| !matches!(c, PathCmd::MoveTo(..))))
+            .map(StrokePath::from_commands)
+            .collect()
+    }
     pub fn points_within(&self) -> Vec<Vec2> {
         let mut points = Vec::new();
         for cmd in &self.commands {

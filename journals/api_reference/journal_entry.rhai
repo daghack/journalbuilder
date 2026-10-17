@@ -213,8 +213,8 @@ doc += api("canvas.add(glyph, style), canvas.add(glyphs, style)", "Adds a placed
 doc += api("canvas.add(other), canvas.add(canvases)", "Adds every stroke on another canvas, or each of an array of canvases (as fill_with_text gives), in its own style.", [
 	arg("other, canvases", "The canvases whose strokes are copied.", "a canvas (this one included), or an array of them."),
 ]);
-doc += api("canvas.add(parts, styles)", "Adds each path of a map of parts, as art::bramble, art::moon and art::snake give them, in the style styles has under its name; parts with no style aren't drawn.", [
-	arg("parts", "The paths, by name.", "a map of names to paths."),
+doc += api("canvas.add(parts, styles)", "Adds each path of a map of parts, as art::bramble, art::eye, art::moon and art::snake give them, in the style styles has under its name, in name order; parts with no style aren't drawn.", [
+	arg("parts", "The paths, by name.", "a map of names to paths, and to anything else so long as it isn't styled (as an eye's iris_radius)."),
 	arg("styles", "Their styles, by part name.", "a map of part names to styles, every name one of the parts'."),
 ]);
 doc += api("canvas.name = text", "The canvas's name in output files; without one, its index on the page.", [
@@ -401,6 +401,7 @@ doc += api("path.points_along(count), path.points_along(count, options)", "count
 	arg("count", "How many points.", "a whole number from 0 to 1000000."),
 	opt("options.start", "0", "Where the first is, as a fraction of the length: 0.75 is the top of a circle, which starts at its right and runs clockwise.", "a number from 0 to 1."),
 ]);
+doc += api("path.subpaths()", "Each subpath, from one move to the next, as a path of its own, in order: to give each piece of art its own style, say. Moves that draw nothing are left out.");
 doc += api("path.is_empty", "Read only: whether the path has nothing in it, as a new moon's lit side.");
 doc += api("path.to_string(), path.to_debug()", "The path's commands as text, for print and debug.");
 
@@ -768,18 +769,16 @@ doc += api("art::bramble_along(path, flower_size), art::bramble_along(path, flow
 	arg("flower_size", "About how wide its flowers are, which everything else is sized by.", "a positive number."),
 	seed_opt("bramble"),
 ] + thickening_opts("vines", "the farthest point of the path from the origin"));
-doc += api("art::eye(center, length), art::eye(center, length, options)", "An eye as a hand sketches one, as a canvas: lids gone over and running past the corners, an iris ringed and washed with color, and a line through the iris bowed toward where it looks.", [
+doc += api("art::eye(center, length), art::eye(center, length, options)", "An eye as a hand sketches one. Gives #{ lines, accent, wash, rim, iris_radius }: lines, the lids gone over and running past the corners, the iris ringed, and a line through the iris bowed toward where it looks; accent, a second outline of the lids, to go round in the iris's colour; wash, a spiral filling the iris; rim, rings round the iris's edge where its wash pools; and iris_radius, a number, to size the wash's brushes by (a third of it suits the wash, an eighth the rim). The iris's parts are hidden where the lids cover it. Draw the colour before the lines, part by part: canvas.add(parts, styles) draws in name order, which would put the wash over the lines.", [
 	vec_arg("center", "Its centre."),
 	arg("length", "How long it is from corner to corner.", "a positive number."),
-	opt("options.color", "#2b1d12, near black", "The iris's wash and outline.", "a CSS colour or a gradient."),
 	opt("options.gaze_angle", "0", "Which way it looks, on the page: 0 is +x, -PI() / 2 up.", "a number, in radians."),
 	opt("options.gaze", "0.5", "How far it looks toward gaze_angle: 0 straight ahead, 1 as far as it goes.", "a number from 0 to 1."),
-	opt("options.messiness", "0.3", "From neat, each line drawn once, to as messy as it gets, lines gone over four or five times, wandering and overshooting.", "a number from 0 to 1."),
+	opt("options.messiness", "0.3", "From neat, each line drawn once, to as messy as it gets, lines gone over four or five times, wandering and overshooting. Neat lines are as few curves as their shape needs (a flat lid is two straight lines), so a style's point_jitter bends them whole; messier ones are drawn through more points, to wander.", "a number from 0 to 1."),
 	seed_opt("eye"),
 	opt("options.angle", "0", "The eye's tilt; 0 keeps the corners level.", "a number, in radians."),
 	opt("options.openness", "0.32", "Its height over its length.", "a number above 0.05 and at most 1."),
 	opt("options.flat", "false", "Lids of straight lines from each corner to a point above and below the middle, as the symbols font's eye has, rather than arcs.", "true or false."),
-	opt("options.ink", "a near-black ink pen", "The style of its lines.", "a style."),
 ]);
 doc += api("art::moon(center, radius, phase)", "The moon in a phase, seen from the northern hemisphere. Gives #{ outline, terminator, lit, dark }: the disc's outline; the terminator, the half ellipse from the top of the disc to the bottom between light and dark (an empty path at new and full); and the lit and dark sides as closed shapes, to hatch or fill (the lit side empty at new, the dark side at full). It takes no seed: the same phase draws the same moon.", [
 	vec_arg("center", "Its centre."),

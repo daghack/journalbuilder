@@ -605,6 +605,10 @@ pub(super) fn register(engine: &mut Engine, text: TextSource) {
         .register_fn("points_along", |path: &mut Path, count: INT| points_along(path, count, &Map::new()))
         .register_fn("points_along", |path: &mut Path, count: INT, options: Map| points_along(path, count, &options))
         .register_get("is_empty", |path: &mut Path| path.borrow().to_substrokes().is_empty())
+        // `path.subpaths()`: each subpath as a path of its own.
+        .register_fn("subpaths", |path: &mut Path| -> Array {
+            path.borrow().subpaths().into_iter().map(|p| Dynamic::from(Path::new(p))).collect()
+        })
         .register_fn("scale_by", |path: &mut Path, scale: Dynamic| -> RhaiResult<Path> {
             let scale = float("scale_by", "the scale", &scale)?;
             Ok(path.update(|p| p.scale_by(scale as f32)))
@@ -779,6 +783,18 @@ mod tests {
 
     fn fails(script: &str) -> String {
         engine().engine.run(script).expect_err("script should fail").to_string()
+    }
+
+    #[test]
+    fn subpaths_split_a_path_at_its_moves() {
+        let ok: bool = eval(r#"
+            let p = new_circle(vec2(0, 0), 5).append(new_line(vec2(20, 0), vec2(30, 0)));
+            p.move_to(vec2(50, 50));
+            let parts = p.subpaths();
+            parts.len() == 2 && parts[1].bounds().width == 10.0 && parts[0].bounds().center.x.abs() < 0.01
+                && new_path().subpaths().len() == 0
+        "#);
+        assert!(ok);
     }
 
     #[test]

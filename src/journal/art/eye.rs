@@ -101,7 +101,8 @@ pub fn eye(center: Vec2, length: f32, gaze_angle: f32, messiness: f32, shape: Ey
     // colour still bleeds a little past the lids, as watercolour does).
     let almond = Almond { half: drawing.half, lid: drawing.lid, flat: shape.flat };
     for _ in 0..drawing.times(&mut rng, 5.0).max(2) {
-        lines.extend(almond.clip(&drawing.ring(&mut rng, iris_center, iris_radius), 0.0).into_iter().map(|points| vec![points]));
+        let steps = drawing.steps(8, 40);
+        lines.extend(almond.clip(&drawing.ring(&mut rng, iris_center, iris_radius, steps), 0.0).into_iter().map(|points| vec![points]));
     }
     let toward = if room.x > 0.0 { (iris_center.x / room.x).clamp(-1.0, 1.0) } else { 0.0 };
     lines.extend(drawing.meridian(&mut rng, iris_center, iris_radius, toward).into_iter().map(|points| vec![points]));
@@ -119,7 +120,7 @@ pub fn eye(center: Vec2, length: f32, gaze_angle: f32, messiness: f32, shape: Ey
     let rim: Vec<Stroke> = (0..drawing.times(&mut rng, 2.0) + 1)
         .map(|_| {
             let radius = iris_radius * rng.random_range(0.8..0.88);
-            almond.clip(&drawing.ring(&mut rng, iris_center, radius), iris_radius * 0.06)
+            almond.clip(&drawing.ring(&mut rng, iris_center, radius, 40), iris_radius * 0.06)
         })
         .flatten()
         .map(|points| vec![points])
@@ -238,6 +239,12 @@ impl Drawing {
     fn wobble(&self, rng: &mut StdRng, scale: f64) -> f64 {
         rng.random_range(-1.0..=1.0) * scale * self.m
     }
+    /// How many points a line is drawn through: as few as its shape needs
+    /// when neat (`least`), up to `most` as it gets messy and wanders, so
+    /// a neat line is a few curves, each moved whole when jittered.
+    fn steps(&self, least: usize, most: usize) -> usize {
+        least + ((most - least) as f64 * self.m).round() as usize
+    }
     /// How many times a line is gone over: once when neat, up to `1 + most`.
     fn times(&self, rng: &mut StdRng, most: f64) -> usize {
         1 + (self.m * most + rng.random_range(0.0..1.0) * self.m).floor() as usize
@@ -271,23 +278,22 @@ impl Drawing {
         };
         let piece = |from: f64, to: f64, steps: usize| (0..=steps).map(|i| point(from + (to - from) * i as f64 / steps as f64)).collect();
         if flat {
-            vec![piece(t0, 0.0, 12), piece(0.0, t1, 12)]
+            vec![piece(t0, 0.0, self.steps(1, 12)), piece(0.0, t1, self.steps(1, 12))]
         } else {
-            vec![piece(t0, t1, 24)]
+            vec![piece(t0, t1, self.steps(4, 24))]
         }
     }
 
-    /// One ring round the iris: a loop a little lumpy, a little off the
-    /// last, drifting in or out so that, gone round a bit more than once,
-    /// its ends don't meet.
-    fn ring(&self, rng: &mut StdRng, center: V, radius: f64) -> Vec<V> {
+    /// One ring round the iris through `steps` + 1 points: a loop a little
+    /// lumpy, a little off the last, drifting in or out so that, gone round
+    /// a bit more than once, its ends don't meet.
+    fn ring(&self, rng: &mut StdRng, center: V, radius: f64, steps: usize) -> Vec<V> {
         let center = center + V::new(self.wobble(rng, 0.1 * radius), self.wobble(rng, 0.1 * radius));
         let squash = 1.0 + self.wobble(rng, 0.08);
         let drift = self.wobble(rng, 0.07);
         let lumps = self.wander(rng, 0.05);
         let start = rng.random_range(0.0..TAU);
         let sweep = TAU * (1.0 + rng.random_range(0.0..=0.05 + 0.3 * self.m));
-        let steps = 40;
         (0..=steps)
             .map(|i| {
                 let s = i as f64 / steps as f64;
@@ -315,7 +321,7 @@ impl Drawing {
                 let at = center + across * self.wobble(rng, 0.08 * radius);
                 let bow = bow * (1.0 + self.wobble(rng, 0.25));
                 let wander = self.wander(rng, 0.03 * radius);
-                let steps = 16;
+                let steps = self.steps(2, 16);
                 (0..=steps)
                     .map(|i| {
                         let s = i as f64 / steps as f64;
@@ -359,7 +365,8 @@ mod tests {
     fn lid_height_half_way(flat: bool) -> f32 {
         let shape = EyeShape { gaze: 0.0, flat, ..EyeShape::default() };
         let e = eye(Vec2::new(0.0, 0.0), 200.0, 0.0, 0.0, shape, 1).expect("an eye");
-        e.lines.points_within().iter().filter(|p| (40.0..=60.0).contains(&p.x.abs())).map(|p| p.y.abs()).fold(0.0, f32::max)
+        e.lines.flattened(0.1).into_iter().flat_map(|(points, _)| points)
+            .filter(|p| (40.0..=60.0).contains(&p.x.abs())).map(|p| p.y.abs()).fold(0.0, f32::max)
     }
 
     #[test]
@@ -369,5 +376,17 @@ mod tests {
         let (flat, arc) = (lid_height_half_way(true), lid_height_half_way(false));
         assert!(flat < 19.5, "{}", flat);
         assert!(arc > 26.0, "{}", arc);
+    }
+
+    #[test]
+    fn neat_lines_are_few_curves() {
+        // Neat, a flat eye's lids are two straight pieces each: their
+        // corners are the only points a jitter would move.
+        let shape = EyeShape { gaze: 0.0, flat: true, ..EyeShape::default() };
+        let neat = eye(Vec2::new(0.0, 0.0), 200.0, 0.0, 0.0, shape, 1).expect("an eye");
+        let messy = eye(Vec2::new(0.0, 0.0), 200.0, 0.0, 1.0, shape, 1).expect("an eye");
+        let count = |e: &Eye| e.lines.commands().len();
+        assert!(count(&neat) < 40, "{}", count(&neat));
+        assert!(count(&messy) > 4 * count(&neat), "{} vs {}", count(&messy), count(&neat));
     }
 }

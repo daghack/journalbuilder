@@ -85,10 +85,14 @@ signed.translate_by(vec2(WIDTH / 2.0 - name.center.x, 0.0));
 canvas.add(signed);
 
 let centre = vec2(WIDTH / 2.0, name.max.y + SIZE * 1.2);
-canvas.add(art::eye(centre, name.width, #{
-	flat: true,
-	color: new_gradient([EYE_TEAL, EYE_DARK_NAVY], #{ center: centre, radius: name.width * 0.18 }),
-	ink: new_style(EYE_NAVY, pen),
-}));
+let eye = art::eye(centre, name.width, #{ flat: true });
+let r = eye.iris_radius;
+let wash_color = new_gradient([EYE_TEAL, EYE_DARK_NAVY], #{ center: centre, radius: name.width * 0.18 });
+let eye_brush = |brush, min, max, size| new_brush(brush, min, max, size, #{ pressure_profile: "taper" });
+// The colour first, under the lines.
+canvas.add(eye.wash, new_style(wash_color, eye_brush.call("Smooth Watercolor", 0.2, 0.35, r * 0.3)));
+canvas.add(eye.rim, new_style(wash_color, eye_brush.call("Rough Watercolor", 0.6, 0.95, r * 0.12)));
+canvas.add(eye.accent, new_style(wash_color, eye_brush.call("Ink Pen", 0.2, 0.6, 1.2)));
+canvas.add(eye.lines, new_style(EYE_NAVY, pen));
 
 journal_entry.add(new_page(#{ name: "response" }).add(canvas));

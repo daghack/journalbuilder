@@ -96,6 +96,21 @@ fn wave(x0, x1, y, rise) {
 	new_wave(vec2(x0, y), vec2(x1, y), #{ amplitude: rise * 3.0.sqrt() / 6.0 })
 }
 
+// An art::eye's parts drawn as a canvas: its iris washed in colour with
+// watercolour brushes sized by its iris_radius, darkest where it pools at
+// the rim, its lids gone round in the colour, and its lines in ink.
+fn inked_eye(eye, colour, ink) {
+	let r = eye.iris_radius;
+	let brush = |name, min, max, size| new_brush(name, min, max, size, #{ pressure_profile: "taper" });
+	// Part by part, so the colour goes under the lines (canvas.add(eye,
+	// styles) would draw them in name order).
+	new_canvas()
+		.add(eye.wash, new_style(colour, brush.call("Smooth Watercolor", 0.2, 0.35, r * 0.3)))
+		.add(eye.rim, new_style(colour, brush.call("Rough Watercolor", 0.6, 0.95, r * 0.12)))
+		.add(eye.accent, new_style(colour, brush.call("Ink Pen", 0.2, 0.6, 1.2)))
+		.add(eye.lines, ink)
+}
+
 // ---- binding pages into the book ----
 //
 // new_book numbers pages from 3, after the title page and the contents,
@@ -604,7 +619,15 @@ art.add(snake.spine.fill_with_text("lorem ipsum dolor sit amet", #{ font: PLAIN,
 // A bramble: canes, leaves and flowers, stroked separately, each part in
 // the style named for it.
 art.add(caption("art::bramble(base, length, #{ angle, flower_size, seed }), canvas.add(parts, #{ vines, leaves, flowers })", 1010));
-art.add(art::bramble(vec2(600, 1450), 400, #{ flower_size: 80, seed: 4 }), BRAMBLE);
+// path.subpaths() splits a path at each move, so each piece of the
+// flowers can have a style of its own: here, red and blue by turns.
+let plant = art::bramble(vec2(600, 1450), 400, #{ flower_size: 80, seed: 4 });
+art.add(plant.vines, BRAMBLE.vines);
+art.add(plant.leaves, BRAMBLE.leaves);
+for (piece, i) in plant.flowers.subpaths() {
+	art.add(piece, new_style(if i % 2 == 0 { RED } else { BLUE }, PEN));
+}
+art.add(write("plant.flowers.subpaths(), red and blue by turns", 380, 1500, 20));
 book.bind("art", art);
 
 // Along a path: a maze grown with brambles, and made a many-headed serpent.
@@ -618,40 +641,43 @@ art.add(caption("art::snake_along the same maze", 860));
 art.add(art::snake_along(maze_lines.copy().translate_by(vec2(LEFT + 110, 940)), 40, #{ seed: 2 }), LINE);
 book.bind("art", art);
 
-// Eyes as sketched in a journal, inked and washed with a colour:
-// art::eye(center, length, #{ color, gaze_angle, messiness, seed }) gives a
-// canvas. Messiness runs from 0 (each line once, true) to 1 (gone over and
-// over, overshooting); the gaze angle is on the page, in radians.
+// Eyes as sketched in a journal: art::eye(center, length, #{ gaze_angle,
+// messiness, seed }) gives its parts, #{ lines, accent, wash, rim }, and
+// iris_radius, to size the wash's brushes by. Messiness runs from 0 (each
+// line once, true) to 1 (gone over and over, overshooting); the gaze angle
+// is on the page, in radians.
 let art = sheet("art");
-art.add(caption("art::eye(center, length, #{ color, gaze_angle, messiness, seed }): messiness 0, 0.25, 0.5, 0.75, 1", TOP));
+art.add(caption("art::eye(center, length, #{ gaze_angle, messiness, seed }): messiness 0, 0.25, 0.5, 0.75, 1", TOP));
 for (m, i) in [0.0, 0.25, 0.5, 0.75, 1.0] {
-	art.add(art::eye(vec2(LEFT + 95 + i * 205, TOP + 110), 150, #{ color: BLUE, gaze_angle: -PI() / 4.0, messiness: m, seed: 3 + i }));
+	art.add(inked_eye(art::eye(vec2(LEFT + 95 + i * 205, TOP + 110), 150, #{ gaze_angle: -PI() / 4.0, messiness: m, seed: 3 + i }), BLUE, LINE));
 }
 art.add(caption("gaze angles: right, down, left, up; the same seed looking each way", TOP + 220));
 for (g, i) in [0.0, PI() / 2.0, PI(), -PI() / 2.0] {
-	art.add(art::eye(vec2(LEFT + 115 + i * 255, TOP + 330), 200, #{ color: BLUE, gaze_angle: g, messiness: 0.4, seed: 11 }));
+	art.add(inked_eye(art::eye(vec2(LEFT + 115 + i * 255, TOP + 330), 200, #{ gaze_angle: g, messiness: 0.4, seed: 11 }), BLUE, LINE));
 }
 // Options: angle tilts the eye, gaze is how far it looks (0 to 1),
-// openness is its height over its length, flat draws its lids as straight
-// lines meeting above and below the middle (as the symbols font's eye
-// has), and ink styles its lines. Where the lids cover the iris, it's
-// hidden.
-art.add(caption("#{ angle, gaze, openness, flat, ink }", TOP + 440));
-art.add(art::eye(vec2(LEFT + 105, TOP + 610), 200, #{ color: BLUE, gaze_angle: 0.0, messiness: 0.5, seed: 4, angle: -0.5, gaze: 0.0 }));
-art.add(art::eye(vec2(LEFT + 370, TOP + 610), 200, #{ color: BLUE, gaze_angle: PI(), messiness: 0.5, seed: 4, gaze: 1.0, openness: 0.22 }));
-art.add(art::eye(vec2(LEFT + 635, TOP + 610), 200, #{ color: BLUE, gaze_angle: PI() / 4.0, messiness: 0.4, seed: 6, flat: true, openness: 0.45 }));
-art.add(art::eye(vec2(LEFT + 890, TOP + 610), 200, #{ color: RED, gaze_angle: 0.3, messiness: 0.6, seed: 4, angle: 1.3, openness: 0.5, ink: new_style(INK, PEN) }));
+// openness is its height over its length, and flat draws its lids as
+// straight lines meeting above and below the middle (as the symbols
+// font's eye has). Where the lids cover the iris, it's hidden. The last
+// draws only some parts: its lines, and its wash in red.
+art.add(caption("#{ angle, gaze, openness, flat }; eye.wash and eye.lines alone", TOP + 440));
+art.add(inked_eye(art::eye(vec2(LEFT + 105, TOP + 610), 200, #{ gaze_angle: 0.0, messiness: 0.5, seed: 4, angle: -0.5, gaze: 0.0 }), BLUE, LINE));
+art.add(inked_eye(art::eye(vec2(LEFT + 370, TOP + 610), 200, #{ gaze_angle: PI(), messiness: 0.5, seed: 4, gaze: 1.0, openness: 0.22 }), BLUE, LINE));
+art.add(inked_eye(art::eye(vec2(LEFT + 635, TOP + 610), 200, #{ gaze_angle: PI() / 4.0, messiness: 0.4, seed: 6, flat: true, openness: 0.45 }), BLUE, LINE));
+let red_eye = art::eye(vec2(LEFT + 890, TOP + 610), 200, #{ gaze_angle: 0.3, messiness: 0.6, seed: 4, angle: 1.3, openness: 0.5 });
+art.add(red_eye.wash, new_style(RED, new_brush("Smooth Watercolor", 0.2, 0.35, red_eye.iris_radius * 0.3, #{ pressure_profile: "taper" })));
+art.add(red_eye.lines, new_style(INK, PEN));
 art.add(write("angle -0.5, gaze 0", LEFT + 10, TOP + 790, 20));
 art.add(write("gaze 1, openness 0.22", LEFT + 265, TOP + 790, 20));
 art.add(write("flat, openness 0.45", LEFT + 530, TOP + 790, 20));
-art.add(write("angle 1.3, openness 0.5, ink", LEFT + 730, TOP + 790, 20));
+art.add(write("angle 1.3, lines, wash", LEFT + 790, TOP + 790, 20));
 // A crowd of them, overlapping as they come.
 art.add(caption("a page of eyes, messy and overlapping", TOP + 850));
 seed(5);
 for i in 0..10 {
 	let at = vec2(LEFT + 110 + (i % 5) * 195 + random_range(-30, 30), TOP + 980 + (i / 5) * 190 + random_range(-30, 30));
 	let colour = if i % 4 == 3 { RED } else { BLUE };
-	art.add(art::eye(at, random_range(150, 240), #{ color: colour, gaze_angle: random_range(-PI(), PI()), messiness: random_range(0.5, 1.0), seed: i, angle: random_range(-1.0, 1.0), gaze: random(), flat: i % 3 == 1 }));
+	art.add(inked_eye(art::eye(at, random_range(150, 240), #{ gaze_angle: random_range(-PI(), PI()), messiness: random_range(0.5, 1.0), seed: i, angle: random_range(-1.0, 1.0), gaze: random(), flat: i % 3 == 1 }), colour, LINE));
 }
 book.bind("art", art);
 
@@ -1004,7 +1030,7 @@ for (options, i) in [
 text.add(caption("an oval, words at an angle of 0.15, avoiding an eye", TOP + 900));
 let centre = vec2(W / 2.0, TOP + 1100);
 let oval = new_ellipse(centre, 480, 170);
-let eye = art::eye(centre, 260, #{ color: BLUE, gaze_angle: 0.0, messiness: 0.3, seed: 2, flat: true, openness: 0.4, gaze: 0.0 });
+let eye = inked_eye(art::eye(centre, 260, #{ gaze_angle: 0.0, messiness: 0.3, seed: 2, flat: true, openness: 0.4, gaze: 0.0 }), BLUE, LINE);
 text.add(eye);
 text.add(oval, CAPTION);
 text.add(new_textbox(#{ shape: oval, angle: 0.15, size: 18, layout: "words", avoid: eye, clearance: 10 }).fill(PLAIN.glyphs(LOREM + LOREM + LOREM)).placed, TEXT);
