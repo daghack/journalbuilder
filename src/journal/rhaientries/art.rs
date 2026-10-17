@@ -214,7 +214,7 @@ const EYE_KEYS: [&str; 9] = ["color", "gaze_angle", "messiness", "seed", "angle"
 fn eye_style(color: &crate::journal::canvas::StrokeColor, brush: &str, min: f64, max: f64, size: f32) -> StrokeStyle {
     let mut brush = BrushSettings::new_brush(brush, min, max, size as f64);
     brush.pressure_profile = crate::journal::canvas::PressureProfile::Taper;
-    StrokeStyle { width: 1.0, color: color.clone(), brush, passes: 1, jitter: 0.0 }
+    StrokeStyle { width: 1.0, color: color.clone(), brush, passes: 1, jitter: 0.0, point_jitter: 0.0 }
 }
 
 /// `art::eye(center, length[, #{ color, gaze_angle, messiness, seed, angle, gaze, openness, flat, ink }])`.

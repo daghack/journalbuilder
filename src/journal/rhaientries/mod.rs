@@ -1010,6 +1010,35 @@ mod tests {
     }
 
     #[test]
+    fn point_jitter_reshapes_each_pass() {
+        let script = r#"
+            let s = new_style("black", new_brush("Ink Pen", 0.2, 0.8, 1.0), #{ point_jitter: 4 });
+            if s.point_jitter != 4.0 || s.passes != 1 || s.jitter != 0.0 { throw "point_jitter alone"; }
+            let c = new_canvas();
+            c.add(new_path().move_to(vec2(0, 0)).cubic_to(vec2(30, -40), vec2(70, -40), vec2(100, 0)), s);
+            s.passes = 3;
+            c.add(new_line(vec2(0, 50), vec2(100, 50)), s);
+            journal_entry.add(new_page().add(c));
+        "#;
+        let entry = engine().build_entry_str(script).expect("script should run");
+        let jc: JournalCanvas = entry.pages[0].canvases()[0].clone().into();
+        let curve = jc.strokes()[0].path.points_within();
+        let p = parry2d::math::Vec2::new;
+        let original = [p(0.0, 0.0), p(30.0, -40.0), p(70.0, -40.0), p(100.0, 0.0)];
+        let moved: Vec<_> = curve.iter().zip(original).map(|(a, b)| *a - b).collect();
+        assert!(moved.iter().all(|d| d.length() <= 4.0 + 1e-4), "{:?}", moved);
+        // Control points stray on their own, not along with the ends.
+        assert!(moved.windows(2).all(|w| (w[0] - w[1]).length() > 1e-3), "{:?}", moved);
+        // Each pass reshaped differently.
+        assert_eq!(jc.strokes()[1].path.to_substrokes().len(), 3);
+        let ends = jc.strokes()[1].path.points_within();
+        assert!((ends[0] - ends[2]).length() > 1e-3 && (ends[1] - ends[3]).length() > 1e-3, "{:?}", ends);
+        // The same every time it's drawn.
+        let again: JournalCanvas = entry.pages[0].canvases()[0].clone().into();
+        assert_eq!(jc.strokes()[0].path.to_string(), again.strokes()[0].path.to_string());
+    }
+
+    #[test]
     fn styles_go_over_their_strokes_in_passes() {
         let script = r#"
             let s = new_style("black", new_brush("Ink Pen", 0.2, 0.8, 1.0));
@@ -1041,6 +1070,8 @@ mod tests {
             ("s.passes = 0;", "style.passes: should be from 1 to 64, got 0"),
             ("s.passes = 1.5;", "style.passes: should be a whole number"),
             ("s.jitter = -1;", "style.jitter: can't be negative"),
+            ("s.point_jitter = -1;", "style.point_jitter: can't be negative"),
+            ("new_style(\"black\", new_brush(\"Ink Pen\", 0.2, 0.8, 1), #{ point_jitter: -1 });", "style.point_jitter: can't be negative"),
         ] {
             let err = engine().build_entry_str(&format!("let s = new_style(\"black\", new_brush(\"Ink Pen\", 0.2, 0.8, 1));\n{}", script))
                 .expect_err("should fail").to_string();

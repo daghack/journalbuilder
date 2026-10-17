@@ -2,8 +2,8 @@
 // page the same size. After the title page and the contents:
 //
 //   pens      every Darkly brush; pressure profiles, widths, colours,
-//             gradients, strokes gone over in passes, pooling ink and
-//             wandering pressure
+//             gradients, strokes gone over in passes and reshaped,
+//             pooling ink and wandering pressure
 //   fonts     every font, its alphabet and a line, font settings,
 //             italics and spacing by outlines, and glyphs placed by hand
 //   glyphs    every variant of every glyph of every font
@@ -240,6 +240,35 @@ rough.passes = 1;
 rough.jitter = 1.2;
 pens.add(write_in("Lorem ipsum dolor sit amet, consectetur adipiscing elit,", LEFT, y + 60, 30, rough, PLAIN));
 pens.add(write_in("sed do eiusmod tempor incididunt ut labore et dolore.", LEFT, y + 110, 30, rough, PLAIN));
+book.bind("pens", pens);
+
+// Strokes reshaped: point_jitter moves every point of every pass, control
+// points included, each its own way, so curves bend differently rather
+// than just shifting.
+let pens = sheet("pens");
+pens.add(subhead("reshaping strokes", TOP));
+pens.add(caption("new_style(..., #{ point_jitter: d }): every point of every pass, control points too, astray by up to d", TOP + 50));
+let y = TOP + 130;
+for d in [0, 1.5, 4, 8] {
+	let style = new_style(INK, new_brush("Ink Pen", 0.5, 0.9, 0.8), #{ point_jitter: d });
+	assert(style.point_jitter == d, "point_jitter reads back");
+	pens.add(write(`point_jitter ${d}`, LEFT, y, 24));
+	pens.add(wave(380, 760, y, 22), style);
+	pens.add(new_circle(vec2(850, y), 30), style);
+	pens.add(write_in("lorem", 920, y, 56, style, LOCHE));
+	y += 110;
+}
+y += 40;
+pens.add(caption("with passes: passes = 4, jitter = 3, point_jitter = 3, each pass bent its own way", y));
+let bent = new_style(INK, scored, #{ passes: 4, jitter: 3, point_jitter: 3 });
+pens.add(write_in("lorem ipsum", LEFT, y + 110, 96, bent, LOCHE));
+y += 200;
+pens.add(caption("body text with unsteady curves: style.point_jitter = 0.8, in red", y));
+let unsteady = TEXT;
+unsteady.color = RED;
+unsteady.point_jitter = 0.8;
+pens.add(write_in("Lorem ipsum dolor sit amet, consectetur adipiscing elit,", LEFT, y + 60, 30, unsteady, PLAIN));
+pens.add(write_in("sed do eiusmod tempor incididunt ut labore et dolore.", LEFT, y + 110, 30, unsteady, PLAIN));
 book.bind("pens", pens);
 
 // Ink as a hand leaves it: pooling toward the bottom of each glyph, a
@@ -1212,8 +1241,8 @@ for page in layout("captioned_figure").typeset(#{
 // Marked-up text: markdown(text) makes a flow that's styled as it's set.
 // *emphasis* and **strong** look as the role's em and strong say (by
 // default italic, and gone over twice); ~~text~~ is struck through; and
-// [text]{settings} sets its own colour, passes, jitter, lean, size,
-// character padding and word spacing, and lines under and through it.
+// [text]{settings} sets its own colour, passes, jitter, point_jitter,
+// lean, size, character padding and word spacing, and lines under and through it.
 // Lines run across the spaces in what they mark, and break where the text
 // does: at the ends of lines, and either side of what it wraps round.
 fn markdown_page(n, info) {
@@ -1244,9 +1273,9 @@ for page in new_layout("marked", Fn("markdown_page")).typeset(#{
 		// escape_markdown(text): text set as it is, its marks escaped.
 		marks_label: markdown(escape_markdown("*emphasis* or _emphasis_, **strong**, ***both***, ~~struck through~~; escape_markdown(text) sets marks as they are")),
 		marks: markdown("Lorem ipsum *dolor sit amet*, consectetur _adipiscing_ elit, **sed do eiusmod** tempor ~~incididunt ut labore~~ et dolore magna aliqua. Ut enim ***ad minim*** veniam, quis nostrud exercitation."),
-		spans_label: "[text]{color, size, italic, skew, passes, jitter, character_padding, word_spacing}",
-		spans: markdown("Lorem ipsum [dolor sit]{color: #9b2318} amet, [consectetur]{size: 1.6} adipiscing [elit]{size: 0.7}, [sed do eiusmod]{italic} tempor [incididunt]{skew: -0.3} ut [labore et dolore]{passes: 4, jitter: 2.5} magna, [aliqua ut enim]{character_padding: 0.5} ad [minim veniam quis nostrud]{word_spacing: 1.4} exercitation, [ullamco [laboris]{size: 1.5} nisi]{color: #9b2318, italic}."),
-		rules_label: "underline: true, a count, or {count, spacing, color, passes, jitter}; strike (strikethrough) likewise",
+		spans_label: "[text]{color, size, italic, skew, passes, jitter, point_jitter, character_padding, word_spacing}",
+		spans: markdown("Lorem ipsum [dolor sit]{color: #9b2318} amet, [consectetur]{size: 1.6} adipiscing [elit]{size: 0.7}, [sed do eiusmod]{italic} tempor [incididunt]{skew: -0.3} ut [labore et dolore]{passes: 4, jitter: 2.5} magna [aliqua]{point_jitter: 2}, [aliqua ut enim]{character_padding: 0.5} ad [minim veniam quis nostrud]{word_spacing: 1.4} exercitation, [ullamco [laboris]{size: 1.5} nisi]{color: #9b2318, italic}."),
+		rules_label: "underline: true, a count, or {count, spacing, color, passes, jitter, point_jitter}; strike (strikethrough) likewise",
 		rules: markdown("Lorem ipsum [dolor sit amet]{underline} consectetur [adipiscing elit]{underline: 2} sed do [eiusmod tempor incididunt ut labore et dolore magna aliqua, ut enim ad minim veniam]{underline: {color: #9b2318}} quis nostrud ~~exercitation~~ ullamco [laboris nisi ut aliquip]{strike: {count: 3, color: #9b2318}} ex ea [commodo consequat]{color: #9b2318, strike: {count: 4, spacing: 0.2, color: #2b1d12, jitter: 1.5}}."),
 		roles_label: "a role's em and strong: em: #{ color }, strong: #{ underline: true, passes: 2, jitter: 1 }; rotation_jitter: 0.05",
 		roles: markdown("Lorem ipsum *dolor sit* amet, **consectetur adipiscing** elit, sed *do eiusmod* tempor **incididunt** ut labore."),

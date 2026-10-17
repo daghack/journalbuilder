@@ -444,12 +444,13 @@ doc += api("brush.pool = number", "Ink pooling: strokes heavier at the very bott
 doc += api("brush.pool_depth = number", "How far up the pooling rises.", [
 	arg("number", "The height, as a fraction of the path's. Default 0.3.", "a number above 0 and at most 1."),
 ]);
-doc += api("new_style(color, brush), new_style(color, brush, options)", "A style: width 1, passes 1 and jitter 0 unless the options set them, as setting the properties below does.", [
+doc += api("new_style(color, brush), new_style(color, brush, options)", "A style: width 1, passes 1, jitter 0 and point_jitter 0 unless the options set them, as setting the properties below does.", [
 	arg("color", "The ink.", "a CSS colour or a gradient."),
 	arg("brush", "The brush; the style keeps a copy.", "a brush, from new_brush."),
 	opt("options.width", "1", "In Darkly renders, multiplies the brush's pressure, so past 1 / max_pressure a stroke gets no heavier (the render warns); in SVG, the stroke's width in canvas units.", "a number."),
 	opt("options.passes", "1", "As style.passes.", "as style.passes."),
 	opt("options.jitter", "0", "As style.jitter.", "as style.jitter."),
+	opt("options.point_jitter", "0", "As style.point_jitter.", "as style.point_jitter."),
 ]);
 doc += api("style.width = number", "The style's width.", [
 	arg("number", "The width, as new_style takes it.", "a number."),
@@ -461,6 +462,9 @@ doc += api("style.passes = number", "Draws each stroke in the style this many ti
 	arg("number", "How many passes. Default 1.", "a whole number from 1 to 64."),
 ]);
 doc += api("style.jitter = number", "How far each pass's ends stray, seeded from each stroke's own points so it's the same every run. With one pass it just roughens a hand.", [
+	arg("number", "How far, in canvas units. Default 0.", "a number of at least 0."),
+]);
+doc += api("style.point_jitter = number", "How far every point of every pass strays, control points included, each its own way, so curves change shape rather than just shifting. On top of jitter, and seeded alike.", [
 	arg("number", "How far, in canvas units. Default 0.", "a number of at least 0."),
 ]);
 
@@ -919,6 +923,7 @@ doc += listing("Span settings: the keys in a span's braces, and in a role's em a
 	opt("color (or colour)", "the text's", "The ink.", "a CSS colour."),
 	opt("passes", "the text's", "How many times strokes are gone over.", "a whole number from 1 to 64."),
 	opt("jitter", "the text's", "How far each pass strays, in canvas units.", "a number of at least 0."),
+	opt("point_jitter", "the text's", "How far each point of each pass strays, control points included, in canvas units.", "a number of at least 0."),
 	opt("italic", "the text's", "True leans the text 0.25 radians; false sets it upright.", "true or false."),
 	opt("skew", "the text's", "Leans the text this far.", "a number, in radians."),
 	opt("size", "1", "Its size, times the size round it; lines grow to fit.", "a positive number."),
@@ -930,7 +935,7 @@ doc += listing("Span settings: the keys in a span's braces, and in a role's em a
 doc += listing("Line settings, in underline and strike braces. Lines run across the spaces between words and break where the text does.", [
 	opt("count", "1", "How many lines.", "a whole number from 1 to 20."),
 	opt("spacing", "set by the pen", "How far apart the lines are, in sizes; how far they must be to show depends on the pen.", "a number of at least 0."),
-	opt("color (or colour), passes, jitter", "the text's", "What the lines are drawn in, as above.", "as above."),
+	opt("color (or colour), passes, jitter, point_jitter", "the text's", "What the lines are drawn in, as above.", "as above."),
 ]);
 
 // ---- locks ----
