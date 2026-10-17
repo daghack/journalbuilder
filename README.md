@@ -221,7 +221,8 @@ What to know:
   flowers: ink })` strokes in different colours;
   `art::bramble_along(path, flower_size)` grows one along a path, such as
   a maze's, `art::snake_along(path, max_width)` makes a many-headed
-  serpent of one, and `art::eye` and `art::moon` draw eyes and moons.
+  serpent of one, and `art::eye` and `art::moon` give the parts of eyes
+  and moons to draw likewise.
 - **Page sizes.** A page is as big as its strokes, plus `page.margin`;
   with `page.size = vec2(1200, 1600)` it's exactly that, from the
   origin, and strokes past its edges are cut off. The showcase is a book
