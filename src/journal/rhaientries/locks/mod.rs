@@ -37,7 +37,8 @@ pub fn register(engine: &mut Engine, library: Rc<LockLibrary>) {
         .build_type::<LockValue>()
         .build_type::<LockResult>()
         .register_fn("new_lock", move |name: &str| LockBuilder::new(library.clone(), name))
-        .register_fn("symbols", symbols);
+        .register_fn("symbols", |base: i64, text: &str| symbols(base, text, &Map::new()))
+        .register_fn("symbols", |base: i64, text: &str, options: Map| symbols(base, text, &options));
     register_maze(engine);
     // Paths are for drawing, so lock files don't get this one.
     engine.register_fn("path", |maze: &mut Maze| maze.path());
@@ -47,8 +48,8 @@ pub fn register(engine: &mut Engine, library: Rc<LockLibrary>) {
 fn register_maze(engine: &mut Engine) {
     engine
         .build_type::<Maze>()
-        .register_fn("new_maze", |seed: i64, width: i64, height: i64| new_maze(seed, width, height, "LeftHanded"))
-        .register_fn("new_maze", new_maze);
+        .register_fn("new_maze", |width: i64, height: i64| new_maze(width, height, &Map::new()))
+        .register_fn("new_maze", |width: i64, height: i64, options: Map| new_maze(width, height, &options));
 }
 
 /// A lock chain under construction: named locks, connections from one
@@ -165,11 +166,13 @@ impl CustomType for LockBuilder {
         builder
             .with_name("Lock")
             .with_fn("add", Self::add)
+            .with_fn("add", |lock: &mut Self, name: &str, type_name: &str| lock.add(name, type_name, Map::new()))
             .with_fn("connect", Self::connect)
             .with_fn("set_input", Self::set_input)
             .with_fn("inputs", Self::inputs)
             .with_fn("outputs", Self::outputs)
             .with_fn("run", Self::run)
+            .with_fn("run", |lock: &mut Self| lock.run(Map::new()))
             .with_fn("unlock", Self::unlock)
             .with_fn("unlock", Self::unlock_map);
     }
@@ -255,9 +258,9 @@ impl CustomType for LockValue {
         builder
             .with_name("LockValue")
             .with_fn("text", Self::text)
-            .with_fn("base", Self::base)
+            .with_get("base", Self::base)
             .with_fn("symbols", Self::symbols)
-            .with_fn("type_name", Self::type_name)
+            .with_get("type_name", Self::type_name)
             .with_fn("maze", Self::maze)
             .with_fn("value", Self::value)
             .with_fn("to_string", Self::display)
@@ -384,18 +387,26 @@ impl CustomType for Maze {
     fn build(mut builder: TypeBuilder<Self>) {
         builder
             .with_name("Maze")
-            .with_fn("width", Self::width)
-            .with_fn("height", Self::height)
+            .with_get("width", Self::width)
+            .with_get("height", Self::height)
             .with_fn("cells", Self::cells)
             .with_fn("fill", Self::fill);
     }
 }
 
-/// `new_maze(seed, width, height[, strategy])`: a maze of `width` x `height`
+/// `new_maze(width, height[, strategy], #{ seed: seed })`: a maze of `width` x `height`
 /// nodes (so a grid of 2w-1 x 2h-1 cells), traversed "LeftHanded" (the
 /// default) or "RightHanded". Its layout depends only on the seed and size.
-fn new_maze(seed: i64, width: i64, height: i64, strategy: &str) -> RhaiResult<Maze> {
-    let strategy = match strategy {
+/// `new_maze(width, height[, #{ seed, strategy }])`.
+fn new_maze(width: i64, height: i64, options: &Map) -> RhaiResult<Maze> {
+    const CALLER: &str = "new_maze";
+    super::options::check_keys(CALLER, options, &["seed", "strategy"])?;
+    let seed = match options.get("seed") {
+        None => 0,
+        Some(s) => s.as_int().map_err(|t| format!("{}: 'seed' should be a whole number, got {}", CALLER, t))?,
+    };
+    let strategy = options.get("strategy").map_or("LeftHanded".to_string(), |s| s.to_string());
+    let strategy = match strategy.as_str() {
         "LeftHanded" => MazeTraversalStrategy::LeftHanded,
         "RightHanded" => MazeTraversalStrategy::RightHanded,
         other => return Err(format!("new_maze: unknown strategy '{}'; expected \"LeftHanded\" or \"RightHanded\"", other).into()),
@@ -409,11 +420,43 @@ fn new_maze(seed: i64, width: i64, height: i64, strategy: &str) -> RhaiResult<Ma
 /// `symbols(base, text)`: text as symbols in `base`. Base 10 takes digits,
 /// base 27 takes letters and spaces, other bases up to 26 take the first
 /// `base` letters (case-insensitive). Anything else is an error.
-fn symbols(base: i64, text: &str) -> RhaiResult<LockValue> {
+fn symbols(base: i64, text: &str, options: &Map) -> RhaiResult<LockValue> {
+    super::options::check_keys("symbols", options, &["lenient"])?;
     let base = u32::try_from(base).map_err(|_| format!("symbols: base must be between 2 and 27, got {}", base))?;
-    let data: Array = base_n_symbols(base, text).map_err(|e| format!("symbols: {}", e))?
+    let text = if lenient("symbols", options)? { lenient_text(base, text) } else { text.to_string() };
+    let data: Array = base_n_symbols(base, &text).map_err(|e| format!("symbols: {}", e))?
         .into_iter().map(|s| Dynamic::from_int(s as i64)).collect();
     Ok(LockValue { var: InfoVar::new(InfoVarType::BaseNSymbol(base), data.into()) })
+}
+
+/// The `lenient` option of `symbols`, false unless given.
+pub(super) fn lenient(caller: &str, options: &Map) -> RhaiResult<bool> {
+    match options.get("lenient") {
+        None => Ok(false),
+        Some(l) => l.as_bool().map_err(|_| format!("{}: 'lenient' should be true or false, got {}", caller, l).into()),
+    }
+}
+
+/// Text made fit for `base`: in capitals, characters the base hasn't
+/// dropped, and runs of spaces and dashes one space where the base has
+/// one, not at either end.
+pub(super) fn lenient_text(base: u32, text: &str) -> String {
+    let fits = |c: char| base_n_symbols(base, &c.to_string()).is_ok();
+    let space = fits(' ');
+    let mut out = String::new();
+    let mut gap = false;
+    for c in text.to_uppercase().chars() {
+        if c != ' ' && fits(c) {
+            if gap && !out.is_empty() {
+                out.push(' ');
+            }
+            gap = false;
+            out.push(c);
+        } else if space && (c.is_whitespace() || c == '-' || c == '—' || c == '–') {
+            gap = true;
+        }
+    }
+    out
 }
 
 fn type_name(var_type: &InfoVarType) -> String {
@@ -518,7 +561,7 @@ mod tests {
                 "maze_content.plain_text": symbols(27, "the conversion"),
             }});
             let maze = result.get("maze_encode.generated_maze");
-            if maze.type_name() != "Maze" {{ throw "expected a maze, got " + maze.type_name(); }}
+            if maze.type_name != "Maze" {{ throw "expected a maze, got " + maze.type_name; }}
             if !result.trace().contains("maze_content.cipher_text") {{ throw "trace is missing intermediates"; }}
             let back = lock.unlock(result);
             [back.text("maze_content.plain_text"), back.text("prime_sub.plain_text")]
@@ -582,7 +625,7 @@ mod tests {
     fn values_expose_text_base_and_symbols() {
         let script = r#"
             let v = symbols(27, "ab c");
-            [v.text(), v.base(), v.symbols(), v.type_name(), `${v}`]
+            [v.text(), v.base, v.symbols(), v.type_name, `${v}`]
         "#;
         let parts: Array = eval(script);
         assert_eq!(parts[0].clone().cast::<String>(), "AB C");
@@ -640,7 +683,7 @@ mod tests {
     #[test]
     fn maze_size_covers_its_cells() {
         let size: Array = eval(&format!(r#"{}
-            let w = maze.width(); let h = maze.height();
+            let w = maze.width; let h = maze.height;
             for c in maze.cells() {{ if c.x >= w || c.y >= h {{ throw "cell outside the grid"; }} }}
             [w, h]
         "#, MAZE));
@@ -662,7 +705,7 @@ mod tests {
                 let text = "{}";
                 let result = lock.run(#{{ "m.maze_text": symbols(27, text) }});
                 if lock.unlock(result).text("m.maze_text") != text {{ throw "didn't round-trip"; }}
-                result.get("m.generated_maze").maze().width()
+                result.get("m.generated_maze").maze().width
             "#, "A".repeat(len)));
             assert_eq!(width, 2 * side - 1, "{} symbols", len);
         }
@@ -672,7 +715,7 @@ mod tests {
     fn values_of_any_type_are_reachable() {
         let parts: Array = eval(&format!(r#"{}
             let length = lock.run(#{{ "m.maze_text": symbols(27, "HELLO WORLD") }}).get("m.text_length");
-            [length.type_name(), length.value(), symbols(27, "AB").value()]
+            [length.type_name, length.value(), symbols(27, "AB").value()]
         "#, MAZE));
         assert_eq!(parts[0].clone().cast::<String>(), "LockProcessInfo");
         assert_eq!(parts[1].clone().cast::<i64>(), 11);
@@ -683,15 +726,15 @@ mod tests {
     #[test]
     fn maze_fill_writes_in_traversal_order() {
         let symbols: Array = eval(r#"
-            let maze = new_maze(3, 2, 2);
+            let maze = new_maze(2, 2, #{ seed: 3 });
             maze.fill([5, 6, 7]);
             maze.cells().map(|c| c.symbol)
         "#);
         let symbols: Vec<i64> = symbols.into_iter().map(|s| s.cast::<i64>()).collect();
         assert_eq!(symbols, vec![5, 6, 7, 0, 0, 0, 0]);
-        let err = error("let m = new_maze(3, 2, 2);\nm.fill([1, 2, 3, 4, 5, 6, 7, 8]);");
+        let err = error("let m = new_maze(2, 2, #{ seed: 3 });\nm.fill([1, 2, 3, 4, 5, 6, 7, 8]);");
         assert!(err.contains("8 symbols don't fit in the maze's 7 cells") && err.contains("line 2"), "{}", err);
-        let err = error("let m = new_maze(3, 2, 2);\nm.fill([1, -2]);");
+        let err = error("let m = new_maze(2, 2, #{ seed: 3 });\nm.fill([1, -2]);");
         assert!(err.contains("item 1 (-2) isn't a symbol"), "{}", err);
     }
 
@@ -712,14 +755,14 @@ mod tests {
             let cells: Array = eval(&format!("{}.cells()", script));
             cells.into_iter().map(|c| { let c = c.cast::<Map>(); (c["x"].clone().cast(), c["y"].clone().cast()) }).collect()
         };
-        let maze = layout("new_maze(1043, 4, 3)");
+        let maze = layout("new_maze(4, 3, #{ seed: 1043 })");
         // 4x3 nodes: 7x5 grid cells, and a spanning tree reaches every node
         // through 11 passages.
         assert_eq!(maze.len(), 12 + 11);
         assert!(maze.iter().all(|&(x, y)| (0..7).contains(&x) && (0..5).contains(&y)), "{:?}", maze);
-        assert_eq!(maze, layout("new_maze(1043, 4, 3, \"LeftHanded\")"));
-        assert_ne!(maze, layout("new_maze(1044, 4, 3)"));
-        let mut right = layout("new_maze(1043, 4, 3, \"RightHanded\")");
+        assert_eq!(maze, layout("new_maze(4, 3, #{ seed: 1043, strategy: \"LeftHanded\" })"));
+        assert_ne!(maze, layout("new_maze(4, 3, #{ seed: 1044 })"));
+        let mut right = layout("new_maze(4, 3, #{ seed: 1043, strategy: \"RightHanded\" })");
         assert_ne!(maze, right);
         // The same cells, walked the other way round.
         let mut left = maze.clone();
@@ -736,9 +779,9 @@ mod tests {
     #[test]
     fn new_maze_rejects_bad_arguments() {
         for (script, want) in [
-            ("let ok = 1;\nnew_maze(1, 0, 3);", "width must be at least 1"),
-            ("let ok = 1;\nnew_maze(1, 3, -2);", "height must be at least 1"),
-            ("let ok = 1;\nnew_maze(1, 3, 3, \"Sideways\");", "unknown strategy 'Sideways'"),
+            ("let ok = 1;\nnew_maze(0, 3, #{ seed: 1 });", "width must be at least 1"),
+            ("let ok = 1;\nnew_maze(3, -2, #{ seed: 1 });", "height must be at least 1"),
+            ("let ok = 1;\nnew_maze(3, 3, #{ seed: 1, strategy: \"Sideways\" });", "unknown strategy 'Sideways'"),
         ] {
             let err = error(script);
             assert!(err.contains(want) && err.contains("line 2"), "{}", err);

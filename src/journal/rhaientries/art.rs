@@ -2,37 +2,39 @@
 //!
 //! ```rhai
 //! // A snake seen from above: its head centred at (0, 0) facing up the page
-//! // (angles are radians; 0 faces +x and PI() / 2.0 faces down the page),
-//! // the tip of its tail at (40, 400), 900 units long along its spine and 36
-//! // across at its widest. The last argument is the seed for its winding.
-//! let snake = art::snake_path(vec2(0.0, 0.0), -PI() / 2.0, vec2(40.0, 400.0), 900.0, 36.0, 7);
-//! canvas.add_path(snake, ink);
+//! // (angles are radians; 0 faces +x and PI() / 2.0 faces down the page;
+//! // by default it faces away from the tail), the tip of its tail at
+//! // (40, 400), 900 units long along its spine and 36 across at its widest
+//! // (by default a twelfth of its length). The seed picks its winding (0 by
+//! // default).
+//! let snake = art::snake(vec2(0.0, 0.0), vec2(40.0, 400.0), 900.0, #{ head_angle: -PI() / 2.0, max_width: 36.0, seed: 7 });
+//! canvas.add(snake.outline, ink);
 //! ```
 //!
-//! `snake_path` gives the snake's outline. Where the body crosses itself,
+//! `outline` is the snake's outline. Where the body crosses itself,
 //! the outline of the strand underneath stops at the edge of the one on top
 //! (the head always goes over), so the path is several strokes. The same
 //! seed gives the same snake; it doesn't use or change the script's
 //! generator (`seed`, `random`).
 //!
-//! `snake_spine`, with the same arguments, gives the same snake's centre
-//! line from the back of its head to the tip of its tail, to write along:
+//! `spine` is the same snake's centre line from the back of its head to
+//! the tip of its tail, to write along:
 //!
 //! ```rhai
-//! let back = art::snake_spine(vec2(0.0, 0.0), -PI() / 2.0, vec2(40.0, 400.0), 900.0, 36.0, 7);
-//! canvas.add_canvas(back.fill_with_text("a snake", font, 30.0, ink)[0]);
+//! canvas.add(snake.spine.fill_with_text("a snake", #{ font: font, size: 30.0, style: ink }));
 //! ```
 //!
 //! `bramble` grows a blackberry bramble and gives its parts as separate
 //! paths, to stroke in different colours: a cane from (0, 0) growing up the
-//! page, 1400 long, with flowers about 200 across (which everything else is
-//! sized by).
+//! page (the default angle), 1400 long, with flowers about 200 across
+//! (which everything else is sized by; by default a fifth of the length).
 //!
 //! ```rhai
-//! let plant = art::bramble(vec2(0.0, 0.0), -PI() / 2.0, 1400.0, 200.0, 7);
-//! canvas.add_path(plant.vines, bark);     // canes, thorns and stalks
-//! canvas.add_path(plant.leaves, green);   // leaflets and their veins
-//! canvas.add_path(plant.flowers, white);  // flowers, buds and sepals
+//! let plant = art::bramble(vec2(0.0, 0.0), 1400.0, #{ angle: -PI() / 2.0, flower_size: 200.0, seed: 7 });
+//! canvas.add(plant.vines, bark);     // canes, thorns and stalks
+//! canvas.add(plant.leaves, green);   // leaflets and their veins
+//! canvas.add(plant.flowers, white);  // flowers, buds and sepals
+//! canvas.add(plant, #{ vines: bark, leaves: green, flowers: white });   // or all three
 //! ```
 //!
 //! Flowers, from closed buds to full blooms, and leaves are modelled in 3D
@@ -46,8 +48,8 @@
 //! touch grow separate vines.
 //!
 //! ```rhai
-//! let path = new_maze(7, 9, 7).path().scale_by(70.0);
-//! let plant = art::bramble_along(path, 38.0, 3);   // flowers 38 across
+//! let path = new_maze(9, 7, #{ seed: 7 }).path().scale_by(70.0);
+//! let plant = art::bramble_along(path, 38.0, #{ seed: 3 });   // flowers 38 across
 //! ```
 //!
 //! Either takes `#{ origin, thickness, reach }` to grow canes thicker
@@ -56,7 +58,7 @@
 //! as far as the canes go).
 //!
 //! ```rhai
-//! let plant = art::bramble_along(path, 38.0, 3, #{ origin: vec2(0, 0), thickness: 4 });
+//! let plant = art::bramble_along(path, 38.0, #{ seed: 3, origin: vec2(0, 0), thickness: 4 });
 //! ```
 //!
 //! `snake_along` does the same for a snake, making a many-headed serpent:
@@ -65,7 +67,7 @@
 //! and a head at every other dead end.
 //!
 //! ```rhai
-//! canvas.add_path(art::snake_along(path, 30.0, 2), ink);   // 30 wide
+//! canvas.add(art::snake_along(path, 30.0, #{ seed: 2 }), ink);   // 30 wide
 //! ```
 //!
 //! `eye` draws an eye as a hand sketches one in a journal, and gives it as
@@ -77,7 +79,7 @@
 //! between neat (0) and as messy as it gets (1).
 //!
 //! ```rhai
-//! canvas.add_canvas(art::eye(vec2(0.0, 0.0), 300.0, "#2a9bb8", -PI() / 4.0, 0.5, 7));
+//! canvas.add(art::eye(vec2(0.0, 0.0), 300.0, #{ color: "#2a9bb8", gaze_angle: -PI() / 4.0, messiness: 0.5, seed: 7 }));
 //! ```
 //!
 //! Options: `angle`, the eye's tilt (default 0, corners level); `gaze`,
@@ -88,7 +90,7 @@
 //! `ink`, the style of its lines (default a near-black ink pen).
 //!
 //! ```rhai
-//! let e = art::eye(vec2(0.0, 0.0), 300.0, "#2a9bb8", PI(), 0.8, 7, #{ angle: 1.2, gaze: 1.0, openness: 0.6, flat: true, ink: ink });
+//! let e = art::eye(vec2(0.0, 0.0), 300.0, #{ color: "#2a9bb8", gaze_angle: PI(), messiness: 0.8, seed: 7, angle: 1.2, gaze: 1.0, openness: 0.6, flat: true, ink: ink });
 //! ```
 //!
 //! `moon` draws the moon in a phase: 0 new, 0.25 first quarter (right half
@@ -98,9 +100,9 @@
 //!
 //! ```rhai
 //! let moon = art::moon(vec2(0.0, 0.0), 80.0, 0.3);   // a waxing gibbous
-//! canvas.add_path(moon.outline, ink);
-//! canvas.add_path(moon.terminator, ink);
-//! canvas.add_path(moon.dark.hatch(4.0, 0.8, 0.5), ink);
+//! canvas.add(moon.outline, ink);
+//! canvas.add(moon.terminator, ink);
+//! canvas.add(moon.dark.hatch(4.0, #{ angle: 0.8, roughness: 0.5 }), ink);
 //! ```
 
 use rhai::{Dynamic, Engine, EvalAltResult, Map, Module, NativeCallContext};
@@ -123,38 +125,77 @@ fn number_arg(ctx: &NativeCallContext, caller: &str, what: &str, v: &Dynamic) ->
     float(caller, what, v).map(|n| n as f32).map_err(|err| error(ctx, err.to_string()))
 }
 
-const BRAMBLE_KEYS: [&str; 3] = ["origin", "thickness", "reach"];
+/// A seed option: which drawing, 0 unless given.
+fn seed(ctx: &NativeCallContext, caller: &str, options: &Map) -> RhaiResult<u64> {
+    match options.get("seed") {
+        None => Ok(0),
+        Some(seed) => seed.as_int().map(|s| s as u64)
+            .map_err(|t| error(ctx, format!("{}: 'seed' should be a whole number, got {}", caller, t))),
+    }
+}
 
-/// A bramble's `#{ origin, thickness, reach }`: canes thicker toward a
-/// growth origin.
-fn thickening(ctx: &NativeCallContext, caller: &str, options: Option<&Map>) -> RhaiResult<Option<art::Thickening>> {
-    let Some(options) = options else { return Ok(None) };
-    check_keys(caller, options, &BRAMBLE_KEYS).map_err(|err| error(ctx, err.to_string()))?;
+/// A number option, `default` unless given.
+fn number_option(ctx: &NativeCallContext, caller: &str, options: &Map, key: &str, default: f32) -> RhaiResult<f32> {
+    number(caller, options, key).map(|n| n.unwrap_or(default)).map_err(|err| error(ctx, err.to_string()))
+}
+
+const THICKENING_KEYS: [&str; 3] = ["origin", "thickness", "reach"];
+
+/// A bramble's `origin`, `thickness` and `reach`: canes thicker toward a
+/// growth origin, if there is one.
+fn thickening(ctx: &NativeCallContext, caller: &str, options: &Map) -> RhaiResult<Option<art::Thickening>> {
+    if !THICKENING_KEYS.iter().any(|k| options.contains_key(*k)) {
+        return Ok(None);
+    }
     let origin = options.get("origin")
-        .ok_or_else(|| error(ctx, format!("{}: missing 'origin', the point canes thicken toward", caller)))?
+        .ok_or_else(|| error(ctx, format!("{}: 'thickness' and 'reach' need an 'origin', the point canes thicken toward", caller)))?
         .clone().try_cast::<Vec2>()
         .ok_or_else(|| error(ctx, format!("{}: 'origin' should be a vec2", caller)))?;
-    let thickness = number(caller, options, "thickness").map_err(|err| error(ctx, err.to_string()))?.unwrap_or(3.0);
+    let thickness = number_option(ctx, caller, options, "thickness", 3.0)?;
     let reach = number(caller, options, "reach").map_err(|err| error(ctx, err.to_string()))?;
     Ok(Some(art::Thickening { origin: origin.into(), thickness, reach }))
 }
 
-fn bramble(ctx: &NativeCallContext, base: Vec2, angle: &Dynamic, length: &Dynamic, flower_size: &Dynamic, seed: i64, options: Option<&Map>) -> RhaiResult<Map> {
+/// `art::bramble(base, length[, #{ angle, flower_size, seed, origin, thickness, reach }])`.
+fn bramble(ctx: &NativeCallContext, base: Vec2, length: &Dynamic, options: &Map) -> RhaiResult<Map> {
     const CALLER: &str = "art::bramble";
-    let n = |what: &str, v: &Dynamic| number_arg(ctx, CALLER, what, v);
-    let thickening = thickening(ctx, CALLER, options)?;
-    let bramble = art::bramble(base.into(), n("angle", angle)?, n("length", length)?, n("flower_size", flower_size)?, seed as u64, thickening)
+    check_keys(CALLER, options, &["angle", "flower_size", "seed", "origin", "thickness", "reach"]).map_err(|err| error(ctx, err.to_string()))?;
+    let length = number_arg(ctx, CALLER, "length", length)?;
+    let angle = number_option(ctx, CALLER, options, "angle", -std::f32::consts::FRAC_PI_2)?;
+    let flower_size = number_option(ctx, CALLER, options, "flower_size", length / 5.0)?;
+    let bramble = art::bramble(base.into(), angle, length, flower_size, seed(ctx, CALLER, options)?, thickening(ctx, CALLER, options)?)
         .map_err(|err| error(ctx, format!("{}: {}", CALLER, err)))?;
     Ok(parts(bramble))
 }
 
-fn bramble_along(ctx: &NativeCallContext, path: &Path, flower_size: &Dynamic, seed: i64, options: Option<&Map>) -> RhaiResult<Map> {
+/// `art::bramble_along(path, flower_size[, #{ seed, origin, thickness, reach }])`.
+fn bramble_along(ctx: &NativeCallContext, path: &Path, flower_size: &Dynamic, options: &Map) -> RhaiResult<Map> {
     const CALLER: &str = "art::bramble_along";
+    check_keys(CALLER, options, &["seed", "origin", "thickness", "reach"]).map_err(|err| error(ctx, err.to_string()))?;
     let flower_size = number_arg(ctx, CALLER, "flower_size", flower_size)?;
-    let thickening = thickening(ctx, CALLER, options)?;
-    let bramble = art::bramble_along(&path.borrow(), flower_size, seed as u64, thickening)
+    let bramble = art::bramble_along(&path.borrow(), flower_size, seed(ctx, CALLER, options)?, thickening(ctx, CALLER, options)?)
         .map_err(|err| error(ctx, format!("{}: {}", CALLER, err)))?;
     Ok(parts(bramble))
+}
+
+/// `art::snake(head_center, tail_end, length[, #{ head_angle, max_width, seed }])`:
+/// `#{ outline, spine }`.
+fn snake(ctx: &NativeCallContext, head: Vec2, tail: Vec2, length: &Dynamic, options: &Map) -> RhaiResult<Map> {
+    const CALLER: &str = "art::snake";
+    check_keys(CALLER, options, &["head_angle", "max_width", "seed"]).map_err(|err| error(ctx, err.to_string()))?;
+    let length = number_arg(ctx, CALLER, "length", length)?;
+    let (h, t): (parry2d::math::Vec2, parry2d::math::Vec2) = (head.into(), tail.into());
+    let away = (h - t).y.atan2((h - t).x);
+    let head_angle = number_option(ctx, CALLER, options, "head_angle", away)?;
+    let max_width = number_option(ctx, CALLER, options, "max_width", length / 12.0)?;
+    let seed = seed(ctx, CALLER, options)?;
+    let fail = |err: String| error(ctx, format!("{}: {}", CALLER, err));
+    let outline = art::snake_path(h, head_angle, t, length, max_width, seed).map_err(fail)?;
+    let spine = art::snake_spine(h, head_angle, t, length, max_width, seed).map_err(fail)?;
+    let mut parts = Map::new();
+    parts.insert("outline".into(), Dynamic::from(Path::new(outline)));
+    parts.insert("spine".into(), Dynamic::from(Path::new(spine)));
+    Ok(parts)
 }
 
 /// A bramble's parts, by name.
@@ -166,7 +207,7 @@ fn parts(bramble: art::Bramble) -> Map {
     parts
 }
 
-const EYE_KEYS: [&str; 5] = ["angle", "gaze", "openness", "flat", "ink"];
+const EYE_KEYS: [&str; 9] = ["color", "gaze_angle", "messiness", "seed", "angle", "gaze", "openness", "flat", "ink"];
 
 /// A style for an eye's strokes: `brush` at `size`, in `color`.
 /// Tapered at both ends, as quick strokes are.
@@ -176,12 +217,15 @@ fn eye_style(color: &crate::journal::canvas::StrokeColor, brush: &str, min: f64,
     StrokeStyle { width: 1.0, color: color.clone(), brush, passes: 1, jitter: 0.0 }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn eye(ctx: &NativeCallContext, center: Vec2, length: &Dynamic, color: Dynamic, gaze_angle: &Dynamic, messiness: &Dynamic, seed: i64, options: &Map) -> RhaiResult<Canvas> {
+/// `art::eye(center, length[, #{ color, gaze_angle, messiness, seed, angle, gaze, openness, flat, ink }])`.
+fn eye(ctx: &NativeCallContext, center: Vec2, length: &Dynamic, options: &Map) -> RhaiResult<Canvas> {
     const CALLER: &str = "art::eye";
     let fail = |err: Box<EvalAltResult>| error(ctx, err.to_string());
     check_keys(CALLER, options, &EYE_KEYS).map_err(fail)?;
-    let color = colour_or_gradient(CALLER, color).map_err(fail)?;
+    let color = colour_or_gradient(CALLER, options.get("color").cloned().unwrap_or_else(|| "#2b1d12".into())).map_err(fail)?;
+    let gaze_angle = number_option(ctx, CALLER, options, "gaze_angle", 0.0)?;
+    let messiness = number_option(ctx, CALLER, options, "messiness", 0.3)?;
+    let seed = seed(ctx, CALLER, options)?;
     let defaults = art::EyeShape::default();
     let option = |key: &str, default: f32| number(CALLER, options, key).map(|n| n.unwrap_or(default)).map_err(fail);
     let flat = match options.get("flat") {
@@ -195,8 +239,7 @@ fn eye(ctx: &NativeCallContext, center: Vec2, length: &Dynamic, color: Dynamic, 
         Some(ink) => ink.clone().try_cast::<StrokeStyle>()
             .ok_or_else(|| error(ctx, format!("{}: 'ink' should be a style (new_style), got {}", CALLER, ink.type_name())))?,
     };
-    let n = |what: &str, v: &Dynamic| number_arg(ctx, CALLER, what, v);
-    let eye = art::eye(center.into(), n("length", length)?, n("gaze_angle", gaze_angle)?, n("messiness", messiness)?, shape, seed as u64)
+    let eye = art::eye(center.into(), number_arg(ctx, CALLER, "length", length)?, gaze_angle, messiness, shape, seed)
         .map_err(|err| error(ctx, format!("{}: {}", CALLER, err)))?;
     // The wash first, then its pooled rim, the coloured outline and the
     // ink over them all.
@@ -227,41 +270,43 @@ pub fn register(engine: &mut Engine) {
     module.set_native_fn("moon", |ctx: NativeCallContext, center: Vec2, radius: Dynamic, phase: Dynamic| -> RhaiResult<Map> {
         moon(&ctx, center, &radius, &phase)
     });
-    module.set_native_fn("snake_path", |ctx: NativeCallContext, head_center: Vec2, head_angle: Dynamic, tail_end: Vec2, snake_length: Dynamic, max_width: Dynamic, random_seed: i64| -> RhaiResult<Path> {
-        let n = |what: &str, v: &Dynamic| number_arg(&ctx, "art::snake_path", what, v);
-        art::snake_path(head_center.into(), n("head_angle", &head_angle)?, tail_end.into(), n("snake_length", &snake_length)?, n("max_width", &max_width)?, random_seed as u64)
+    module.set_native_fn("snake", |ctx: NativeCallContext, head_center: Vec2, tail_end: Vec2, length: Dynamic| -> RhaiResult<Map> {
+        snake(&ctx, head_center, tail_end, &length, &Map::new())
+    });
+    module.set_native_fn("snake", |ctx: NativeCallContext, head_center: Vec2, tail_end: Vec2, length: Dynamic, options: Map| -> RhaiResult<Map> {
+        snake(&ctx, head_center, tail_end, &length, &options)
+    });
+    module.set_native_fn("bramble", |ctx: NativeCallContext, base: Vec2, length: Dynamic| -> RhaiResult<Map> {
+        bramble(&ctx, base, &length, &Map::new())
+    });
+    module.set_native_fn("bramble", |ctx: NativeCallContext, base: Vec2, length: Dynamic, options: Map| -> RhaiResult<Map> {
+        bramble(&ctx, base, &length, &options)
+    });
+    module.set_native_fn("bramble_along", |ctx: NativeCallContext, path: Path, flower_size: Dynamic| -> RhaiResult<Map> {
+        bramble_along(&ctx, &path, &flower_size, &Map::new())
+    });
+    module.set_native_fn("bramble_along", |ctx: NativeCallContext, path: Path, flower_size: Dynamic, options: Map| -> RhaiResult<Map> {
+        bramble_along(&ctx, &path, &flower_size, &options)
+    });
+    let snake_along = |ctx: &NativeCallContext, path: &Path, max_width: &Dynamic, options: &Map| -> RhaiResult<Path> {
+        const CALLER: &str = "art::snake_along";
+        check_keys(CALLER, options, &["seed"]).map_err(|err| error(ctx, err.to_string()))?;
+        let max_width = number_arg(ctx, CALLER, "max_width", max_width)?;
+        art::snake_along(&path.borrow(), max_width, seed(ctx, CALLER, options)?)
             .map(Path::new)
-            .map_err(|err| error(&ctx, format!("art::snake_path: {}", err)))
+            .map_err(|err| error(ctx, format!("{}: {}", CALLER, err)))
+    };
+    module.set_native_fn("snake_along", move |ctx: NativeCallContext, path: Path, max_width: Dynamic| -> RhaiResult<Path> {
+        snake_along(&ctx, &path, &max_width, &Map::new())
     });
-    module.set_native_fn("snake_spine", |ctx: NativeCallContext, head_center: Vec2, head_angle: Dynamic, tail_end: Vec2, snake_length: Dynamic, max_width: Dynamic, random_seed: i64| -> RhaiResult<Path> {
-        let n = |what: &str, v: &Dynamic| number_arg(&ctx, "art::snake_spine", what, v);
-        art::snake_spine(head_center.into(), n("head_angle", &head_angle)?, tail_end.into(), n("snake_length", &snake_length)?, n("max_width", &max_width)?, random_seed as u64)
-            .map(Path::new)
-            .map_err(|err| error(&ctx, format!("art::snake_spine: {}", err)))
+    module.set_native_fn("snake_along", move |ctx: NativeCallContext, path: Path, max_width: Dynamic, options: Map| -> RhaiResult<Path> {
+        snake_along(&ctx, &path, &max_width, &options)
     });
-    module.set_native_fn("bramble", |ctx: NativeCallContext, base: Vec2, angle: Dynamic, length: Dynamic, flower_size: Dynamic, random_seed: i64| -> RhaiResult<Map> {
-        bramble(&ctx, base, &angle, &length, &flower_size, random_seed, None)
+    module.set_native_fn("eye", |ctx: NativeCallContext, center: Vec2, length: Dynamic| -> RhaiResult<Canvas> {
+        eye(&ctx, center, &length, &Map::new())
     });
-    module.set_native_fn("bramble", |ctx: NativeCallContext, base: Vec2, angle: Dynamic, length: Dynamic, flower_size: Dynamic, random_seed: i64, options: Map| -> RhaiResult<Map> {
-        bramble(&ctx, base, &angle, &length, &flower_size, random_seed, Some(&options))
-    });
-    module.set_native_fn("bramble_along", |ctx: NativeCallContext, path: Path, flower_size: Dynamic, random_seed: i64| -> RhaiResult<Map> {
-        bramble_along(&ctx, &path, &flower_size, random_seed, None)
-    });
-    module.set_native_fn("bramble_along", |ctx: NativeCallContext, path: Path, flower_size: Dynamic, random_seed: i64, options: Map| -> RhaiResult<Map> {
-        bramble_along(&ctx, &path, &flower_size, random_seed, Some(&options))
-    });
-    module.set_native_fn("snake_along", |ctx: NativeCallContext, path: Path, max_width: Dynamic, random_seed: i64| -> RhaiResult<Path> {
-        let max_width = number_arg(&ctx, "art::snake_along", "max_width", &max_width)?;
-        art::snake_along(&path.borrow(), max_width, random_seed as u64)
-            .map(Path::new)
-            .map_err(|err| error(&ctx, format!("art::snake_along: {}", err)))
-    });
-    module.set_native_fn("eye", |ctx: NativeCallContext, center: Vec2, length: Dynamic, color: Dynamic, gaze_angle: Dynamic, messiness: Dynamic, random_seed: i64| -> RhaiResult<Canvas> {
-        eye(&ctx, center, &length, color, &gaze_angle, &messiness, random_seed, &Map::new())
-    });
-    module.set_native_fn("eye", |ctx: NativeCallContext, center: Vec2, length: Dynamic, color: Dynamic, gaze_angle: Dynamic, messiness: Dynamic, random_seed: i64, options: Map| -> RhaiResult<Canvas> {
-        eye(&ctx, center, &length, color, &gaze_angle, &messiness, random_seed, &options)
+    module.set_native_fn("eye", |ctx: NativeCallContext, center: Vec2, length: Dynamic, options: Map| -> RhaiResult<Canvas> {
+        eye(&ctx, center, &length, &options)
     });
     engine.register_static_module("art", module.into());
 }
@@ -279,14 +324,14 @@ mod tests {
     #[test]
     fn snake_path_draws_a_snake_from_its_seed() {
         let script = r##"
-            let draw = |seed| art::snake_path(vec2(0.0, 0.0), -PI() / 2.0, vec2(20.0, 300.0), 900.0, 30.0, seed);
+            let draw = |seed| art::snake(vec2(0.0, 0.0), vec2(20.0, 300.0), 900.0, #{ head_angle: -PI() / 2.0, max_width: 30.0, seed: seed }).outline;
             let snake = draw.call(7);
             if snake.to_string() != draw.call(7).to_string() { throw "the same seed should draw the same snake"; }
             if snake.to_string() == draw.call(8).to_string() { throw "another seed should draw another snake"; }
-            let spine = art::snake_spine(vec2(0.0, 0.0), -PI() / 2.0, vec2(20.0, 300.0), 900.0, 30.0, 7);
+            let spine = art::snake(vec2(0.0, 0.0), vec2(20.0, 300.0), 900.0, #{ head_angle: -PI() / 2.0, max_width: 30.0, seed: 7 }).spine;
             if spine.to_string() == snake.to_string() { throw "the spine should be another path"; }
             let c = new_canvas();
-            c.add_path(snake, new_style(1.0, "#f2ead8", new_brush("Ink Pen", 0.3, 0.7, 1.0)));
+            c.add(snake, new_style("#f2ead8", new_brush("Ink Pen", 0.3, 0.7, 1.0)));
             // The tail's tip reaches the tail end (the outline's bounds include
             // the stroke's width).
             if c.bounds().max.y < 300.0 { throw "the tail should reach the tail end: " + c.bounds(); }
@@ -297,8 +342,8 @@ mod tests {
             draw.call(9);
             if random() != a { throw "snake_path shouldn't draw from the script's generator"; }
             let p = new_page();
-            p.add_canvas(c);
-            journal_entry.add_page(p);
+            p.add(c);
+            journal_entry.add(p);
         "##;
         engine().build_entry_str(script).expect("script should run");
     }
@@ -306,19 +351,19 @@ mod tests {
     #[test]
     fn bramble_gives_its_three_parts() {
         let script = r##"
-            let plant = art::bramble(vec2(0.0, 0.0), -PI() / 2.0, 1000.0, 150.0, 5);
+            let plant = art::bramble(vec2(0.0, 0.0), 1000.0, #{ angle: -PI() / 2.0, flower_size: 150.0, seed: 5 });
             let pen = new_brush("Ink Pen", 0.3, 0.7, 1.0);
             let c = new_canvas();
-            c.add_path(plant.vines, new_style(1.0, "#c8a27a", pen));
-            c.add_path(plant.leaves, new_style(1.0, "#9fd17a", pen));
-            c.add_path(plant.flowers, new_style(1.0, "#f2ead8", pen));
+            c.add(plant.vines, new_style("#c8a27a", pen));
+            c.add(plant.leaves, new_style("#9fd17a", pen));
+            c.add(plant.flowers, new_style("#f2ead8", pen));
             if plant.keys().len() != 3 { throw "expected vines, leaves and flowers: " + plant.keys(); }
             let p = new_page();
-            p.add_canvas(c);
-            journal_entry.add_page(p);
+            p.add(c);
+            journal_entry.add(p);
         "##;
         engine().build_entry_str(script).expect("script should run");
-        let err = engine().build_entry_str("let ok = 1;\nart::bramble(vec2(0.0, 0.0), 0.0, 100.0, 150.0, 1);")
+        let err = engine().build_entry_str("let ok = 1;\nart::bramble(vec2(0.0, 0.0), 100.0, #{ angle: 0.0, flower_size: 150.0, seed: 1 });")
             .expect_err("too short a cane should fail").to_string();
         assert!(err.contains("art::bramble: length must be at least") && err.contains("line 2"), "{}", err);
     }
@@ -326,22 +371,22 @@ mod tests {
     #[test]
     fn bramble_along_follows_a_path() {
         let script = r##"
-            let path = new_maze(2, 3, 2).path().scale_by(70.0);
-            let plant = art::bramble_along(path, 40.0, 1);
+            let path = new_maze(3, 2, #{ seed: 2 }).path().scale_by(70.0);
+            let plant = art::bramble_along(path, 40.0, #{ seed: 1 });
             let pen = new_brush("Ink Pen", 0.3, 0.7, 1.0);
             let c = new_canvas();
-            c.add_path(plant.vines, new_style(1.0, "#c8a27a", pen));
-            c.add_path(plant.leaves, new_style(1.0, "#a8d68a", pen));
-            c.add_path(plant.flowers, new_style(1.0, "#f2ead8", pen));
+            c.add(plant.vines, new_style("#c8a27a", pen));
+            c.add(plant.leaves, new_style("#a8d68a", pen));
+            c.add(plant.flowers, new_style("#f2ead8", pen));
             // The vines span the maze: 2 nodes across, 140 apart.
             let b = c.bounds();
             if b.width < 140.0 { throw "the vines should cross the maze: " + b; }
             let p = new_page();
-            p.add_canvas(c);
-            journal_entry.add_page(p);
+            p.add(c);
+            journal_entry.add(p);
         "##;
         engine().build_entry_str(script).expect("script should run");
-        let err = engine().build_entry_str("let ok = 1;\nart::bramble_along(new_path(), 40.0, 1);")
+        let err = engine().build_entry_str("let ok = 1;\nart::bramble_along(new_path(), 40.0, #{ seed: 1 });")
             .expect_err("an empty path should fail").to_string();
         assert!(err.contains("art::bramble_along: the path has no lines to follow") && err.contains("line 2"), "{}", err);
     }
@@ -349,19 +394,19 @@ mod tests {
     #[test]
     fn brambles_thicken_toward_their_origin() {
         let ok: bool = engine().engine.eval(r#"
-            let path = new_maze(2, 3, 2).path().scale_by(70.0);
-            let plain = art::bramble_along(path, 40.0, 1).vines;
-            let thick = art::bramble_along(path, 40.0, 1, #{ origin: vec2(0, 0), thickness: 4, reach: 120 }).vines;
-            let free = art::bramble(vec2(0, 0), -PI() / 2.0, 400.0, 80.0, 2, #{ origin: vec2(0, 0) }).vines;
-            `${plain}` != `${thick}` && `${free}` != `${art::bramble(vec2(0, 0), -PI() / 2.0, 400.0, 80.0, 2).vines}`
+            let path = new_maze(3, 2, #{ seed: 2 }).path().scale_by(70.0);
+            let plain = art::bramble_along(path, 40.0, #{ seed: 1 }).vines;
+            let thick = art::bramble_along(path, 40.0, #{ seed: 1, origin: vec2(0, 0), thickness: 4, reach: 120 }).vines;
+            let free = art::bramble(vec2(0, 0), 400.0, #{ angle: -PI() / 2.0, flower_size: 80.0, seed: 2, origin: vec2(0, 0) }).vines;
+            `${plain}` != `${thick}` && `${free}` != `${art::bramble(vec2(0, 0), 400.0, #{ angle: -PI() / 2.0, flower_size: 80.0, seed: 2 }).vines}`
         "#).unwrap();
         assert!(ok);
         for (script, want) in [
-            ("art::bramble_along(new_maze(2, 3, 2).path(), 4.0, 1, #{ thickness: 2 })", "art::bramble_along: missing 'origin'"),
-            ("art::bramble(vec2(0, 0), 0.0, 400.0, 80.0, 1, #{ origin: vec2(0, 0), thickness: 0.5 })", "thickness must be a number of at least 1"),
-            ("art::bramble(vec2(0, 0), 0.0, 400.0, 80.0, 1, #{ origin: vec2(0, 0), reach: -1 })", "reach must be a positive number"),
-            ("art::bramble(vec2(0, 0), 0.0, 400.0, 80.0, 1, #{ origin: 3 })", "'origin' should be a vec2"),
-            ("art::bramble(vec2(0, 0), 0.0, 400.0, 80.0, 1, #{ origin: vec2(0, 0), girth: 2 })", "unknown option 'girth'"),
+            ("art::bramble_along(new_maze(3, 2, #{ seed: 2 }).path(), 4.0, #{ seed: 1, thickness: 2 })", "art::bramble_along: 'thickness' and 'reach' need an 'origin'"),
+            ("art::bramble(vec2(0, 0), 400.0, #{ angle: 0.0, flower_size: 80.0, seed: 1, origin: vec2(0, 0), thickness: 0.5 })", "thickness must be a number of at least 1"),
+            ("art::bramble(vec2(0, 0), 400.0, #{ angle: 0.0, flower_size: 80.0, seed: 1, origin: vec2(0, 0), reach: -1 })", "reach must be a positive number"),
+            ("art::bramble(vec2(0, 0), 400.0, #{ angle: 0.0, flower_size: 80.0, seed: 1, origin: 3 })", "'origin' should be a vec2"),
+            ("art::bramble(vec2(0, 0), 400.0, #{ angle: 0.0, flower_size: 80.0, seed: 1, origin: vec2(0, 0), girth: 2 })", "unknown option 'girth'"),
         ] {
             let err = engine().engine.eval::<rhai::Dynamic>(script).expect_err(script).to_string();
             assert!(err.contains(want), "{}: {}", want, err);
@@ -371,16 +416,16 @@ mod tests {
     #[test]
     fn snake_along_follows_a_path() {
         let script = r##"
-            let path = new_maze(2, 3, 2).path().scale_by(70.0);
+            let path = new_maze(3, 2, #{ seed: 2 }).path().scale_by(70.0);
             let c = new_canvas();
-            c.add_path(art::snake_along(path, 30.0, 1), new_style(1.0, "#f2ead8", new_brush("Ink Pen", 0.3, 0.7, 1.0)));
+            c.add(art::snake_along(path, 30.0, #{ seed: 1 }), new_style("#f2ead8", new_brush("Ink Pen", 0.3, 0.7, 1.0)));
             if c.bounds().width < 140.0 { throw "the serpent should cross the maze: " + c.bounds(); }
             let p = new_page();
-            p.add_canvas(c);
-            journal_entry.add_page(p);
+            p.add(c);
+            journal_entry.add(p);
         "##;
         engine().build_entry_str(script).expect("script should run");
-        let err = engine().build_entry_str("let ok = 1;\nart::snake_along(new_line(vec2(0.0, 0.0), vec2(100.0, 0.0)), 0.0, 1);")
+        let err = engine().build_entry_str("let ok = 1;\nart::snake_along(new_line(vec2(0.0, 0.0), vec2(100.0, 0.0)), 0.0, #{ seed: 1 });")
             .expect_err("a zero width should fail").to_string();
         assert!(err.contains("art::snake_along: max_width must be a positive number") && err.contains("line 2"), "{}", err);
     }
@@ -388,27 +433,27 @@ mod tests {
     #[test]
     fn eye_draws_an_eye_from_its_seed() {
         let script = r##"
-            let draw = |seed| art::eye(vec2(100.0, 100.0), 200.0, "#2a9bb8", 0.5, 0.6, seed);
+            let draw = |seed| art::eye(vec2(100.0, 100.0), 200.0, #{ color: "#2a9bb8", gaze_angle: 0.5, messiness: 0.6, seed: seed });
             let e = draw.call(7);
             if e.bounds().to_string() != draw.call(7).bounds().to_string() { throw "the same seed should draw the same eye"; }
             if e.bounds().to_string() == draw.call(8).bounds().to_string() { throw "another seed should draw another eye"; }
             // About as long as asked, round its centre.
             let b = e.bounds();
             if b.width < 190.0 || b.width > 320.0 || (b.center - vec2(100.0, 100.0)).length() > 40.0 { throw "the eye should be where asked: " + b; }
-            let tilted = art::eye(vec2(0.0, 0.0), 200.0, RED_INK, PI(), 0.0, 1, #{ angle: PI() / 2.0, gaze: 1.0, openness: 0.3, ink: new_style(1.0, "#222", new_brush("Pencil", 0.3, 0.7, 1.0)) });
+            let tilted = art::eye(vec2(0.0, 0.0), 200.0, #{ color: RED_INK, gaze_angle: PI(), messiness: 0.0, seed: 1, angle: PI() / 2.0, gaze: 1.0, openness: 0.3, ink: new_style("#222", new_brush("Pencil", 0.3, 0.7, 1.0)) });
             if tilted.bounds().height < 190.0 { throw "turned upright, the eye should be tall: " + tilted.bounds(); }
-            art::eye(vec2(0.0, 0.0), 200.0, "#123", 0.0, 0.5, 1, #{ flat: true });
+            art::eye(vec2(0.0, 0.0), 200.0, #{ color: "#123", gaze_angle: 0.0, messiness: 0.5, seed: 1, flat: true });
             let p = new_page();
-            p.add_canvas(e);
-            journal_entry.add_page(p);
+            p.add(e);
+            journal_entry.add(p);
         "##.replace("RED_INK", "\"#9b2318\"");
         engine().build_entry_str(&script).expect("script should run");
         for (call, message) in [
-            ("art::eye(vec2(0.0, 0.0), 200.0, \"#123\", 0.0, 1.5, 1);", "art::eye: messiness runs from 0 to 1"),
-            ("art::eye(vec2(0.0, 0.0), 0.0, \"#123\", 0.0, 0.5, 1);", "art::eye: length must be a positive number"),
-            ("art::eye(vec2(0.0, 0.0), 200.0, \"#123\", 0.0, 0.5, 1, #{ squint: 1 });", "art::eye: unknown option 'squint'"),
-            ("art::eye(vec2(0.0, 0.0), 200.0, \"#123\", 0.0, 0.5, 1, #{ ink: 3 });", "art::eye: 'ink' should be a style"),
-            ("art::eye(vec2(0.0, 0.0), 200.0, \"#123\", 0.0, 0.5, 1, #{ flat: 1 });", "art::eye: 'flat' should be true or false"),
+            ("art::eye(vec2(0.0, 0.0), 200.0, #{ color: \"#123\", gaze_angle: 0.0, messiness: 1.5, seed: 1 });", "art::eye: messiness runs from 0 to 1"),
+            ("art::eye(vec2(0.0, 0.0), 0.0, #{ color: \"#123\", gaze_angle: 0.0, messiness: 0.5, seed: 1 });", "art::eye: length must be a positive number"),
+            ("art::eye(vec2(0.0, 0.0), 200.0, #{ color: \"#123\", gaze_angle: 0.0, messiness: 0.5, seed: 1, squint: 1 });", "art::eye: unknown option 'squint'"),
+            ("art::eye(vec2(0.0, 0.0), 200.0, #{ color: \"#123\", gaze_angle: 0.0, messiness: 0.5, seed: 1, ink: 3 });", "art::eye: 'ink' should be a style"),
+            ("art::eye(vec2(0.0, 0.0), 200.0, #{ color: \"#123\", gaze_angle: 0.0, messiness: 0.5, seed: 1, flat: 1 });", "art::eye: 'flat' should be true or false"),
         ] {
             let err = engine().build_entry_str(&format!("let ok = 1;\n{}", call)).expect_err(call).to_string();
             assert!(err.contains(message) && err.contains("line 2"), "{}", err);
@@ -438,8 +483,8 @@ mod tests {
 
     #[test]
     fn snake_path_errors_name_the_function_and_line() {
-        let err = engine().build_entry_str("let ok = 1;\nart::snake_path(vec2(0.0, 0.0), 0.0, vec2(5000.0, 0.0), 900.0, 30.0, 1);")
+        let err = engine().build_entry_str("let ok = 1;\nart::snake(vec2(0.0, 0.0), vec2(5000.0, 0.0), 900.0, #{ head_angle: 0.0, max_width: 30.0, seed: 1 });")
             .expect_err("a tail end out of reach should fail").to_string();
-        assert!(err.contains("art::snake_path: the tail end is") && err.contains("line 2"), "{}", err);
+        assert!(err.contains("art::snake: the tail end is") && err.contains("line 2"), "{}", err);
     }
 }

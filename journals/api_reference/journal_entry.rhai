@@ -24,13 +24,9 @@ const RED = "#9b2318";
 
 // Constant pressure, and text no smaller than 26, so the plain font's dots
 // (strokes about a unit long) show.
-let pen = new_brush("Ink Pen", 0.4, 0.7, 1.5);
-pen.pressure_profile = "constant";
-const TEXT = new_style(1.0, INK, pen);
-const CAPTION = new_style(1.0, RED, new_brush("Ink Pen", 0.3, 0.7, 1.2));
-let nib = new_brush("Calligraphy", 0.4, 0.8, 1.5);
-nib.pressure_profile = "constant";
-const HEADING = new_style(1.2, RED, nib);
+const TEXT = new_style(INK, new_brush("Ink Pen", 0.4, 0.7, 1.5, #{ pressure_profile: "constant" }));
+const CAPTION = new_style(RED, new_brush("Ink Pen", 0.3, 0.7, 1.2));
+const HEADING = new_style(RED, new_brush("Calligraphy", 0.4, 0.8, 1.5, #{ pressure_profile: "constant" }), #{ width: 1.2 });
 
 const PLAIN = font("plain");
 const LOCHE = font("loche_upper");
@@ -39,11 +35,7 @@ const LOCHE = font("loche_upper");
 
 // Text as it is, with markdown's marks escaped.
 fn esc(s) {
-	let t = s;
-	for mark in ["\\", "*", "_", "~", "[", "]", "{", "}"] {
-		t.replace(mark, "\\" + mark);
-	}
-	t
+	escape_markdown(s)
 }
 
 // A section's heading.
@@ -106,34 +98,42 @@ fn angle_arg(effect) { arg("angle", effect + " Positive turns clockwise, y being
 fn seed_arg(what) { arg("seed", "Which " + what + " it draws: the same seed gives the same drawing, without touching the script's generator.", "a whole number.") }
 fn name_arg(what) { arg("text", "The " + what + "'s name in output files.", "a string of letters, digits, underscores, hyphens and dots, not starting with a dot, unique among its siblings. Reading it gives () until it's set.") }
 
-// Options of the text layouts.
-fn spacing_opt() { opt("options.spacing", "0", "Extra room between glyphs, as a fraction of the symbol scale; negative tightens.", "a number above -0.5.") }
-fn avoid_opt(what) { opt("options.avoid", "nothing", "What glyphs keep clear of" + what + " (see Keeping Text Clear).", "an avoidance tree, a path, a canvas or a glyph, or an array of any of these.") }
-fn clearance_opt(needs) { opt("options.clearance", "symbol scale / 8", "How far glyphs keep from what they avoid, in canvas units, on top of any clearance a tree was built with." + needs, "a number of at least 0.") }
-fn layout_opt(words) { opt("options.layout", "flat", "How glyphs are placed.", "flat (glyph by glyph) or words (" + words + ").") }
-fn split_words_opt() { opt("options.split_words", "false", "With layout: words, breaks words round what's avoided rather than moving them past it whole.", "true, false, or the fewest glyphs a piece may have (a whole number of at least 1; true is 2).") }
-fn split_padding_opt() { opt("options.split_padding", "0", "How much further the pieces of split words keep from what's avoided, in symbol scales. Needs split_words.", "a number of at least 0.") }
+// Text settings: what text calls take, as roles do.
+fn font_set() { req("settings.font", "The font the text is set in.", "a font, from font or ternary_font.") }
+fn size_set() { req("settings.size", "The size glyphs are set at (the symbol scale), in canvas units.", "a positive number.") }
+fn style_set() { req("settings.style", "How the strokes are drawn: their brush, width and colour.", "a style, from new_style.") }
+fn spacing_opt() { opt("settings.spacing", "0", "Extra room between glyphs, as a fraction of the size; negative tightens.", "a number above -0.5.") }
+fn avoid_opt(what) { opt("settings.avoid", "nothing", "What glyphs keep clear of" + what + " (see Keeping Text Clear).", "an avoidance tree, a path, a canvas or a glyph, or an array of any of these.") }
+fn clearance_opt(needs) { opt("settings.clearance", "size / 8", "How far glyphs keep from what they avoid, in canvas units, on top of any clearance a tree was built with." + needs, "a number of at least 0.") }
+fn layout_opt(fallback, words) { opt("settings.layout", fallback, "How glyphs are placed.", "flat (glyph by glyph) or words (" + words + ").") }
+fn jagged_opt(fallback) { opt("settings.jagged", fallback, "How much further in each line starts, at most, at random, in sizes.", "a number.") }
+fn split_words_opt() { opt("settings.split_words", "false", "With layout: words, breaks words round what's avoided rather than moving them past it whole.", "true, false, or the fewest glyphs a piece may have (a whole number of at least 1; true is 2).") }
+fn split_padding_opt() { opt("settings.split_padding", "0", "How much further the pieces of split words keep from what's avoided, in sizes. Needs split_words.", "a number of at least 0.") }
+fn jitter_opts() {
+	[
+		opt("settings.position_jitter", "0", "How far each placed glyph strays, at most, either way, at random, in sizes.", "a number of at least 0, or [across, down]."),
+		opt("settings.rotation_jitter", "0", "How far each placed glyph turns, at most, either way.", "a number of at least 0, in radians."),
+		opt("settings.scale_jitter", "0", "How much each placed glyph's size changes, at most, either way, as a fraction.", "a number from 0 up to, not including, 1."),
+	]
+}
 fn path_text_opts() {
 	[
 		spacing_opt(),
 		avoid_opt(""),
 		clearance_opt(" Needs avoid."),
-		layout_opt("words aren't split between subpaths"),
+		layout_opt("flat", "words aren't split between subpaths"),
 		split_words_opt(),
 		split_padding_opt(),
-		opt("options.angle", "turned to the path", "Holds every glyph at this angle instead of turning it with the path; 0 is upright.", "a number, in radians."),
-	]
+		opt("settings.angle", "turned to the path", "Holds every glyph at this angle instead of turning it with the path; 0 is upright.", "a number, in radians."),
+	] + jitter_opts()
 }
 
-// A snake's arguments.
-fn snake_args() {
+fn seed_opt(what) { opt("options.seed", "0", "Which " + what + " it draws: the same seed gives the same drawing, without touching the script's generator.", "a whole number.") }
+fn thickening_opts(parts, reach) {
 	[
-		vec_arg("head_center", "Where the centre of its head is."),
-		arg("head_angle", "Which way its head faces: 0 is +x, PI() / 2 down the page.", "a number, in radians."),
-		vec_arg("tail_end", "Where the tip of its tail is: near enough for a snake this long to reach."),
-		arg("length", "How long it is along its spine.", "a number at least 4 times max_width."),
-		arg("max_width", "How wide it is at its widest.", "a positive number."),
-		seed_arg("winding"),
+		opt("options.origin", "none", "A growth origin: " + parts + " are thicker toward it, as old wood is. Thorns, stalks, leaves and flowers keep their size. Needed for thickness and reach.", "a vec."),
+		opt("options.thickness", "3", "How many times their usual width " + parts + " are at the origin, easing back to it at the reach.", "a number of at least 1."),
+		opt("options.reach", reach, "How far from the origin " + parts + " are back to their usual width.", "a positive number."),
 	]
 }
 
@@ -145,23 +145,29 @@ doc += heading("Reading This Reference");
 doc += para("A journal is a rhai script. It draws strokes onto canvases, puts canvases on pages, and adds the pages to journal_entry, which journalbuild renders: one image per canvas, or one per page on parchment, or a PDF. This book lists every function a script can call, by what it works on. Each entry gives a signature in red and then what it does.");
 doc += para("In signatures, receiver.method(arguments) is called on a value, as path.line_to(point); a bare name(arguments) is a global function. A name = value entry is a property: it can be read, and set unless the entry says it's read only.");
 doc += para("Under each entry, each argument has a line of its own: its name in italics, what it does, and the values it takes. An argument marked optional can be left out of the call, and is then its default; the others must be given. An argument written options is a map, #{ key: value, ... }, and its keys are listed as options.KEY: each optional, with its default, unless it's marked required. Unknown keys are errors. For a property, the line is the value it's set to. Words in the values, such as ramp or flat, are strings: write them in double quotes.");
+doc += para("Every call has one shape: what it needs, in order, then one map of everything optional, which can be left out: path.hatch(4, #{ angle: 0.3 }). A constructor's options also take any property its value can be set by, checked as setting it is: new_brush(name, min_pressure, max_pressure, size, #{ pressure_profile: constant }) is a brush with its pressure_profile set. Text calls take one map of text settings, with the keys layout roles take (font, size, style and the rest), so a role's settings can be passed straight in: role keys a call doesn't use are ignored. Canvases, pages, the entry, trees and lock chains all take what's put in them with add, which gives back what it was called on, so calls chain.");
 doc += para("Units: coordinates are canvas units, one pixel at --scale 1, with y running down the page. Angles are radians; PI() is rhai's, and degrees(d) converts. Numbers can be whole or decimal anywhere a number is taken, and must be finite; a whole number is needed only where the values say so. Colours are CSS colours: a name, #rgb, #rrggbb, rgb(), rgba(), hsl() or hsla().");
 doc += para("Shared values: paths, glyphs, canvases and avoidance trees are shared. Assigning one, passing it or looping over it gives the same value, so changes through any copy reach it; copy() makes an independent one. Their transforms change the value and return it, so calls chain: p.move_to(a).line_to(b). Vecs, fonts, brushes, styles and pages are plain values: changing one changes that copy only.");
 doc += para("Randomness is seeded: random(), glyph variant picks, text layout, hatching, point distributions and random spanning trees all draw on one generator with a fixed seed, so a journal renders the same every run. The procedural art takes seeds of its own.");
-doc += para("Sections: the entry and its pages; canvases and strokes; vectors and angles; paths; brushes and styles; gradients; fonts and glyphs; text; keeping text clear; randomness and messages; generators; procedural art; page layouts; marked-up text; locks; lock and layout files; building.");
+doc += para("Sections: the entry and its pages; canvases and strokes; vectors and angles; paths; brushes and styles; gradients; fonts and glyphs; text; keeping text clear; randomness and messages; generators; balanced ternary; procedural art; books; page layouts; marked-up text; locks; lock and layout files; building.");
 
 // ---- the entry and its pages ----
 
 doc += heading("The Entry and Its Pages");
 doc += para("A script starts with journal_entry, an empty entry, in scope. Whatever journal_entry holds when the script ends is rendered.");
-doc += api("journal_entry.add_page(page)", "Adds a copy of a page to the entry. Each page's name, or page_N without one, names its output files.", [
+doc += api("journal_entry.add(page)", "Adds a copy of a page to the entry. Each page's name, or page_N without one, names its output files. Returns the entry.", [
 	arg("page", "The page to add.", "a page, from new_page, page.split or layout.typeset, whose name no other page in the entry has."),
 ]);
-doc += api("journal_entry.add_pages(pages)", "Adds pages, such as split tiles or typeset pages, in order.", [
+doc += api("journal_entry.add(pages)", "Adds pages, such as split tiles, typeset pages or a book's, in order.", [
 	arg("pages", "The pages to add.", "an array of pages, with names no other page in the entry has."),
 ]);
-doc += api("new_page()", "A new, empty page.");
-doc += api("page.add_canvas(canvas)", "Adds a copy of the canvas, as it is now, to the page. Each canvas renders as an image of its own, darkly_PAGE_CANVAS.png, named after the page and the canvas's name or index.", [
+doc += api("new_page(), new_page(options)", "A new, empty page, its properties (below) set by the options as setting them does.", [
+	opt("options.name", "none", "As page.name.", "as page.name."),
+	opt("options.size", "()", "As page.size.", "as page.size."),
+	opt("options.margin", "()", "As page.margin.", "as page.margin."),
+	opt("options.svg_style", "the defaults below", "As page.svg_style.", "as page.svg_style."),
+]);
+doc += api("page.add(canvas)", "Adds a copy of the canvas, as it is now, to the page, and returns the page, so new_page(options).add(canvas) is a page. Each canvas renders as an image of its own, darkly_PAGE_CANVAS.png, named after the page and the canvas's name or index.", [
 	arg("canvas", "The canvas to render on the page; later changes to it don't reach the page.", "a canvas whose name, or index without one, no other canvas on the page has."),
 ]);
 doc += api("page.name = text", "The page's name in output files.", [
@@ -180,12 +186,7 @@ doc += api("page.svg_style = options", "How the page's SVG output (--svg) is dra
 	opt("options.trail_off_percent", "0.15", "How much of each end of a stroke tapers away, as a fraction of it.", "a number of at least 0."),
 	opt("options.noise_amplitude", "0.3", "How much noise is in the opacity of the image the SVG is rasterised to.", "a number of at least 0."),
 ]);
-doc += api("page.split(columns, rows)", "Cuts a named page into a grid of tiles, each a page of its own named NAME_ROW_COLUMN (counting from 0), row by row. Each tile renders exactly its share of the pixels of the whole page's render, strokes crossing a seam drawn whole and cut off at it, so a canvas's tiles placed side by side make up its render. Gives the tiles as an array. Fails for a page with no name, nothing drawn, or that is a tile itself.", [
-	arg("columns", "How many tiles across.", "a whole number from 1 to 1000."),
-	arg("rows", "How many tiles down.", "a whole number from 1 to 1000."),
-]);
-doc += api("page.split(options)", "As above, with tiles counted or of a set size, across and down.", [
-	arg("options", "One key across and one down, at most.", "a map of the keys below."),
+doc += api("page.split(), page.split(options)", "Cuts a named page into a grid of tiles, each a page of its own named NAME_ROW_COLUMN (counting from 0), row by row, the tiles counted or of a set size, across and down. Each tile renders exactly its share of the pixels of the whole page's render, strokes crossing a seam drawn whole and cut off at it, so a canvas's tiles placed side by side make up its render. Gives the tiles as an array. Fails for a page with no name, nothing drawn, or that is a tile itself.", [
 	opt("options.columns", "1", "How many tiles across. Not with tile_width.", "a whole number from 1 to 1000."),
 	opt("options.rows", "1", "How many tiles down. Not with tile_height.", "a whole number from 1 to 1000."),
 	opt("options.tile_width", "none", "Tiles this wide, in canvas units: the grid grows evenly round the page to a whole number of them. Not with columns.", "a positive number."),
@@ -197,31 +198,24 @@ doc += api("page.tile", "Read only: a tile's place in its page's grid, #{ row, c
 
 doc += heading("Canvases and Strokes");
 doc += para("A canvas holds strokes, each a path drawn in a style. It's cropped to its strokes when rendered, plus the page's margin.");
-doc += api("new_canvas()", "A new, empty canvas.");
-doc += api("canvas.add_path(path, style)", "Adds a copy of the path, drawn in the style.", [
-	arg("path", "The lines to draw; later changes to the path don't reach the canvas.", "a path whose points are all finite (no infinity or NaN)."),
+doc += api("new_canvas(), new_canvas(options)", "A new, empty canvas.", [
+	opt("options.name", "none", "As canvas.name.", "as canvas.name."),
+]);
+doc += para("canvas.add puts a copy of what it's given on the canvas, as it is now (later changes don't reach the canvas), and returns the canvas, so adds chain.");
+doc += api("canvas.add(path, style)", "Adds the path, drawn in the style.", [
+	arg("path", "The lines to draw.", "a path whose points are all finite (no infinity or NaN)."),
 	style_arg(),
 ]);
-doc += api("canvas.add_glyph(glyph, style)", "Adds a copy of a placed glyph's strokes, drawn in the style.", [
-	arg("glyph", "The glyph to draw, where it's placed.", "a glyph; a blank one (a space) adds nothing."),
+doc += api("canvas.add(glyph, style), canvas.add(glyphs, style)", "Adds a placed glyph's strokes, or each of an array of glyphs', drawn in the style.", [
+	arg("glyph, glyphs", "What to draw, where it's placed.", "a glyph, or an array of them (as font.glyphs or textbox.fill give); a blank one (a space) adds nothing."),
 	style_arg(),
 ]);
-doc += api("canvas.add_glyphs(glyphs, style)", "Adds glyphs, as add_glyph does each.", [
-	arg("glyphs", "The glyphs to draw.", "an array of glyphs, as font.glyphs or textbox.fill give."),
-	style_arg(),
+doc += api("canvas.add(other), canvas.add(canvases)", "Adds every stroke on another canvas, or each of an array of canvases (as fill_with_text gives), in its own style.", [
+	arg("other, canvases", "The canvases whose strokes are copied.", "a canvas (this one included), or an array of them."),
 ]);
-doc += api("canvas.add_stroke(stroke)", "Adds a copy of a stroke: a path with its style.", [
-	arg("stroke", "The stroke to draw.", "a stroke, from new_stroke, whose points are all finite."),
-]);
-doc += api("canvas.add_canvas(other)", "Adds a copy of every stroke on another canvas, in its own style.", [
-	arg("other", "The canvas whose strokes are copied.", "a canvas, this one included."),
-]);
-doc += api("new_stroke(path, style)", "A stroke: a copy of the path, with the style it's drawn in.", [
-	arg("path", "The stroke's lines.", "a path."),
-	style_arg(),
-]);
-doc += api("stroke.style = style", "The stroke's style.", [
-	style_arg(),
+doc += api("canvas.add(parts, styles)", "Adds each path of a map of parts, as art::bramble, art::moon and art::snake give them, in the style styles has under its name; parts with no style aren't drawn.", [
+	arg("parts", "The paths, by name.", "a map of names to paths."),
+	arg("styles", "Their styles, by part name.", "a map of part names to styles, every name one of the parts'."),
 ]);
 doc += api("canvas.name = text", "The canvas's name in output files; without one, its index on the page.", [
 	name_arg("canvas"),
@@ -242,7 +236,7 @@ doc += api("canvas.copy()", "An independent copy of the canvas.");
 // ---- vectors ----
 
 doc += heading("Vectors and Angles");
-doc += para("Vecs are points and directions: vec2s on the page, and vec3s and vec4s for points of more coordinates, such as distribute_points_3 and distribute_points_4 give. They're values: methods give new vecs and leave the one they're called on as it was. Where an entry says a vec, it means a vec2.");
+doc += para("Vecs are points and directions: vec2s on the page, and vec3s and vec4s for points of more coordinates, such as distribute_points gives for 3 or 4 bounds. They're values: methods give new vecs and leave the one they're called on as it was. Where an entry says a vec, it means a vec2.");
 doc += api("vec2(x, y)", "A vec2, a point or direction on the page.", [
 	arg("x", "How far across, growing to the right.", "a finite number; infinity and NaN (from a division by zero, say) are refused."),
 	arg("y", "How far down, growing down the page.", "a finite number."),
@@ -346,6 +340,35 @@ doc += api("new_arc(center, radius, start_angle, end_angle)", "An arc of a circl
 	arg("start_angle", "Where the arc starts, from the x axis; positive angles are clockwise, y being down.", "a number, in radians."),
 	arg("end_angle", "Where it ends: it runs from start_angle toward this.", "a number, in radians."),
 ]);
+doc += api("new_polyline(points), new_polyline(points, options)", "Straight lines through points, in order.", [
+	arg("points", "The corners.", "an array of vecs."),
+	opt("options.closed", "false", "Whether the last joins back to the first.", "true or false."),
+]);
+doc += api("new_polygon(center, radius, sides), new_polygon(center, radius, sides, options)", "A regular polygon, its corners radius from the centre; or, with step, a star in one line.", [
+	vec_arg("center", "Its centre."),
+	arg("radius", "How far its corners are from the centre.", "a number."),
+	arg("sides", "How many corners.", "a whole number from 3 to 10000."),
+	opt("options.angle", "-PI() / 2, up the page", "Where its first corner is, from the centre.", "a number, in radians."),
+	opt("options.step", "1", "Each corner joined to the step-th on: 5 sides and step 2 is a five-pointed star in one line. Where step and sides share a factor, there's a closed outline for each cycle of corners.", "a whole number from 1 to sides - 1."),
+]);
+doc += api("new_star(center, outer, inner, points), new_star(center, outer, inner, points, options)", "A star's outline: its points outer from the centre, the corners between them inner.", [
+	vec_arg("center", "Its centre."),
+	arg("outer", "How far its points reach.", "a number."),
+	arg("inner", "How far in the corners between them are.", "a number."),
+	arg("points", "How many points.", "a whole number from 2 to 10000."),
+	opt("options.angle", "-PI() / 2, up the page", "Where its first point is, from the centre.", "a number, in radians."),
+]);
+doc += api("new_ellipse(center, rx, ry), new_ellipse(center, rx, ry, options)", "An ellipse, as four curves.", [
+	vec_arg("center", "Its centre."),
+	arg("rx, ry", "Its radii across and down, before it's turned.", "numbers."),
+	opt("options.angle", "0", "How far it's turned.", "a number, in radians."),
+]);
+doc += api("new_wave(start, end), new_wave(start, end, options)", "A wavy line from start to end, each wave a curve rising to its left and falling to its right: up first, going left to right across the page.", [
+	vec_arg("start", "Where it starts."),
+	vec_arg("end", "Where it ends."),
+	opt("options.amplitude", "a twentieth of its length", "How far it rises and falls; negative falls first.", "a number."),
+	opt("options.waves", "3", "How many waves.", "a whole number from 1 to 10000."),
+]);
 doc += api("path.bounds()", "What the path's lines cover: #{ min, max, center, width, height }. Fails for an empty path.");
 doc += api("path.translate_by(offset)", "Moves the path.", [
 	offset_arg(),
@@ -358,13 +381,8 @@ doc += api("path.rotate_around(point, angle)", "Turns the path about a point.", 
 	angle_arg("How far to turn."),
 ]);
 doc += api("path.copy()", "An independent copy of the path.");
-doc += api("path.hatch(spacing, angle, roughness)", "Shading for the inside of a closed path, as a new path (the path itself is unchanged), each line a stroke of its own. Every subpath is taken as a closed shape, and shapes inside or across others cut holes in them.", [
+doc += api("path.hatch(spacing), path.hatch(spacing, options)", "Shading for the inside of a closed path, as a new path (the path itself is unchanged), each line a stroke of its own. Every subpath is taken as a closed shape, and shapes inside or across others cut holes in them.", [
 	arg("spacing", "How far apart the lines are.", "a positive number."),
-	arg("angle", "Which way the lines run.", "a number, in radians, or an array of them for a layer each (cross-hatching)."),
-	arg("roughness", "How far each line's ends are jittered, at most.", "a number of at least 0."),
-]);
-doc += api("path.hatch(options)", "Hatching with options.", [
-	req("options.spacing", "How far apart the lines are.", "a positive number."),
 	opt("options.angle", "PI() / 4", "Which way the lines run.", "a number, in radians, or an array of them for a layer each (cross-hatching)."),
 	opt("options.roughness", "0", "How far each line's ends are jittered, at most.", "a number of at least 0."),
 	opt("options.bow", "0", "How far each line bends from straight, at most.", "a number of at least 0."),
@@ -379,11 +397,11 @@ doc += api("path.erase_outside(shape), path.erase_outside(shape, options)", "Cut
 	arg("shape", "What to keep the path inside. Every subpath is taken as a closed shape, as for hatching.", "a path, all its points finite."),
 	opt("options.fill_rule", "holes", "Which parts of overlapping shapes are inside.", "holes, evenodd or nonzero, as for hatch."),
 ]);
-doc += api("path.ternary(digits), path.ternary(digits, options)", "Balanced-ternary digits written along the path from its start, as the balanced_ternary font writes them down its stems, each digit in a slot of its own (the path must be one subpath); gives the marks as a new path (the path itself is unchanged and not in it). Each mark reaches out from the path at the middle of its slot, so bars and hook tips are evenly spaced. A 0 is a bar across the path, and a -1 or 1 a stroke that runs alongside the path for most of a slot before that point, then bends sharply out to the left or right. Left and right are the traveller's, going from the path's start to its end: for a path running left to right across the page, 1 is down.", [
-	arg("digits", "The digits, first at the path's start.", "an array of -1, 0 and 1 (as balanced_ternary gives), or a string of -, 0 and +."),
-	opt("options.spacing", "the path's length over the number of digits", "How far along the path each digit's slot runs. The digits must fit on the path.", "a positive number."),
-	opt("options.width", "0.6 of the spacing", "How far the marks reach out from the path.", "a positive number."),
+doc += api("path.points_along(count), path.points_along(count, options)", "count points evenly spaced along a path of one subpath, by length, each #{ position, angle }: where it is, and which way the path runs there (the angle a glyph turned to the path has). On a path that comes back to its start, as circles do, they go once round without doubling up at the start; on an open one the first and last are at its ends.", [
+	arg("count", "How many points.", "a whole number from 0 to 1000000."),
+	opt("options.start", "0", "Where the first is, as a fraction of the length: 0.75 is the top of a circle, which starts at its right and runs clockwise.", "a number from 0 to 1."),
 ]);
+doc += api("path.is_empty", "Read only: whether the path has nothing in it, as a new moon's lit side.");
 doc += api("path.to_string(), path.to_debug()", "The path's commands as text, for print and debug.");
 
 // ---- brushes and styles ----
@@ -391,13 +409,18 @@ doc += api("path.to_string(), path.to_debug()", "The path's commands as text, fo
 doc += heading("Brushes and Styles");
 doc += para("A brush is a Darkly brush with pressures and a size; a style is a brush with a width and a colour, and is what strokes are drawn in.");
 doc += api("brush_names()", "The name of every Darkly brush, sorted.");
-doc += api("new_brush(name, min_pressure, max_pressure, size)", "A brush. Pressure runs from min_pressure to max_pressure along each stroke, as its pressure_profile says.", [
+doc += api("new_brush(name, min_pressure, max_pressure, size), new_brush(name, min_pressure, max_pressure, size, options)", "A brush. Pressure runs from min_pressure to max_pressure along each stroke, as its pressure_profile says. Options set its properties (below) as setting them does.", [
 	arg("name", "Which Darkly brush draws.", "one of brush_names()."),
 	arg("min_pressure", "The least pressure along a stroke.", "a number from 0 to 1, at most max_pressure."),
 	arg("max_pressure", "The most pressure along a stroke.", "a number from 0 to 1, at least min_pressure."),
 	arg("size", "How wide its marks are, in canvas units.", "a positive number."),
+	opt("options.pressure_profile", "ramp", "As brush.pressure_profile.", "as brush.pressure_profile."),
+	opt("options.pressure_variation", "0", "As brush.pressure_variation.", "as brush.pressure_variation."),
+	opt("options.variation_length", "12", "As brush.variation_length.", "as brush.variation_length."),
+	opt("options.pool", "0", "As brush.pool.", "as brush.pool."),
+	opt("options.pool_depth", "0.3", "As brush.pool_depth.", "as brush.pool_depth."),
 ]);
-doc += api("brush.brush_style = name", "The Darkly brush's name.", [
+doc += api("brush.name = name", "The Darkly brush's name.", [
 	arg("name", "Which Darkly brush draws.", "one of brush_names(); it isn't checked until the render."),
 ]);
 doc += api("brush.min_pressure = number, brush.max_pressure = number", "The least and most pressure along a stroke.", [
@@ -421,10 +444,12 @@ doc += api("brush.pool = number", "Ink pooling: strokes heavier at the very bott
 doc += api("brush.pool_depth = number", "How far up the pooling rises.", [
 	arg("number", "The height, as a fraction of the path's. Default 0.3.", "a number above 0 and at most 1."),
 ]);
-doc += api("new_style(width, color, brush)", "A style: passes 1 and jitter 0 until they're set.", [
-	arg("width", "In Darkly renders, multiplies the brush's pressure, so past 1 / max_pressure a stroke gets no heavier (the render warns); in SVG, the stroke's width in canvas units.", "a number."),
+doc += api("new_style(color, brush), new_style(color, brush, options)", "A style: width 1, passes 1 and jitter 0 unless the options set them, as setting the properties below does.", [
 	arg("color", "The ink.", "a CSS colour or a gradient."),
 	arg("brush", "The brush; the style keeps a copy.", "a brush, from new_brush."),
+	opt("options.width", "1", "In Darkly renders, multiplies the brush's pressure, so past 1 / max_pressure a stroke gets no heavier (the render warns); in SVG, the stroke's width in canvas units.", "a number."),
+	opt("options.passes", "1", "As style.passes.", "as style.passes."),
+	opt("options.jitter", "0", "As style.jitter.", "as style.jitter."),
 ]);
 doc += api("style.width = number", "The style's width.", [
 	arg("number", "The width, as new_style takes it.", "a number."),
@@ -462,7 +487,7 @@ doc += para("Fonts come from config/fonts.json, each with its glyphs and how tex
 doc += api("font(name)", "A font, as the font file sets it.", [
 	arg("name", "Which font.", "one of font_names()."),
 ]);
-doc += api("font(name, options)", "A font with settings changed, as the properties below change them.", [
+doc += api("font(name, options)", "A font with settings changed, as setting the properties below does.", [
 	arg("name", "Which font.", "one of font_names()."),
 	opt("options.character_padding", "the font file's", "Room between glyphs' outlines, in font sizes.", "a number of at least 0."),
 	opt("options.space_width", "the font file's", "A space's width, in font sizes.", "a positive number."),
@@ -470,8 +495,9 @@ doc += api("font(name, options)", "A font with settings changed, as the properti
 	opt("options.fallback", "the font file's", "Where characters the font hasn't are looked for.", "a font, a font's name, or () for nowhere."),
 ]);
 doc += api("font_names()", "Every font's name, sorted.");
-doc += api("ternary_font(name)", "A font whose letters are balanced-ternary digits: a to m are 1 to 13, n to z are -13 to -1.", [
+doc += api("ternary_font(name), ternary_font(name, options)", "A font whose letters are balanced-ternary digits: a to m are 1 to 13, n to z are -13 to -1.", [
 	arg("name", "The font whose glyphs draw the digits.", "one of font_names()."),
+	opt("options", "none", "The font's settings, as font(name, options) takes them.", "a map of character_padding, space_width, skew and fallback."),
 ]);
 doc += api("font.name", "Read only: the font's name.");
 doc += api("font.character_padding = number", "Text is set with each glyph as close to the last as their outlines allow, plus this.", [
@@ -490,8 +516,12 @@ doc += api("font.characters()", "The characters the font has glyphs for.");
 doc += api("font.glyphs(text)", "A text's glyphs, each at the origin with scale 1, variants picked from the seeded generator, looked for in the fallbacks too.", [
 	arg("text", "The text to set.", "a string; characters with no glyph anywhere come out as X (see missing_glyphs)."),
 ]);
-doc += api("font.glyph(name)", "One glyph, its first variant, from the font's own glyphs (not its fallbacks).", [
-	arg("name", "Which glyph.", "a character or a glyph's name, as a string, or a number (as ternary.glyph(-13))."),
+doc += api("font.glyph(name), font.glyph(name, options)", "One glyph, its first variant, from the font's own glyphs (not its fallbacks), placed as the options say.", [
+	arg("name", "Which glyph.", "a character or a glyph's name, as a string, a number (as ternary.glyph(-13)), or a balanced-ternary value (its number)."),
+	opt("options.position", "the origin", "As glyph.position.", "as glyph.position."),
+	opt("options.scale", "1", "As glyph.scale.", "as glyph.scale."),
+	opt("options.rotation", "0", "As glyph.rotation.", "as glyph.rotation."),
+	opt("options.skew", "0", "As glyph.skew.", "as glyph.skew."),
 ]);
 doc += api("font.variants(name)", "Every variant of one of the font's own glyphs.", [
 	arg("name", "Which glyph.", "a character or a glyph's name, as a string, or a number."),
@@ -520,84 +550,110 @@ doc += api("glyph.scale_by(factor)", "Multiplies its scale. Returns the glyph.",
 doc += api("glyph.rotate_by(angle)", "Turns it further. Returns the glyph.", [
 	angle_arg("How much further."),
 ]);
+doc += api("glyphs.translate_by(offset), glyphs.scale_by(factor), glyphs.rotate_around(point, angle)", "An array of glyphs moved, scaled about the origin (positions and sizes alike), or turned about a point, as one: each glyph changed. Returns the array.", [
+	offset_arg(),
+	arg("factor", "How many times bigger.", "a number."),
+	vec_arg("point", "The centre of the turn."),
+	angle_arg("How far to turn."),
+]);
 doc += api("glyph.path()", "Its strokes, placed, as a new path; empty for blanks.");
 doc += api("glyph.copy()", "An independent copy of the glyph.");
 
 // ---- text ----
 
 doc += heading("Text");
-doc += para("Text layouts place glyphs, scaling each by the symbol scale and turning it to its line on top of any scale and rotation it has.");
-doc += api("new_textbox(options)", "A box, or any closed shape, glyphs flow into, line by line. Each line holds glyphs only where the band they take up, from a quarter of the symbol scale above it to three quarters below, is inside the shape (a line by the shape's top or bottom looks at the shape just inside it, so a box's lines run its full width).", [
-	opt("options.center", "none: give center, width and height, or shape", "The box's centre.", "a vec."),
-	opt("options.width", "none: needed with center", "Its width.", "a positive number."),
-	opt("options.height", "none: needed with center", "Its height.", "a positive number."),
-	opt("options.shape", "none: give it, or center, width and height", "The shape to fill instead of a box. Each subpath is an outline, closed back to its start, filled where it winds round (so one drawn on past its start, as circles are, is still filled); a place inside an even number of outlines, as in one inside another, is outside. A rectangle at angle 0 fills just as a box does.", "a path with a subpath of at least three points."),
-	opt("options.angle", "0", "Which way the lines run: 0 left to right, each below the last; other angles turn them, the next line always to their right-hand side. Glyphs turn with their lines.", "a finite number, in radians."),
-	req("options.symbol_scale", "The size glyphs are set at, in canvas units.", "a positive number."),
-	layout_opt("wrapping at spaces"),
-	opt("options.jagged_edge", "0", "How much further in each line starts, at most, at random, in symbol scales.", "a number."),
+doc += para("Text layouts place glyphs, scaling each by the size and turning it to its line on top of any scale and rotation it has. Every text call takes a map of text settings, written settings, whose keys are those layout roles take (see Role settings): a role's settings can be passed straight in, and role settings a call doesn't use are ignored. Other unknown keys are errors.");
+doc += api("new_textbox(settings)", "A box, or any closed shape, glyphs flow into, line by line. Each line holds glyphs only where the band they take up, from a quarter of the size above it to three quarters below, is inside the shape (a line by the shape's top or bottom looks at the shape just inside it, so a box's lines run its full width).", [
+	opt("settings.center", "none: give center, width and height, or shape", "The box's centre.", "a vec."),
+	opt("settings.width", "none: needed with center", "Its width.", "a positive number."),
+	opt("settings.height", "none: needed with center", "Its height.", "a positive number."),
+	opt("settings.shape", "none: give it, or center, width and height", "The shape to fill instead of a box. Each subpath is an outline, closed back to its start, filled where it winds round (so one drawn on past its start, as circles are, is still filled); a place inside an even number of outlines, as in one inside another, is outside. A rectangle at angle 0 fills just as a box does.", "a path with a subpath of at least three points."),
+	opt("settings.angle", "0", "Which way the lines run: 0 left to right, each below the last; other angles turn them, the next line always to their right-hand side. Glyphs turn with their lines.", "a finite number, in radians."),
+	size_set(),
+	layout_opt("flat", "wrapping at spaces"),
+	jagged_opt("0"),
 	avoid_opt(""),
 	clearance_opt(" Needs avoid."),
 	spacing_opt(),
 	split_words_opt(),
 	split_padding_opt(),
-]);
-doc += api("textbox.fill(glyphs)", "Places what fits: #{ placed, unplaced }, arrays of glyphs. Add the placed ones to a canvas with add_glyphs.", [
+] + jitter_opts());
+doc += api("textbox.fill(glyphs)", "Places what fits: #{ placed, unplaced }, arrays of glyphs. Add the placed ones to a canvas with canvas.add(placed, style).", [
 	arg("glyphs", "The glyphs to place, in order.", "an array of glyphs, as font.glyphs gives."),
 ]);
 doc += api("textbox.place_all(glyphs)", "Fills the box again and again until every glyph is placed: an array of arrays of placed glyphs, one per box. Fails if a glyph won't fit even an empty box.", [
 	arg("glyphs", "The glyphs to place, in order.", "an array of glyphs."),
 ]);
-doc += api("path.fill_with_text(text, font, size, style)", "The text along the path, each glyph turned to it, over as many copies of the path as it takes: an array of canvases, one per copy. Fails if a glyph won't fit the path at all.", [
+doc += api("path.fill_with_text(text, settings)", "The text along the path, each glyph turned to it, over as many copies of the path as it takes: an array of canvases, one per copy. Fails if a glyph won't fit the path at all.", [
 	arg("text", "The text to write.", "a string."),
-	font_arg(),
-	arg("size", "The font size (symbol scale), in canvas units.", "a positive number."),
-	style_arg(),
-]);
-doc += api("path.fill_with_text(text, font, size, style, options)", "As above, with options.", [
-	arg("text, font, size, style", "As above.", "as above."),
+	font_set(),
+	size_set(),
+	style_set(),
 ] + path_text_opts());
-doc += api("path.fit_text(text, font, style)", "The text along the path at the largest size that fits all of it, as a canvas.", [
+doc += api("path.fit_text(text, settings)", "The text along the path at the largest size that fits all of it, as a canvas; a size setting is ignored.", [
 	arg("text", "The text to write.", "a string."),
-	font_arg(),
-	style_arg(),
-]);
-doc += api("path.fit_text(text, font, style, options)", "As above, with options.", [
-	arg("text, font, style", "As above.", "as above."),
+	font_set(),
+	style_set(),
 ] + path_text_opts());
-doc += api("canvas.scatter_notes(messages, font, style, options)", "Scatters messages over the canvas in random boxes, clear of its strokes and of each other; gives a canvas of just the messages. Fails for an empty canvas.", [
+doc += api("write_line(text, at, settings)", "The text written from at to the right, on the line through at, as a canvas: glyphs' centres on it, as along any path.", [
+	arg("text", "The text to write.", "a string."),
+	vec_arg("at", "Where the line starts."),
+	font_set(),
+	size_set(),
+	style_set(),
+] + path_text_opts());
+doc += api("write_block(text, at, width, settings)", "The text wrapped into lines width long, the first from at (on its line, as write_line sets it) and each line_height sizes below the last, the left edges ragged by jagged. Gives #{ canvas, bottom }: the text, and where a line after it would go, for stacking blocks.", [
+	arg("text", "The text to write.", "a string."),
+	vec_arg("at", "Where the first line starts."),
+	arg("width", "How long lines are.", "a positive number."),
+	font_set(),
+	size_set(),
+	style_set(),
+	opt("settings.line_height", "1.25", "How far apart lines are, in sizes.", "a positive number."),
+	layout_opt("words", "wrapping at spaces"),
+	jagged_opt("0"),
+	spacing_opt(),
+	avoid_opt(""),
+	clearance_opt(" Needs avoid."),
+	split_words_opt(),
+	split_padding_opt(),
+] + jitter_opts());
+doc += api("canvas.scatter_notes(messages, width_range, height_range, settings)", "Scatters messages over the canvas in random boxes, clear of its strokes and of each other; gives a canvas of just the messages. Fails for an empty canvas.", [
 	arg("messages", "The notes, a box each.", "an array of strings."),
-	font_arg(),
-	style_arg(),
-	req("options.symbol_scale", "The size glyphs are set at, in canvas units.", "a positive number."),
-	req("options.width_range", "Box widths to try, at random between the two.", "[least, most]: positive numbers, least at most most."),
-	req("options.height_range", "Box heights to try.", "[least, most]: positive numbers, least at most most."),
-	opt("options.rotation_jitter", "PI() / 16", "How far each glyph turns, at random, either way.", "a number of at least 0, in radians."),
-	opt("options.scale_jitter", "0.15", "How much each glyph's size varies, at random, either way, as a fraction.", "a number from 0 up to, not including, 1."),
-	opt("options.jagged_edge", "0.1", "How much further in each line starts, at most, at random, in symbol scales.", "a number."),
-	opt("options.max_attempts", "100", "How many boxes are tried for each message before backing off.", "a whole number of at least 1."),
+	arg("width_range", "Box widths to try, at random between the two.", "[least, most]: positive numbers, least at most most."),
+	arg("height_range", "Box heights to try.", "[least, most]: positive numbers, least at most most."),
+	font_set(),
+	size_set(),
+	style_set(),
+	opt("settings.rotation_jitter", "PI() / 16", "How far each glyph turns, at random, either way, before notes are placed.", "a number of at least 0, in radians."),
+	opt("settings.scale_jitter", "0.15", "How much each glyph's size varies, at random, either way, as a fraction, before notes are placed.", "a number from 0 up to, not including, 1."),
+	opt("settings.position_jitter", "0", "How far each placed glyph strays, at most, either way, in sizes.", "a number of at least 0, or [across, down]."),
+	jagged_opt("0.1"),
+	opt("settings.max_attempts", "100", "How many boxes are tried for each message before backing off.", "a whole number of at least 1."),
 	spacing_opt(),
 	avoid_opt(", besides the canvas and other notes"),
 	clearance_opt(" Kept from the canvas, avoid and other notes alike, so it needs no avoid."),
-	layout_opt("words whole, each note in one clear patch"),
+	layout_opt("flat", "words whole, each note in one clear patch"),
+	split_words_opt(),
+	split_padding_opt(),
 ]);
 
 // ---- avoidance ----
 
 doc += heading("Keeping Text Clear");
-doc += para("avoid, in every text layout, is a tree, a path, a canvas or a glyph, or an array of any of these. Glyphs keep their whole outline (the hull of their strokes) at least clearance from all of it: by default an eighth of the symbol scale, on top of any clearance a tree was built with. Glyphs placed by one call keep clear of each other too.");
+doc += para("avoid, in every text layout, is a tree, a path, a canvas or a glyph, or an array of any of these. Glyphs keep their whole outline (the hull of their strokes) at least clearance from all of it: by default an eighth of the size, on top of any clearance a tree was built with. Glyphs placed by one call keep clear of each other too.");
 doc += api("new_avoidance_tree()", "An empty tree of what to keep clear of. Trees are shared: a text box made with one sees what's added to it later, so tree.add(placed) keeps later text off what's just been placed.");
-doc += api("tree.add(item), tree.add(item, clearance)", "Adds what to keep clear of, as it is now. Returns the tree.", [
+doc += api("tree.add(item), tree.add(item, options)", "Adds what to keep clear of, as it is now. Returns the tree.", [
 	arg("item", "What to keep clear of.", "a path (its lines), a canvas (its marks), a glyph (its outline, insides included), another tree (with its own clearances), or an array of any of these."),
-	opt("clearance", "0", "How far to keep from it, in canvas units, on top of the clearance text asks for.", "a number of at least 0."),
+	opt("options.clearance", "0", "How far to keep from it, in canvas units, on top of the clearance text asks for.", "a number of at least 0."),
 ]);
-doc += api("tree.add_hull(item), tree.add_hull(item, clearance)", "Keeps out of everything inside the item's outline, not just off its marks. Returns the tree.", [
+doc += api("tree.add_hull(item), tree.add_hull(item, options)", "Keeps out of everything inside the item's outline, not just off its marks. Returns the tree.", [
 	arg("item", "What to take the outline of.", "a path, a canvas or a glyph, or an array of any of these; not a tree."),
-	opt("clearance", "0", "How far to keep from the outline, in canvas units.", "a number of at least 0."),
+	opt("options.clearance", "0", "How far to keep from the outline, in canvas units.", "a number of at least 0."),
 ]);
-doc += api("tree.add_region(path), tree.add_region(path, clearance)", "Keeps out of a closed shape. Returns the tree.", [
+doc += api("tree.add_region(path), tree.add_region(path, options)", "Keeps out of a closed shape. Returns the tree.", [
 	arg("path", "The shape.", "a path."),
-	opt("clearance", "0", "How far to keep from it, in canvas units.", "a number of at least 0."),
+	opt("options.clearance", "0", "How far to keep from it, in canvas units.", "a number of at least 0."),
 ]);
 doc += api("tree.blocks(point), tree.blocks(glyph)", "Whether something is too close to what's in the tree.", [
 	arg("point or glyph", "What to test.", "a vec, or a placed glyph (a blank one is never blocked)."),
@@ -619,72 +675,101 @@ doc += api("random_range(low, high)", "A number from low up to, not including, h
 doc += api("warn(message)", "Reports something, with the script line, without stopping the script. Errors give the script line too.", [
 	arg("message", "What to report.", "a string."),
 ]);
+doc += api("assert(condition, message)", "Stops the script, with the message and the script line, unless the condition holds: for checking a journal's own sums.", [
+	arg("condition", "What must hold.", "true or false."),
+	arg("message", "What went wrong, if it doesn't.", "a string."),
+]);
 
 // ---- generators ----
 
 doc += heading("Generators");
-doc += para("Points to draw from, the trees that join them, and digits. Distributions and the depth_first and random trees draw on the script's generator, so seed(n) fixes them.");
-doc += api("distribute_points_2(kind, count, bounds), distribute_points_3(kind, count, bounds), distribute_points_4(kind, count, bounds)", "Exactly count points scattered through a box, as an array of vec2s, vec3s or vec4s.", [
+doc += para("Points to draw from, and the trees that join them. Distributions and the depth_first and random trees draw on the script's generator, so seed(n) fixes them.");
+doc += api("distribute_points(kind, count, bounds)", "Exactly count points scattered through a box, as an array of vec2s, vec3s or vec4s: as many coordinates as bounds has pairs.", [
 	arg("kind", "How they're scattered. uniform_random: each anywhere, so clumps and gaps. poisson_disk: evenly at random, none close, by weighted sample elimination. jittered_grid: one at random in each of count cells of a grid. grid: the cells' centres, row by row, x fastest, every cell when count fills the grid. halton: the Halton sequence, quasi-random and even, shifted at random. golden: the generalised golden-ratio sequence, like halton but more even.", "uniform_random, poisson_disk, jittered_grid, grid, halton or golden."),
 	arg("count", "How many points.", "a whole number from 0 to 1000000."),
-	arg("bounds", "The box: the least and greatest each coordinate can be, x first.", "an array of [low, high] pairs of numbers, low below high: 2, 3 or 4 pairs, as the function's number."),
+	arg("bounds", "The box: the least and greatest each coordinate can be, x first.", "an array of 2, 3 or 4 [low, high] pairs of numbers, low below high."),
 ]);
-doc += api("points.spanning_tree(algorithm, metric), points.spanning_tree(algorithm, metric, options)", "A tree joining every point by one way only, as an array of [parent, child] index pairs into points, each pointing away from the root, in the order the algorithm added them: draw them in order and the tree grows. Every pair is compared, so at most 20000 points. Under 2 points gives [].", [
+doc += api("points.spanning_tree(), points.spanning_tree(options)", "A tree joining every point by one way only, as an array of [parent, child] index pairs into points, each pointing away from the root, in the order the algorithm added them: draw them in order and the tree grows. Every pair is compared, so at most 20000 points. Under 2 points gives [].", [
 	arg("points", "What to join.", "an array of vec2s, vec3s or vec4s, all one size."),
-	arg("algorithm", "Which tree. prim (or minimum): the shortest in all, grown from the root a nearest point at a time. kruskal: the same tree, its edges shortest first, fragments joining up. maximum: the longest in all, long crossing lines. shortest_path: each point by its shortest way to the root, veins radiating out. breadth_first: by hops from the root, nearest neighbours first. depth_first: a random walk deep before it backtracks, long corridors. random: a uniformly random tree, an even maze. The last four go between neighbours only.", "prim, minimum, kruskal, maximum, shortest_path, breadth_first, depth_first or random."),
-	arg("metric", "How far apart points are. euclidean: straight. squared_euclidean: straight, squared, the same minimum tree but shortest paths take many short hops. manhattan: along the axes, as streets in a grid. chebyshev: the farthest along any one axis.", "euclidean (or euclidian), squared_euclidean, manhattan (or taxicab) or chebyshev."),
+	opt("options.algorithm", "prim", "Which tree. prim (or minimum): the shortest in all, grown from the root a nearest point at a time. kruskal: the same tree, its edges shortest first, fragments joining up. maximum: the longest in all, long crossing lines. shortest_path: each point by its shortest way to the root, veins radiating out. breadth_first: by hops from the root, nearest neighbours first. depth_first: a random walk deep before it backtracks, long corridors. random: a uniformly random tree, an even maze. The last four go between neighbours only.", "prim, minimum, kruskal, maximum, shortest_path, breadth_first, depth_first or random."),
+	opt("options.metric", "euclidean", "How far apart points are. euclidean: straight. squared_euclidean: straight, squared, the same minimum tree but shortest paths take many short hops. manhattan: along the axes, as streets in a grid. chebyshev: the farthest along any one axis.", "euclidean (or euclidian), squared_euclidean, manhattan (or taxicab) or chebyshev."),
 	opt("options.root", "0", "The point the tree grows from.", "a whole number, the index of a point."),
 	opt("options.neighbours", "4 per coordinate, less 2: 6 for vec2s", "For the neighbour algorithms, how many nearest points each point is joined to (and they to it); the shortest tree's edges are added too, so it's in one piece.", "a whole number of at least 1."),
 ]);
-doc += api("balanced_ternary(n), balanced_ternary(n, width)", "n in balanced ternary: an array of digits, -1, 0 and 1, most significant first, each worth three times the next. 5 is [1, -1, -1], 9 - 3 - 1; 0 is [0].", [
-	arg("n", "The number.", "a whole number."),
-	opt("width", "as many digits as n needs", "How many digits to give, with 0s in front. Fails if n needs more.", "a whole number of at least 1."),
+doc += api("nearest(points, point)", "The index of the point nearest point: a root for a tree, say.", [
+	arg("points", "Where to look.", "a non-empty array of vecs, all one size."),
+	arg("point", "What to be near.", "a vec of the same size."),
 ]);
-doc += api("from_balanced_ternary(digits)", "The number balanced-ternary digits make, most significant first.", [
-	arg("digits", "The digits.", "an array of -1, 0 and 1."),
+doc += api("new_edges(points, pairs)", "A path of straight lines, one between the two points each pair indexes: a spanning tree drawn.", [
+	arg("points", "The points.", "an array of vec2s."),
+	arg("pairs", "Which to join.", "an array of [a, b] indices into points, as spanning_tree gives."),
+]);
+
+// ---- balanced ternary ----
+
+doc += heading("Balanced Ternary");
+doc += para("A balanced-ternary value is a number's digits, -1, 0 and 1, most significant first, each worth three times the next: 5 is +--, 9 - 3 - 1. It's a value: fonts draw it as a glyph and paths write it as marks.");
+doc += api("balanced_ternary(n), balanced_ternary(text), balanced_ternary(digits)", "A balanced-ternary value: from a whole number, in as few digits as it needs (0 is 0), or from its digits as given, leading 0s kept.", [
+	arg("n", "The number.", "a whole number."),
+	arg("text", "The digits as text: - for -1, 0, and + for 1.", "a non-empty string of -, 0 and +."),
+	arg("digits", "The digits.", "a non-empty array of -1, 0 and 1."),
+]);
+doc += api("bt.value", "Read only: the whole number it is.");
+doc += api("bt.digits()", "Its digits, an array of -1, 0 and 1.");
+doc += api("bt.digits(width)", "Its digits in chunks of width, an array of arrays, the first padded with 0s in front so every chunk reads as a number: balanced_ternary(2026).digits(3) is [[0, 1, 0], [-1, 1, 0], [0, 0, 1]], 3, -6 and 1.", [
+	arg("width", "Digits to a chunk.", "a whole number of at least 1."),
+]);
+doc += api("bt.to_string(), bt.to_debug(), a == b, a != b", "Its digits as text, such as +--, for print and debug; and whether two values have the same digits.");
+doc += api("path.fill_with_text(bt, settings)", "The digits written along the path from its start, as the balanced_ternary font writes them down its stems, size apart, over as many copies of the path as it takes: an array of canvases, one per copy. A 0 is a bar across the path, and a -1 or 1 a stroke that runs alongside the path for most of its slot, then bends sharply out to the left or right of a traveller going along the path (for a path running left to right across the page, 1 is down). The path must be one subpath, and isn't drawn.", [
+	arg("bt", "The digits.", "a balanced-ternary value."),
+	style_set(),
+	req("settings.size", "How far along the path each digit's slot runs.", "a positive number, no longer than the path."),
+	opt("settings.width", "0.6 of the slot", "How far the marks reach out from the path.", "a positive number."),
+]);
+doc += api("path.fit_text(bt, settings)", "The digits written along the whole path, each a share of its length, as a canvas; otherwise as above.", [
+	arg("bt", "The digits.", "a balanced-ternary value."),
+	style_set(),
+	opt("settings.width", "0.6 of the slot", "How far the marks reach out from the path.", "a positive number."),
 ]);
 
 // ---- art ----
 
 doc += heading("Procedural Art");
 doc += para("The art module draws shapes from a few parameters and a seed of their own: the same seed gives the same drawing, and the script's generator is neither used nor changed.");
-doc += api("art::snake_path(head_center, head_angle, tail_end, length, max_width, seed)", "The outline of a snake seen from above, winding from its head to the tip of its tail. Where it crosses itself the strand beneath stops at the edge of the one on top (the head always goes over), so the path is several strokes.", snake_args());
-doc += api("art::snake_spine(head_center, head_angle, tail_end, length, max_width, seed)", "The same snake's centre line, from the back of its head to the tip of its tail: a path to write along.", snake_args());
-doc += api("art::snake_along(path, max_width, seed)", "A many-headed serpent along a path: its body follows the path, slithering a little off it and forking where it forks, its tail at the dead end nearest the path's start and a head at every other.", [
+doc += api("art::snake(head_center, tail_end, length), art::snake(head_center, tail_end, length, options)", "A snake seen from above, winding from its head to the tip of its tail. Gives #{ outline, spine }: its outline, which is several strokes, since where it crosses itself the strand beneath stops at the edge of the one on top (the head always goes over); and its centre line, from the back of its head to the tip of its tail, a path to write along.", [
+	vec_arg("head_center", "Where the centre of its head is."),
+	vec_arg("tail_end", "Where the tip of its tail is: near enough for a snake this long to reach."),
+	arg("length", "How long it is along its spine.", "a number at least 4 times max_width."),
+	opt("options.head_angle", "facing away from the tail", "Which way its head faces: 0 is +x, PI() / 2 down the page.", "a number, in radians."),
+	opt("options.max_width", "length / 12", "How wide it is at its widest.", "a positive number."),
+	seed_opt("winding"),
+]);
+doc += api("art::snake_along(path, max_width), art::snake_along(path, max_width, options)", "A many-headed serpent along a path, as a path: its body follows the path, slithering a little off it and forking where it forks, its tail at the dead end nearest the path's start and a head at every other.", [
 	arg("path", "The lines its body follows.", "a path with lines."),
 	arg("max_width", "How wide it is at its widest.", "a positive number."),
-	seed_arg("serpent"),
+	seed_opt("serpent"),
 ]);
-doc += api("art::bramble(base, angle, length, flower_size, seed), art::bramble(base, angle, length, flower_size, seed, options)", "A blackberry bramble. Gives #{ vines, leaves, flowers }: canes, thorns and stalks; leaflets and veins; flowers, buds and sepals, as paths to stroke in different colours. Parts in front hide the lines behind them.", [
+doc += api("art::bramble(base, length), art::bramble(base, length, options)", "A blackberry bramble. Gives #{ vines, leaves, flowers }: canes, thorns and stalks; leaflets and veins; flowers, buds and sepals, as paths to stroke in different colours (canvas.add(parts, styles) draws them). Parts in front hide the lines behind them.", [
 	vec_arg("base", "Where the cane grows from."),
-	arg("angle", "Which way it grows: 0 is +x, -PI() / 2 up the page.", "a number, in radians."),
 	arg("length", "How far it grows.", "a number at least 2 times flower_size."),
-	arg("flower_size", "About how wide its flowers are, which everything else is sized by.", "a positive number."),
-	seed_arg("bramble"),
-	req("options.origin", "A growth origin: canes and branches are thicker toward it, as old wood is. Thorns, stalks, leaves and flowers keep their size.", "a vec."),
-	opt("options.thickness", "3", "How many times their usual width canes are at the origin, easing back to it at the reach.", "a number of at least 1."),
-	opt("options.reach", "as far as the cane could grow from the origin", "How far from the origin canes are back to their usual width.", "a positive number."),
-]);
-doc += api("art::bramble_along(path, flower_size, seed), art::bramble_along(path, flower_size, seed, options)", "A bramble grown along a path, such as a maze's: vines follow its lines, branch at junctions and flower at its dead ends. Gives #{ vines, leaves, flowers }.", [
+	opt("options.angle", "-PI() / 2, up the page", "Which way it grows: 0 is +x.", "a number, in radians."),
+	opt("options.flower_size", "length / 5", "About how wide its flowers are, which everything else is sized by.", "a positive number."),
+	seed_opt("bramble"),
+] + thickening_opts("canes and branches", "as far as the cane could grow from the origin"));
+doc += api("art::bramble_along(path, flower_size), art::bramble_along(path, flower_size, options)", "A bramble grown along a path, such as a maze's: vines follow its lines, branch at junctions and flower at its dead ends. Gives #{ vines, leaves, flowers }.", [
 	arg("path", "The lines its vines follow.", "a path with lines, all its points finite."),
 	arg("flower_size", "About how wide its flowers are, which everything else is sized by.", "a positive number."),
-	seed_arg("bramble"),
-	req("options.origin", "A growth origin: vines are thicker toward it, as old wood is. Thorns, stalks, leaves and flowers keep their size.", "a vec."),
-	opt("options.thickness", "3", "How many times their usual width vines are at the origin, easing back to it at the reach.", "a number of at least 1."),
-	opt("options.reach", "the farthest point of the path from the origin", "How far from the origin vines are back to their usual width.", "a positive number."),
-]);
-doc += api("art::eye(center, length, color, gaze_angle, messiness, seed)", "An eye as a hand sketches one, as a canvas: lids gone over and running past the corners, an iris ringed and washed with color, and a line through the iris bowed toward where it looks.", [
+	seed_opt("bramble"),
+] + thickening_opts("vines", "the farthest point of the path from the origin"));
+doc += api("art::eye(center, length), art::eye(center, length, options)", "An eye as a hand sketches one, as a canvas: lids gone over and running past the corners, an iris ringed and washed with color, and a line through the iris bowed toward where it looks.", [
 	vec_arg("center", "Its centre."),
 	arg("length", "How long it is from corner to corner.", "a positive number."),
-	arg("color", "The iris's wash and outline.", "a CSS colour or a gradient."),
-	arg("gaze_angle", "Which way it looks, on the page: 0 is +x, -PI() / 2 up.", "a number, in radians."),
-	arg("messiness", "From neat, each line drawn once, to as messy as it gets, lines gone over four or five times, wandering and overshooting.", "a number from 0 to 1."),
-	seed_arg("eye"),
-]);
-doc += api("art::eye(center, length, color, gaze_angle, messiness, seed, options)", "As above, with options.", [
-	arg("center, length, color, gaze_angle, messiness, seed", "As above.", "as above."),
-	opt("options.angle", "0", "The eye's tilt; 0 keeps the corners level.", "a number, in radians."),
+	opt("options.color", "#2b1d12, near black", "The iris's wash and outline.", "a CSS colour or a gradient."),
+	opt("options.gaze_angle", "0", "Which way it looks, on the page: 0 is +x, -PI() / 2 up.", "a number, in radians."),
 	opt("options.gaze", "0.5", "How far it looks toward gaze_angle: 0 straight ahead, 1 as far as it goes.", "a number from 0 to 1."),
+	opt("options.messiness", "0.3", "From neat, each line drawn once, to as messy as it gets, lines gone over four or five times, wandering and overshooting.", "a number from 0 to 1."),
+	seed_opt("eye"),
+	opt("options.angle", "0", "The eye's tilt; 0 keeps the corners level.", "a number, in radians."),
 	opt("options.openness", "0.32", "Its height over its length.", "a number above 0.05 and at most 1."),
 	opt("options.flat", "false", "Lids of straight lines from each corner to a point above and below the middle, as the symbols font's eye has, rather than arcs.", "true or false."),
 	opt("options.ink", "a near-black ink pen", "The style of its lines.", "a style."),
@@ -693,6 +778,30 @@ doc += api("art::moon(center, radius, phase)", "The moon in a phase, seen from t
 	vec_arg("center", "Its centre."),
 	arg("radius", "Its radius.", "a positive number."),
 	arg("phase", "How far through its month it is: 0 new, 0.25 first quarter (the right half lit), 0.5 full, 0.75 last quarter (the left half lit). Phases wrap, so 1.25 is 0.25 and -0.25 is 0.75.", "a number."),
+]);
+
+// ---- books ----
+
+doc += heading("Books");
+doc += para("A book numbers pages in order and names them for their number and section, so their files sort in order, and keeps a contents of where each section starts. How a page looks, its running head and folio, is the journal's.");
+doc += api("new_book(), new_book(options)", "An empty book.", [
+	opt("options.first", "1", "As book.first.", "as book.first."),
+]);
+doc += api("book.first = n", "The number the first page gets: 3, say, after a title page and a contents.", [
+	arg("n", "The number.", "a whole number; set before any page is added."),
+]);
+doc += api("book.add(section, page), book.add(section, pages)", "Adds a page, or pages in order, to a section, each named NN_SECTION: its number, two digits at least, and the section with spaces made underscores. Gives the (first) page's number.", [
+	arg("section", "The section, as the contents lists it.", "a string; a new section starts whenever it changes."),
+	arg("page, pages", "What to add.", "a page, or an array of pages such as typeset or split gives."),
+]);
+doc += api("book.next", "Read only: the number the next page added gets, for its folio.");
+doc += api("book.pages", "Read only: the pages, in order, to add to journal_entry.");
+doc += api("book.contents", "Read only: each section and its first page's number, [[section, number], ...].");
+doc += api("roman(n)", "n in lowercase roman numerals, for folios: roman(14) is xiv.", [
+	arg("n", "The number.", "a whole number from 1 to 3999."),
+]);
+doc += api("escape_markdown(text)", "The text with markdown's marks escaped, so markdown(escape_markdown(text)) sets it as it is.", [
+	arg("text", "The text.", "a string."),
 ]);
 
 // ---- layouts ----
@@ -717,13 +826,13 @@ doc += api("layout.typeset(options)", "Typesets pages until every flow has run o
 	opt("options.max_pages", "200", "The most pages to set before failing.", "a whole number of at least 1."),
 ]);
 doc += para("Boxes. Every box takes a style map, which can be left out; its keys are the box styles below, and for slots (every box but rows and columns) role settings of the slot's own too.");
-doc += api("row(children), row(style, children)", "Lays out boxes across.", [
-	opt("style", "none", "How the row is laid out, and where it sits (see Box styles).", "a map of box style keys, container keys among them."),
+doc += api("row(children), row(children, style)", "Lays out boxes across.", [
 	arg("children", "The boxes it lays out, left to right.", "an array of boxes: rows, columns, flows and the rest."),
+	opt("style", "none", "How the row is laid out, and where it sits (see Box styles).", "a map of box style keys, container keys among them."),
 ]);
-doc += api("column(children), column(style, children)", "Lays out boxes down.", [
-	opt("style", "none", "How the column is laid out, and where it sits (see Box styles).", "a map of box style keys, container keys among them."),
+doc += api("column(children), column(children, style)", "Lays out boxes down.", [
 	arg("children", "The boxes it lays out, top to bottom.", "an array of boxes."),
+	opt("style", "none", "How the column is laid out, and where it sits (see Box styles).", "a map of box style keys, container keys among them."),
 ]);
 doc += api("flow(name), flow(name, style)", "A slot for text from a flow; what doesn't fit goes on in the next slot of the same name, then on the next page. Its role, unless style says one, is the flow's name.", [
 	arg("name", "Which flow it sets.", "a name in typeset's flows."),
@@ -778,7 +887,7 @@ doc += listing("On slots, also, besides any role setting, which overrides its ro
 	opt("role", "named after the slot", "The role it takes: by default its flow's or art's name, or label, initial or rule.", "a role's name, in typeset's roles."),
 	opt("wrap", "box when absolute, none otherwise", "What text wrapping round it keeps clear of.", "box (its box), hull (the outline of what it draws) or none."),
 ]);
-doc += listing("Role settings: the keys of each role in typeset's roles, and of slots' styles. Flows and labels need font, style and size; initials font and style; rules, borders, and art that's a path or glyph, only style.", [
+doc += listing("Role settings: the keys of each role in typeset's roles, and of slots' styles, and the text settings every text call takes (each takes the ones it uses and ignores the rest). Flows and labels need font, style and size; initials font and style; rules, borders, and art that's a path or glyph, only style.", [
 	opt("font", "none", "The font text is set in.", "a font."),
 	opt("style", "none", "The style text and strokes are drawn in.", "a style."),
 	opt("size", "none", "The symbol scale text is set at, in canvas units.", "a positive number."),
@@ -793,6 +902,9 @@ doc += listing("Role settings: the keys of each role in typeset's roles, and of 
 	opt("split_words", "false", "Breaks words round what text wraps round rather than moving them past it whole.", "true, false, or the fewest letters a piece may have (a whole number of at least 1; true is 2)."),
 	opt("split_padding", "0", "How much further the pieces keep from it, in sizes. Needs split_words.", "a number of at least 0."),
 	opt("fit", "false", "Shrinks the text until all of it fits the slot.", "true or false."),
+	opt("position_jitter", "0", "How far each glyph strays, at most, either way, at random, in sizes.", "a number of at least 0, or [across, down]."),
+	opt("rotation_jitter", "0", "How far each glyph turns, at most, either way.", "a number of at least 0, in radians."),
+	opt("scale_jitter", "0", "How much each glyph's size changes, at most, either way, as a fraction.", "a number from 0 up to, not including, 1."),
 	opt("em", "#{ italic: true }", "How markdown's emphasis looks.", "a map of span settings (see Marked-Up Text)."),
 	opt("strong", "#{ passes: 2, jitter: size / 20 }", "How markdown's strong text looks: by default gone over twice, a little astray.", "a map of span settings."),
 ]);
@@ -828,10 +940,10 @@ doc += para("Locks encipher text for a journal to draw. A chain is lock types wi
 doc += api("new_lock(name)", "An empty lock chain. The chain is checked after every change, so a mistake fails at the line that made it.", [
 	arg("name", "The chain's name, for messages.", "a string."),
 ]);
-doc += api("lock.add(id, lock_type, options)", "Adds a lock to the chain. Returns the chain.", [
+doc += api("lock.add(id, lock_type), lock.add(id, lock_type, options)", "Adds a lock to the chain. Returns the chain.", [
 	arg("id", "The lock's name in the chain, as in ID.NAME.", "a string, not empty, with no dot, that no other lock in the chain has."),
 	arg("lock_type", "Which lock file: locks/TYPE.rhai, or in --locks-dir.", "a lock type's name (see Lock types)."),
-	arg("options", "The type's options.", "a map of the type's option names to values: each required unless the type gives it a default."),
+	opt("options", "none", "The type's options.", "a map of the type's option names to values: each required unless the type gives it a default."),
 ]);
 doc += api("lock.connect(from, to)", "Wires one lock's output to another's input. Returns the chain.", [
 	arg("from", "The output.", "ID.NAME of a lock's output."),
@@ -843,8 +955,8 @@ doc += api("lock.set_input(input, value)", "Fixes an input, so running doesn't n
 ]);
 doc += api("lock.inputs()", "The inputs still needing a value when it's run: #{ NAME: type }.");
 doc += api("lock.outputs()", "The chain's final outputs: #{ NAME: type }.");
-doc += api("lock.run(inputs)", "Runs the chain: a lock result of its outputs.", [
-	arg("inputs", "A value for every open input.", "a map of the names lock.inputs() gives to lock values of their types."),
+doc += api("lock.run(), lock.run(inputs)", "Runs the chain: a lock result of its outputs.", [
+	opt("inputs", "none, for a chain whose inputs are all set", "A value for every open input.", "a map of the names lock.inputs() gives to lock values of their types."),
 ]);
 doc += api("lock.unlock(result)", "Recovers the inputs from a run's result: a lock result.", [
 	arg("result", "What running the chain gave.", "a lock result, from run."),
@@ -860,24 +972,25 @@ doc += api("result.text(name)", "One value as text.", [
 ]);
 doc += api("result.values()", "Every value: #{ NAME: lock value }.");
 doc += api("result.trace()", "Every value computed along the way, intermediate ones included.");
-doc += api("symbols(base, text)", "Text as a lock value of symbols in a base.", [
+doc += api("symbols(base, text), symbols(base, text, options)", "Text as a lock value of symbols in a base.", [
 	arg("base", "Which symbols: 10 is digits; 27 is space (0) and A to Z (1 to 26); other bases the first base letters, A being 0.", "a whole number from 2 to 27."),
 	arg("text", "The text.", "a string of the base's symbols, letters in any case."),
+	opt("options.lenient", "false", "Makes any text fit: in capitals, characters the base hasn't dropped, and runs of spaces and dashes one space where the base has one (not at either end).", "true or false."),
 ]);
 doc += api("value.symbols()", "The value's symbols, as an array of whole numbers. Fails for values that aren't symbols.");
 doc += api("value.text()", "The value as text, for symbols and strings.");
-doc += api("value.base()", "The base of a value of symbols.");
+doc += api("value.base", "Read only: the base of a value of symbols.");
 doc += api("value.value()", "The value as lock files see it: symbols as an array of whole numbers, a maze as a maze.");
-doc += api("value.type_name()", "The value's type, such as Base27Symbol or Maze.");
+doc += api("value.type_name", "Read only: the value's type, such as Base27Symbol or Maze.");
 doc += api("value.maze()", "A maze output, for drawing.");
 doc += api("value.to_string(), value.to_debug()", "The value as text, for print and debug.");
-doc += api("new_maze(seed, width, height), new_maze(seed, width, height, strategy)", "A maze of width by height nodes, in a grid of 2w - 1 by 2h - 1 cells. Its layout depends only on the seed and size; its cells hold random symbols from 0 to 26.", [
-	arg("seed", "Which maze.", "a whole number."),
+doc += api("new_maze(width, height), new_maze(width, height, options)", "A maze of width by height nodes, in a grid of 2w - 1 by 2h - 1 cells. Its layout depends only on the seed and size; its cells hold random symbols from 0 to 26.", [
 	arg("width", "How many nodes across.", "a whole number of at least 1."),
 	arg("height", "How many nodes down.", "a whole number of at least 1."),
-	opt("strategy", "LeftHanded", "The order its cells are walked in.", "LeftHanded or RightHanded."),
+	opt("options.seed", "0", "Which maze.", "a whole number."),
+	opt("options.strategy", "LeftHanded", "The order its cells are walked in.", "LeftHanded or RightHanded."),
 ]);
-doc += api("maze.width(), maze.height()", "Its grid size in cells, passages included.");
+doc += api("maze.width, maze.height", "Read only: its grid size in cells, passages included.");
 doc += api("maze.cells()", "Every cell in walking order, the order a lock writes its text: #{ x, y, step, symbol }. Nodes are at even coordinates, passages between them.");
 doc += api("maze.fill(symbols)", "Writes symbols into the cells in walking order, and 0 into any left over.", [
 	arg("symbols", "What to write.", "an array of whole numbers of at least 0, no more of them than the maze has cells."),
@@ -939,9 +1052,10 @@ doc += api("one_of(choices), one_of(choices, default)", "An option type: one of 
 doc += api("symbol_type(base)", "The type of symbols in a base, such as Base27Symbol: an array of whole numbers from 0 to base - 1. Other types are Maze, String, Any (which matches every type) or a name of the file's own.", [
 	arg("base", "The base.", "a whole number from 2 to 27."),
 ]);
-doc += api("symbols(base, text) in lock files", "Text as an array of symbols: symbols(27, HI) is [8, 9].", [
+doc += api("symbols(base, text), symbols(base, text, options) in lock files", "Text as an array of symbols: symbols(27, HI) is [8, 9].", [
 	arg("base", "The base, as symbols takes it in journals.", "a whole number from 2 to 27."),
 	arg("text", "The text.", "a string of the base's symbols."),
+	opt("options.lenient", "false", "As in journals: any text made to fit.", "true or false."),
 ]);
 doc += api("symbol_text(base, symbols)", "Symbols back as text: symbol_text(27, [8, 9]) is HI.", [
 	arg("base", "The base.", "a whole number from 2 to 27."),
@@ -981,22 +1095,22 @@ doc.trim();
 // ---- typesetting ----
 
 fn reference_page(n, info) {
-	column(#{ padding: [80, 100, 60, 100], gap: 14 }, [
+	column([
 		if n == 0 {
-			column(#{ gap: 10 }, [
+			column([
 				flow("title", #{ role: "heading", height: 130, fit: true }),
 				flow("subtitle", #{ align: "center" }),
 				rule(#{ height: 10, margin: [10, 250] }),
-			])
+			], #{ gap: 10 })
 		} else {
-			column(#{ gap: 6 }, [
+			column([
 				label("api reference", #{ role: "head", height: 50 }),
 				rule(#{ height: 6 }),
-			])
+			], #{ gap: 6 })
 		},
 		flow("body", #{ grow: 1 }),
 		label(`${n + 1}`, #{ role: "folio", align: "center", height: 40 }),
-	])
+	], #{ padding: [80, 100, 60, 100], gap: 14 })
 }
 
 let pages = new_layout("reference", Fn("reference_page")).typeset(#{
@@ -1016,7 +1130,7 @@ let pages = new_layout("reference", Fn("reference_page")).typeset(#{
 		folio: #{ font: PLAIN, style: TEXT, size: 26 },
 	},
 });
-journal_entry.add_pages(pages);
+journal_entry.add(pages);
 
 // Every character above has a glyph.
 if missing_glyphs().len() > 0 {

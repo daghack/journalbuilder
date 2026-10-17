@@ -23,39 +23,28 @@ fn folio(n) {
 	label(roman(n + 1), #{ role: "folio", align: "center", height: 40 })
 }
 
-fn roman(n) {
-	let out = "";
-	for pair in [[100, "c"], [90, "xc"], [50, "l"], [40, "xl"], [10, "x"], [9, "ix"], [5, "v"], [4, "iv"], [1, "i"]] {
-		while n >= pair[0] {
-			out += pair[1];
-			n -= pair[0];
-		}
-	}
-	out
-}
-
 fn page(n, info) {
 	let columns = if n == 0 {
-		let left = column(#{ grow: 1 }, [
+		let left = column([
 			flow("title", #{ role: "heading", height: 110, fit: true, valign: "center", align: "center" }),
 			rule(#{ height: 20, margin: [0, 120, 20, 120] }),
-			column(#{ grow: 1 }, [
+			column([
 				initial("body", #{ position: "absolute", top: 0, left: 0, width: 130, height: 130 }),
 				flow("body", #{ grow: 1 }),
-			]),
-		]);
+			], #{ grow: 1 }),
+		], #{ grow: 1 });
 		let right = if info.art.contains("illustration") {
-			column(#{ grow: 1 }, [
+			column([
 				figure("illustration", #{ height: "48%", margin: [0, 30] }),
 				flow("caption", #{ margin: [10, 0, 24, 0] }),
 				flow("body", #{ grow: 1 }),
-			])
+			], #{ grow: 1 })
 		} else {
 			flow("body", #{ grow: 1 })
 		};
-		row(#{ grow: 1, gap: 40 }, [left, divider(), right])
+		row([left, divider(), right], #{ grow: 1, gap: 40 })
 	} else {
-		row(#{ grow: 1, gap: 40 }, [flow("body", #{ grow: 1 }), divider(), flow("body", #{ grow: 1 })])
+		row([flow("body", #{ grow: 1 }), divider(), flow("body", #{ grow: 1 })], #{ grow: 1, gap: 40 })
 	};
-	column(#{ padding: [80, 110, 40, 110] }, [columns, folio(n)])
+	column([columns, folio(n)], #{ padding: [80, 110, 40, 110] })
 }

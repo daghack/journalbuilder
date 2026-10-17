@@ -15,7 +15,7 @@
 //! // ...or out from a centre.
 //! let glow = new_gradient(["white", "rgba(255, 200, 0, 0)"], #{ center: vec2(0.0, 0.0), radius: 120.0 });
 //!
-//! let style = new_style(1.0, fade, brush);   // in place of a colour
+//! let style = new_style(fade, brush);   // in place of a colour
 //! style.color = across;                            // or set it later
 //! ```
 //!
@@ -202,7 +202,7 @@ mod tests {
         let e = engine();
         let ok: bool = e.engine.eval(r#"
             let g = new_gradient(["red", "blue"]);
-            let style = new_style(1.0, g, new_brush("Ink Pen", 0.4, 0.8, 1.6));
+            let style = new_style(g, new_brush("Ink Pen", 0.4, 0.8, 1.6));
             let back = style.color;
             style.color = "gold";
             let solid = style.color == "gold";
@@ -225,7 +225,7 @@ mod tests {
             (r#"new_gradient(["red", "blue"], #{ angle: 1 })"#, "unknown option 'angle'"),
             (r#"new_gradient(["red", "blue"], #{ vertical: 1 })"#, "'vertical' should be true or false"),
             (r#"new_gradient(["red", "blue"], #{ vertical: true, radius: 3 })"#, "'vertical' runs down each path"),
-            (r#"new_style(1.0, 3, new_brush("Ink Pen", 0.4, 0.8, 1.6))"#, "expected a colour string or a gradient"),
+            (r#"new_style(3, new_brush("Ink Pen", 0.4, 0.8, 1.6))"#, "expected a colour string or a gradient"),
         ] {
             let err = fails(&format!("let ok = 1;\n{};", script));
             assert!(err.contains(want) && err.contains("line 2"), "{}: {}", want, err);

@@ -63,13 +63,14 @@ chain, an output only connects to an input of the same type (or `"Any"`).
 The standard rhai library (arrays, maps, strings, math), plus:
 
 - `symbol_type(base)`: the type name above.
-- `symbols(base, text)`: text as symbols, `symbols(27, "HI")` is `[8, 9]`.
+- `symbols(base, text[, #{ lenient }])`: text as symbols, `symbols(27, "HI")` is `[8, 9]`;
+  with `lenient: true` any text is made to fit the base first.
 - `symbol_text(base, symbols)`: the reverse.
-- `new_maze(seed, width, height[, strategy])`: a maze of width x height
-  nodes, walked "LeftHanded" (the default) or "RightHanded". Its `cells()`
-  are `#{ x, y, step, symbol }` in walking order, and `fill(symbols)` writes
-  symbols into them in that order, 0 into any left over. `width()` and
-  `height()` are its size in cells.
+- `new_maze(width, height[, #{ seed, strategy }])`: a maze of width x height
+  nodes, laid out by the seed (0 by default) and walked "LeftHanded" (the
+  default) or "RightHanded". Its `cells()` are `#{ x, y, step, symbol }` in
+  walking order, and `fill(symbols)` writes symbols into them in that
+  order, 0 into any left over. `width` and `height` are its size in cells.
 
 There's nothing random and nothing to draw with: a lock is a function of its
 options and values alone.

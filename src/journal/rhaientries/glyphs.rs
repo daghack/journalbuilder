@@ -25,10 +25,12 @@
 //!     g.position = vec2(i * 40.0, 0.0);
 //!     g.rotate_by(0.1);
 //!     g.skew = 0.3;                             // leant about its centre, before it's turned
-//!     canvas.add_glyph(g, style);
+//!     canvas.add(g, style);
 //! }
-//! canvas.add_glyph(font("symbols").glyph("basic_eye").scale_by(50.0), style);
+//! canvas.add(font("symbols").glyph("basic_eye", #{ scale: 50.0, position: vec2(0, 0) }), style);
 //! ternary.glyph(-13);                           // a glyph by its name (or number)
+//! ternary.glyph(balanced_ternary("+--"));       // or balanced-ternary value
+//! row.translate_by(vec2(0, 40)).rotate_around(vec2(0, 0), 0.1);   // an array of glyphs as one
 //!
 //! // Glyphs, like paths and canvases, are shared: every copy of one (a
 //! // variable, an array element, a loop variable) is the same glyph, so
@@ -36,16 +38,16 @@
 //! g.translate_by(vec2(1.0, 0.0)).scale_by(2.0);
 //! let word = copper.glyphs("ink");
 //! for (g, i) in word { g.position = vec2(i * 20.0, 0.0); }
-//! canvas.add_glyphs(word, style);   // adds copies of the glyphs' strokes
+//! canvas.add(word, style);   // adds copies of the glyphs' strokes
 //! ```
 //!
 //! A character is looked for as it is in the font and its fallbacks, then in
 //! the other case; variant picks come from the engine's seeded generator.
 
-use rhai::{Array, Dynamic, Engine, EvalAltResult, Map};
+use rhai::{Array, Dynamic, Engine, EvalAltResult, Map, NativeCallContext};
 use std::rc::Rc;
 
-use super::options::{check_keys, float};
+use super::options::{apply_props, float};
 use super::random::SharedRng;
 use super::{Canvas, CanvasData, Path, Shared, StrokeStyle, Vec2};
 use crate::journal::fonts::{Font, Mapping};
@@ -170,10 +172,27 @@ fn setting(value: f32) -> Dynamic {
     Dynamic::from(value.to_string().parse::<f64>().expect("a float's string form parses"))
 }
 
-/// A glyph's name, from a string or a number (as `ternary.glyph(-13)`).
+/// A glyph's name, from a string, a number (as `ternary.glyph(-13)`) or a
+/// balanced-ternary value (its number).
 fn glyph_key(key: &Dynamic) -> String {
-    key.to_string()
+    match key.clone().try_cast::<super::generate::BalancedTernary>() {
+        Some(bt) => bt.value().to_string(),
+        None => key.to_string(),
+    }
 }
+
+/// The font's own glyph for a character or name: its first variant. (Its
+/// fallbacks aren't looked in; `glyphs` sets text as text is set.)
+fn glyph(f: &Font, key: &Dynamic) -> RhaiResult<Glyph> {
+    let key = glyph_key(key);
+    f.variants(&key).and_then(|v| v.into_iter().next()).map(Glyph::new)
+        .ok_or_else(|| format!("glyph: font '{}' has no glyph '{}'", f.name(), key).into())
+}
+
+/// What `font` and `ternary_font` take, as a font's properties.
+const FONT_PROPS: [&str; 4] = ["character_padding", "space_width", "skew", "fallback"];
+/// What `font.glyph` takes, as a glyph's properties.
+const GLYPH_PROPS: [&str; 4] = ["position", "scale", "rotation", "skew"];
 
 pub fn register(engine: &mut Engine, symdict: Rc<FontBook>, rng: SharedRng) {
     engine.register_type_with_name::<Font>("Font");
@@ -183,29 +202,19 @@ pub fn register(engine: &mut Engine, symdict: Rc<FontBook>, rng: SharedRng) {
     let b = book.clone();
     engine.register_fn("font", move |name: &str| named(&b, "font", name));
     let b = book.clone();
-    engine.register_fn("font", move |name: &str, options: Map| -> RhaiResult<Font> {
-        const CALLER: &str = "font";
-        check_keys(CALLER, &options, &["character_padding", "space_width", "skew", "fallback"])?;
-        let mut font = named(&b, CALLER, name)?;
-        if let Some(value) = options.get("character_padding") {
-            set_padding(&mut font, CALLER, value)?;
-        }
-        if let Some(value) = options.get("space_width") {
-            set_space(&mut font, CALLER, value)?;
-        }
-        if let Some(value) = options.get("skew") {
-            font.skew = skew_angle(CALLER, value)?;
-        }
-        if let Some(value) = options.get("fallback") {
-            font.fallback = fallback_font(&b, CALLER, value.clone())?;
-        }
-        Ok(font)
+    engine.register_fn("font", move |ctx: NativeCallContext, name: &str, options: Map| -> RhaiResult<Font> {
+        apply_props(&ctx, "font", named(&b, "font", name)?, options, &FONT_PROPS)
     });
-    let b = book.clone();
-    engine.register_fn("ternary_font", move |name: &str| -> RhaiResult<Font> {
-        let mut font = named(&b, "ternary_font", name)?;
+    let ternary = |book: &FontBook, name: &str| -> RhaiResult<Font> {
+        let mut font = named(book, "ternary_font", name)?;
         font.mapping = Mapping::BalancedTernary;
         Ok(font)
+    };
+    let b = book.clone();
+    engine.register_fn("ternary_font", move |name: &str| ternary(&b, name));
+    let b = book.clone();
+    engine.register_fn("ternary_font", move |ctx: NativeCallContext, name: &str, options: Map| -> RhaiResult<Font> {
+        apply_props(&ctx, "ternary_font", ternary(&b, name)?, options, &FONT_PROPS)
     });
     let b = book.clone();
     engine.register_fn("font_names", move || -> Array { b.names().into_iter().map(Dynamic::from).collect() });
@@ -237,12 +246,9 @@ pub fn register(engine: &mut Engine, symdict: Rc<FontBook>, rng: SharedRng) {
             .ok_or_else(|| format!("variants: font '{}' has no glyph '{}'", f.name(), key))?;
         Ok(variants.into_iter().map(|symbol| Dynamic::from(Glyph::new(symbol))).collect())
     });
-    // The font's own glyph for a character or name: its first variant. (Its
-    // fallbacks aren't looked in; `glyphs` sets text as text is set.)
-    engine.register_fn("glyph", |f: &mut Font, key: Dynamic| -> RhaiResult<Glyph> {
-        let key = glyph_key(&key);
-        f.variants(&key).and_then(|v| v.into_iter().next()).map(Glyph::new)
-            .ok_or_else(|| format!("glyph: font '{}' has no glyph '{}'", f.name(), key).into())
+    engine.register_fn("glyph", |f: &mut Font, key: Dynamic| glyph(f, &key));
+    engine.register_fn("glyph", |ctx: NativeCallContext, f: &mut Font, key: Dynamic, options: Map| -> RhaiResult<Glyph> {
+        apply_props(&ctx, "glyph", glyph(f, &key)?, options, &GLYPH_PROPS)
     });
     let b = book;
     engine.register_fn("glyphs", move |font: &mut Font, text: &str| -> Array {
@@ -252,15 +258,49 @@ pub fn register(engine: &mut Engine, symdict: Rc<FontBook>, rng: SharedRng) {
             .collect()
     });
 
-    engine.register_fn("add_glyph", |canvas: &mut Canvas, glyph: Glyph, style: StrokeStyle| -> RhaiResult<()> {
-        add_glyph(&mut canvas.borrow_mut(), &glyph, &style)
+    engine.register_fn("add", |canvas: &mut Canvas, glyph: Glyph, style: StrokeStyle| -> RhaiResult<Canvas> {
+        add_glyph(&mut canvas.borrow_mut(), &glyph, &style)?;
+        Ok(canvas.clone())
     });
-    engine.register_fn("add_glyphs", |canvas: &mut Canvas, glyphs: Array, style: StrokeStyle| -> RhaiResult<()> {
-        let mut canvas = canvas.borrow_mut();
-        for glyph in glyph_array("add_glyphs", glyphs)? {
-            add_glyph(&mut canvas, &glyph, &style)?;
+    engine.register_fn("add", |canvas: &mut Canvas, glyphs: Array, style: StrokeStyle| -> RhaiResult<Canvas> {
+        let glyphs = glyph_array("canvas.add", glyphs)?;
+        let mut data = canvas.borrow_mut();
+        for glyph in glyphs {
+            add_glyph(&mut data, &glyph, &style)?;
         }
-        Ok(())
+        drop(data);
+        Ok(canvas.clone())
+    });
+    // An array of glyphs moved, scaled or turned as one: each glyph
+    // changed in place, the array returned.
+    engine.register_fn("translate_by", |glyphs: &mut Array, delta: Vec2| -> RhaiResult<Array> {
+        let delta: parry2d::math::Vec2 = delta.into();
+        for g in glyph_array("translate_by", glyphs.clone())? {
+            g.borrow_mut().translate_by(delta);
+        }
+        Ok(glyphs.clone())
+    });
+    engine.register_fn("scale_by", |glyphs: &mut Array, factor: Dynamic| -> RhaiResult<Array> {
+        let factor = float("scale_by", "the scale", &factor)? as f32;
+        for g in glyph_array("scale_by", glyphs.clone())? {
+            let mut s = g.borrow_mut();
+            let p = s.position();
+            s.set_position(p * factor);
+            s.scale_by(factor);
+        }
+        Ok(glyphs.clone())
+    });
+    engine.register_fn("rotate_around", |glyphs: &mut Array, point: Vec2, rad: Dynamic| -> RhaiResult<Array> {
+        let rad = float("rotate_around", "the angle", &rad)? as f32;
+        let point: parry2d::math::Vec2 = point.into();
+        let (sin, cos) = rad.sin_cos();
+        for g in glyph_array("rotate_around", glyphs.clone())? {
+            let mut s = g.borrow_mut();
+            let d = s.position() - point;
+            s.set_position(point + parry2d::math::Vec2::new(d.x * cos - d.y * sin, d.x * sin + d.y * cos));
+            s.rotate_rad_by(rad);
+        }
+        Ok(glyphs.clone())
     });
 }
 
@@ -359,11 +399,11 @@ mod tests {
         // Leaning glyphs mustn't open up the spaces between them: the line
         // is longer by about one glyph's lean, not every glyph's.
         let widths: Array = eval(r#"
-            let s = new_style(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
+            let s = new_style("black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
             let line = new_line(vec2(0.0, 0.0), vec2(4000.0, 0.0));
             let text = "the quick brown fox jumps over the lazy dog";
-            [line.fill_with_text(text, font("plain"), 20.0, s)[0].bounds().width,
-             line.fill_with_text(text, font("plain", #{ skew: 0.3 }), 20.0, s)[0].bounds().width]
+            [line.fill_with_text(text, #{ font: font("plain"), size: 20.0, style: s })[0].bounds().width,
+             line.fill_with_text(text, #{ font: font("plain", #{ skew: 0.3 }), size: 20.0, style: s })[0].bounds().width]
         "#);
         let (upright, leant) = (widths[0].as_float().unwrap(), widths[1].as_float().unwrap());
         assert!((leant - upright).abs() < 0.3f64.tan() * 20.0, "{} -> {}", upright, leant);
@@ -397,14 +437,14 @@ mod tests {
     #[test]
     fn spaces_are_blank_glyphs_and_add_nothing() {
         let script = r#"
-            let style = new_style(1.0, "black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
+            let style = new_style("black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
             let g = font("loche_upper").glyphs("a b");
             if !g[1].is_blank || g[0].is_blank { throw "expected only the space to be blank"; }
             let canvas = new_canvas();
-            canvas.add_glyphs(g, style);
+            canvas.add(g, style);
             let page = new_page();
-            page.add_canvas(canvas);
-            journal_entry.add_page(page);
+            page.add(canvas);
+            journal_entry.add(page);
         "#;
         let entry = engine().build_entry_str(script).expect("script should run");
         assert_eq!(entry.pages[0].canvases()[0].strokes.len(), 2);
@@ -437,11 +477,11 @@ mod tests {
             ("let ok = 1;\nfont(\"copper\", #{ padding: 1 });", "font: unknown option 'padding'"),
             ("let ok = 1;\nfont(\"copper\", #{ character_padding: -1 });", "character_padding can't be negative"),
             ("let ok = 1;\nlet f = font(\"copper\"); f.space_width = 0;", "space_width must be positive"),
-            ("let ok = 1;\nfont(\"copper\", #{ skew: 2 });", "font: skew must be an angle in radians between"),
+            ("let ok = 1;\nfont(\"copper\", #{ skew: 2 });", "font: font.skew: skew must be an angle in radians between"),
             ("let ok = 1;\nlet g = font(\"copper\").glyph(\"a\"); g.skew = -1.6;", "glyph.skew: skew must be an angle"),
             ("let ok = 1;\nlet f = font(\"copper\"); f.fallback = 3;", "a fallback is a font, a font's name or ()"),
             ("let ok = 1;\nfont(\"symbols\").glyph(\"no_such_glyph\");", "glyph: font 'symbols' has no glyph 'no_such_glyph'"),
-            ("let ok = 1;\nnew_canvas().add_glyphs([font(\"symbols\").glyph(\"X\"), 3], new_style(1.0, \"black\", new_brush(\"Ink Pen\", 0.3, 0.7, 1.0)));", "add_glyphs: item 1"),
+            ("let ok = 1;\nnew_canvas().add([font(\"symbols\").glyph(\"X\"), 3], new_style(\"black\", new_brush(\"Ink Pen\", 0.3, 0.7, 1.0)));", "canvas.add: item 1"),
         ] {
             let err = fails(script);
             assert!(err.contains(want) && err.contains("line 2"), "{}: {}", want, err);

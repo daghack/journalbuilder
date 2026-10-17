@@ -11,14 +11,14 @@
 //! // layouts/two_columns.rhai
 //! fn page_size() { #{ width: 1400, height: 1000 } }
 //! fn page(n, info) {
-//!     row(#{ padding: 80, gap: 60 }, [
-//!         column(#{ grow: 1 }, [
+//!     row([
+//!         column([
 //!             if n == 0 { flow("title", #{ role: "heading", height: 90, fit: true }) } else { spacer() },
 //!             flow("body", #{ grow: 1 }),
-//!         ]),
+//!         ], #{ grow: 1 }),
 //!         band("divider", #{ width: 20 }),
 //!         flow("body", #{ grow: 1 }),
-//!     ])
+//!     ], #{ padding: 80, gap: 60 })
 //! }
 //! ```
 //!
@@ -35,13 +35,13 @@
 //!     },
 //!     art: #{ divider: knot_path },
 //! });
-//! journal_entry.add_pages(pages);
+//! journal_entry.add(pages);
 //! ```
 //!
 //! `new_layout("name", Fn("my_page"))` makes one from a function in the
 //! journal instead, and `width`/`height` in the content give a page size.
 //!
-//! **Boxes.** `row(style, children)` and `column(style, children)` lay their
+//! **Boxes.** `row(children, style)` and `column(children, style)` lay their
 //! children out across or down (the style is optional). Leaves:
 //!
 //! - `flow(name, style)`: text from the flow `name`. A flow runs through its
@@ -210,10 +210,9 @@ const BOX_KEYS: [&str; 20] = [
     "margin", "padding", "align_self", "position", "top", "left", "right", "bottom", "aspect", "border", "wrap",
 ];
 const CONTAINER_KEYS: [&str; 4] = ["gap", "justify", "align", "align_content"];
-/// Role settings, which roles and slots take.
-const ROLE_KEYS: [&str; 17] = [
-    "font", "style", "size", "line_height", "align", "valign", "indent", "paragraph_gap", "spacing", "clearance", "jagged", "fit", "split_words", "split_padding", "em", "strong", "role",
-];
+/// Role settings, which roles and slots take: the text settings (see
+/// text_settings.rs), `role` for slots only.
+use super::text_settings::{Jitter, ROLE_KEYS};
 
 fn dimension(caller: &str, key: &str, value: &Dynamic) -> RhaiResult<Dimension> {
     if let Ok(n) = value.as_float() {
@@ -290,6 +289,7 @@ fn check_role_setting(caller: &str, key: &str, value: &Dynamic) -> RhaiResult<()
         "split_words" | "split_padding" => word_split(caller, &Map::from_iter([(key.into(), value.clone()), ("split_words".into(), true.into())])).map(|_| ()),
         "em" | "strong" => SpanStyle::from_map(&format!("{} '{}'", caller, key), value).map(|_| ()),
         "role" => string(caller, key, value).map(|_| ()),
+        "position_jitter" | "rotation_jitter" | "scale_jitter" => Jitter::parse(caller, &Map::from_iter([(key.into(), value.clone())])).map(|_| ()),
         _ => Ok(()),
     }
 }
@@ -478,6 +478,8 @@ struct Role {
     /// What emphasis and strong text in markdown look like.
     em: SpanStyle,
     strong: SpanStyle,
+    /// How far set glyphs stray.
+    jitter: Jitter,
 }
 
 /// A flow of text, as far as it's been set.
@@ -570,7 +572,8 @@ impl Content {
             Some(strong) => SpanStyle::from_map(&format!("{} 'strong'", caller), strong)?,
             None => SpanStyle::strong(size.unwrap_or(0.0)),
         };
-        Ok(Role { font, style, text, fit: settings.get("fit").and_then(|f| f.as_bool().ok()).unwrap_or(false), valign, em, strong })
+        let jitter = Jitter::parse(&caller, &settings)?;
+        Ok(Role { font, style, text, fit: settings.get("fit").and_then(|f| f.as_bool().ok()).unwrap_or(false), valign, em, strong, jitter })
     }
 }
 
@@ -927,7 +930,8 @@ fn typeset_page(ctx: &NativeCallContext, root: &Node, n: usize, content: &mut Co
                     (vec![glyph], k + 1)
                 } else {
                     let text_style = text_style.ok_or_else(|| format!("{}: its role '{}' needs a 'size'", caller, node.role))?;
-                    let setting = set_slot(inner, &text_style, role, text.glyphs(), text.chars, text.paragraph_start, &avoid, rng);
+                    let mut setting = set_slot(inner, &text_style, role, text.glyphs(), text.chars, text.paragraph_start, &avoid, rng);
+                    role.jitter.apply(&mut setting.placed, text_style.size, &mut *rng.borrow_mut());
                     text.styled.draw(&mut canvas, &setting, text.start, &style, &avoid, text_style.clearance)?;
                     (setting.placed, setting.consumed)
                 };
@@ -954,7 +958,8 @@ fn typeset_page(ctx: &NativeCallContext, root: &Node, n: usize, content: &mut Co
         if text.glyphs().is_empty() {
             continue;
         }
-        let setting = set_slot(placed[i].inner, &text_style, role, text.glyphs(), text.chars, text.paragraph_start, &avoid, rng);
+        let mut setting = set_slot(placed[i].inner, &text_style, role, text.glyphs(), text.chars, text.paragraph_start, &avoid, rng);
+        role.jitter.apply(&mut setting.placed, text_style.size, &mut *rng.borrow_mut());
         text.styled.draw(&mut canvas, &setting, text.start, &style, &avoid, text_style.clearance)?;
         let flow = content.flow(name)?;
         flow.cursor += setting.consumed;
@@ -1052,7 +1057,7 @@ pub fn register(engine: &mut Engine, symdict: Rc<FontBook>, rng: SharedRng, layo
     for (name, kind) in [("row", Kind::Row), ("column", Kind::Column)] {
         let k = kind.clone();
         engine.register_fn(name, move |children: Array| Node::new(name, k.clone(), Map::new(), children));
-        engine.register_fn(name, move |options: Map, children: Array| Node::new(name, kind.clone(), options, children));
+        engine.register_fn(name, move |children: Array, options: Map| Node::new(name, kind.clone(), options, children));
     }
     type Leaf = fn(String) -> Kind;
     for (name, make) in [
@@ -1089,8 +1094,8 @@ mod tests {
 
     const SETUP: &str = r#"
         let pen = new_brush("Ink Pen", 0.3, 0.7, 1.0);
-        let ink = new_style(1.0, "black", pen);
-        let red = new_style(1.0, "darkred", pen);
+        let ink = new_style("black", pen);
+        let red = new_style("darkred", pen);
         let font = font("loche_upper");
         let words = "the quick brown fox jumps over the lazy dog ";
         let roles = #{
@@ -1101,18 +1106,18 @@ mod tests {
             rule: #{ style: red },
         };
         fn two_columns(n, info) {
-            column(#{ padding: 20, gap: 10 }, [
+            column([
                 if n == 0 { flow("title", #{ role: "heading", height: 40, fit: true }) } else { spacer(#{ height: 40 }) },
-                row(#{ grow: 1, gap: 10 }, [
-                    column(#{ grow: 1 }, [
+                row([
+                    column([
                         if n == 0 { initial("body", #{ position: "absolute", top: 0, left: 0, width: 40, height: 40 }) } else { spacer() },
                         flow("body", #{ grow: 1 }),
-                    ]),
+                    ], #{ grow: 1 }),
                     band("divider", #{ width: 6 }),
                     flow("body", #{ grow: 1 }),
-                ]),
+                ], #{ grow: 1, gap: 10 }),
                 rule(#{ height: 4 }),
-            ])
+            ], #{ padding: 20, gap: 10 })
         }
         let book = new_layout("book", Fn("two_columns"));
     "#;
@@ -1137,7 +1142,7 @@ mod tests {
         let entry = build(r#"
             let text = words + words + words + words + words + words + words + words;
             text = text + text + text;
-            journal_entry.add_pages(book.typeset(#{
+            journal_entry.add(book.typeset(#{
                 width: 400, height: 300, flows: #{ title: "Title", body: text }, roles: roles,
                 art: #{ divider: new_circle(vec2(0.0, 0.0), 3.0) },
             }));
@@ -1165,7 +1170,7 @@ mod tests {
     fn text_wraps_around_the_drop_cap() {
         let entry = build(r#"
             let text = words + words + words + words + words + words;
-            journal_entry.add_pages(book.typeset(#{
+            journal_entry.add(book.typeset(#{
                 width: 400, height: 300, flows: #{ title: "Title", body: text }, roles: roles,
                 art: #{ divider: new_circle(vec2(0.0, 0.0), 3.0) },
             }));
@@ -1188,7 +1193,7 @@ mod tests {
                 art: #{ figure: new_circle(vec2(0.0, 0.0), 1.0) },
             });
             if pages.len() != 1 { throw "one page"; }
-            journal_entry.add_pages(pages);
+            journal_entry.add(pages);
         "#).expect("script should run");
         let canvas: JournalCanvas = entry.pages[0].canvases()[0].clone().into();
         // The page size from the file, and the circle fitted to its box.
@@ -1204,8 +1209,8 @@ mod tests {
     #[test]
     fn bands_repeat_their_art_along_the_box() {
         let entry = build(r#"
-            let strip = new_layout("strip", |n, info| column(#{ padding: 10 }, [band("dot", #{ height: 20 })]));
-            journal_entry.add_pages(strip.typeset(#{ width: 220, height: 40, roles: #{ dot: #{ style: ink } }, art: #{ dot: new_circle(vec2(0.0, 0.0), 5.0) } }));
+            let strip = new_layout("strip", |n, info| column([band("dot", #{ height: 20 })], #{ padding: 10 }));
+            journal_entry.add(strip.typeset(#{ width: 220, height: 40, roles: #{ dot: #{ style: ink } }, art: #{ dot: new_circle(vec2(0.0, 0.0), 5.0) } }));
         "#).expect("script should run");
         // 200 long, 20 across: ten circles 20 across.
         assert_eq!(entry.pages[0].canvases()[0].strokes.len(), 10);
@@ -1213,22 +1218,22 @@ mod tests {
 
     #[test]
     fn mistakes_fail_with_what_went_wrong() {
-        let typeset = |content: &str| format!("journal_entry.add_pages(book.typeset(#{{ width: 400, height: 300, roles: roles, art: #{{ divider: new_circle(vec2(0.0, 0.0), 3.0) }}, {} }}));", content);
+        let typeset = |content: &str| format!("journal_entry.add(book.typeset(#{{ width: 400, height: 300, roles: roles, art: #{{ divider: new_circle(vec2(0.0, 0.0), 3.0) }}, {} }}));", content);
         for (script, want) in [
-            ("let ok = 1;\nrow(#{ colour: 1 }, []);", "row: unknown option 'colour'"),
+            ("let ok = 1;\nrow([], #{ colour: 1 });", "row: unknown option 'colour'"),
             ("let ok = 1;\nflow(\"a\", #{ width: \"wide\" });", "'width' should be a number, \"N%\" or \"auto\""),
             ("let ok = 1;\nflow(\"a\", #{ align: \"middle\" });", "unknown align 'middle'"),
-            ("let ok = 1;\ncolumn(#{ justify: \"left\" }, []);", "unknown justify 'left'"),
+            ("let ok = 1;\ncolumn([], #{ justify: \"left\" });", "unknown justify 'left'"),
             ("let ok = 1;\nrow([1]);", "child 0 is a i64"),
             ("let ok = 1;\nflow(\"a\", #{ gap: 3 });", "unknown option 'gap'"),
             (&typeset("flows: #{ title: \"t\" }"), "sets a flow 'body', but there's no such flow"),
             (&typeset("flows: #{ title: \"t\", body: \"b\", extra: \"never placed\" }"), "page 1 sets none of what's left of flow(s) 'extra'"),
             (&typeset("flows: #{ title: \"t\", body: words + words + words + words + words + words + words + words + words + words + words + words + words + words + words + words + words + words + words + words + words + words + words + words }, max_pages: 1"), "still text left after 1 pages"),
-            ("journal_entry.add_pages(book.typeset(#{ width: 400, height: 300, roles: roles, flows: #{ title: \"t\", body: \"b\" } }));", "there's no art named 'divider'"),
-            ("roles.remove(\"body\");\njournal_entry.add_pages(book.typeset(#{ width: 400, height: 300, roles: roles, flows: #{ title: \"t\", body: \"b\" } }));", "uses role 'body', which `roles` doesn't have"),
-            ("journal_entry.add_pages(book.typeset(#{ roles: roles }));", "give the page's 'width'"),
-            ("roles.body.size = -1;\njournal_entry.add_pages(book.typeset(#{ width: 400, height: 300, roles: roles }));", "'size' must be a positive number"),
-            ("journal_entry.add_pages(new_layout(\"bad\", |n, info| 3).typeset(#{ width: 10, height: 10 }));", "returned a i64, not a layout box"),
+            ("journal_entry.add(book.typeset(#{ width: 400, height: 300, roles: roles, flows: #{ title: \"t\", body: \"b\" } }));", "there's no art named 'divider'"),
+            ("roles.remove(\"body\");\njournal_entry.add(book.typeset(#{ width: 400, height: 300, roles: roles, flows: #{ title: \"t\", body: \"b\" } }));", "uses role 'body', which `roles` doesn't have"),
+            ("journal_entry.add(book.typeset(#{ roles: roles }));", "give the page's 'width'"),
+            ("roles.body.size = -1;\njournal_entry.add(book.typeset(#{ width: 400, height: 300, roles: roles }));", "'size' must be a positive number"),
+            ("journal_entry.add(new_layout(\"bad\", |n, info| 3).typeset(#{ width: 10, height: 10 }));", "returned a i64, not a layout box"),
         ] {
             let err = build(script).expect_err(script);
             assert!(err.contains(want), "{}:\n{}", want, err);
@@ -1239,7 +1244,7 @@ mod tests {
     fn layout_file_mistakes_name_the_file_and_line() {
         let dir = std::env::temp_dir().join(format!("journal_layouts_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("bad.rhai"), "fn page(n, info) {\n\trow(#{ colour: 1 }, [])\n}\n").unwrap();
+        std::fs::write(dir.join("bad.rhai"), "fn page(n, info) {\n\trow([], #{ colour: 1 })\n}\n").unwrap();
         std::fs::write(dir.join("pageless.rhai"), "fn other() {}\n").unwrap();
         let symd = FontBook::from_file(crate::journal::fonts::DEFAULT_FONTS).unwrap();
         let mut engine = JournalEngine::with_dirs(Rc::new(symd), crate::journal::rhaientries::DEFAULT_LOCKS_DIR, &dir);
@@ -1254,7 +1259,7 @@ mod tests {
     fn typeset_pages_split_into_tiles() {
         let entry = build(r#"
             let pages = book.typeset(#{ width: 400, height: 300, flows: #{ title: "Title", body: words }, roles: roles, art: #{ divider: new_circle(vec2(0.0, 0.0), 3.0) } });
-            journal_entry.add_pages(pages[0].split(2, 1));
+            journal_entry.add(pages[0].split(#{ columns: 2, rows: 1 }));
         "#).expect("script should run");
         let tile: JournalCanvas = entry.pages[1].canvases()[0].clone().into();
         assert_eq!(tile.frame().unwrap().page.extents().x, 400.0);

@@ -601,11 +601,8 @@ fn lock_engine(sources: &Sources) -> Engine {
             Ok(format!("Base{}Symbol", check_base("symbol_type", base)?))
         })
         // symbols(27, "HI") is [8, 9]: see crate::lockbuilder::base_n_symbols.
-        .register_fn("symbols", |base: Dynamic, text: &str| -> RhaiResult<Array> {
-            let base = check_base("symbols", base)?;
-            let symbols = base_n_symbols(base, text).map_err(|e| format!("symbols: {}", e))?;
-            Ok(symbols.into_iter().map(|s| Dynamic::from_int(s as rhai::INT)).collect())
-        })
+        .register_fn("symbols", |base: Dynamic, text: &str| lock_file_symbols(base, text, Map::new()))
+        .register_fn("symbols", lock_file_symbols)
         // symbol_text(27, [8, 9]) is "HI".
         .register_fn("symbol_text", |base: Dynamic, symbols: Array| -> RhaiResult<String> {
             let base = check_base("symbol_text", base)?;
@@ -614,6 +611,16 @@ fn lock_engine(sources: &Sources) -> Engine {
             Ok(symbols_to_string(&symbols, base))
         });
     engine
+}
+
+/// `symbols(base, text[, #{ lenient }])` in lock files: the symbols as an
+/// array of whole numbers.
+fn lock_file_symbols(base: Dynamic, text: &str, options: Map) -> RhaiResult<Array> {
+    super::super::options::check_keys("symbols", &options, &["lenient"])?;
+    let base = check_base("symbols", base)?;
+    let text = if super::lenient("symbols", &options)? { super::lenient_text(base, text) } else { text.to_string() };
+    let symbols = base_n_symbols(base, &text).map_err(|e| format!("symbols: {}", e))?;
+    Ok(symbols.into_iter().map(|s| Dynamic::from_int(s as rhai::INT)).collect())
 }
 
 fn check_base(caller: &str, base: Dynamic) -> RhaiResult<u32> {

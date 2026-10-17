@@ -399,7 +399,7 @@ pub struct SymbolPlacementArgs<'a> {
     pub avoid: Option<&'a AvoidanceTree>,
     pub padding: f32,
     pub symbol_scale: f32,
-    /// Extra space between glyphs, as a fraction of `symbol_scale`; 0 sets
+    /// Extra space between glyphs, as a fraction of `size`; 0 sets
     /// them as close as their outlines and paddings allow.
     pub spacing: f32,
     /// How far below the path each glyph's centre sits, as a fraction of

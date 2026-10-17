@@ -7,7 +7,7 @@ layout its text, the look of each kind of text (a font, an ink, a size) and
 its art, and gets back as many pages as the text needs:
 
 ```rhai
-journal_entry.add_pages(layout("two_column_article").typeset(#{
+journal_entry.add(layout("two_column_article").typeset(#{
 	name: "lunar",
 	flows: #{ title: "Lunar Influence", body: text, caption: "the moon" },
 	roles: #{
@@ -43,7 +43,7 @@ journal can, `art::bramble` included.
 
 ## Boxes
 
-- `row(style, children)` and `column(style, children)` lay out their
+- `row(children, style)` and `column(children, style)` lay out their
   children across or down. The style is optional.
 - `flow(name, style)`: text from the flow `name`. Each flow runs through
   its slots in the order they come in the tree, then on to the next page:
@@ -155,7 +155,7 @@ as it is, for art made to measure:
 
 ```rhai
 fn bramble_in(b) {
-	let plant = art::bramble(vec2(b.center.x, b.y + b.height), -PI() / 2.0, b.height, b.height * 0.2, 5);
+	let plant = art::bramble(vec2(b.center.x, b.y + b.height), b.height, #{ angle: -PI() / 2.0, flower_size: b.height * 0.2, seed: 5 });
 	...
 }
 art: #{ illustration: Fn("bramble_in") }

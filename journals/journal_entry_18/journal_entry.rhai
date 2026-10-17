@@ -22,11 +22,11 @@ let shorts = [
 ];
 
 let box_size = 150.0;
-let symbol_scale = 19.0;
+let size = 19.0;
 let font = font("loche_upper");
 let boxes = new_textbox(#{
 	center: vec2(0.0, 0.0), width: box_size, height: box_size,
-	symbol_scale: symbol_scale, layout: "words", jagged_edge: 0.5,
+	size: size, layout: "words", jagged: 0.5,
 });
 let fateful = boxes.place_all(font.glyphs(fateful_pages));
 let spider = boxes.place_all(font.glyphs(spider_web));
@@ -34,18 +34,18 @@ let spider = boxes.place_all(font.glyphs(spider_web));
 // A maze of n x n nodes has 2n² - 1 cells, passages included: enough for
 // every box.
 let nodes = ((fateful.len() + spider.len()) / 2.0).sqrt().ceiling().to_int();
-let spacing = box_size + symbol_scale;
+let spacing = box_size + size;
 
 // Nib sizes are in canvas units, like everything else; 2.43 keeps the look
 // of the legacy render (which fit this page to 1080 px with a 1.75 nib).
 let brush = new_brush("Calligraphy", 0.15, 0.25, 2.43);
-let fateful_style = new_style(2.0, "black", brush);
-let spider_style = new_style(2.0, "hsl(160, 50%, 40%, 0.8)", brush);
+let fateful_style = new_style("black", brush, #{ width: 2.0 });
+let spider_style = new_style("hsl(160, 50%, 40%, 0.8)", brush, #{ width: 2.0 });
 
 let canvas = new_canvas();
 let next_fateful = 0;
 let next_spider = 0;
-for cell in new_maze(1043, nodes, nodes).cells() {
+for cell in new_maze(nodes, nodes, #{ seed: 1043 }).cells() {
 	// Prefer one text at random, falling back to the other once it runs out.
 	let take_fateful = if random() < 0.5 { next_fateful < fateful.len() } else { next_spider >= spider.len() };
 	let block = ();
@@ -61,17 +61,9 @@ for cell in new_maze(1043, nodes, nodes).cells() {
 	} else {
 		break;
 	}
-	let offset = vec2(cell.x * spacing, cell.y * spacing);
-	for g in block {
-		canvas.add_glyph(g.translate_by(offset), style);
-	}
+	canvas.add(block.translate_by(vec2(cell.x * spacing, cell.y * spacing)), style);
 }
 
-canvas.add_canvas(canvas.scatter_notes(shorts, font, new_style(2.0, "hsl(200, 50%, 40%, 0.8)", brush),
-	#{ symbol_scale: 23.0, width_range: [200, 500], height_range: [300, 600] }));
+canvas.add(canvas.scatter_notes(shorts, [200, 500], [300, 600], #{ font: font, style: new_style("hsl(200, 50%, 40%, 0.8)", brush, #{ width: 2.0 }), size: 23.0 }));
 
-let page = new_page();
-page.name = "maze_textbox";
-page.svg_style = #{ noise_amplitude: 1.5 };
-page.add_canvas(canvas);
-journal_entry.add_page(page);
+journal_entry.add(new_page(#{ name: "maze_textbox", svg_style: #{ noise_amplitude: 1.5 } }).add(canvas));

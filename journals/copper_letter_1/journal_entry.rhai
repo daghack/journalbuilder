@@ -1,7 +1,3 @@
-let maze_page = new_page();
-
-let canvas = new_canvas();
-
 let paragraphs = [
 	"Us. I like Us very much for our collaboration. Us. What a delight it is to write it upon the page. Us. We. Us. How pleasant indeed. Alas, but there is so little time left for Us, for when I have dreamed, I have dreamed that we are at the End of Us, one way or another. At least for the most part—God does not intend I remain in Cenotaph much longer. Do not concern yourself overly with this, perhaps you will prove lucky and miss me but briefly.",
 
@@ -16,18 +12,10 @@ let paragraphs = [
 	"You have seen, and as a result you have made my time in Cenotaph approach enjoyable. As my other games come to their end, I promise that my games with you will not. You will be able to keep up with them, I have no doubt—you've proven adequately up to the task so far. I even admired the variety you managed to make out of a single secret way, I almost missed one of the many before the possibility irritated at me enough to thoroughly review. Well done. Your most banal, Loche."
 ];
 
-let maze_canvases = [];
-let origin = vec2(0.0, 0.0);
-let brush_style = new_brush("Rough Ink", 0.25, 0.5, 1.0);
-let style = new_style(1.5, "darkred", brush_style);
-let copper_font = font("copper");
+let style = new_style("darkred", new_brush("Rough Ink", 0.25, 0.5, 1.0), #{ width: 1.5 });
+let copper = font("copper");
 
 for (paragraph, index) in paragraphs {
-	let maze_path = new_maze(index, 10, 10).path();
-	maze_path.scale_by(40.0);
-	let maze_canvas = maze_path.fit_text(paragraph, copper_font, style);
-	let page = new_page();
-	page.add_canvas(maze_canvas);
-	journal_entry.add_page(page);
+	let maze_path = new_maze(10, 10, #{ seed: index }).path().scale_by(40.0);
+	journal_entry.add(new_page().add(maze_path.fit_text(paragraph, #{ font: copper, style: style })));
 }
-

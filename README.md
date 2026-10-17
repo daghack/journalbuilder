@@ -83,23 +83,13 @@ A journal script fills in `journal_entry` with pages, each holding one or
 more canvases of strokes:
 
 ```rhai
-let brush = new_brush("Calligraphy", 0.15, 0.25, 2.0);
-let ink = new_style(2.5, "rgba(0, 0, 0, 0.8)", brush);
+let ink = new_style(new_brush("Calligraphy", 0.15, 0.25, 2.0), #{ width: 2.5 }, #{ width: "rgba(0, 0, 0, 0.8)" });
 
-let canvas = new_canvas();
-canvas.add_path(new_circle(vec2(0.0, 0.0), 100.0), ink);
+let canvas = new_canvas()
+	.add(new_circle(vec2(0.0, 0.0), 100.0), ink)
+	.add(write_line("ink", vec2(-50.0, 0.0), #{ font: font("copper"), size: 50.0, style: ink }));
 
-let font = font("copper");
-for (g, i) in font.glyphs("ink") {
-	g.scale = 50.0;
-	g.position = vec2(i * 50.0 - 50.0, 0.0);
-	canvas.add_glyph(g, ink);
-}
-
-let page = new_page();
-page.name = "hello";
-page.add_canvas(canvas);
-journal_entry.add_page(page);
+journal_entry.add(new_page(#{ name: "hello" }).add(canvas));
 ```
 
 This renders `darkly_hello_0.png`: one image per canvas, named
@@ -108,6 +98,16 @@ indices. With `--svg` there's also `hello_0.svg` and `hello_0.png`.
 
 What to know:
 
+- **One shape for every call.** What a call needs comes first, in order,
+  then one map of everything optional, which can be left out:
+  `path.hatch(4, #{ angle: 0.3 })`. Constructors' options also set any
+  property of what they make, checked as setting it is:
+  `new_brush("Ink Pen", 0.4, 0.8, 1.6, #{ pressure_profile: "taper" })`.
+  Text calls take one map of text settings with the keys layout roles
+  take (`font`, `size`, `style`, `spacing`, ...), so a role's settings can
+  be passed straight in. Canvases, pages, the entry, avoidance trees and
+  lock chains all take things with `add`, which returns what it was
+  called on, so calls chain.
 - **Units.** Coordinates are canvas units, one pixel at `--scale 1`. Each
   canvas is cropped to its strokes, plus `page.margin` (by default half the
   largest brush size).
@@ -120,7 +120,7 @@ What to know:
   `#{ min, max, center, width, height }`.
 - **Brushes and widths.** `new_brush(name, min_pressure, max_pressure,
   size)` picks a Darkly brush; `size` is how wide its marks are. In
-  `new_style(width, color, brush)`, `width` scales the brush's
+  `new_style(brush, #{ width }, #{ width: color })` (width 1 by default), `width` scales the brush's
   pressure in Darkly renders, so past `1 / max_pressure` a stroke gets no
   heavier (the render warns), but it's the stroke's geometric width in SVG.
 - **Pressure.** `brush.pressure_profile` runs pressure along each stroke
@@ -132,8 +132,8 @@ What to know:
   its lowest `brush.pool_depth` (default 0.3 of its height). Both are
   pressure in Darkly renders, so capped as width is, and width in the
   styled SVG output.
-- **Going over strokes.** `style.passes = 7` draws each stroke in the
-  style seven times over, and `style.jitter = 9` lets each pass's ends
+- **Going over strokes.** `#{ passes: 7 }` (or `style.passes = 7`) draws each stroke in the
+  style seven times over, and `#{ jitter: 9 }` lets each pass's ends
   stray by up to 9 units, so a straight stroke turns, stretches and
   shifts a little each time: the scored, manic look of writing gone over
   again and again. One pass with a little jitter just roughens a hand.
@@ -170,45 +170,62 @@ What to know:
   it is in the font and its fallbacks, then in the other case, so a font of
   capitals sets lowercase text in them. `font("plain")` is a simple font
   made to read easily. `f.glyphs(text)` gives a text's glyphs,
-  `f.glyph("a")` one glyph, `f.variants("a")` all of a glyph's variants,
-  and `font_names()` every font; `ternary_font("balanced_ternary")` maps
-  letters to balanced-ternary digits. Text layout: `new_textbox` flows
-  glyphs into a box, `canvas.scatter_notes` scatters notes across a
-  canvas, and `path.fill_with_text` / `fit_text` write along a path,
-  each glyph turned to it, or held at `angle` (radians, 0 upright) with
-  `#{ angle: 0 }`.
+  `f.glyph("a", #{ position, scale, rotation })` one glyph, placed,
+  `f.variants("a")` all of a glyph's variants, and `font_names()` every
+  font; `ternary_font("balanced_ternary")` maps letters to
+  balanced-ternary digits. Text layout: `write_line(text, at, settings)`
+  writes a line from a point, `write_block(text, at, width, settings)`
+  wraps text to a width and says where the next goes, `new_textbox` flows
+  glyphs into a box or any shape, `canvas.scatter_notes` scatters notes
+  across a canvas, and `path.fill_with_text` / `fit_text` write along a
+  path, each glyph turned to it, or held at `angle` (radians, 0 upright)
+  with `#{ angle: 0 }`. Every one, roles too, takes `position_jitter`,
+  `rotation_jitter` and `scale_jitter`, setting each glyph a little off
+  true as a hand does.
+- **Balanced ternary.** `balanced_ternary(2026)` (or `"+-0"` text, or an
+  array of digits) is a value: `.value`, `.digits()`, and `.digits(3)` in
+  chunks of three, padded in front. `font.glyph(bt)` draws a small one as
+  a glyph, and `path.fill_with_text(bt, #{ style, size })` /
+  `fit_text(bt, #{ style })` write its digits as marks along a path.
 - **Keeping text clear.** Every text layout takes `avoid` (a path, canvas,
   glyph, or an array of them) and `clearance`, and keeps each glyph's
   whole outline that far from it. For more control, build an avoidance
-  tree: `new_avoidance_tree().add(border, 8.0).add_hull(drawing, 4.0)`
+  tree: `new_avoidance_tree().add(border, #{ clearance: 8 }).add_hull(drawing, #{ clearance: 4 })`
   keeps 8 from the border's lines and 4 from anywhere inside the drawing's
   outline; `add_region(path)` keeps out of a closed shape. Trees are
   shared, so `avoid.add(placed)` keeps later text off what's just been
   placed. With `layout: "words"`, a word that runs into something moves
   past it whole; `split_words: true` breaks it round it instead, for a
   tighter fit (or `split_words: 3`: no piece shorter than 3 letters), and
-  `split_padding` (in symbol scales) keeps the pieces further off it.
-- **Hatching.** `path.hatch(spacing, angle, roughness)` shades a closed
+  `split_padding` (in sizes) keeps the pieces further off it.
+- **Shapes.** Besides `new_path()` and its lines and curves, `new_line`,
+  `new_circle`, `new_rectangle`, `new_arc`, `new_ellipse`, `new_polygon`
+  (a star in one line with `#{ step: 2 }`), `new_star`, `new_wave` and
+  `new_polyline(points)` make shapes, and `path.points_along(count)`
+  gives evenly spaced points round one, with the way it runs: for rings
+  of glyphs.
+- **Hatching.** `path.hatch(spacing)` shades a closed
   path's inside with lines, each a stroke of its own; shapes inside or
   across others in the same path (`ring.append(hole)`) cut holes in it.
-  `path.hatch(#{ spacing, angle: [a, b], roughness, bow, inset,
+  `path.hatch(spacing, #{ angle: [a, b], roughness, bow, inset,
   fill_rule })` cross-hatches, bends lines, keeps them off the outline, and
   picks how overlaps fill.
 - **Procedural art.** The `art` module draws shapes from a few
-  parameters and a seed: `art::snake_path(head_center, head_angle,
-  tail_end, snake_length, max_width, random_seed)` is the outline of a
-  snake seen from above, winding from its head to the tip of its tail and
-  passing over and under itself. `art::bramble(base, angle, length,
-  flower_size, random_seed)` grows a blackberry bramble and gives its
-  `vines`, `leaves` and `flowers` as separate paths, to stroke in
-  different colours; `art::bramble_along(path, flower_size, random_seed)`
-  grows one along a path, such as a maze's, and `art::snake_along(path,
-  max_width, random_seed)` makes a many-headed serpent of one.
+  parameters and a seed of their own (`#{ seed }`, 0 by default):
+  `art::snake(head_center, tail_end, length)` gives a snake's `outline`,
+  winding from its head to the tip of its tail and passing over and under
+  itself, and its `spine`. `art::bramble(base, length)` grows a
+  blackberry bramble and gives its `vines`, `leaves` and `flowers` as
+  separate paths, which `canvas.add(plant, #{ vines: bark, leaves: green,
+  flowers: ink })` strokes in different colours;
+  `art::bramble_along(path, flower_size)` grows one along a path, such as
+  a maze's, `art::snake_along(path, max_width)` makes a many-headed
+  serpent of one, and `art::eye` and `art::moon` draw eyes and moons.
 - **Page sizes.** A page is as big as its strokes, plus `page.margin`;
   with `page.size = vec2(1200, 1600)` it's exactly that, from the
   origin, and strokes past its edges are cut off. The showcase is a book
   of such pages.
-- **Splitting pages.** `page.split(columns, rows)` cuts a named page into a
+- **Splitting pages.** `page.split(#{ columns, rows })` cuts a named page into a
   grid of tiles, each a page of its own named `{name}_{row}_{column}`
   (`page.split(#{ tile_width: 1200, tile_height: 1600 })` makes tiles of a
   set size instead). Each tile renders exactly its share of the pixels of
@@ -220,7 +237,11 @@ What to know:
   magick \( darkly_big_0_0_0.png darkly_big_0_1_0.png +append \) \( darkly_big_1_0_0.png darkly_big_1_1_0.png +append \) -append +repage big.png
   ```
 
-  `journal_entry.add_pages(page.split(2, 2))` adds them all.
+  `journal_entry.add(page.split(#{ columns: 2, rows: 2 }))` adds them all.
+- **Books.** `new_book(#{ first: 3 })` numbers pages as they're added
+  (`book.add(section, page)`), names them `03_section` and on, and keeps a
+  `book.contents` of where each section starts; `book.next` is the next
+  page's number, for its folio, and `roman(n)` writes it in numerals.
 - **Page layouts.** A layout lays out pages as trees of flexbox boxes, and
   `typeset` pours text, art and ornaments into their slots, chaining the
   text through columns and pages until it runs out; see
@@ -264,10 +285,10 @@ Give one the text (**flows**), how each kind of text and stroke looks
 (**roles**) and the drawings (**art**), and add the pages it returns:
 
 ```rhai
-let ink = new_style(1.0, "rgba(30, 20, 20, 0.9)", new_brush("Ink Pen", 0.4, 0.9, 3.0));
-let red = new_style(1.0, "darkred", new_brush("Ink Pen", 0.4, 0.9, 3.0));
+let ink = new_style("rgba(30, 20, 20, 0.9)", new_brush("Ink Pen", 0.4, 0.9, 3.0));
+let red = new_style("darkred", new_brush("Ink Pen", 0.4, 0.9, 3.0));
 
-journal_entry.add_pages(layout("two_column_article").typeset(#{
+journal_entry.add(layout("two_column_article").typeset(#{
 	name: "lunar",                   // pages lunar_0, lunar_1, ...
 	flows: #{
 		title: "Lunar Influence",
@@ -318,15 +339,15 @@ For a one-off, write it in the journal:
 
 ```rhai
 fn two_up(n, info) {
-	column(#{ padding: 60, gap: 30 }, [
+	column([
 		if n == 0 { flow("title", #{ role: "heading", height: 80, fit: true, align: "center" }) } else { spacer() },
-		row(#{ grow: 1, gap: 40 }, [
+		row([
 			flow("body", #{ grow: 1 }),
 			rule(#{ width: 4 }),
 			flow("body", #{ grow: 1 }),
-		]),
+		], #{ grow: 1, gap: 40 }),
 		label(`${n + 1}`, #{ role: "folio", height: 30, align: "center" }),
-	])
+	], #{ padding: 60, gap: 30 })
 }
 let pages = new_layout("two_up", Fn("two_up")).typeset(#{ width: 1200, height: 1600, flows: flows, roles: roles });
 ```
@@ -351,10 +372,10 @@ default), round the outline of what's drawn in it (`wrap: "hull"`), or
 not at all (`wrap: "none"`).
 
 ```rhai
-column(#{ grow: 1 }, [
+column([
 	figure("sigil", #{ position: "absolute", top: 200, left: 150, width: 300, height: 300, wrap: "hull" }),
 	flow("body", #{ grow: 1, clearance: 12, split_words: true, split_padding: 0.4 }),
-])
+], #{ grow: 1 })
 ```
 
 `clearance` is how far text keeps from what it wraps round. By default a
