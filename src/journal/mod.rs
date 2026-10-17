@@ -14,6 +14,7 @@ pub mod progress;
 pub mod publish;
 pub mod hatch;
 pub mod spanning;
+pub mod ternary;
 pub mod markup;
 pub mod typeset;
 pub mod rhaientries;

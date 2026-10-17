@@ -8,9 +8,11 @@
 //             italics and spacing by outlines, and glyphs placed by hand
 //   glyphs    every variant of every glyph of every font
 //   art       shapes and paths, hatching, vectors, mazes, snakes, brambles,
-//             eyes, paths cut by shapes, brambles thickening toward an origin
+//             eyes, moons in every phase, paths cut by shapes, brambles
+//             thickening toward an origin
 //   generators  point distributions, vec3 and vec4, spanning trees by
-//             algorithm and metric, balanced ternary, angles in degrees
+//             algorithm and metric, balanced ternary (as glyphs, and along
+//             paths), angles in degrees
 //   text      text boxes, text kept clear of drawings, text along paths
 //             (turned to them or held at an angle), scattered notes,
 //             words split round drawings
@@ -651,6 +653,41 @@ for i in 0..10 {
 }
 book.bind("art", art);
 
+// The moon in a phase: art::moon(center, radius, phase) gives #{ outline,
+// terminator, lit, dark }, the sides closed to hatch or fill. The phase
+// runs from 0 (new) through 0.25 (first quarter, right half lit), 0.5
+// (full) and 0.75 (last quarter) back to new at 1, and wraps.
+let art = sheet("art");
+art.add_canvas(caption("art::moon(center, radius, phase): phase 0 to 1 by 0.125, the dark side hatched", TOP));
+for i in 0..9 {
+	let phase = i * 0.125;
+	let at = vec2(LEFT + 55 + i * 111, TOP + 110);
+	let moon = art::moon(at, 45, phase);
+	art.add_path(moon.outline, LINE);
+	art.add_path(moon.terminator, LINE);
+	if `${moon.dark}` != "" { art.add_path(moon.dark.hatch(5.0, 0.8, 0.5), LINE); }
+	art.add_canvas(write(`${phase}`, at.x - 22, TOP + 190, 20));
+}
+art.add_canvas(caption("moon.lit hatched in red, moon.dark cross-hatched; phases wrap: 1.3 is 0.3, -0.3 is 0.7", TOP + 260));
+for (phase, i) in [1.3, -0.3] {
+	let moon = art::moon(vec2(LEFT + 250 + i * 500, TOP + 480), 160, phase);
+	art.add_path(moon.outline, LINE);
+	art.add_path(moon.terminator, LINE);
+	art.add_path(moon.lit.hatch(#{ spacing: 9.0, angle: 0.5, roughness: 1.0 }), CAPTION);
+	art.add_path(moon.dark.hatch(#{ spacing: 6.0, angle: [0.8, 2.4], roughness: 1.0 }), LINE);
+	art.add_canvas(write(`phase ${phase}`, LEFT + 190 + i * 500, TOP + 680, 22));
+}
+// A month of them, a day a moon.
+art.add_canvas(caption("a month: art::moon(at, 34, day / 29.5), the dark side hatched", TOP + 740));
+for day in 0..30 {
+	let at = vec2(LEFT + 70 + (day % 6) * 172, TOP + 820 + (day / 6) * 100);
+	let moon = art::moon(at, 34, day / 29.5);
+	art.add_path(moon.outline, LINE);
+	if `${moon.dark}` != "" { art.add_path(moon.dark.hatch(4.0, 0.8, 0.4), LINE); }
+	art.add_canvas(write(`${day}`, at.x + 48, at.y + 8, 20));
+}
+book.bind("art", art);
+
 // Cutting paths by a closed shape: erase_inside takes away what the shape
 // covers (lines behind a figure), erase_outside what it doesn't. The
 // shape's subpaths close as for hatching, with the same fill rules, and
@@ -812,6 +849,31 @@ for i in 0..24 {
 	gen.add_path(new_line(hub, hub + vec2(110, 0).rotated(i * radians(PI() / 12))), new_style(1, BLUE, PEN));
 }
 if (degrees(180) - PI()).abs() > 1e-12 { throw "degrees should be radians"; }
+
+// path.ternary(digits[, options]) writes digits along a path from its
+// start, as the font writes them down its stems: a 0 a bar across, a -1
+// or +1 a stroke bending sharply off to the traveller's left or right,
+// marks evenly spaced by where they leave the path. It gives the marks;
+// the path is drawn too. Digits are an array, or "-0+" text.
+let y = TOP + 700;
+let digits = balanced_ternary(2026, 9);
+gen.add_canvas(caption(`path.ternary(balanced_ternary(2026, 9)): ${digits}, down a stem, and #{ width: 32 } along a wave`, y));
+let stem = new_line(vec2(LEFT + 30, y + 40), vec2(LEFT + 30, y + 280));
+gen.add_path(stem, LINE);
+gen.add_path(stem.ternary(digits), LINE);
+let path = wave(LEFT + 140, RIGHT - 20, y + 160, 70);
+gen.add_path(path, LINE);
+gen.add_path(path.ternary(digits, #{ width: 32 }), LINE);
+
+// Digits as text, and spaced closer than the path's length needs.
+let y = TOP + 1020;
+gen.add_canvas(caption("path.ternary(\"+-0+-0+-0\"), and #{ spacing: 30, width: 14 } round an arc", y));
+let path = wave(LEFT + 20, RIGHT - 380, y + 130, 60);
+gen.add_path(path, LINE);
+gen.add_path(path.ternary("+-0+-0+-0"), LINE);
+let arc = new_arc(vec2(RIGHT - 160, y + 150), 110, 3.4, 6.0);
+gen.add_path(arc, LINE);
+gen.add_path(arc.ternary(digits, #{ spacing: 30, width: 14 }), LINE);
 book.bind("generators", gen);
 
 // ---- text ----
