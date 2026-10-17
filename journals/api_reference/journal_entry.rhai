@@ -606,7 +606,7 @@ doc += api("write_line(text, at, settings)", "The text written from at to the ri
 	size_set(),
 	style_set(),
 ] + path_text_opts());
-doc += api("write_block(text, at, width, settings)", "The text wrapped into lines width long, the first from at (on its line, as write_line sets it) and each line_height sizes below the last, the left edges ragged by jagged. Gives #{ canvas, bottom }: the text, and where a line after it would go, for stacking blocks.", [
+doc += api("write_block(text, at, width, settings)", "The text wrapped into lines width long, the first from at (on its line, as write_line sets it) and each line_height sizes below the last (give or take line_jitter), the left edges ragged by jagged. Gives #{ canvas, bottom }: the text, and where a line after it would go, for stacking blocks.", [
 	arg("text", "The text to write.", "a string."),
 	vec_arg("at", "Where the first line starts."),
 	arg("width", "How long lines are.", "a positive number."),
@@ -614,6 +614,7 @@ doc += api("write_block(text, at, width, settings)", "The text wrapped into line
 	size_set(),
 	style_set(),
 	opt("settings.line_height", "1.25", "How far apart lines are, in sizes.", "a positive number."),
+	opt("settings.line_jitter", "0", "How much each line's distance from the last varies, at most, either way, at random, in sizes.", "a number of at least 0."),
 	layout_opt("words", "wrapping at spaces"),
 	jagged_opt("0"),
 	spacing_opt(),
@@ -896,6 +897,7 @@ doc += listing("Role settings: the keys of each role in typeset's roles, and of 
 	opt("style", "none", "The style text and strokes are drawn in.", "a style."),
 	opt("size", "none", "The symbol scale text is set at, in canvas units.", "a positive number."),
 	opt("line_height", "1.25", "How far apart lines are, in sizes.", "a positive number."),
+	opt("line_jitter", "0", "How much each line's distance from the last varies, at most, either way, at random, in sizes.", "a number of at least 0."),
 	opt("align", "left", "How lines sit across the slot.", "left, center, right or justify."),
 	opt("valign", "top", "Where the text sits down the slot.", "top, center or bottom."),
 	opt("indent", "0", "How much further in a paragraph's first line starts, in sizes.", "a number of at least 0."),

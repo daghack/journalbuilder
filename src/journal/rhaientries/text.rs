@@ -57,6 +57,7 @@
 
 use parry2d::bounding_volume::Aabb;
 use parry2d::math::Vec2 as PVec;
+use rand::Rng;
 use rhai::{Array, Dynamic, Engine, EvalAltResult, Map};
 use std::rc::Rc;
 
@@ -306,11 +307,12 @@ fn splat(canvas: &Canvas, msgs: Array, width_range: Dynamic, height_range: Dynam
     Ok(Canvas::new(splatted))
 }
 
-const BLOCK_KEYS: [&str; 13] = ["font", "size", "style", "line_height", "jagged", "spacing", "layout", "avoid", "clearance", "split_words", "split_padding", "position_jitter", "rotation_jitter"];
+const BLOCK_KEYS: [&str; 14] = ["font", "size", "style", "line_height", "line_jitter", "jagged", "spacing", "layout", "avoid", "clearance", "split_words", "split_padding", "position_jitter", "rotation_jitter"];
 
 /// `write_block(text, at, width, settings)`: the text wrapped to lines
 /// `width` long, the first from `at` (on its centre line, as write_line
-/// sets it), each `line_height` sizes below the last (default 1.25), words
+/// sets it), each `line_height` sizes below the last (default 1.25), give
+/// or take up to `line_jitter` sizes at random (default 0), words
 /// kept whole unless `layout` is "flat". Gives `#{ canvas, bottom }`,
 /// `bottom` being where a line after them would go.
 fn write_block(msg: &str, at: Vec2, width: Dynamic, settings: Map, symdict: &FontBook, rng: &SharedRng) -> RhaiResult<Map> {
@@ -329,6 +331,11 @@ fn write_block(msg: &str, at: Vec2, width: Dynamic, settings: Map, symdict: &Fon
         None => 1.25,
         Some(h) if h > 0.0 && h.is_finite() => h,
         Some(h) => return Err(format!("{}: 'line_height' must be positive, got {}", CALLER, h).into()),
+    };
+    let line_jitter = match number(CALLER, &options, "line_jitter")? {
+        None => 0.0,
+        Some(j) if j >= 0.0 && j.is_finite() => j,
+        Some(j) => return Err(format!("{}: 'line_jitter' must be a number of at least 0, got {}", CALLER, j).into()),
     };
     options.entry("layout".into()).or_insert_with(|| "words".into());
     let at: PVec = at.into();
@@ -359,9 +366,14 @@ fn write_block(msg: &str, at: Vec2, width: Dynamic, settings: Map, symdict: &Fon
     }
     let pitch = line_height * size;
     let mut canvas = CanvasData::default();
+    // How far lines have strayed from their even spacing, all told.
+    let mut drift = 0.0;
     for (i, row) in rows.iter_mut().enumerate() {
+        if i > 0 && line_jitter > 0.0 {
+            drift += r.random_range(-line_jitter..line_jitter) * size;
+        }
         for g in row.iter_mut() {
-            g.translate_by(PVec::new(0.0, at.y + i as f32 * pitch));
+            g.translate_by(PVec::new(0.0, at.y + i as f32 * pitch + drift));
         }
         tb.jitter.apply(row, size, &mut *r);
         for g in row.iter() {
@@ -370,7 +382,7 @@ fn write_block(msg: &str, at: Vec2, width: Dynamic, settings: Map, symdict: &Fon
     }
     let mut out = Map::new();
     out.insert("canvas".into(), Dynamic::from(Canvas::new(canvas)));
-    out.insert("bottom".into(), Dynamic::from((at.y + rows.len() as f32 * pitch) as f64));
+    out.insert("bottom".into(), Dynamic::from((at.y + rows.len() as f32 * pitch + drift) as f64));
     Ok(out)
 }
 
@@ -430,6 +442,22 @@ mod tests {
 
     fn fails(script: &str) -> String {
         engine().engine.run(script).expect_err("script should fail").to_string()
+    }
+
+    #[test]
+    fn write_block_line_jitter_moves_lines_off_even() {
+        let ok: bool = eval(r#"
+            let hand = #{ font: font, size: 10.0, style: style };
+            let even = write_block(text, vec2(0, 0), 100.0, hand);
+            let lines = (even.bottom / 12.5).round();
+            if (even.bottom - lines * 12.5).abs() > 1e-3 { throw "even lines should be line_height apart: " + even.bottom; }
+            let jittered = write_block(text, vec2(0, 0), 100.0, hand + #{ line_jitter: 0.3 });
+            if (jittered.bottom - even.bottom).abs() < 1e-3 { throw "line_jitter should move the lines"; }
+            if (jittered.bottom - even.bottom).abs() > lines * 3.0 { throw "lines strayed too far: " + jittered.bottom; }
+            true
+        "#);
+        assert!(ok);
+        assert!(fails(r#"write_block("a", vec2(0, 0), 100.0, #{ font: font("loche_upper"), size: 10.0, style: new_style("black", new_brush("Ink Pen", 0.3, 0.7, 1.0)), line_jitter: -1 })"#).contains("line_jitter"));
     }
 
     #[test]

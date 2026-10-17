@@ -67,6 +67,9 @@ pub struct TextStyle {
     pub clearance: f32,
     /// Lines start up to this much further in, at random.
     pub jagged: f32,
+    /// Each line's distance from the last varies by up to this much,
+    /// either way, at random.
+    pub line_jitter: f32,
     /// Whether a word that doesn't fit before something the text avoids
     /// may break round it, going on past it on the same line (see
     /// `WordSplit`; its padding is in sizes too).
@@ -84,6 +87,7 @@ impl TextStyle {
             spacing: 0.0,
             clearance: size / 4.0,
             jagged: 0.0,
+            line_jitter: 0.0,
             split: None,
         }
     }
@@ -342,7 +346,11 @@ pub fn set_text(rect: Aabb, style: &TextStyle, glyphs: &[Symbol], chars: &[char]
             setting.consumed = n;
             break;
         }
-        let paragraph_gap = if setting.paragraph_start && lines > 0 { style.paragraph_gap * style.line_height * size } else { 0.0 };
+        let mut paragraph_gap = if setting.paragraph_start && lines > 0 { style.paragraph_gap * style.line_height * size } else { 0.0 };
+        // Lines after the first sit a little nearer or further, at random.
+        if lines > 0 && style.line_jitter > 0.0 {
+            paragraph_gap += rng.random_range(-style.line_jitter..style.line_jitter) * size;
+        }
         // A line is as tall as its largest glyph needs, which isn't known
         // till it's filled: it's filled for its first glyph, then again for
         // the largest, while that grows.
@@ -617,6 +625,18 @@ mod tests {
         let first_x = |y: f32| setting.placed.iter().filter(|g| (g.position().y - y).abs() < 1e-3).map(|g| g.position().x).fold(f32::MAX, f32::min);
         assert!(first_x(ys[0]) > 20.0 && first_x(ys[1]) < 20.0 && first_x(ys[2]) > 20.0);
         assert_eq!(setting.consumed, g.len());
+    }
+
+    #[test]
+    fn line_jitter_spaces_lines_unevenly_within_bounds() {
+        let (g, c) = text("one\ntwo\nthree\nfour\nfive\nsix");
+        let mut style = TextStyle::new(10.0);
+        style.line_jitter = 0.4;
+        let ys = lines(&set_text(rect(500.0, 500.0), &style, &g, &c, false, None, &mut rng()));
+        assert_eq!(ys.len(), 6);
+        let gaps: Vec<f32> = ys.windows(2).map(|w| w[1] - w[0]).collect();
+        assert!(gaps.iter().all(|gap| (gap - 12.5).abs() <= 4.0 + 1e-3), "{:?}", gaps);
+        assert!(gaps.iter().any(|gap| (gap - 12.5).abs() > 1e-3), "{:?}", gaps);
     }
 
     #[test]

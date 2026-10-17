@@ -33,8 +33,8 @@ pub(super) const JITTER_KEYS: [&str; 3] = ["position_jitter", "rotation_jitter",
 
 /// Role settings: what roles and slots take (see layout.rs). `role` is
 /// for slots only.
-pub(super) const ROLE_KEYS: [&str; 20] = [
-    "font", "style", "size", "line_height", "align", "valign", "indent", "paragraph_gap", "spacing", "clearance", "jagged", "fit", "split_words", "split_padding", "em", "strong",
+pub(super) const ROLE_KEYS: [&str; 21] = [
+    "font", "style", "size", "line_height", "line_jitter", "align", "valign", "indent", "paragraph_gap", "spacing", "clearance", "jagged", "fit", "split_words", "split_padding", "em", "strong",
     "position_jitter", "rotation_jitter", "scale_jitter", "role",
 ];
 

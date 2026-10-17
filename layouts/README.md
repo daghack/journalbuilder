@@ -92,6 +92,7 @@ names another with `role`. Settings:
 |---|---|---|
 | `font`, `style`, `size` | text | the font (leant for italics: `font("plain", #{ skew: 0.25 })`), stroke style and symbol scale |
 | `line_height` | text | in sizes, default 1.25 |
+| `line_jitter` | text | how much each line's distance from the last varies, at most, either way, at random, in sizes |
 | `align` | text | "left", "center", "right", "justify" (a paragraph's last line is left) |
 | `valign` | text | "top", "center", "bottom" in its box |
 | `indent` | text | a paragraph's first line, in sizes |

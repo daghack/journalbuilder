@@ -75,7 +75,8 @@
 //! "right", "justify"), `valign` ("top", "center", "bottom"), `indent` (a
 //! paragraph's first line, in sizes), `paragraph_gap` (in lines, default
 //! 0.5), `spacing` (between glyphs, in sizes), `jagged` (random line
-//! starts, in sizes), `clearance` (from what text wraps around, in units,
+//! starts, in sizes), `line_jitter` (how much each line's distance from
+//! the last varies, at random, either way, in sizes), `clearance` (from what text wraps around, in units,
 //! default size / 4), `split_words` (break a word round what text wraps
 //! around rather than moving it past whole: `true`, or the fewest letters a
 //! piece may have; `true` is 2), `split_padding` (how much further the
@@ -276,7 +277,7 @@ fn check_role_setting(caller: &str, key: &str, value: &Dynamic) -> RhaiResult<()
         "font" if !value.is::<Font>() => Err(format!("{}: 'font' should be a font, got {}", caller, value.type_name()).into()),
         "style" if !value.is::<StrokeStyle>() => Err(format!("{}: 'style' should be a stroke style, got {}", caller, value.type_name()).into()),
         "size" | "line_height" => positive("a positive number"),
-        "indent" | "paragraph_gap" | "spacing" | "clearance" | "jagged" => {
+        "indent" | "paragraph_gap" | "spacing" | "clearance" | "jagged" | "line_jitter" => {
             match number(caller, &Map::from_iter([(key.into(), value.clone())]), key)? {
                 Some(n) if n.is_finite() && (n >= 0.0 || key == "spacing") => Ok(()),
                 _ => Err(format!("{}: '{}' must be a number of at least 0, got {}", caller, key, value).into()),
@@ -555,6 +556,7 @@ impl Content {
                 text.spacing = get("spacing")?.unwrap_or(0.0);
                 text.clearance = get("clearance")?.unwrap_or(text.clearance);
                 text.jagged = get("jagged")?.unwrap_or(0.0);
+                text.line_jitter = get("line_jitter")?.unwrap_or(0.0);
                 text.split = word_split(&caller, &settings)?;
                 if let Some(align) = settings.get("align") {
                     text.align = Align::from_name(&align.to_string()).expect("checked when given");

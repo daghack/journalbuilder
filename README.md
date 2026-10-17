@@ -317,7 +317,7 @@ journal_entry.add(layout("two_column_article").typeset(#{
   [layouts/README.md](layouts/README.md#marked-up-text)).
 - **Roles** are maps of settings, by name. Text roles need `font`,
   `style` and `size` (the symbol scale, in canvas units); the rest are
-  optional: `line_height`, `align`, `valign`, `indent`, `paragraph_gap`,
+  optional: `line_height`, `line_jitter`, `align`, `valign`, `indent`, `paragraph_gap`,
   `spacing`, `jagged`, `clearance`, `split_words`, `split_padding`,
   `fit`, and `em` and `strong` (how markdown's emphasis and strong text
   look). Art, rules and bands need only a `style`. Each layout file's
