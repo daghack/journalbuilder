@@ -63,9 +63,10 @@ const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--svg
                       page, rather than writing images: each page's
                       canvases layered into one image (on parchment,
                       with --parchment), 150 canvas units to the inch.
-  --stitch N          Also lay every N pages side by side, in order, as
-                      darkly_stitched_{n}.png (from 0; the last may have
-                      fewer), tops level. Pages are rendered as one image
+  --stitch N          Also lay every N pages side by side, in order, tops
+                      level, named for the pages they hold: page_0 to
+                      page_5 as darkly_page_0-5.png (the last may have
+                      fewer; a page left alone isn't stitched). Pages are rendered as one image
                       each, darkly_{page}.png, as with --parchment (which
                       it goes with, on parchment, or without, on nothing).
                       Not with --pdf.

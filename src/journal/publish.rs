@@ -71,7 +71,8 @@ pub fn canvas_images(entry: &Entry, engine: &mut DarklyEngine, dir: &str, render
 
 /// A Darkly render of each page, its canvases layered into one image (see
 /// `page_image`), `darkly_{page}.png`; and with `stitch`, every `stitch`
-/// of them in turn side by side, `darkly_stitched_{n}.png` (see `stitched`).
+/// of them in turn side by side (see `stitched`), named for the pages it
+/// holds (see `stitch_label`).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn page_images(entry: &Entry, engine: &mut DarklyEngine, dir: &str, render: &Render, only: Option<&[usize]>, stitch: Option<usize>) -> Result<(), String> {
     let mut progress = pages_progress(entry, "Rendering", only);
@@ -83,18 +84,38 @@ pub fn page_images(entry: &Entry, engine: &mut DarklyEngine, dir: &str, render: 
             let filename = format!("{}/darkly_{}.png", dir, label);
             image.save(&filename).map_err(|e| write_error(&filename, e))?;
             if stitch.is_some() {
-                images.push(image);
+                images.push((label, image));
             }
         }
         progress.step();
     }
     if let Some(n) = stitch {
-        for (k, group) in images.chunks(n).enumerate() {
-            let filename = format!("{}/darkly_stitched_{}.png", dir, k);
-            stitched(group).save(&filename).map_err(|e| write_error(&filename, e))?;
+        for group in images.chunks(n) {
+            // A page alone is its own image already.
+            if group.len() < 2 {
+                continue;
+            }
+            let (first, last) = (&group[0].0, &group[group.len() - 1].0);
+            let filename = format!("{}/darkly_{}.png", dir, stitch_label(first, last));
+            let images: Vec<RgbaImage> = group.iter().map(|(_, image)| image.clone()).collect();
+            stitched(&images).save(&filename).map_err(|e| write_error(&filename, e))?;
         }
     }
     Ok(())
+}
+
+/// What a stitch of the pages from `first` to `last` is called: their
+/// names with the numbers they end in as a range, page_0 to page_5 being
+/// page_0-5; or, unless they differ only in that number, both names,
+/// first-last.
+pub fn stitch_label(first: &str, last: &str) -> String {
+    let stem = |label: &str| label.trim_end_matches(|c: char| c.is_ascii_digit()).len();
+    let (a, b) = (stem(first), stem(last));
+    if a < first.len() && b < last.len() && first[..a] == last[..b] {
+        format!("{}-{}", first, &last[b..])
+    } else {
+        format!("{}-{}", first, last)
+    }
 }
 
 /// Images side by side, left to right in order, their tops level; where
@@ -294,6 +315,13 @@ pub fn svgs(entry: &Entry, dir: &str, scale: f32, only: Option<&[usize]>) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stitches_are_named_for_their_pages() {
+        assert_eq!(stitch_label("becoming_us_page_0", "becoming_us_page_5"), "becoming_us_page_0-5");
+        assert_eq!(stitch_label("page_8", "page_11"), "page_8-11");
+        assert_eq!(stitch_label("03_pens_brushes", "05_pens_0"), "03_pens_brushes-05_pens_0");
+    }
 
     #[test]
     fn stitching_lays_images_side_by_side_tops_level() {
