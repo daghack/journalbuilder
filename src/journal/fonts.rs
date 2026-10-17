@@ -474,7 +474,7 @@ mod tests {
     #[test]
     fn the_repository_font_file_loads() {
         let b = FontBook::from_file(DEFAULT_FONTS).unwrap();
-        for name in ["copper", "plain", "loche_upper", "loche_lower", "lang", "eldritch", "sharp_lower", "balanced_ternary", "symbols"] {
+        for name in ["copper", "plain", "loche_upper", "loche_lower", "lang", "eldritch", "sharp_lower", "nivelia", "balanced_ternary", "symbols"] {
             assert!(b.font(name).is_some(), "{}", name);
         }
         assert_eq!(b.font("copper").unwrap().fallback.unwrap().name(), "loche_upper");
