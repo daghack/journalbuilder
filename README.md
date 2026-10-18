@@ -16,7 +16,7 @@ cargo build --release
 target/release/journalbuild journal_entry_17
 ```
 
-Renders go to `webapp/journals/journal_entry_17/output/`. Rendering needs a GPU
+Renders go to `journal_entry_17_output/` in the current directory (emptied first). Rendering needs a GPU
 that wgpu can use (Metal on macOS). While it runs, one line of the
 terminal shows its progress: a spinner while the script runs, then a bar
 of the pages rendered, the page it's on and the time left

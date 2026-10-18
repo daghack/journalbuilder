@@ -83,9 +83,10 @@ const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--svg
                       repository's webapp/journals/).
   --fonts FILE        Font file (default: the repository's
                       webapp/config/fonts.json).
-  --output-dir DIR    Where to write renders (default: <journal>/output).
-                      Earlier .png/.svg/.pdf renders there are cleared first
-                      (except with --page); other files are kept.
+  --output-dir DIR    Where to write renders (default: NAME_output in the current
+                      directory, emptied first unless --page). In a given
+                      directory, earlier .png/.svg/.pdf renders are cleared
+                      first (except with --page); other files are kept.
   --locks-dir DIR     Directory of lock files, one per lock type (default:
                       the repository's webapp/locks/).
   --layouts-dir DIR   Directory of page layout files, for layout(name)
@@ -214,8 +215,10 @@ fn run(args: &Args) -> Result<(), String> {
 
     let journal_name = &args.journal_name;
     let journal_path = format!("{}/{}/journal_entry.rhai", args.journals_dir, journal_name);
+    // By default, NAME_output in the current directory, emptied first.
+    let default_output = args.output_dir.is_none();
     let output_dir = args.output_dir.clone()
-        .unwrap_or_else(|| format!("{}/{}/output", args.journals_dir, journal_name));
+        .unwrap_or_else(|| format!("{}_output", journal_name));
     let mut engine = JournalEngine::with_dirs(symd.clone(), &args.locks_dir, &args.layouts_dir);
     // A spinner while the script runs, which can take a while.
     let running = Rc::new(RefCell::new(Progress::new(&format!("Running {}", journal_name), 0)));
@@ -242,6 +245,12 @@ fn run(args: &Args) -> Result<(), String> {
             .collect::<Result<_, _>>()
             .map_err(|err| format!("{} (in {})", err, journal_name))?),
     };
+    if default_output && pages.is_none() {
+        match std::fs::remove_dir_all(&output_dir) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(format!("couldn't clear {}: {}", output_dir, e)),
+            _ => {}
+        }
+    }
     if pages.is_some() {
         // Rendering a subset: keep the other pages' existing output.
         std::fs::create_dir_all(&output_dir).map_err(|e| format!("couldn't create {}: {}", output_dir, e))?;
