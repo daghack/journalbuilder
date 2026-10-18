@@ -1,7 +1,7 @@
 // Glyph paths: SVG path data read into strokes of lines, quadratic and
 // cubic curves, edited, and written back. Reads what src/journal/paths.rs
 // reads (M L H V C S Q T Z, absolute or relative; no arcs), and writes
-// absolute commands with numbers as scripts/plain_font.py's num() does.
+// absolute commands with numbers written as fonts.json has them.
 
 export interface Point {
   x: number;
@@ -136,7 +136,7 @@ function reflect(control: Point | null, about: Point): Point {
 }
 
 /**
- * A number as plain_font.py's num() writes it: four decimals at most,
+ * A number as fonts.json has it: four decimals at most,
  * trailing zeros and point dropped, never "-0". Exact halves round to even,
  * as Python's "%.4f" does.
  */
@@ -249,7 +249,7 @@ export function nearestOnSegment(from: Point, s: Segment, p: Point): { t: number
   return best;
 }
 
-/** An ellipse as a stroke of four cubics, starting at angle `startDeg` (0 is right, 90 down), as plain_font.py's ellipse(). */
+/** An ellipse as a stroke of four cubics, starting at angle `startDeg` (0 is right, 90 down). */
 export function ellipse(cx: number, cy: number, rx: number, ry: number, startDeg = -90): Stroke {
   const rad = (a: number) => (a * Math.PI) / 180;
   const at = (a: number): Point => ({ x: cx + rx * Math.cos(rad(a)), y: cy + ry * Math.sin(rad(a)) });
@@ -271,7 +271,7 @@ export function ellipse(cx: number, cy: number, rx: number, ry: number, startDeg
   return { start: at(startDeg), segments, closed: false };
 }
 
-/** A dot, as plain_font.py draws one: a stroke too short to see as a line. */
+/** A dot: a stroke too short to see as a line. */
 export function dot(at: Point): Stroke {
   return { start: { x: at.x, y: at.y - 0.035 }, segments: [{ kind: 'L', to: { x: at.x, y: at.y + 0.035 } }], closed: false };
 }

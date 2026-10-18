@@ -41,7 +41,7 @@ function parseValue(text: string, type: string): { value: TestValue; problem: st
       <label class="field">
         <span>Name</span>
         <input type="text" [value]="editor.model().name" (input)="editor.setName($any($event.target).value)" (blur)="editor.settle()" spellcheck="false" />
-        <span class="hint">Its file is locks/{{ editor.model().name }}.rhai.</span>
+        <span class="hint">Its file is webapp/locks/{{ editor.model().name }}.rhai.</span>
       </label>
       <label class="stack">
         <span class="hint">What it does (the file's opening comment)</span>

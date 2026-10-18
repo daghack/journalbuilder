@@ -80,16 +80,16 @@ const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--svg
                       it off). Smooths thin, aliased strokes; render time
                       grows with K squared.
   --journals-dir DIR  Directory containing journals (default: the
-                      repository's journals/).
+                      repository's webapp/journals/).
   --fonts FILE        Font file (default: the repository's
-                      config/fonts.json).
+                      webapp/config/fonts.json).
   --output-dir DIR    Where to write renders (default: <journal>/output).
                       Earlier .png/.svg/.pdf renders there are cleared first
                       (except with --page); other files are kept.
   --locks-dir DIR     Directory of lock files, one per lock type (default:
-                      the repository's locks/).
+                      the repository's webapp/locks/).
   --layouts-dir DIR   Directory of page layout files, for layout(name)
-                      (default: the repository's layouts/).
+                      (default: the repository's webapp/layouts/).
   --check-locks       Run every lock file's examples through lock and
                       unlock, instead of building a journal.";
 
@@ -125,7 +125,7 @@ fn parse_args() -> Result<Args, String> {
     // grows with K²).
     let mut supersample = DEFAULT_SUPERSAMPLE;
     // Defaults are found from the repository, not the working directory.
-    let mut journals_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/journals").to_string();
+    let mut journals_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/webapp/journals").to_string();
     let mut font_file = fonts::DEFAULT_FONTS.to_string();
     let mut locks_dir = DEFAULT_LOCKS_DIR.to_string();
     let mut layouts_dir = DEFAULT_LAYOUTS_DIR.to_string();

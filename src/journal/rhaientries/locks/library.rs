@@ -1,6 +1,6 @@
 //! Lock types written in rhai, one file per type: `<locks dir>/<type>.rhai`.
 //! Lock files run in an engine of their own and work with plain rhai
-//! values; locks/README.md describes what a lock file defines. Helpers
+//! values; webapp/locks/README.md describes what a lock file defines. Helpers
 //! they share live in `<locks dir>/lib/`, for `import "lib/<name>"`. A
 //! composite lock file wires other lock types together instead (`chain`).
 
@@ -23,7 +23,7 @@ use chain::Chain;
 type RhaiResult<T> = Result<T, Box<EvalAltResult>>;
 
 /// The repository's lock files.
-pub const DEFAULT_LOCKS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/locks");
+pub const DEFAULT_LOCKS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/webapp/locks");
 
 /// The functions every lock file defines: name, parameter count, and how
 /// errors show it.
@@ -828,8 +828,8 @@ fn unlock(o, out) {{ #{{ text: out.out }} }}
         assert_eq!(err, "can't connect e.out (Base27Symbol) to b.text (Base10Symbol)");
     }
 
-    const SHIFT: &str = include_str!("../../../../locks/shift_cipher.rhai");
-    const VIGENERE: &str = include_str!("../../../../locks/vigenere_cipher.rhai");
+    const SHIFT: &str = include_str!("../../../../webapp/locks/shift_cipher.rhai");
+    const VIGENERE: &str = include_str!("../../../../webapp/locks/vigenere_cipher.rhai");
 
     /// A composite lock file: `options` and `chain`, with `chain`'s body.
     fn chain_file(options: &str, body: &str) -> String {
@@ -1126,7 +1126,7 @@ fn unlock(o, out) {{ #{{ text: out.out }} }}
     #[test]
     fn every_lock_file_passes_its_examples() {
         let library = Rc::new(LockLibrary::new(DEFAULT_LOCKS_DIR));
-        let results = library.check_all().expect("the repository's locks/ should be readable");
+        let results = library.check_all().expect("the repository's webapp/locks/ should be readable");
         assert!(!results.is_empty(), "no lock files in {}", DEFAULT_LOCKS_DIR);
         let failures: Vec<String> = results.iter()
             .filter_map(|(name, result)| match result {

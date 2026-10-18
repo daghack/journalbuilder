@@ -75,8 +75,8 @@ describe('glyph paths', () => {
     expect(nearestOnSegment(from, quad, pointAt(from, quad, 0.4)).t).toBeCloseTo(0.4, 3);
   });
 
-  it('draws ellipses as plain_font.py does', () => {
-    // Path().ellipse(0, 0, 0.5, 0.25) in plain_font.py.
+  it('draws ellipses as fonts.json has them', () => {
+    // An ellipse of radii 0.5 and 0.25 about the origin.
     expect(formatPath([ellipse(0, 0, 0.5, 0.25)])).toBe(
       'M 0 -0.25 C 0.2761 -0.25 0.5 -0.1381 0.5 0 C 0.5 0.1381 0.2761 0.25 0 0.25 C -0.2761 0.25 -0.5 0.1381 -0.5 0 C -0.5 -0.1381 -0.2761 -0.25 0 -0.25',
     );

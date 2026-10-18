@@ -1,4 +1,4 @@
-//! Keeps journals/showcase up to date: it should show everything journals
+//! Keeps webapp/journals/showcase up to date: it should show everything journals
 //! can draw with. These fail when something scripts can call, a font, or a
 //! lock type isn't in it (see CLAUDE.md). Brushes and glyphs needn't be
 //! listed: the showcase draws every one of `brush_names()`, and every
@@ -8,7 +8,7 @@ use scribe::journal::rhaientries::JournalEngine;
 use scribe::journal::fonts::{FontBook, DEFAULT_FONTS};
 use std::rc::Rc;
 
-const SHOWCASE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/journals/showcase/journal_entry.rhai");
+const SHOWCASE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/webapp/journals/showcase/journal_entry.rhai");
 
 /// Functions scripts can call that aren't capabilities to show.
 const NOT_SHOWN: &[(&str, &str)] = &[
@@ -17,7 +17,7 @@ const NOT_SHOWN: &[(&str, &str)] = &[
 ];
 
 fn showcase() -> String {
-    std::fs::read_to_string(SHOWCASE).expect("journals/showcase/journal_entry.rhai")
+    std::fs::read_to_string(SHOWCASE).expect("webapp/journals/showcase/journal_entry.rhai")
 }
 
 /// Whether `word` is in `text` as a whole word (or `module::name`).
@@ -40,7 +40,7 @@ fn every_function_scripts_can_call_is_in_the_showcase() {
         .filter(|name| !NOT_SHOWN.iter().any(|(n, _)| n == name))
         .filter(|name| !mentions(&script, name))
         .collect();
-    assert!(missing.is_empty(), "add examples of these to journals/showcase (or, if they aren't capabilities, to NOT_SHOWN in tests/showcase.rs): {}", missing.join(", "));
+    assert!(missing.is_empty(), "add examples of these to webapp/journals/showcase (or, if they aren't capabilities, to NOT_SHOWN in tests/showcase.rs): {}", missing.join(", "));
 }
 
 #[test]
@@ -59,7 +59,7 @@ fn every_font_is_in_the_showcase() {
 #[test]
 fn every_lock_type_is_in_the_showcase() {
     let script = showcase();
-    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/locks");
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/webapp/locks");
     let mut missing = Vec::new();
     for entry in std::fs::read_dir(dir).unwrap() {
         let path = entry.unwrap().path();

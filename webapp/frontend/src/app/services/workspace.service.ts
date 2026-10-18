@@ -14,8 +14,8 @@ interface Stored {
 
 /**
  * Edits not yet saved into the repository, which every script runs with:
- * fonts from the font editor in place of config/fonts.json, and lock files
- * from the lock editor added to locks/. The renderer's workers are sent
+ * fonts from the font editor in place of webapp/config/fonts.json, and lock files
+ * from the lock editor added to webapp/locks/. The renderer's workers are sent
  * them whenever they change.
  */
 @Injectable({ providedIn: 'root' })

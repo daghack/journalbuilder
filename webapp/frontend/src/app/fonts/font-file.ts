@@ -1,6 +1,6 @@
-// config/fonts.json as the font editor holds it: fonts, their options and
-// glyphs in file order, written back as scripts/plain_font.py writes it
-// (`write_fonts`), so a glyph changed is a line changed.
+// webapp/config/fonts.json as the font editor holds it: fonts, their options and
+// glyphs in file order, written back in the layout fonts.json is kept in
+// (one glyph to a line), so a glyph changed is a line changed.
 
 import { parsePath } from './glyph-path';
 
@@ -23,7 +23,7 @@ export interface Glyph {
 export type FontsFile = Font[];
 
 /** The options a font can have besides its glyphs (see FontEntry in src/journal/fonts.rs). */
-export const OPTION_KEYS = ['character_padding', 'space_width', 'fallback'] as const;
+export const OPTION_KEYS = ['character_padding', 'space_width', 'fallback', 'glyph_padding'] as const;
 export type OptionKey = (typeof OPTION_KEYS)[number];
 
 /** A space's width in fonts that don't give one, in font sizes (DEFAULT_SPACE_WIDTH). */
@@ -169,7 +169,7 @@ export function jsonString(text: string, ascii: boolean): string {
   return ascii ? json.replace(/[\u007f-￿]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`) : json;
 }
 
-/** The fonts file as write_fonts writes it: one glyph to a line. */
+/** The fonts file as it is kept: one glyph to a line. */
 export function serializeFonts(fonts: FontsFile): string {
   const lines = ['{'];
   fonts.forEach((font, i) => {
@@ -267,6 +267,18 @@ export function checkFonts(fonts: FontsFile): FontProblem[] {
         problem(`space_width must be a positive number, got ${raw}`, { option: key });
       } else if (key === 'fallback' && typeof value !== 'string') {
         problem(`fallback must be a font's name, got ${raw}`, { option: key });
+      } else if (key === 'glyph_padding') {
+        if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+          problem(`glyph_padding must map glyphs to numbers, got ${raw}`, { option: key });
+          continue;
+        }
+        for (const [glyph, extra] of Object.entries(value)) {
+          if (!font.glyphs.some((g) => g.key === glyph)) {
+            problem(`glyph_padding gives '${glyph}', which isn't a glyph`, { option: key });
+          } else if (!(typeof extra === 'number' && Number.isFinite(extra) && extra >= 0)) {
+            problem(`glyph_padding for '${glyph}' must be a number of at least 0, got ${JSON.stringify(extra)}`, { option: key });
+          }
+        }
       }
     }
     const keys = new Set<string>();

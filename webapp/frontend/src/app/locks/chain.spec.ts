@@ -8,7 +8,7 @@ import { chainSource, exampleProblem, journalChain } from './chain-source';
 const ports = (inputs: [string, string][], outputs: [string, string][]): LockPorts => ({ inputs, outputs, options: {} });
 const B27 = 'Base27Symbol';
 
-/** locks/shift_vigenere.rhai, as the editor holds it. */
+/** webapp/locks/shift_vigenere.rhai, as the editor holds it. */
 function shiftVigenereModel(): { model: ChainModel; ports: PortsByNode } {
   return {
     model: {
@@ -35,7 +35,7 @@ function shiftVigenereModel(): { model: ChainModel; ports: PortsByNode } {
 const kinds = (type: string) => (type === 'shift_cipher' ? { base: 'integer', shift: 'integer' } : { cipher_base: 'integer', key_base: 'integer', plain_base: 'integer' }) as Record<string, 'integer'>;
 
 describe('composite lock files', () => {
-  it('writes locks/shift_vigenere.rhai as it is', () => {
+  it('writes webapp/locks/shift_vigenere.rhai as it is', () => {
     const { model, ports } = shiftVigenereModel();
     const outputs = { cipher_text: { text: 'OAUOKLNIUNLBJV' }, shifted_key: { text: 'NHA' } };
     expect(chainSource(model, { ports, optionKinds: kinds, outputs })).toBe(shiftVigenere);

@@ -2,7 +2,7 @@
 
 ## Keep the showcase up to date
 
-`journals/showcase` is a journal of everything journals can draw with: a
+`webapp/journals/showcase` is a journal of everything journals can draw with: a
 page each for pens (Darkly brushes, pressure profiles, widths, colours),
 fonts, every glyph, art tools, text layout, locks, and pages typeset from
 layouts. It's the reference for what's available, so it must never fall
@@ -16,12 +16,12 @@ the same change:
   engine): add a labelled example on the page it belongs to, or a new page
   if nothing fits. New options deserve an example too, even though the
   test below can't see them.
-- **A font or symbol set** (a font added to `config/fonts.json`): add it
+- **A font or symbol set** (a font added to `webapp/config/fonts.json`): add it
   to the fonts pages with its alphabet and a line. The glyphs pages draw
   every glyph of every font by themselves.
 - **A brush**: the pens page draws every `brush_names()` entry by itself;
   add examples only for new brush settings.
-- **A lock type** (`locks/*.rhai`): add a row to the locks page.
+- **A lock type** (`webapp/locks/*.rhai`): add a row to the locks page.
 - **A new kind of page or output** (layouts, splitting, ...): show it on
   its own page, and update the page list at the top of the showcase.
 
@@ -72,7 +72,7 @@ their default positional: `default` is a reserved word in rhai.
 
 ## Keep the API reference up to date
 
-`journals/api_reference` is a book with an entry for every function
+`webapp/journals/api_reference` is a book with an entry for every function
 journal scripts can call: its signature, its arguments and options with
 their defaults, and what it gives back. The showcase shows what calls
 draw; the reference says what they take. It must match the API exactly.

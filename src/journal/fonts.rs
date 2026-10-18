@@ -1,5 +1,5 @@
 //! Fonts: glyphs by character, with the settings text is set with, loaded
-//! from a font file (by default `config/fonts.json`):
+//! from a font file (by default `webapp/config/fonts.json`):
 //!
 //! ```json
 //! {
@@ -49,7 +49,7 @@ use super::symbol::{Symbol, SymbolBase, SymbolType};
 
 /// The repository's font file. Resolved at build time, so it's found
 /// whatever directory journalbuild (or a test) runs from.
-pub const DEFAULT_FONTS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/config/fonts.json");
+pub const DEFAULT_FONTS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/webapp/config/fonts.json");
 
 /// The glyph drawn for a character no font has: a font, and its glyph.
 pub const FALLBACK_GLYPH: (&str, &str) = ("symbols", "X");

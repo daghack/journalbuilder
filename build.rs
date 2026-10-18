@@ -10,7 +10,7 @@ fn main() {
     }
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut out = String::new();
-    for (constant, dir) in [("LAYOUTS", "layouts"), ("LOCKS", "locks")] {
+    for (constant, dir) in [("LAYOUTS", "webapp/layouts"), ("LOCKS", "webapp/locks")] {
         let dir = root.join(dir);
         println!("cargo:rerun-if-changed={}", dir.display());
         let mut scripts = Vec::new();

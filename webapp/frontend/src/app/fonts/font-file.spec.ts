@@ -3,7 +3,7 @@ import { checkFonts, fallbackLoop, fontChanges, jsonString, parseFonts, serializ
 import { formatPath, parsePath } from './glyph-path';
 
 describe('the fonts file', () => {
-  it('writes config/fonts.json back as it was', () => {
+  it('writes webapp/config/fonts.json back as it was', () => {
     expect(serializeFonts(parseFonts(fontsJson))).toBe(fontsJson);
   });
 
@@ -53,7 +53,9 @@ describe('checking fonts', () => {
     const messages = checkFonts(fonts(`{
       "a": {"character_padding": -1, "space_width": 0, "fallback": "nope", "glyphs": {"A": [], "B": "L 0 0", "C": "M 0 0 A 1 1 0 0 0 1 1"}},
       "b": {"fallback": "c", "glyphs": {}},
-      "c": {"fallback": "b", "glyphs": {}}
+      "c": {"fallback": "b", "glyphs": {}},
+      "d": {"glyph_padding": {"Z": 0.1, ".": -1}, "glyphs": {".": "M 0 0 L 0 0.01"}},
+      "e": {"glyph_padding": 0.2, "glyphs": {}}
     }`)).map((problem) => problem.message);
     expect(messages).toEqual([
       'character_padding must be a number of at least 0, got -1',
@@ -61,6 +63,9 @@ describe('checking fonts', () => {
       "glyph 'A' has no variants",
       "glyph 'B': path data must start with a moveto, not 'L'",
       "glyph 'C': arcs ('A'/'a') aren't supported",
+      "glyph_padding gives 'Z', which isn't a glyph",
+      "glyph_padding for '.' must be a number of at least 0, got -1",
+      'glyph_padding must map glyphs to numbers, got 0.2',
       "falls back to 'nope', which isn't a font",
       'fonts fall back in a loop: b -> c -> b',
       'fonts fall back in a loop: c -> b -> c',

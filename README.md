@@ -16,7 +16,7 @@ cargo build --release
 target/release/journalbuild journal_entry_17
 ```
 
-Renders go to `journals/journal_entry_17/output/`. Rendering needs a GPU
+Renders go to `webapp/journals/journal_entry_17/output/`. Rendering needs a GPU
 that wgpu can use (Metal on macOS). While it runs, one line of the
 terminal shows its progress: a spinner while the script runs, then a bar
 of the pages rendered, the page it's on and the time left
@@ -65,22 +65,20 @@ cd webapp/frontend && npm install && npm start
 
 | path | what's there |
 |---|---|
-| `journals/<name>/journal_entry.rhai` | one journal per directory |
-| `journals/showcase` | a page each of every brush, font, glyph, art tool, text layout and lock type, with the calls that make them |
-| `journals/api_reference` | the API reference: an entry for every function scripts can call, with its arguments, options and defaults |
-| `locks/` | lock types, one rhai file each; see [locks/README.md](locks/README.md) |
-| `layouts/` | page layouts, one rhai file each; see [layouts/README.md](layouts/README.md) |
-| `config/fonts.json` | every font: its glyphs' SVG paths by character (a list for variants), `character_padding`, `space_width` and `fallback`; sets of symbols are fonts too |
+| `webapp/journals/<name>/journal_entry.rhai` | one journal per directory |
+| `webapp/journals/showcase` | a page each of every brush, font, glyph, art tool, text layout and lock type, with the calls that make them |
+| `webapp/journals/api_reference` | the API reference: an entry for every function scripts can call, with its arguments, options and defaults |
+| `webapp/locks/` | lock types, one rhai file each; see [webapp/locks/README.md](webapp/locks/README.md) |
+| `webapp/layouts/` | page layouts, one rhai file each; see [webapp/layouts/README.md](webapp/layouts/README.md) |
+| `webapp/config/fonts.json` | every font: its glyphs' SVG paths by character (a list for variants), `character_padding`, `space_width` and `fallback`; sets of symbols are fonts too |
 | `src/journal/` | canvases, paths, glyph placement, fonts, hatching, gradients, parchment, and Darkly and SVG rendering |
 | `src/journal/publish.rs` | writing an entry out: images per canvas or page, PDFs, SVGs |
 | `src/journal/art/` | procedural path art: snakes and brambles, free or along a path |
 | `src/journal/rhaientries/` | the rhai API journals and lock files use |
 | `src/lockbuilder/` | runs lock chains forward (lock) and backward (unlock) |
 | `src/bin/journalbuild/` | the command line |
-| `webapp/` | the web editor: `wasm/` (the renderer for the browser) and `frontend/` (the Angular app); see [webapp/README.md](webapp/README.md) |
+| `webapp/` | the web editor: `wasm/` (the renderer for the browser) and `frontend/` (the Angular app), with the journals, locks, layouts and fonts above it builds from; see [webapp/README.md](webapp/README.md) |
 | `tests/`, `scripts/smoke.sh` | tests, below |
-| `scripts/plain_font.py` | draws the plain font into `config/fonts.json` |
-| `assets/svgsets/` | source artwork for symbol sets (not read by the build) |
 
 ## Writing a journal
 
@@ -159,7 +157,7 @@ What to know:
 - **Randomness is seeded.** `random()`, `random_range(a, b)`, glyph variant
   picks, text layout and hatching all draw from one generator with a fixed
   seed, so a journal renders the same every run. `seed(n)` changes it.
-- **Fonts and glyphs.** Fonts come from `config/fonts.json`, each with
+- **Fonts and glyphs.** Fonts come from `webapp/config/fonts.json`, each with
   its glyphs and how text is set in it: `character_padding` between
   glyphs and `space_width` (both in font sizes), and a `fallback` font for
   characters it hasn't. Text is set with each glyph as close to the last
@@ -256,11 +254,11 @@ What to know:
 - **Problems.** `warn("...")` reports something without stopping the
   script. Errors give the script line.
 
-`journals/showcase` shows everything there is to draw with, each example
+`webapp/journals/showcase` shows everything there is to draw with, each example
 labelled with the calls that make it: render it with
 `target/release/journalbuild showcase`.
 
-`journals/api_reference` lists every function scripts can call, with its
+`webapp/journals/api_reference` lists every function scripts can call, with its
 arguments, options and defaults: render it with
 `target/release/journalbuild api_reference --pdf`.
 
@@ -268,7 +266,7 @@ The module docs in `src/journal/rhaientries/` cover each area in more
 detail: `style.rs` (brushes and styles, passes and jitter), `path.rs`
 (paths, hatching, text along paths), `text.rs` (text boxes, scattered
 notes), `glyphs.rs` (glyphs and fonts), `avoid.rs`, `layout.rs` (page
-layouts), `markdown.rs` (marked-up text for layouts), `gradient.rs`, `random.rs`, `art.rs` and `locks/mod.rs`. The journals in `journals/` and
+layouts), `markdown.rs` (marked-up text for layouts), `gradient.rs`, `random.rs`, `art.rs` and `locks/mod.rs`. The journals in `webapp/journals/` and
 `tests/smoke_journals/smoke` use most of it.
 
 ## Using layouts
@@ -280,7 +278,7 @@ them, column after column and page after page, until it runs out.
 
 ### Typesetting with a layout file
 
-The layouts in `layouts/` are ready to use:
+The layouts in `webapp/layouts/` are ready to use:
 
 | layout | flows | art |
 |---|---|---|
@@ -321,7 +319,7 @@ journal_entry.add(layout("two_column_article").typeset(#{
   `markdown(text)`: `*emphasis*`, `**strong**`, `~~struck out~~`, and
   `[text]{settings}` for colour, size, lean, passes, spacing, and lines
   under and through, which break where the text does (see
-  [layouts/README.md](layouts/README.md#marked-up-text)).
+  [webapp/layouts/README.md](webapp/layouts/README.md#marked-up-text)).
 - **Roles** are maps of settings, by name. Text roles need `font`,
   `style` and `size` (the symbol scale, in canvas units); the rest are
   optional: `line_height`, `line_jitter`, `align`, `valign`, `indent`, `paragraph_gap`,
@@ -360,7 +358,7 @@ let pages = new_layout("two_up", Fn("two_up")).typeset(#{ width: 1200, height: 1
 ```
 
 To reuse it, put `page(n, info)` (and, optionally, `page_size()`) in
-`layouts/<name>.rhai` and load it with `layout("<name>")`; no rebuild is
+`webapp/layouts/<name>.rhai` and load it with `layout("<name>")`; no rebuild is
 needed. Rows and columns lay out their children with flexbox rules:
 `grow` shares out the space left, `width`/`height` take units or
 `"40%"`, and `gap`, `padding`, `margin`, `justify` and `align` work as in
@@ -391,8 +389,8 @@ breaks it round the figure instead, so lines hug the outline more
 tightly, and `split_padding` (in sizes) adds room at the breaks. An
 `initial` placed the same way is a drop cap the text wraps round.
 
-[layouts/README.md](layouts/README.md) has every box, style key and role
-setting; `journals/showcase` uses each layout, and an inline one.
+[webapp/layouts/README.md](webapp/layouts/README.md) has every box, style key and role
+setting; `webapp/journals/showcase` uses each layout, and an inline one.
 
 ## Locks
 
@@ -411,8 +409,8 @@ for cell in result.get("maze.generated_maze").maze().cells() { /* ... */ }
 lock.unlock(result).text("sub.plain_text");   // "A SECRET"
 ```
 
-Each lock type is a rhai file in `locks/`, so adding one doesn't need a
-rebuild. [locks/README.md](locks/README.md) describes what a lock file
+Each lock type is a rhai file in `webapp/locks/`, so adding one doesn't need a
+rebuild. [webapp/locks/README.md](webapp/locks/README.md) describes what a lock file
 defines; `journalbuild --check-locks` tests them.
 
 ## Tests

@@ -464,7 +464,7 @@ export class LockEditorService {
   /**
    * Save the chain as a lock type: checked (its example run, locked and
    * unlocked), added to the workspace so journals and other chains can use
-   * it, and written to a file to put in locks/.
+   * it, and written to a file to put in webapp/locks/.
    */
   async save() {
     const model = this.model();
@@ -496,7 +496,7 @@ export class LockEditorService {
     this.note.set({
       kind: 'ok',
       text: `${name} is a lock type now in this browser: in the palette, and in journals as .add("x", "${name}", #{...}). `
-        + `To add it to the repository, put ${name}.rhai in locks/, add a row for it to the showcase's locks page (tests/showcase.rs checks), and rebuild the renderer (npm run wasm).`,
+        + `To add it to the repository, put ${name}.rhai in webapp/locks/, add a row for it to the showcase's locks page (tests/showcase.rs checks), and rebuild the renderer (npm run wasm).`,
     });
   }
 

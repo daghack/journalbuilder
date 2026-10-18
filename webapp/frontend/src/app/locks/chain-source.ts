@@ -1,4 +1,4 @@
-// A chain written as a composite lock file (locks/README.md), and as
+// A chain written as a composite lock file (webapp/locks/README.md), and as
 // journal script.
 
 import { rhaiKey, rhaiString, rhaiValue } from '../shared/rhai-literal';

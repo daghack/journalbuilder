@@ -4,11 +4,11 @@
 //! until the text runs out.
 //!
 //! A layout is a rhai function from a page number to that page's tree,
-//! usually in a layout file, `layouts/<name>.rhai`, which defines
+//! usually in a layout file, `webapp/layouts/<name>.rhai`, which defines
 //! `page(n, info)` and, optionally, `page_size()`:
 //!
 //! ```rhai
-//! // layouts/two_columns.rhai
+//! // webapp/layouts/two_columns.rhai
 //! fn page_size() { #{ width: 1400, height: 1000 } }
 //! fn page(n, info) {
 //!     row([
@@ -134,7 +134,7 @@ use crate::journal::typeset::{fitting_size, set_text, Align, TextStyle};
 use super::RhaiResult;
 
 /// The repository's layout files.
-pub const DEFAULT_LAYOUTS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/layouts");
+pub const DEFAULT_LAYOUTS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/webapp/layouts");
 
 #[derive(Clone, Debug, PartialEq)]
 enum Kind {

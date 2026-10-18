@@ -1,7 +1,7 @@
 // A lock chain as the lock editor holds it: lock types placed as nodes,
 // wires from outputs to inputs, values fixed, the chain's own names for the
 // ports left open, options of its own, and a test case. Saved, it's a
-// composite lock file (see chain-source.ts and locks/README.md).
+// composite lock file (see chain-source.ts and webapp/locks/README.md).
 
 import type { LockOption, LockPorts, LockValue } from '../scribe';
 

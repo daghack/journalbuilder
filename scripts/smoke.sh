@@ -5,14 +5,14 @@
 #   2. Runs every lock file's examples with `journalbuild --check-locks`.
 #   3. Renders the small fixture in tests/smoke_journals at full scale, one
 #      page of it supersampled, and all of it on parchment and as a PDF at
-#      reduced scale, and every page of journals/showcase at reduced scale.
-#   4. Renders page 0 of every journal in journals/ at reduced scale, Darkly
+#      reduced scale, and every page of webapp/journals/showcase at reduced scale.
+#   4. Renders page 0 of every journal in webapp/journals/ at reduced scale, Darkly
 #      output only.
 #   5. Checks the web editor (webapp/): its renderer still builds for the
 #      browser and, once its npm packages are installed and its wasm built
 #      (webapp/README.md), its unit tests pass and it builds.
 #
-# Renders go to a temporary directory, so journals/*/output is untouched.
+# Renders go to a temporary directory, so webapp/journals/*/output is untouched.
 # It is deleted afterwards unless something fails or --keep is passed.
 
 set -euo pipefail
@@ -116,7 +116,7 @@ render showcase darkly_01_title_0.png darkly_02_contents_0.png darkly_03_pens_br
 	darkly_29_text_0.png darkly_30_text_0.png darkly_31_locks_ciphers.png darkly_32_spread_0.png darkly_33_spread_0.png darkly_34_layouts_0.png \
 	-- showcase --strict-glyphs --scale 0.25
 
-for journal in journals/*/; do
+for journal in webapp/journals/*/; do
 	name=$(basename "$journal")
 	# Rendered whole above.
 	[[ "$name" == showcase ]] && continue

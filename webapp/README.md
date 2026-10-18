@@ -53,7 +53,7 @@ the font's options on the right.
   `character_padding`, `space_width` and `fallback`. What fonts.rs would
   reject is listed, and the journals keep the last good fonts until it's
   fixed.
-- **Export** writes the whole fonts.json as `scripts/plain_font.py` does,
+- **Export** writes the whole fonts.json in the layout it is kept in,
   one glyph to a line, so a glyph changed is a line changed in the diff.
   Put it in `config/fonts.json`. A new font of 20 glyphs or more needs a
   line in the showcase.

@@ -19,9 +19,9 @@ WORKDIR /src
 # Only what the crate builds from, so other changes don't rebuild it.
 COPY Cargo.toml Cargo.lock build.rs ./
 COPY src src
-COPY config config
-COPY layouts layouts
-COPY locks locks
+COPY webapp/config webapp/config
+COPY webapp/layouts webapp/layouts
+COPY webapp/locks webapp/locks
 COPY webapp/wasm webapp/wasm
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
@@ -36,10 +36,10 @@ WORKDIR /src/webapp/frontend
 COPY webapp/frontend/package.json webapp/frontend/package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
 COPY webapp/frontend ./
-COPY journals /src/journals
+COPY webapp/journals /src/webapp/journals
 # examples.mjs also copies these, for the unit tests' fixtures.
-COPY config /src/config
-COPY locks /src/locks
+COPY webapp/config /src/webapp/config
+COPY webapp/locks /src/webapp/locks
 COPY --from=wasm /out/wasm-pkg wasm-pkg
 # Gzipped copies sit beside the files for nginx's gzip_static: the
 # renderer is 17 MB, 9 MB gzipped, and isn't worth compressing per request.

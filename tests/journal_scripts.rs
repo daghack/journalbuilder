@@ -38,8 +38,8 @@ fn display(path: &Path) -> String {
 
 #[test]
 fn every_rhai_journal_evaluates() {
-    let scripts = rhai_journals(concat!(env!("CARGO_MANIFEST_DIR"), "/journals"));
-    assert!(!scripts.is_empty(), "no rhai journals found in journals/");
+    let scripts = rhai_journals(concat!(env!("CARGO_MANIFEST_DIR"), "/webapp/journals"));
+    assert!(!scripts.is_empty(), "no rhai journals found in webapp/journals/");
     check_scripts(&scripts);
 }
 

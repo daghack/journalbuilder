@@ -150,15 +150,15 @@ pub mod embedded {
 
     include!(concat!(env!("OUT_DIR"), "/embedded_sources.rs"));
 
-    /// `config/fonts.json`.
-    pub const FONTS: &[u8] = include_bytes!("../../../config/fonts.json");
+    /// `webapp/config/fonts.json`.
+    pub const FONTS: &[u8] = include_bytes!("../../../webapp/config/fonts.json");
 
-    /// The layout files, as if in `layouts/`.
+    /// The layout files, as if in `webapp/layouts/`.
     pub fn layouts() -> Sources {
         Sources::embedded("layouts", LAYOUTS)
     }
 
-    /// The lock files and their helpers, as if in `locks/`.
+    /// The lock files and their helpers, as if in `webapp/locks/`.
     pub fn locks() -> Sources {
         Sources::embedded("locks", LOCKS)
     }
@@ -231,7 +231,7 @@ mod tests {
     fn journals_run_the_same_with_embedded_files() {
         use super::super::JournalEngine;
         use crate::journal::fonts::FontBook;
-        let journals = Path::new(env!("CARGO_MANIFEST_DIR")).join("journals");
+        let journals = Path::new(env!("CARGO_MANIFEST_DIR")).join("webapp/journals");
         let mut checked = 0;
         for journal in std::fs::read_dir(&journals).unwrap().flatten() {
             let script = journal.path().join("journal_entry.rhai");

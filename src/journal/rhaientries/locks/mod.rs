@@ -1,6 +1,6 @@
 //! Rhai API for building and running lock chains (see `crate::lockbuilder`).
-//! Each lock type is a lock file, `locks/<type>.rhai` (see `library` and
-//! locks/README.md).
+//! Each lock type is a lock file, `webapp/locks/<type>.rhai` (see `library` and
+//! webapp/locks/README.md).
 //!
 //! ```rhai
 //! let lock = new_lock("page_one_lock")

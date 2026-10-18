@@ -283,7 +283,7 @@ export class FontEditorService {
     // The draft was saved as it was; it's only unsaved if it differs from the built-in fonts.
     if (builtin !== null) this.savedText.set(builtin);
     if (this.workspace.fonts() !== null && this.workspace.fontsBase() !== null && builtin !== null && this.workspace.fontsBase() !== hash(builtin)) {
-      this.loadError.set('config/fonts.json has changed since these edits began; they may undo newer changes. Revert to the built-in fonts to start again from it.');
+      this.loadError.set('webapp/config/fonts.json has changed since these edits began; they may undo newer changes. Revert to the built-in fonts to start again from it.');
     }
   }
 
@@ -313,7 +313,7 @@ export class FontEditorService {
     if (opened) this.load(opened.text, opened.name, opened.handle);
   }
 
-  /** Put the font shown back as it is in config/fonts.json, as one undo step; the other fonts keep their edits. */
+  /** Put the font shown back as it is in webapp/config/fonts.json, as one undo step; the other fonts keep their edits. */
   revertFont() {
     const builtin = this.builtinFont();
     if (!builtin || this.fontUnchanged()) return;
@@ -322,7 +322,7 @@ export class FontEditorService {
     this.keepSelection();
   }
 
-  /** Start again from config/fonts.json as built in, every font. */
+  /** Start again from webapp/config/fonts.json as built in, every font. */
   revert() {
     const builtin = this.builtin();
     if (builtin === null) return;
