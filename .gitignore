@@ -2,5 +2,5 @@
 .DS_Store
 
 # Generated output
-/webapp/journals/*/output/
+/*_output/
 /pkg/

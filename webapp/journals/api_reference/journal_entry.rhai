@@ -488,7 +488,7 @@ doc += api("gradient.to_string(), gradient.to_debug()", "The gradient as text, f
 // ---- fonts and glyphs ----
 
 doc += heading("Fonts and Glyphs");
-doc += para("Fonts come from config/fonts.json, each with its glyphs and how text is set in it; sets of symbols are fonts too. A font is a value: changing one changes that copy. A character is looked for as it is in a font and its fallbacks, then in the other case, so a font of capitals sets lowercase text in them.");
+doc += para("Fonts come from the files in fonts/, one per font (copper.json is the font copper), each with its glyphs and how text is set in it; sets of symbols are fonts too. A font is a value: changing one changes that copy. A character is looked for as it is in a font and its fallbacks, then in the other case, so a font of capitals sets lowercase text in them.");
 doc += api("font(name)", "A font, as the font file sets it.", [
 	arg("name", "Which font.", "one of font_names()."),
 ]);
@@ -1092,8 +1092,8 @@ doc += api("journalbuild NAME [flags]", "Runs journals/NAME/journal_entry.rhai a
 	opt("--pdf", "off", "Puts the pages in one PDF, NAME.pdf, a page each at 150 canvas units to the inch, rather than writing images; on parchment with --parchment.", "a flag."),
 	opt("--stitch N", "off", "Also lays every N pages side by side, in order, tops level, named for the pages they hold: page_0 to page_5 as darkly_page_0-5.png (the last may have fewer; a page left alone is not stitched). Pages are rendered one image each, as with --parchment, on parchment with it. Not with --pdf.", "a whole number of at least 1."),
 	opt("--journals-dir DIR", "the repository's journals/", "Where journals are.", "a directory."),
-	opt("--output-dir DIR", "the journal's output/", "Where renders go. Earlier .png, .svg and .pdf renders there are cleared first, except with --page.", "a directory."),
-	opt("--fonts FILE", "the repository's config/fonts.json", "The font file.", "a file."),
+	opt("--output-dir DIR", "NAME_output in the current directory", "Where renders go. The default directory is emptied first, except with --page; in a given directory, earlier .png, .svg and .pdf renders are cleared first, except with --page.", "a directory."),
+	opt("--fonts PATH", "the repository's fonts/", "The fonts: a directory with a NAME.json for each font, or one file with every font in it by name.", "a directory or a file."),
 	opt("--locks-dir DIR", "the repository's locks/", "Where lock files are.", "a directory."),
 	opt("--layouts-dir DIR", "the repository's layouts/", "Where layout files are, for layout(name).", "a directory."),
 ]);

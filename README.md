@@ -16,7 +16,7 @@ cargo build --release
 target/release/journalbuild journal_entry_17
 ```
 
-Renders go to `webapp/journals/journal_entry_17/output/`. Rendering needs a GPU
+Renders go to `journal_entry_17_output/` in the current directory (emptied first). Rendering needs a GPU
 that wgpu can use (Metal on macOS). While it runs, one line of the
 terminal shows its progress: a spinner while the script runs, then a bar
 of the pages rendered, the page it's on and the time left
@@ -70,7 +70,7 @@ cd webapp/frontend && npm install && npm start
 | `webapp/journals/api_reference` | the API reference: an entry for every function scripts can call, with its arguments, options and defaults |
 | `webapp/locks/` | lock types, one rhai file each; see [webapp/locks/README.md](webapp/locks/README.md) |
 | `webapp/layouts/` | page layouts, one rhai file each; see [webapp/layouts/README.md](webapp/layouts/README.md) |
-| `webapp/config/fonts.json` | every font: its glyphs' SVG paths by character (a list for variants), `character_padding`, `space_width` and `fallback`; sets of symbols are fonts too |
+| `webapp/fonts/` | a `NAME.json` for each font: its glyphs' SVG paths by character (a list for variants), `character_padding`, `space_width` and `fallback`; sets of symbols are fonts too |
 | `src/journal/` | canvases, paths, glyph placement, fonts, hatching, gradients, parchment, and Darkly and SVG rendering |
 | `src/journal/publish.rs` | writing an entry out: images per canvas or page, PDFs, SVGs |
 | `src/journal/art/` | procedural path art: snakes and brambles, free or along a path |
@@ -157,7 +157,7 @@ What to know:
 - **Randomness is seeded.** `random()`, `random_range(a, b)`, glyph variant
   picks, text layout and hatching all draw from one generator with a fixed
   seed, so a journal renders the same every run. `seed(n)` changes it.
-- **Fonts and glyphs.** Fonts come from `webapp/config/fonts.json`, each with
+- **Fonts and glyphs.** Fonts come from `webapp/fonts/`, one file each, with
   its glyphs and how text is set in it: `character_padding` between
   glyphs and `space_width` (both in font sizes), and a `fallback` font for
   characters it hasn't. Text is set with each glyph as close to the last

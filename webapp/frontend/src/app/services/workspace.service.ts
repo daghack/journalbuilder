@@ -14,7 +14,7 @@ interface Stored {
 
 /**
  * Edits not yet saved into the repository, which every script runs with:
- * fonts from the font editor in place of webapp/config/fonts.json, and lock files
+ * fonts from the font editor in place of webapp/fonts/, and lock files
  * from the lock editor added to webapp/locks/. The renderer's workers are sent
  * them whenever they change.
  */

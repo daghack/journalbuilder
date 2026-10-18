@@ -4,6 +4,7 @@
   "scripts": {
     "ng": "ng",
     "examples": "node scripts/examples.mjs",
+    "split-fonts": "node scripts/split-fonts.mjs",
     "wasm": "wasm-pack build ../wasm --target web --release --out-dir ../frontend/wasm-pkg --out-name scribe_wasm",
     "wasm:dev": "wasm-pack build ../wasm --target web --dev --out-dir ../frontend/wasm-pkg --out-name scribe_wasm",
     "start": "npm run examples && npm run wasm && ng serve",
