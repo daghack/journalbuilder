@@ -9,6 +9,11 @@ fn main() {
         return;
     }
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fonts = root.join("webapp/fonts");
+    println!("cargo:rerun-if-changed={}", fonts.display());
+    let merged = merge_fonts(&fonts);
+    let out_dir = std::env::var("OUT_DIR").unwrap();
+    std::fs::write(Path::new(&out_dir).join("fonts.json"), merged).unwrap();
     let mut out = String::new();
     for (constant, dir) in [("LAYOUTS", "webapp/layouts"), ("LOCKS", "webapp/locks")] {
         let dir = root.join(dir);
@@ -22,7 +27,6 @@ fn main() {
         }
         out.push_str("];\n");
     }
-    let out_dir = std::env::var("OUT_DIR").unwrap();
     std::fs::write(Path::new(&out_dir).join("embedded_sources.rs"), out).unwrap();
 }
 
@@ -38,4 +42,17 @@ fn collect(dir: &Path, prefix: &str, scripts: &mut Vec<(String, String)>) {
             scripts.push((format!("{}{}", prefix, stem), path.display().to_string()));
         }
     }
+}
+
+/// The font files in `dir` (`NAME.json`, one font each) as one font file,
+/// as `fonts::merge_font_dir` makes.
+fn merge_fonts(dir: &Path) -> String {
+    let mut files: Vec<_> = std::fs::read_dir(dir).unwrap().flatten().map(|e| e.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "json")).collect();
+    files.sort();
+    let fonts: Vec<String> = files.iter().map(|path| {
+        let name = path.file_stem().unwrap().to_string_lossy();
+        format!("{:?}: {}", name, std::fs::read_to_string(path).unwrap().trim())
+    }).collect();
+    format!("{{\n{}\n}}\n", fonts.join(",\n"))
 }

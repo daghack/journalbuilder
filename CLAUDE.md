@@ -16,7 +16,7 @@ the same change:
   engine): add a labelled example on the page it belongs to, or a new page
   if nothing fits. New options deserve an example too, even though the
   test below can't see them.
-- **A font or symbol set** (a font added to `webapp/config/fonts.json`): add it
+- **A font or symbol set** (a font added to `webapp/fonts/`): add it
   to the fonts pages with its alphabet and a line. The glyphs pages draw
   every glyph of every font by themselves.
 - **A brush**: the pens page draws every `brush_names()` entry by itself;

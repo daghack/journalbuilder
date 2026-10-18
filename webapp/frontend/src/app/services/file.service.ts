@@ -81,8 +81,13 @@ export class FileService {
       await writable.close();
       return { name: handle.name, text, handle };
     }
-    this.download(new Blob([text], { type: kind.mime }), name);
-    return { name, text, handle: null };
+    // A download can't tell us what the user saves it as, so ask for the name.
+    const chosen = prompt('Save as', name)?.trim();
+    if (!chosen) return null;
+    const extension = /\.[^.]*$/.exec(name)?.[0] ?? '';
+    const saveAs = /\.[^.]*$/.test(chosen) ? chosen : chosen + extension;
+    this.download(new Blob([text], { type: kind.mime }), saveAs);
+    return { name: saveAs, text, handle: null };
   }
 
   /** Hand `blob` to the browser to save as `name`. */

@@ -150,8 +150,8 @@ pub mod embedded {
 
     include!(concat!(env!("OUT_DIR"), "/embedded_sources.rs"));
 
-    /// `webapp/config/fonts.json`.
-    pub const FONTS: &[u8] = include_bytes!("../../../webapp/config/fonts.json");
+    /// The font files in `webapp/fonts/`, as one font file.
+    pub const FONTS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/fonts.json"));
 
     /// The layout files, as if in `webapp/layouts/`.
     pub fn layouts() -> Sources {

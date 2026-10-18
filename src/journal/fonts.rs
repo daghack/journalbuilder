@@ -1,17 +1,16 @@
 //! Fonts: glyphs by character, with the settings text is set with, loaded
-//! from a font file (by default `webapp/config/fonts.json`):
+//! from the font files (by default the directory `webapp/fonts`, a file
+//! for each font, named for it: `copper.json` holds the font `copper`):
 //!
 //! ```json
 //! {
-//!     "copper": {
-//!         "character_padding": 0.05,
-//!         "space_width": 0.5,
-//!         "fallback": "loche_upper",
-//!         "glyph_padding": { ".": 0.2 },
-//!         "glyphs": {
-//!             "A": "M -0.6 -0.6 C ...",
-//!             "a": ["M 0.4 -0.2 C ...", "M 0.5 -0.1 C ..."]
-//!         }
+//!     "character_padding": 0.05,
+//!     "space_width": 0.5,
+//!     "fallback": "loche_upper",
+//!     "glyph_padding": { ".": 0.2 },
+//!     "glyphs": {
+//!         "A": "M -0.6 -0.6 C ...",
+//!         "a": ["M 0.4 -0.2 C ...", "M 0.5 -0.1 C ..."]
 //!     }
 //! }
 //! ```
@@ -47,9 +46,31 @@ use std::rc::Rc;
 use super::paths::StrokePath;
 use super::symbol::{Symbol, SymbolBase, SymbolType};
 
-/// The repository's font file. Resolved at build time, so it's found
+/// The repository's fonts directory. Resolved at build time, so it's found
 /// whatever directory journalbuild (or a test) runs from.
-pub const DEFAULT_FONTS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/webapp/config/fonts.json");
+pub const DEFAULT_FONTS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/webapp/fonts");
+
+/// The fonts in directory `dir`, one `NAME.json` file each, as one font
+/// file's text: `{ "NAME": <that file's font>, ... }`, sorted by name.
+pub fn merge_font_dir(dir: &str) -> Result<String, String> {
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(dir).map_err(|e| format!("{}: {}", dir, e))? {
+        let path = entry.map_err(|e| format!("{}: {}", dir, e))?.path();
+        if path.extension().is_some_and(|ext| ext == "json") {
+            files.push(path);
+        }
+    }
+    files.sort();
+    let mut merged = String::from("{");
+    for (i, path) in files.iter().enumerate() {
+        let name = path.file_stem().unwrap().to_string_lossy();
+        let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {}", path.display(), e))?;
+        merged.push_str(if i == 0 { "\n" } else { ",\n" });
+        merged.push_str(&format!("{:?}: {}", name, text.trim()));
+    }
+    merged.push_str("\n}\n");
+    Ok(merged)
+}
 
 /// The glyph drawn for a character no font has: a font, and its glyph.
 pub const FALLBACK_GLYPH: (&str, &str) = ("symbols", "X");
@@ -230,8 +251,14 @@ pub struct FontBook {
 }
 
 impl FontBook {
-    pub fn from_file(file: &str) -> Result<FontBook, String> {
-        let bytes = std::fs::read(file).map_err(|e| e.to_string())?;
+    /// Load the fonts in `path`: a directory of font files, one font each
+    /// and named for its file (`plain.json`), or a single file with every
+    /// font in it, by name.
+    pub fn from_file(path: &str) -> Result<FontBook, String> {
+        if std::path::Path::new(path).is_dir() {
+            return Self::from_bytes(merge_font_dir(path)?.as_bytes());
+        }
+        let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
         Self::from_bytes(&bytes)
     }
     pub fn from_bytes(bytes: &[u8]) -> Result<FontBook, String> {

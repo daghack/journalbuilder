@@ -31,7 +31,7 @@ The SVG preview works anywhere.
 
 ## Fonts
 
-The whole of `config/fonts.json`, one font at a time: its glyphs on the
+The whole of `fonts/` (a file per font), one font at a time: its glyphs on the
 left, each with its variants; the variant you pick in the middle, to draw;
 the font's options on the right.
 
@@ -55,7 +55,7 @@ the font's options on the right.
   fixed.
 - **Export** writes the whole fonts.json in the layout it is kept in,
   one glyph to a line, so a glyph changed is a line changed in the diff.
-  Put it in `config/fonts.json`. A new font of 20 glyphs or more needs a
+  Split it into `fonts/` with `npm run split-fonts -- exported.json`. A new font of 20 glyphs or more needs a
   line in the showcase.
 
 ## Locks
@@ -90,7 +90,7 @@ Fonts edited and lock types saved here are the workspace: every script,
 in every editor, runs with them (the diagnostics say when), and Darkly
 renders and exports do too. They're kept in this browser only until
 exported into the repository; the tabs show what's in use. If
-config/fonts.json changes after edits began, the font editor says so.
+the files in fonts/ change after edits began, the font editor says so.
 
 ## Running it
 

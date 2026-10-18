@@ -335,7 +335,7 @@ book.bind("pens", pens);
 
 // ---- fonts ----
 //
-// Fonts come from config/fonts.json, each with its glyphs, the padding
+// Fonts come from fonts/ (a file for each font), each with its glyphs, the padding
 // between them, the width of a space, and a font to fall back to.
 
 let alphabet = "abcdefghijklmnopqrstuvwxyz";
