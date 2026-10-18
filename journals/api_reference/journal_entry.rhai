@@ -568,7 +568,7 @@ doc += api("glyph.copy()", "An independent copy of the glyph.");
 
 doc += heading("Text");
 doc += para("Text layouts place glyphs, scaling each by the size and turning it to its line on top of any scale and rotation it has. Every text call takes a map of text settings, written settings, whose keys are those layout roles take (see Role settings): a role's settings can be passed straight in, and role settings a call doesn't use are ignored. Other unknown keys are errors.");
-doc += api("new_textbox(settings)", "A box, or any closed shape, glyphs flow into, line by line. Each line holds glyphs only where the band they take up, from a quarter of the size above it to three quarters below, is inside the shape (a line by the shape's top or bottom looks at the shape just inside it, so a box's lines run its full width).", [
+doc += api("new_textbox(settings)", "A box, or any closed shape, glyphs flow into, line by line, each glyph's own ink wholly inside the shape: lines run from where the first glyph fits to where the last does, so ink meets the shape's edges, and the first line starts as near its top as glyphs fit.", [
 	opt("settings.center", "none: give center, width and height, or shape", "The box's centre.", "a vec."),
 	opt("settings.width", "none: needed with center", "Its width.", "a positive number."),
 	opt("settings.height", "none: needed with center", "Its height.", "a positive number."),
@@ -580,6 +580,8 @@ doc += api("new_textbox(settings)", "A box, or any closed shape, glyphs flow int
 	avoid_opt(""),
 	clearance_opt(" Needs avoid."),
 	spacing_opt(),
+	opt("settings.align", "left", "Where each line's glyphs go along it. left: from its start. right and center: moved along as far as they still fit, or half that. justify: spread so the last goes as far as it fits (at the blanks, with layout: words), all but the text's last line. Jagged lines stay left.", "left, center, right or justify."),
+	opt("settings.valign", "top", "Where the text sits down the box. top: from as high as its glyphs fit. center and bottom: set again lower by half, or all, of the room left under its last line, or as far toward that as all the text still fits, if it fitted from the top.", "top, center or bottom."),
 	split_words_opt(),
 	split_padding_opt(),
 ] + jitter_opts());

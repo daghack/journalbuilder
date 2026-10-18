@@ -1036,6 +1036,37 @@ text.add(oval, CAPTION);
 text.add(new_textbox(#{ shape: oval, angle: 0.15, size: 18, layout: "words", avoid: eye, clearance: 10 }).fill(PLAIN.glyphs(LOREM + LOREM + LOREM)).placed, TEXT);
 book.bind("text", text);
 
+// Lines aligned in a text box: set from their start, then moved along as
+// far as their glyphs' ink still fits the shape (all the way, or half way),
+// or spread to meet both ends, all but the text's last line.
+let text = sheet("text");
+text.add(subhead("aligned text boxes", TOP));
+text.add(caption("new_textbox #{ align }: left, center, right and justify, in circles", TOP + 50));
+let y = TOP + 270;
+for (align, i) in ["left", "center", "right", "justify"] {
+	let at = vec2(LEFT + 125 + i * 255, y);
+	let circle = new_circle(at, 115);
+	text.add(circle, CAPTION);
+	text.add(new_textbox(#{ shape: circle, size: 26, layout: "words", align: align }).fill(PLAIN.glyphs(LOREM)).placed, TEXT);
+	text.add(write_in(align, at.x - 40, y + 140, 22, CAPTION, PLAIN));
+}
+text.add(caption("justify, words kept whole, a ring; flat, a star: ink meets the edges", TOP + 520));
+let y = TOP + 760;
+let ring = new_circle(vec2(LEFT + 250, y), 200).append(new_circle(vec2(LEFT + 250, y), 80));
+text.add(ring, CAPTION);
+text.add(new_textbox(#{ shape: ring, size: 18, layout: "words", align: "justify" }).fill(PLAIN.glyphs(LOREM + LOREM)).placed, TEXT);
+let star = new_star(vec2(LEFT + 750, y), 210, 100, 6);
+text.add(star, CAPTION);
+text.add(new_textbox(#{ shape: star, size: 16, align: "justify" }).fill(PLAIN.glyphs(LOREM + LOREM)).placed, TEXT);
+text.add(caption("new_textbox #{ valign }: top, center and bottom, centred lines", TOP + 1000));
+let y = TOP + 1140;
+for (valign, i) in ["top", "center", "bottom"] {
+	let circle = new_circle(vec2(LEFT + 150 + i * 350, y), 110);
+	text.add(circle, CAPTION);
+	text.add(new_textbox(#{ shape: circle, size: 26, layout: "words", align: "center", valign: valign }).fill(PLAIN.glyphs("Lorem ipsum dolor sit amet, consectetur adipiscing elit.")).placed, TEXT);
+}
+book.bind("text", text);
+
 // Text written as a hand writes it: a line from a point, and a block
 // wrapped to a width, line after line, giving where the next text goes.
 // Every text call takes a role's settings (layouts' role keys, so a role

@@ -113,7 +113,7 @@ render fixture-pdf smoke.pdf \
 render showcase darkly_01_title_0.png darkly_02_contents_0.png darkly_03_pens_brushes.png darkly_05_pens_0.png darkly_06_pens_0.png darkly_07_pens_0.png darkly_08_fonts_0.png \
 	darkly_11_fonts_0.png darkly_12_glyphs_0.png darkly_15_art_0.png darkly_19_art_0.png darkly_20_art_0.png darkly_21_generators_0.png \
 	darkly_22_generators_0.png darkly_23_generators_0.png darkly_24_text_0.png darkly_26_text_0.png darkly_27_text_0.png darkly_28_text_0.png \
-	darkly_29_text_0.png darkly_30_locks_ciphers.png darkly_31_spread_0.png darkly_32_spread_0.png darkly_33_layouts_0.png \
+	darkly_29_text_0.png darkly_30_text_0.png darkly_31_locks_ciphers.png darkly_32_spread_0.png darkly_33_spread_0.png darkly_34_layouts_0.png \
 	-- showcase --strict-glyphs --scale 0.25
 
 for journal in journals/*/; do

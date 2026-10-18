@@ -68,6 +68,7 @@ use super::random::SharedRng;
 use super::{Canvas, CanvasData, Path, Vec2};
 use crate::journal::canvas::artistic::{jitter_symbols, scatter_notes, ScatterOptions};
 use crate::journal::fonts::FontBook;
+use crate::journal::typeset::Align;
 use crate::journal::canvas::textbox::{rectangle, TextBox as CoreTextBox, TextBoxLineMode, TextBoxOptions};
 use crate::journal::canvas::Canvas as JournalCanvas;
 use crate::journal::symbol::{Symbol, WordSplit};
@@ -88,10 +89,15 @@ pub struct TextBox {
     avoid: Option<Avoid>,
     padding: f32,
     spacing: f32,
+    align: Align,
+    /// Whether glyphs' ink stays inside the shape: not for write_block's
+    /// line boxes, which glyphs overhang.
+    contain: bool,
+    valign: f32,
     jitter: Jitter,
 }
 
-const TEXTBOX_KEYS: [&str; 16] = ["center", "width", "height", "shape", "angle", "size", "layout", "jagged", "avoid", "clearance", "spacing", "split_words", "split_padding", "position_jitter", "rotation_jitter", "scale_jitter"];
+const TEXTBOX_KEYS: [&str; 18] = ["center", "width", "height", "shape", "angle", "size", "layout", "jagged", "avoid", "clearance", "spacing", "align", "valign", "split_words", "split_padding", "position_jitter", "rotation_jitter", "scale_jitter"];
 
 /// The `spacing` option: extra space between glyphs, as a fraction of the
 /// symbol scale. Negative tightens, down to glyphs touching their
@@ -178,6 +184,22 @@ impl TextBox {
         let jagged_edge = number(CALLER, &options, "jagged")?.unwrap_or(0.0);
         let layout = line_mode(CALLER, &options)?;
         let avoid = AvoidOption::parse(CALLER, &options, false)?;
+        let align = match options.get("align") {
+            None => Align::Left,
+            Some(value) => {
+                let name = value.clone().into_string().map_err(|t| format!("{}: 'align' should be a string, got {}", CALLER, t))?;
+                Align::from_name(&name).ok_or_else(|| format!("{}: unknown align '{}'; aligns: {}", CALLER, name, Align::NAMES.join(", ")))?
+            }
+        };
+        let valign = match options.get("valign") {
+            None => 0.0,
+            Some(value) => match value.clone().into_string().as_deref() {
+                Ok("top") => 0.0,
+                Ok("center") => 0.5,
+                Ok("bottom") => 1.0,
+                _ => return Err(format!("{}: 'valign' should be top, center or bottom, got {}", CALLER, value).into()),
+            },
+        };
         Ok(TextBox {
             shape: Rc::new(shape),
             angle,
@@ -187,6 +209,9 @@ impl TextBox {
             padding: avoid.padding(symbol_scale),
             avoid: avoid.tree,
             spacing: spacing(CALLER, &options)?,
+            align,
+            contain: true,
+            valign,
             jitter: Jitter::parse(CALLER, &options)?,
         })
     }
@@ -228,6 +253,9 @@ impl TextBox {
             avoid: tree.as_deref(),
             padding: self.padding,
             spacing: self.spacing,
+            align: self.align,
+            contain: self.contain,
+            valign: self.valign,
         });
         f(&core)
     }
@@ -358,7 +386,9 @@ fn write_block(msg: &str, at: Vec2, width: Dynamic, settings: Map, symdict: &Fon
     let line_box = |y: f32| -> RhaiResult<TextBox> {
         let mut options = box_options.clone();
         options.insert("center".into(), Dynamic::from(Vec2::new((at.x + width / 2.0) as f64, y as f64)));
-        TextBox::new(options).map_err(|e| format!("{}", e).replace("new_textbox", CALLER).into())
+        let mut line = TextBox::new(options).map_err(|e| -> Box<EvalAltResult> { format!("{}", e).replace("new_textbox", CALLER).into() })?;
+        line.contain = false;
+        Ok(line)
     };
     let mut r = rng.borrow_mut();
     let mut to_place = font.build(msg, symdict, &mut *r);
@@ -564,8 +594,9 @@ mod tests {
                 for g in glyphs { if g.position.x < x && g.position.x > m { m = g.position.x; } }
                 m
             }
-            let bar = new_line(vec2(-150.0, -100.0), vec2(-150.0, 100.0));
-            let opts = #{ center: vec2(0.0, 0.0), width: 400, height: 10, size: 10.0, layout: "words", avoid: bar, clearance: 2.0 };
+            let bar = new_line(vec2(-160.0, -100.0), vec2(-160.0, 100.0));
+            // One line high: glyphs' ink keeps inside the box.
+            let opts = #{ center: vec2(0.0, 0.0), width: 400, height: 16, size: 10.0, layout: "words", avoid: bar, clearance: 2.0 };
             let whole = new_textbox(opts).fill(font.glyphs("abcdefghijklmnop")).placed;
             opts.split_words = true;
             let split = new_textbox(opts).fill(font.glyphs("abcdefghijklmnop")).placed;
@@ -573,14 +604,14 @@ mod tests {
             let padded = new_textbox(opts).fill(font.glyphs("abcdefghijklmnop")).placed;
             opts.split_words = 8;   // the piece before the bar would be too short
             let long_pieces = new_textbox(opts).fill(font.glyphs("abcdefghijklmnop")).placed;
-            [whole[0].position.x, split[0].position.x, last_before(split, -150.0), last_before(padded, -150.0),
+            [whole[0].position.x, split[0].position.x, last_before(split, -160.0), last_before(padded, -160.0),
              long_pieces[0].position.x, split.len(), padded.len()]
         "#);
         let xs: Vec<f64> = xs.into_iter().map(|x| x.as_float().unwrap_or_else(|_| x.as_int().unwrap() as f64)).collect();
-        assert!(xs[0] > -150.0, "a whole word moves past the bar: {:?}", xs);
-        assert!(xs[1] < -150.0, "a split one starts before it: {:?}", xs);
+        assert!(xs[0] > -160.0, "a whole word moves past the bar: {:?}", xs);
+        assert!(xs[1] < -160.0, "a split one starts before it: {:?}", xs);
         assert!(xs[3] < xs[2], "padding keeps the first piece further from it: {:?}", xs);
-        assert!(xs[4] > -150.0, "pieces too short to split: {:?}", xs);
+        assert!(xs[4] > -160.0, "pieces too short to split: {:?}", xs);
         assert!(xs[5] == 16.0 && xs[6] == 16.0, "every glyph placed: {:?}", xs);
     }
 
