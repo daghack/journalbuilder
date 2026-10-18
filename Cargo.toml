@@ -7,7 +7,7 @@ edition = "2024"
 members = [".", "webapp/wasm"]
 
 [features]
-# Compile the layout and lock files and config/fonts.json into the library
+# Compile the layout and lock files and fonts/ into the library
 # (`rhaientries::embedded`), for builds with no files to read, like the
 # web editor's.
 embedded-assets = []

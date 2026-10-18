@@ -18,7 +18,7 @@ import { ShellService, type Mode } from './shell.service';
     @if (workspace.fonts() !== null) {
       <div class="menu">
         <button type="button" class="chip" aria-haspopup="true" (click)="shell.mode.set('fonts')"
-                title="Journals use the fonts as edited in the font editor, not webapp/config/fonts.json">Edited Fonts</button>
+                title="Journals use the fonts as edited in the font editor, not the built-in fonts">Edited Fonts</button>
         <ul class="list" aria-label="Edited fonts">
           @for (font of changedFonts(); track font.name) {
             <li>
@@ -68,7 +68,7 @@ export class ModeTabsComponent {
   protected readonly shell = inject(ShellService);
   protected readonly workspace = inject(WorkspaceService);
   protected readonly lockNames = computed(() => Object.keys(this.workspace.locks()));
-  /** webapp/config/fonts.json as built in, read; null until the renderer gives it. */
+  /** the built-in fonts as built in, read; null until the renderer gives it. */
   protected readonly builtinFonts = signal<FontsFile | null>(null);
   /** The fonts the edited fonts change from the built-in ones. */
   protected readonly changedFonts = computed<FontChange[]>(() => {

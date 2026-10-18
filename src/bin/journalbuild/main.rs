@@ -43,7 +43,7 @@ const DEFAULT_SUPERSAMPLE: f32 = 1.2;
 const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--svg]
                     [--scale S] [--supersample K] [--strict-glyphs]
                     [--parchment] [--pdf] [--stitch N]
-                    [--journals-dir DIR] [--output-dir DIR] [--fonts FILE]
+                    [--journals-dir DIR] [--output-dir DIR] [--fonts PATH]
                     [--locks-dir DIR] [--layouts-dir DIR]
        journalbuild --check-locks [--locks-dir DIR]
 
@@ -81,8 +81,9 @@ const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--svg
                       grows with K squared.
   --journals-dir DIR  Directory containing journals (default: the
                       repository's webapp/journals/).
-  --fonts FILE        Font file (default: the repository's
-                      webapp/config/fonts.json).
+  --fonts PATH        Font files: a directory with a NAME.json for each font,
+                      or one file with every font (default: the
+                      repository's webapp/fonts/).
   --output-dir DIR    Where to write renders (default: NAME_output in the current
                       directory, emptied first unless --page). In a given
                       directory, earlier .png/.svg/.pdf renders are cleared
@@ -160,7 +161,7 @@ fn parse_args() -> Result<Args, String> {
                 journals_dir = args.next().ok_or("--journals-dir needs a directory")?;
             }
             "--fonts" => {
-                font_file = args.next().ok_or("--fonts needs a file")?;
+                font_file = args.next().ok_or("--fonts needs a path")?;
             }
             "--locks-dir" => {
                 locks_dir = args.next().ok_or("--locks-dir needs a directory")?;

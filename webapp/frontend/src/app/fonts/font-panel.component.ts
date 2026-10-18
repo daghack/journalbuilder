@@ -13,9 +13,9 @@ import { FALLBACK_GLYPH, fallbackLoop, fallbackOf, optionRaw, parseFonts, withOp
       </div>
       <div class="row">
         <button type="button" class="primary" (click)="editor.export()" [disabled]="!editor.file() || editor.problems().length > 0"
-                title="Save the whole fonts file: back where it came from in Chromium browsers, else as a download. Put it in webapp/config/fonts.json.">Export fonts.json</button>
+                title="Save the whole fonts file: back where it came from in Chromium browsers, else as a download. Split it into webapp/fonts/ with npm run split-fonts.">Export fonts.json</button>
         <button type="button" (click)="editor.open()" title="Open a fonts file">Open…</button>
-        <button type="button" (click)="revert()" [disabled]="editor.unchanged()" title="Throw away every font's edits: start again from webapp/config/fonts.json as built in">Revert all</button>
+        <button type="button" (click)="revert()" [disabled]="editor.unchanged()" title="Throw away every font's edits: start again from the built-in fonts as built in">Revert all</button>
       </div>
       @if (editor.loadError(); as error) { <p class="note-error">{{ error }}</p> }
       <p class="hint">
@@ -49,7 +49,7 @@ import { FALLBACK_GLYPH, fallbackLoop, fallbackOf, optionRaw, parseFonts, withOp
         @if (fontError(); as error) { <p class="problem">{{ error }}</p> }
         <div class="row">
           <button type="button" (click)="editor.revertFont()" [disabled]="editor.fontUnchanged()"
-                  [title]="editor.builtinFont() ? 'Put ' + editor.fontName() + ' back as it is in webapp/config/fonts.json; other fonts keep their edits' : editor.fontName() + ' is not in webapp/config/fonts.json, so has nothing to revert to'">Revert {{ editor.fontName() }}</button>
+                  [title]="editor.builtinFont() ? 'Put ' + editor.fontName() + ' back as it is in the built-in fonts; other fonts keep their edits' : editor.fontName() + ' is not in the built-in fonts, so has nothing to revert to'">Revert {{ editor.fontName() }}</button>
           <button type="button" class="danger" (click)="editor.deleteFont()" [disabled]="file.length < 2">Delete {{ editor.fontName() }}</button>
         </div>
       </section>
@@ -240,6 +240,6 @@ export class FontPanelComponent {
   }
 
   protected revert() {
-    if (this.editor.unchanged() || confirm('Throw away every edit to the fonts and start again from webapp/config/fonts.json?')) this.editor.revert();
+    if (this.editor.unchanged() || confirm('Throw away every edit to the fonts and start again from the built-in fonts?')) this.editor.revert();
   }
 }

@@ -1,6 +1,6 @@
 //! Fonts and glyphs for rhai scripts.
 //!
-//! Fonts come from the font file (`webapp/config/fonts.json`, see fonts.rs), each
+//! Fonts come from the font file (`webapp/fonts/`, see fonts.rs), each
 //! with its glyphs and the settings text is set with. A font is a value:
 //! changing one changes that copy, not the font everywhere.
 //!
