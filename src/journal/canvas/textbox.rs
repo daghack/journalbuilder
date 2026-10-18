@@ -3,6 +3,7 @@ use parry2d::math::Vec2;
 use crate::journal::avoid::AvoidanceTree;
 use crate::journal::symbol::{Symbol, SymbolPlacementArgs, WordSplit, place_along_path, place_words_along_path};
 use crate::journal::paths::StrokePath;
+use crate::journal::typeset::Align;
 use rand::{Rng, RngCore};
 
 #[derive(Clone)]
@@ -27,6 +28,18 @@ pub struct TextBoxOptions<'a> {
     pub padding: f32,
     /// Extra space between glyphs, as a fraction of `size`.
     pub spacing: f32,
+    /// Where each line's glyphs go along it: from its start, moved along as
+    /// far as they still fit (centred between, or to the end), or spread
+    /// out to reach both ends, all but the text's last line.
+    pub align: Align,
+    /// Whether glyphs' ink stays wholly inside the shape, lines reaching
+    /// its edges; otherwise lines hold glyphs where the band they take up
+    /// is inside it, as write_block's line boxes, which glyphs overhang.
+    pub contain: bool,
+    /// Where the text sits down a box that keeps it inside: 0 from the
+    /// top, 1 at the bottom, or between, the room left under it shared out
+    /// above it.
+    pub valign: f32,
 }
 
 /// A rectangle as a shape for `TextBoxOptions`.
@@ -46,15 +59,94 @@ pub enum TextBoxLineMode {
 /// Glyphs sit a quarter of their height below each line.
 const BASELINE_SHIFT: f32 = 0.25;
 
-/// How many places across a line's glyphs it's checked to be inside the
-/// shape.
-const BAND_SAMPLES: usize = 5;
+/// How many places across the band a line's glyphs might take up the shape
+/// is looked at, to find where along the line they could go.
+const BAND_SAMPLES: usize = 9;
+
+/// The band looked at, in symbol scales above and below the line: more than
+/// any glyph takes up, as each glyph's own ink is what's checked.
+const BAND_ABOVE: f32 = 0.5;
+const BAND_BELOW: f32 = 1.5;
+
+/// How far down to try the next line when one holds nothing, in symbol
+/// scales: little, so the first line starts as near the shape's top as
+/// its glyphs fit.
+const EMPTY_LINE_STEP: f32 = 0.05;
+
+/// For boxes that don't keep glyphs inside: how many places across a
+/// line's band, from a quarter of the symbol scale above the line to three
+/// quarters below, it's checked to be inside the shape.
+const LOOSE_BAND_SAMPLES: usize = 5;
+
+/// A closed shape, as a text box's: closed outlines, each inside where it
+/// winds round at all, and a place inside an even number of them outside.
+#[derive(Debug)]
+pub struct Region {
+    rings: Vec<Vec<Vec2>>,
+}
+
+impl Region {
+    pub fn new(rings: Vec<Vec<Vec2>>) -> Region {
+        Region { rings: rings.into_iter().filter(|ring| ring.len() >= 3).collect() }
+    }
+
+    fn edges(ring: &[Vec2]) -> impl Iterator<Item = (Vec2, Vec2)> + '_ {
+        ring.iter().enumerate().map(move |(i, &a)| (a, ring[(i + 1) % ring.len()]))
+    }
+
+    /// Whether a point is inside.
+    pub fn contains(&self, p: Vec2) -> bool {
+        let rings_inside = self.rings.iter().filter(|ring| {
+            let mut winding = 0;
+            for (a, b) in Region::edges(ring) {
+                if (a.y > p.y) != (b.y > p.y) {
+                    let x = a.x + (p.y - a.y) * (b.x - a.x) / (b.y - a.y);
+                    if x > p.x {
+                        winding += if b.y > a.y { 1 } else { -1 };
+                    }
+                }
+            }
+            winding != 0
+        }).count();
+        rings_inside % 2 == 1
+    }
+
+    /// Whether a closed outline (a placed glyph's footprint) is wholly
+    /// inside: none of its edges crosses the shape's, it starts inside, and
+    /// no outline of the shape (a hole) is inside it.
+    pub fn holds(&self, outline: &[Vec2]) -> bool {
+        let Some(&first) = outline.first() else { return true };
+        let (lo, hi) = outline.iter().fold((first, first), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
+        let crosses = |(a, b): (Vec2, Vec2), (c, d): (Vec2, Vec2)| {
+            let side = |p: Vec2, q: Vec2, r: Vec2| (q - p).perp_dot(r - p);
+            let (d1, d2) = (side(c, d, a), side(c, d, b));
+            let (d3, d4) = (side(a, b, c), side(a, b, d));
+            (d1 > 0.0) != (d2 > 0.0) && (d3 > 0.0) != (d4 > 0.0)
+        };
+        for ring in &self.rings {
+            for edge in Region::edges(ring) {
+                let (a, b) = edge;
+                if a.x.max(b.x) < lo.x || a.x.min(b.x) > hi.x || a.y.max(b.y) < lo.y || a.y.min(b.y) > hi.y {
+                    continue;
+                }
+                if Region::edges(outline).any(|side| crosses(side, edge)) {
+                    return false;
+                }
+            }
+        }
+        let around = Region { rings: vec![outline.to_vec()] };
+        self.contains(first) && !self.rings.iter().any(|ring| around.contains(ring[0]))
+    }
+}
 
 pub struct TextBox<'a> {
     layout: TextBoxLineMode,
     jagged_edge: f32,
     /// The shape, turned so the lines run along +x.
     shape: Vec<Vec<Vec2>>,
+    /// The shape where it is, which glyphs' ink stays inside, if it's
+    /// kept to.
+    region: Option<Region>,
     /// Along the lines, and on to the next.
     along: Vec2,
     across: Vec2,
@@ -62,7 +154,16 @@ pub struct TextBox<'a> {
     avoid: Option<&'a AvoidanceTree>,
     padding: f32,
     spacing: f32,
+    align: Align,
+    valign: f32,
 }
+
+/// How many halvings close in on how far down text can be set and still
+/// all fit, when valign's full share of the room would lose some.
+const VALIGN_STEPS: usize = 8;
+
+/// How many halvings close in on how far a line's glyphs can be moved.
+const ALIGN_STEPS: usize = 14;
 
 impl<'a> TextBox<'a> {
     pub fn new(options: TextBoxOptions<'a>) -> TextBox<'a> {
@@ -72,6 +173,7 @@ impl<'a> TextBox<'a> {
             .map(|ring| ring.iter().map(|p| Vec2::new(p.dot(along), p.dot(across))).collect())
             .collect();
         TextBox {
+            region: options.contain.then(|| Region::new(options.shape.clone())),
             jagged_edge: options.jagged_edge,
             layout: options.layout,
             avoid: options.avoid,
@@ -81,6 +183,8 @@ impl<'a> TextBox<'a> {
             across,
             symbol_scale: options.symbol_scale,
             spacing: options.spacing,
+            align: options.align,
+            valign: options.valign,
         }
     }
 
@@ -118,19 +222,41 @@ impl<'a> TextBox<'a> {
         edges.chunks_exact(2).map(|pair| (pair[0], pair[1])).filter(|(l, r)| r > l).collect()
     }
 
-    /// Where a line at `y` can hold glyphs: inside the shape all the way
-    /// across the band they take up, from a quarter of the symbol scale
-    /// above the line to three quarters below it, as far as it lies
-    /// within the shape's top and bottom (a line near either looks at the
-    /// shape just inside it, so a rectangle's lines run its full width).
+    /// Where along a line at `y` glyphs might go: wherever the shape is,
+    /// anywhere across a band taller than glyphs take up (a line by the
+    /// shape's top or bottom looks at the shape just inside it). Each
+    /// glyph's own ink is checked against the shape as it's placed, so
+    /// these only need to hold every place one could go.
     fn line_spans(&self, y: f32) -> Vec<(f32, f32)> {
+        if self.region.is_none() {
+            return self.band_spans(y);
+        }
+        let (top, bottom) = self.extent();
+        let inset = (bottom - top) * 1e-4;
+        let (top, bottom) = (top + inset, bottom - inset);
+        let (above, below) = (y - BAND_ABOVE * self.symbol_scale, y + BAND_BELOW * self.symbol_scale);
+        let mut spans: Vec<(f32, f32)> = Vec::new();
+        for i in 0..BAND_SAMPLES {
+            let at = (above + (below - above) * i as f32 / (BAND_SAMPLES - 1) as f32).clamp(top, bottom);
+            spans = union(&spans, &self.spans_at(at));
+        }
+        spans
+    }
+
+    /// For boxes that don't keep glyphs inside: where a line at `y` can
+    /// hold glyphs, inside the shape all the way across the band they take
+    /// up, from a quarter of the symbol scale above the line to three
+    /// quarters below it, as far as it lies within the shape's top and
+    /// bottom (a line near either looks at the shape just inside it, so a
+    /// rectangle's lines run its full width).
+    fn band_spans(&self, y: f32) -> Vec<(f32, f32)> {
         let (top, bottom) = self.extent();
         let inset = (bottom - top) * 1e-4;
         let (top, bottom) = (top + inset, bottom - inset);
         let (above, below) = (y - BASELINE_SHIFT * self.symbol_scale, y + (1.0 - BASELINE_SHIFT) * self.symbol_scale);
         let mut spans: Option<Vec<(f32, f32)>> = None;
-        for i in 0..BAND_SAMPLES {
-            let at = (above + (below - above) * i as f32 / (BAND_SAMPLES - 1) as f32).clamp(top, bottom);
+        for i in 0..LOOSE_BAND_SAMPLES {
+            let at = (above + (below - above) * i as f32 / (LOOSE_BAND_SAMPLES - 1) as f32).clamp(top, bottom);
             let here = self.spans_at(at);
             spans = Some(match spans {
                 None => here,
@@ -140,9 +266,11 @@ impl<'a> TextBox<'a> {
         spans.unwrap_or_default()
     }
 
-    pub fn fill_line_with(&self, symbols: Vec<Symbol>, y_pos: f32, rng: &mut dyn RngCore) -> (Vec<Symbol>, Vec<Symbol>) {
+    /// A line of a box that doesn't keep glyphs inside: along its spans,
+    /// from their starts (or jagged in from them).
+    fn fill_loose_line(&self, symbols: Vec<Symbol>, y_pos: f32, rng: &mut dyn RngCore) -> (Vec<Symbol>, Vec<Symbol>) {
         let mut stroke = StrokePath::new();
-        for (left, right) in self.line_spans(y_pos) {
+        for (left, right) in self.band_spans(y_pos) {
             let offset_x = rng.random::<f32>() * self.jagged_edge * self.symbol_scale;
             let current_x = left + offset_x;
             let width = right - left - offset_x;
@@ -156,10 +284,113 @@ impl<'a> TextBox<'a> {
             spacing: self.spacing,
             baseline_shift: BASELINE_SHIFT,
             angle: None,
+            within: None,
         };
         match self.layout {
             TextBoxLineMode::Flat => place_along_path(symbols, &stroke, &args),
             TextBoxLineMode::WordsByBlankSymbol(split) => place_words_along_path(symbols, &stroke, &args, split),
+        }
+    }
+
+    pub fn fill_line_with(&self, symbols: Vec<Symbol>, y_pos: f32, rng: &mut dyn RngCore) -> (Vec<Symbol>, Vec<Symbol>) {
+        let Some(region) = &self.region else { return self.fill_loose_line(symbols, y_pos, rng) };
+        let spans = self.line_spans(y_pos);
+        let args = SymbolPlacementArgs {
+            avoid: self.avoid,
+            padding: self.padding,
+            symbol_scale: self.symbol_scale,
+            spacing: self.spacing,
+            baseline_shift: BASELINE_SHIFT,
+            angle: None,
+            within: Some(region),
+        };
+        let mut placed = Vec::new();
+        let mut to_place = symbols;
+        for (i, &(left, right)) in spans.iter().enumerate() {
+            if to_place.is_empty() {
+                break;
+            }
+            // Each line runs on a little past the shape's edges (though not
+            // into the next span's room), so glyphs' padding can hang over
+            // and their ink meet the edge. Jagged lines start in from it.
+            let room = |gap: f32| (gap / 2.0).min(self.symbol_scale);
+            let before = if i == 0 { self.symbol_scale } else { room(left - spans[i - 1].1) };
+            let after = if i + 1 == spans.len() { self.symbol_scale } else { room(spans[i + 1].0 - right) };
+            let offset_x = rng.random::<f32>() * self.jagged_edge * self.symbol_scale;
+            let from = if offset_x > 0.0 { left + offset_x } else { left - before };
+            let to = right + after;
+            if to <= from {
+                continue;
+            }
+            let (start, end) = (self.place(from, y_pos), self.place(to, y_pos));
+            let stroke = StrokePath::new().move_to(start.x, start.y).line_to(end.x, end.y);
+            let (mut run, rest) = match self.layout {
+                TextBoxLineMode::Flat => place_along_path(to_place, &stroke, &args),
+                TextBoxLineMode::WordsByBlankSymbol(split) => place_words_along_path(to_place, &stroke, &args, split),
+            };
+            to_place = rest;
+            // A jagged line keeps the edge it was given.
+            if offset_x == 0.0 {
+                self.align_run(&mut run, to_place.is_empty());
+            }
+            placed.extend(run);
+        }
+        (placed, to_place)
+    }
+
+    /// Whether glyphs placed on a line are where they may be: inside the
+    /// shape and clear of what's avoided.
+    fn fits(&self, glyphs: &[Symbol]) -> bool {
+        glyphs.iter().filter(|g| !g.is_blank()).all(|g| {
+            let footprint = g.footprint();
+            self.region.as_ref().is_none_or(|region| region.holds(&footprint)) && !self.avoid.is_some_and(|tree| tree.blocks(&footprint, self.padding))
+        })
+    }
+
+    /// Move a line's glyphs, set from its start, along it as `align` says:
+    /// as far as they still fit, all of them (right) or half that
+    /// (centre), or each further than the last so the last goes as far as
+    /// it can (justify; not the text's last line). In words, justified
+    /// lines spread at the blanks.
+    fn align_run(&self, run: &mut [Symbol], last: bool) {
+        let shares: Vec<f32> = match self.align {
+            Align::Left => return,
+            Align::Justify if last => return,
+            Align::Right | Align::Center => vec![1.0; run.len()],
+            Align::Justify => {
+                let letters = run.len() - run.iter().rev().take_while(|g| g.is_blank()).count();
+                let words = matches!(self.layout, TextBoxLineMode::WordsByBlankSymbol(_));
+                let gaps: Vec<usize> = (0..run.len()).map(|k| {
+                    let k = k.min(letters.saturating_sub(1));
+                    if words { run[..k].iter().filter(|g| g.is_blank()).count() } else { k }
+                }).collect();
+                let most = gaps.iter().copied().max().unwrap_or(0);
+                if most == 0 {
+                    return;
+                }
+                gaps.iter().map(|&g| g as f32 / most as f32).collect()
+            }
+        };
+        let moved = |d: f32| -> Vec<Symbol> {
+            run.iter().zip(&shares).map(|(g, share)| {
+                let mut g = g.clone();
+                g.set_position(g.position() + self.along * (d * share));
+                g
+            }).collect()
+        };
+        // The furthest they go and still fit, closed in on by halving.
+        let (mut low, mut high) = (0.0, 3.0 * self.symbol_scale);
+        if self.fits(&moved(high)) {
+            low = high;
+        } else {
+            for _ in 0..ALIGN_STEPS {
+                let mid = (low + high) / 2.0;
+                if self.fits(&moved(mid)) { low = mid } else { high = mid }
+            }
+        }
+        let d = if self.align == Align::Center { low / 2.0 } else { low };
+        if d > 0.0 {
+            run.clone_from_slice(&moved(d));
         }
     }
 
@@ -168,24 +399,89 @@ impl<'a> TextBox<'a> {
         self.along * x + self.across * y
     }
 
-    pub fn fill_bounds_with(&self, mut to_place: Vec<Symbol>, rng: &mut dyn RngCore) -> (Vec<Symbol>, Vec<Symbol>) {
+    pub fn fill_bounds_with(&self, to_place: Vec<Symbol>, rng: &mut dyn RngCore) -> (Vec<Symbol>, Vec<Symbol>) {
         let (min_y, max_y) = self.extent();
-        let mut current_y = min_y;
+        if self.region.is_none() || self.valign <= 0.0 {
+            let (placed, rest, _, _) = self.fill_from(min_y, to_place, rng);
+            return (placed, rest);
+        }
+        // Set from the top, then again lower by the share of the room left
+        // under the last line valign gives, unless that loses text that
+        // fitted from the top.
+        let (placed, rest, first, last) = self.fill_from(min_y, to_place.clone(), rng);
+        // A hair short of all of it, so the last line isn't pushed out by
+        // rounding.
+        let room = self.room_below(&last, max_y - min_y) - 0.01 * self.symbol_scale;
+        if room <= 0.0 {
+            return (placed, rest);
+        }
+        let shift = room * self.valign.min(1.0);
+        let (lower, lower_rest, _, _) = self.fill_from(first + shift, to_place.clone(), rng);
+        if !rest.is_empty() || lower_rest.is_empty() {
+            return (lower, lower_rest);
+        }
+        // Lower lines can be shorter: as far down as it all still fits.
+        let (mut low, mut high, mut best) = (0.0, shift, (placed, rest));
+        for _ in 0..VALIGN_STEPS {
+            let mid = (low + high) / 2.0;
+            let (moved, moved_rest, _, _) = self.fill_from(first + mid, to_place.clone(), rng);
+            if moved_rest.is_empty() { (low, best) = (mid, (moved, moved_rest)) } else { high = mid }
+        }
+        best
+    }
+
+    /// The room left under a line: the most there is between a glyph's
+    /// ink and the shape's edge straight below it (at a circle's bottom, the
+    /// gap under the line's middle), up to `most`.
+    fn room_below(&self, line: &[Symbol], most: f32) -> f32 {
+        let mut room: f32 = 0.0;
+        for glyph in line.iter().filter(|g| !g.is_blank()) {
+            // Its lowest point across the lines, in the turned shape.
+            let Some(low) = glyph.footprint().into_iter()
+                .map(|p| Vec2::new(p.dot(self.along), p.dot(self.across)))
+                .max_by(|a, b| a.y.total_cmp(&b.y)) else { continue };
+            let edge = self.shape.iter()
+                .flat_map(|ring| ring.iter().enumerate().map(move |(i, &a)| (a, ring[(i + 1) % ring.len()])))
+                .filter(|(a, b)| (a.x > low.x) != (b.x > low.x))
+                .map(|(a, b)| a.y + (low.x - a.x) * (b.y - a.y) / (b.x - a.x))
+                .filter(|&y| y >= low.y)
+                .fold(f32::INFINITY, f32::min);
+            if edge.is_finite() {
+                room = room.max(edge - low.y);
+            }
+        }
+        room.min(most)
+    }
+
+    /// Lines from `top` down: what's placed, what isn't, where the first
+    /// line that held anything is, and that last such line.
+    fn fill_from(&self, top: f32, mut to_place: Vec<Symbol>, rng: &mut dyn RngCore) -> (Vec<Symbol>, Vec<Symbol>, f32, Vec<Symbol>) {
+        let (min_y, max_y) = self.extent();
+        let mut current_y = top;
         let height = max_y - min_y;
         let mut placed_symbols = Vec::new();
+        let mut last = Vec::new();
+        let mut first = top;
         while current_y - min_y < height {
             let (placed_line, not_placed) = self.fill_line_with(to_place, current_y, rng);
             to_place = not_placed;
             let max_height = placed_line.iter()
                 .map(|symbol| symbol.hull_aabb().extents().y * self.symbol_scale / 2.0)
                 .fold(0.0, f32::max);
+            if !placed_line.is_empty() {
+                if last.is_empty() {
+                    first = current_y;
+                }
+                last = placed_line.clone();
+            }
             placed_symbols.extend(placed_line);
-            current_y += if max_height > 0.0 { max_height } else { self.symbol_scale };
+            let empty_step = if self.region.is_some() { EMPTY_LINE_STEP * self.symbol_scale } else { self.symbol_scale };
+            current_y += if max_height > 0.0 { max_height } else { empty_step };
             if to_place.is_empty() {
                break;
             }
         }
-        (placed_symbols, to_place)
+        (placed_symbols, to_place, first, last)
     }
 }
 
@@ -202,21 +498,46 @@ fn intersect(a: &[(f32, f32)], b: &[(f32, f32)]) -> Vec<(f32, f32)> {
     out
 }
 
+/// Where either set of spans, each left to right and apart, is: left to
+/// right and apart.
+fn union(a: &[(f32, f32)], b: &[(f32, f32)]) -> Vec<(f32, f32)> {
+    let mut all: Vec<(f32, f32)> = a.iter().chain(b).copied().collect();
+    all.sort_by(|x, y| x.0.total_cmp(&y.0));
+    let mut out: Vec<(f32, f32)> = Vec::new();
+    for (left, right) in all {
+        match out.last_mut() {
+            Some(last) if left <= last.1 => last.1 = last.1.max(right),
+            _ => out.push((left, right)),
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn textbox(shape: Vec<Vec<Vec2>>, angle: f32) -> TextBox<'static> {
-        TextBox::new(TextBoxOptions {
+    use crate::journal::symbol::{SymbolBase, SymbolType};
+    use std::rc::Rc;
+
+    fn options(shape: Vec<Vec<Vec2>>) -> TextBoxOptions<'static> {
+        TextBoxOptions {
             jagged_edge: 0.0,
             layout: TextBoxLineMode::Flat,
             shape,
-            angle,
+            angle: 0.0,
             symbol_scale: 10.0,
             avoid: None,
             padding: 0.0,
             spacing: 0.0,
-        })
+            align: Align::Left,
+            contain: true,
+            valign: 0.0,
+        }
+    }
+
+    fn textbox(shape: Vec<Vec<Vec2>>, angle: f32) -> TextBox<'static> {
+        TextBox::new(TextBoxOptions { angle, ..options(shape) })
     }
 
     #[test]
@@ -228,21 +549,98 @@ mod tests {
     }
 
     #[test]
-    fn holes_split_lines_and_glyphs_stay_out_of_reach_of_the_edge() {
+    fn lines_look_wherever_glyphs_might_go() {
         let square = |h: f32| vec![Vec2::new(-h, -h), Vec2::new(h, -h), Vec2::new(h, h), Vec2::new(-h, h)];
-        let tb = textbox(vec![square(50.0), square(10.0)], 0.0);
+        // The band from -35 to -15 misses the hole; from -7 to 13 it's
+        // across it all the way.
+        let tb = textbox(vec![square(50.0), square(15.0)], 0.0);
         assert_eq!(tb.line_spans(-30.0), vec![(-50.0, 50.0)]);
-        // The band from -2.5 to 7.5 crosses the hole.
-        assert_eq!(tb.line_spans(0.0), vec![(-50.0, -10.0), (10.0, 50.0)]);
+        assert_eq!(tb.line_spans(-2.0), vec![(-50.0, -15.0), (15.0, 50.0)]);
         // A circle drawn on past its start is filled all the same.
         let circle = StrokePath::circle(Vec2::ZERO, 80.0).flattened(0.1).into_iter().map(|(ring, _)| ring).collect();
         let spans = textbox(circle, 0.0).line_spans(0.0);
         assert!(spans.len() == 1 && spans[0].0 < -79.0 && spans[0].1 > 79.0, "{:?}", spans);
-        // A diamond narrows below the line, so the band's bottom bounds it.
+        // A diamond is widest at the band's top.
         let diamond = vec![vec![Vec2::new(0.0, -50.0), Vec2::new(50.0, 0.0), Vec2::new(0.0, 50.0), Vec2::new(-50.0, 0.0)]];
         let spans = textbox(diamond, 0.0).line_spans(10.0);
         assert_eq!(spans.len(), 1);
+        assert!((spans[0].0 + 45.0).abs() < 1e-3 && (spans[0].1 - 45.0).abs() < 1e-3, "{:?}", spans);
+    }
+
+    #[test]
+    fn loose_lines_hold_glyphs_where_their_band_is_inside() {
+        let square = |h: f32| vec![Vec2::new(-h, -h), Vec2::new(h, -h), Vec2::new(h, h), Vec2::new(-h, h)];
+        let tb = TextBox::new(TextBoxOptions { contain: false, ..options(vec![square(50.0), square(10.0)]) });
+        assert_eq!(tb.line_spans(-30.0), vec![(-50.0, 50.0)]);
+        // The band from -2.5 to 7.5 crosses the hole.
+        assert_eq!(tb.line_spans(0.0), vec![(-50.0, -10.0), (10.0, 50.0)]);
+        // A diamond narrows below the line, so the band's bottom bounds it.
+        let diamond = vec![vec![Vec2::new(0.0, -50.0), Vec2::new(50.0, 0.0), Vec2::new(0.0, 50.0), Vec2::new(-50.0, 0.0)]];
+        let spans = TextBox::new(TextBoxOptions { contain: false, ..options(diamond) }).line_spans(10.0);
+        assert_eq!(spans.len(), 1);
         assert!((spans[0].0 + 32.5).abs() < 1e-3 && (spans[0].1 - 32.5).abs() < 1e-3, "{:?}", spans);
+    }
+
+    #[test]
+    fn a_region_holds_only_what_is_wholly_inside() {
+        let square = |c: Vec2, h: f32| vec![c + Vec2::new(-h, -h), c + Vec2::new(h, -h), c + Vec2::new(h, h), c + Vec2::new(-h, h)];
+        let region = Region::new(vec![square(Vec2::ZERO, 50.0), square(Vec2::ZERO, 10.0)]);
+        assert!(region.holds(&square(Vec2::new(30.0, 0.0), 5.0)));
+        assert!(!region.holds(&square(Vec2::new(48.0, 0.0), 5.0)), "across the edge");
+        assert!(!region.holds(&square(Vec2::ZERO, 5.0)), "in the hole");
+        assert!(!region.holds(&square(Vec2::new(0.0, 0.0), 20.0)), "round the hole");
+        assert!(!region.holds(&square(Vec2::new(100.0, 0.0), 5.0)), "outside");
+    }
+
+    fn boxes(count: usize) -> Vec<Symbol> {
+        let base = Rc::new(SymbolBase::new(SymbolType::Pathed("M -1 -1 L 1 -1 L 1 1 L -1 1 Z".parse().unwrap())));
+        (0..count).map(|_| Symbol::new_default_from_base_rc(base.clone())).collect()
+    }
+
+    #[test]
+    fn justified_glyphs_fill_a_circle_to_its_edge() {
+        let r = 80.0;
+        let circle: Vec<Vec<Vec2>> = StrokePath::circle(Vec2::ZERO, r).flattened(0.1).into_iter().map(|(ring, _)| ring).collect();
+        let tb = TextBox::new(TextBoxOptions { align: Align::Justify, ..options(circle.clone()) });
+        let (placed, unplaced) = tb.fill_bounds_with(boxes(400), &mut <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(1));
+        assert!(!placed.is_empty() && !unplaced.is_empty());
+        let region = Region::new(circle);
+        for glyph in &placed {
+            assert!(region.holds(&glyph.footprint()), "{:?} leaves the circle", glyph.position());
+        }
+        // Each line's ends reach the circle, as near as a glyph's corner
+        // can; and the first line is near the top.
+        let mut lines: Vec<(f32, f32, f32)> = Vec::new();
+        for glyph in &placed {
+            let p = glyph.position();
+            match lines.iter_mut().find(|l| (l.0 - p.y).abs() < 1.0) {
+                Some(line) => { line.1 = line.1.min(p.x); line.2 = line.2.max(p.x); }
+                None => lines.push((p.y, p.x, p.x)),
+            }
+        }
+        for &(y, left, right) in &lines {
+            let far = |x: f32| [-5.0f32, 5.0].iter().flat_map(|dx| [-5.0f32, 5.0].map(|dy| Vec2::new(x + dx, y + dy).length())).fold(0.0, f32::max);
+            assert!(far(left) > r - 1.0 && far(right) > r - 1.0, "line at {} runs {}..{}", y, left, right);
+        }
+        let top = lines.iter().map(|l| l.0).fold(f32::MAX, f32::min);
+        assert!(top < -r + 10.0, "first line at {}", top);
+    }
+
+    #[test]
+    fn valign_shares_out_the_room_under_the_text() {
+        let square = vec![Vec2::new(-50.0, -50.0), Vec2::new(50.0, -50.0), Vec2::new(50.0, 50.0), Vec2::new(-50.0, 50.0)];
+        let ink = |valign: f32| {
+            let tb = TextBox::new(TextBoxOptions { valign, ..options(vec![square.clone()]) });
+            let (placed, _) = tb.fill_bounds_with(boxes(12), &mut <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(1));
+            let ys = placed.iter().flat_map(|g| g.footprint()).map(|p| p.y);
+            ys.fold((f32::MAX, f32::MIN), |(lo, hi), y| (lo.min(y), hi.max(y)))
+        };
+        let (top, _) = ink(0.0);
+        assert!(top < -49.0, "top {}", top);
+        let (_, bottom) = ink(1.0);
+        assert!(bottom > 49.0, "bottom {}", bottom);
+        let (top, bottom) = ink(0.5);
+        assert!(((top + 50.0) - (50.0 - bottom)).abs() < 1.0, "{}..{}", top, bottom);
     }
 
     #[test]

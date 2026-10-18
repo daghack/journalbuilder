@@ -1,4 +1,5 @@
 use super::avoid::{shapes_within, AvoidanceTree};
+use super::canvas::textbox::Region;
 use super::paths::{StrokePath, Walk};
 use parry2d::math::Vec2;
 
@@ -410,11 +411,13 @@ pub struct SymbolPlacementArgs<'a> {
     /// rather than to the path; they're still set along it, as close as
     /// their outlines at that angle allow.
     pub angle: Option<f32>,
+    /// A shape each glyph's ink must lie wholly inside, as a text box's.
+    pub within: Option<&'a Region>,
 }
 
 impl SymbolPlacementArgs<'_> {
     pub fn new(symbol_scale: f32) -> Self {
-        SymbolPlacementArgs { avoid: None, padding: 0.0, symbol_scale, spacing: 0.0, baseline_shift: 0.0, angle: None }
+        SymbolPlacementArgs { avoid: None, padding: 0.0, symbol_scale, spacing: 0.0, baseline_shift: 0.0, angle: None, within: None }
     }
 }
 
@@ -542,7 +545,8 @@ impl<'a> Placer<'a> {
         }
         let footprint = placed.footprint();
         let at = self.offset + start;
-        self.args.avoid.is_some_and(|tree| tree.blocks(&footprint, self.args.padding + pad))
+        self.args.within.is_some_and(|shape| !shape.holds(&footprint))
+            || self.args.avoid.is_some_and(|tree| tree.blocks(&footprint, self.args.padding + pad))
             || self.placed.blocks(&footprint, 0.0)
             || self.recent.iter().any(|(other, end)| at - end > self.args.symbol_scale && shapes_within(&footprint, other, 0.0))
     }
@@ -610,14 +614,27 @@ impl<'a> Placer<'a> {
     fn fit_word(&self, walk: &Walk, from: f32, word: &[Piece], spacing: &Spacing, split: Option<WordSplit>, pad: f32) -> Option<Run> {
         let whole = self.fit_run(walk, from, word, spacing, pad)?;
         match split {
-            Some(split) if whole.spans[0].0 > self.start(spacing, &self.shaped(walk, from, &word[0]), from) + 1e-3 => {
+            Some(split) if whole.spans[0].0 > self.first_clear(walk, from, word, spacing, pad) + 1e-3 => {
                 Some(self.split_word(walk, from, word, spacing, split).unwrap_or(whole))
             }
             _ => Some(whole),
         }
     }
 
-    /// `word` in pieces: the longest first piece that fits from `from`,
+    /// Where the word's first glyph starts: where it would be set from
+    /// `from`, or, kept inside a shape (whose lines start outside it, so
+    /// glyphs can reach its edge), the first spot from there it fits on its
+    /// own.
+    fn first_clear(&self, walk: &Walk, from: f32, word: &[Piece], spacing: &Spacing, pad: f32) -> f32 {
+        let set = self.start(spacing, &self.shaped(walk, from, &word[0]), from);
+        if self.args.within.is_none() {
+            return set;
+        }
+        self.fit_run(walk, from, &word[..1], spacing, pad).map_or(set, |run| run.spans[0].0)
+    }
+
+    /// `word` in pieces: the longest first piece that fits from where its
+    /// first glyph starts (see `first_clear`),
     /// and the rest past what stops it (broken again if need be), all
     /// `split.padding` further from what they avoid. `None` if no first
     /// piece fits, or the rest runs off the end.
@@ -628,7 +645,7 @@ impl<'a> Placer<'a> {
         if n < 2 * min {
             return None;
         }
-        let start = self.start(spacing, &self.shaped(walk, from, &word[0]), from);
+        let start = self.first_clear(walk, from, word, spacing, 0.0);
         for k in (min..=n - min).rev() {
             let Some(Ok(mut head)) = self.try_run(walk, start, &word[..k], spacing, pad) else { continue };
             let rest_from = head.spans.last().expect("a piece has glyphs").1 + self.gap();
