@@ -49,6 +49,8 @@ Useful flags (`journalbuild` with no arguments lists them all):
   defaults.
 - `--check-locks`: run every lock file's examples instead of building a
   journal.
+- `--check-gpu`: check that Darkly can render here (there's a GPU wgpu
+  can use) instead of building a journal; fails if it can't.
 
 ## Web editor
 
@@ -426,3 +428,20 @@ page 0 of each journal at quarter scale. Last, it checks that the web
 editor's renderer still builds for the browser and, if the editor's npm
 packages are installed and its wasm built, runs its unit tests and builds
 it. Renders go to a temporary directory; `--keep` keeps them.
+
+Where there's no GPU (a cloud sandbox, CI), `smoke.sh` skips the Darkly
+renders, but what journals draw is still checked: `cargo test` renders
+the smoke fixture, every page of the showcase and page 0 of every other
+journal as SVG, rasterised on the CPU, and compares each canvas with its
+image in `tests/svg_renders/` (`tests/svg_renders.rs`). Small differences
+between machines pass; moved, missing or restyled strokes don't. A
+failure writes the new render and a diff (changed pixels in red) to
+`target/svg-render-diffs/`. When a change means to alter what's drawn,
+look at those, then update the images and commit them with it:
+
+```bash
+UPDATE_SVG_RENDERS=1 cargo test --release --test svg_renders
+```
+
+Run the tests with `--release`, as `smoke.sh` does: in debug builds rhai
+rejects the bigger journal scripts as too complex.

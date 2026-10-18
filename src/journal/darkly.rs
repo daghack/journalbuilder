@@ -18,6 +18,12 @@ pub fn new_engine(width: u32, height: u32) -> DarklyEngine {
     block_on(new_engine_async(width, height)).unwrap_or_else(|e| panic!("{}", e))
 }
 
+/// Whether Darkly can render here: a GPU adapter wgpu can use, or why not.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn check_gpu() -> Result<(), String> {
+    block_on(new_engine_async(1, 1)).map(|_| ())
+}
+
 /// A headless engine on the first GPU adapter (WebGPU in a browser), or
 /// why there isn't one.
 pub async fn new_engine_async(width: u32, height: u32) -> Result<DarklyEngine, String> {

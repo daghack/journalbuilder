@@ -46,6 +46,7 @@ const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--svg
                     [--journals-dir DIR] [--output-dir DIR] [--fonts FILE]
                     [--locks-dir DIR] [--layouts-dir DIR]
        journalbuild --check-locks [--locks-dir DIR]
+       journalbuild --check-gpu
 
   --page P,...        Render only these pages, by index (0-based) or by
                       name. Other pages' existing output is kept.
@@ -91,11 +92,16 @@ const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--svg
   --layouts-dir DIR   Directory of page layout files, for layout(name)
                       (default: the repository's webapp/layouts/).
   --check-locks       Run every lock file's examples through lock and
-                      unlock, instead of building a journal.";
+                      unlock, instead of building a journal.
+  --check-gpu         Check that Darkly can render (there's a GPU wgpu can
+                      use), instead of building a journal; fails if not.
+                      Without one, --svg renders still work, and cargo
+                      test checks them (tests/svg_renders.rs).";
 
 struct Args {
     strict_glyphs: bool,
     check_locks: bool,
+    check_gpu: bool,
     journal_name: String,
     journals_dir: String,
     pages: Option<Vec<String>>,
@@ -118,6 +124,7 @@ fn parse_args() -> Result<Args, String> {
     let mut pdf = false;
     let mut strict_glyphs = false;
     let mut check_locks = false;
+    let mut check_gpu = false;
     let mut scale = 1.0;
     // Supersample by default: Darkly aliases brush marks thinner than about
     // a pixel into ragged edges. Measured on journal_entry_17, 1.2x costs
@@ -139,6 +146,7 @@ fn parse_args() -> Result<Args, String> {
             "--pdf" => pdf = true,
             "--strict-glyphs" => strict_glyphs = true,
             "--check-locks" => check_locks = true,
+            "--check-gpu" => check_gpu = true,
             "--scale" => {
                 let value = args.next().ok_or("--scale needs a value, e.g. --scale 0.25")?;
                 scale = value.parse::<f32>().ok().filter(|s| *s > 0.0)
@@ -182,6 +190,12 @@ fn parse_args() -> Result<Args, String> {
             extra => return Err(format!("unexpected argument '{}'", extra)),
         }
     }
+    if check_gpu {
+        if journal_name.is_some() || check_locks {
+            return Err("--check-gpu only checks for a GPU, so it takes no journal name or --check-locks".to_string());
+        }
+        journal_name = Some(String::new());
+    }
     let journal_name = match (journal_name, check_locks) {
         (Some(name), false) => name,
         (None, true) => String::new(),
@@ -191,7 +205,7 @@ fn parse_args() -> Result<Args, String> {
     if stitch.is_some() && pdf {
         return Err("--stitch lays rendered pages side by side, so it can't go with --pdf".to_string());
     }
-    Ok(Args { strict_glyphs, check_locks, journal_name, journals_dir, pages, svg, scale, supersample, output_dir, font_file, locks_dir, layouts_dir, parchment, pdf, stitch })
+    Ok(Args { strict_glyphs, check_locks, check_gpu, journal_name, journals_dir, pages, svg, scale, supersample, output_dir, font_file, locks_dir, layouts_dir, parchment, pdf, stitch })
 }
 
 fn main() {
@@ -199,7 +213,14 @@ fn main() {
         eprintln!("error: {}\n\n{}", err, USAGE);
         std::process::exit(1);
     });
-    let result = if args.check_locks { check_locks(&args.locks_dir) } else { run(&args) };
+    let result = if args.check_gpu {
+        darkly::check_gpu().map(|()| println!("ok   Darkly can render: there's a GPU"))
+            .map_err(|err| format!("Darkly can't render, no GPU: {}", err))
+    } else if args.check_locks {
+        check_locks(&args.locks_dir)
+    } else {
+        run(&args)
+    };
     if let Err(err) = result {
         eprintln!("error: {}", err);
         std::process::exit(1);

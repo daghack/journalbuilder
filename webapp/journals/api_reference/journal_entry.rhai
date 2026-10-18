@@ -1100,6 +1100,7 @@ doc += api("journalbuild NAME [flags]", "Runs journals/NAME/journal_entry.rhai a
 doc += api("journalbuild --check-locks [--locks-dir DIR]", "Runs every lock file's examples through lock and unlock instead of building a journal.", [
 	opt("--locks-dir DIR", "the repository's locks/", "Where lock files are.", "a directory."),
 ]);
+doc += api("journalbuild --check-gpu", "Checks that Darkly can render here, that there's a GPU wgpu can use, instead of building a journal. Fails if there isn't one; --svg renders still work without one.");
 
 doc.trim();
 

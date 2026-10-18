@@ -8,6 +8,10 @@
 #      reduced scale, and every page of webapp/journals/showcase at reduced scale.
 #   4. Renders page 0 of every journal in webapp/journals/ at reduced scale, Darkly
 #      output only.
+#      Steps 3 and 4 need a GPU and are skipped without one (journalbuild
+#      --check-gpu). Step 1 still checks what journals draw then: its
+#      tests/svg_renders.rs compares SVG renders, made on the CPU, with
+#      committed images.
 #   5. Checks the web editor (webapp/): its renderer still builds for the
 #      browser and, once its npm packages are installed and its wasm built
 #      (webapp/README.md), its unit tests pass and it builds.
@@ -97,6 +101,10 @@ render() {
 }
 
 echo "== renders"
+if ! gpu_output=$("$BIN" --check-gpu 2>&1); then
+	echo "skip Darkly renders: no GPU ($(tail -n 1 <<<"$gpu_output" | cut -c1-120))"
+	echo "     SVG renders were still compared with tests/svg_renders/ by cargo test"
+else
 render fixture darkly_page_0_0.png darkly_page_1_0.png darkly_page_1_1.png darkly_lock_maze.png darkly_art_0.png \
 	darkly_art_0_0_0.png darkly_art_1_1_0.png darkly_book_0_0.png darkly_book_1_0.png \
 	page_0_0.png page_1_0.png page_1_1.png lock_maze.png art_0.png art_0_1_0.png \
@@ -129,6 +137,7 @@ for journal in webapp/journals/*/; do
 		fi
 	fi
 done
+fi
 
 echo "== web editor"
 if ! rustup target list --installed 2>/dev/null | grep -q wasm32-unknown-unknown; then

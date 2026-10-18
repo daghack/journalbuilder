@@ -106,3 +106,13 @@ plain font's dots and colons don't render.
 `./scripts/smoke.sh` builds in release mode, runs the tests (every journal
 script is evaluated), checks the lock files, and renders the smoke fixture,
 the showcase and page 0 of every journal at reduced scale.
+
+Without a GPU (a cloud sandbox), smoke.sh skips the Darkly renders, and
+`tests/svg_renders.rs` is what checks drawing: it compares SVG renders of
+the smoke fixture, the showcase and page 0 of every journal, made on the
+CPU, with the images in `tests/svg_renders/`. A change that means to
+alter what's drawn will fail it: look at the diffs it writes to
+`target/svg-render-diffs/`, then update the images and commit them with
+the change (`UPDATE_SVG_RENDERS=1 cargo test --release --test
+svg_renders`). A new journal goes in its `first_pages!` list. Run tests
+with `--release`: debug builds reject the bigger scripts as too complex.

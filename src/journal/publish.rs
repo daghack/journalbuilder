@@ -299,17 +299,26 @@ pub fn svgs(entry: &Entry, dir: &str, scale: f32, only: Option<&[usize]>) -> Res
     let mut progress = pages_progress(entry, "SVGs", only);
     for (i, page) in entry.selected_pages(only) {
         progress.start(&page.label(i));
-        for (label, canvas) in page.rendered_canvases() {
-            let name = format!("{}_{}", page.label(i), label);
+        for (name, svg, png) in page_svg_renders(page, i, scale) {
             let (svg_file, png_file) = (format!("{}/{}.svg", dir, name), format!("{}/{}.png", dir, name));
-            let seed = canvas_svg_seed(&canvas, &name);
-            let (svg, png) = canvas.to_svg_and_png(2.0 * scale, page.svg_style(), seed);
             std::fs::write(&svg_file, svg).map_err(|e| write_error(&svg_file, e))?;
             std::fs::write(&png_file, png).map_err(|e| write_error(&png_file, e))?;
         }
         progress.step();
     }
     Ok(())
+}
+
+/// The SVG renders of page `index`'s canvases as `svgs` writes them: each
+/// one's file name (`{page}_{canvas}`), SVG and PNG. Needs no GPU, so
+/// tests compare these (tests/svg_renders.rs).
+pub fn page_svg_renders(page: &Page, index: usize, scale: f32) -> Vec<(String, String, Vec<u8>)> {
+    page.rendered_canvases().map(|(label, canvas)| {
+        let name = format!("{}_{}", page.label(index), label);
+        let seed = canvas_svg_seed(&canvas, &name);
+        let (svg, png) = canvas.to_svg_and_png(2.0 * scale, page.svg_style(), seed);
+        (name, svg, png)
+    }).collect()
 }
 
 #[cfg(test)]
