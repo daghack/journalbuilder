@@ -562,7 +562,7 @@ impl Lock for RhaiLock {
 /// symbol helpers and mazes. Nothing random and nothing drawn, so a lock is
 /// a pure function of its options and values.
 fn lock_engine(sources: &Sources) -> Engine {
-    let mut engine = Engine::new();
+    let mut engine = crate::journal::rhaientries::rhai_engine();
     // `import "lib/permutations" as perm;` loads <dir>/lib/permutations.rhai.
     engine.set_module_resolver(sources.module_resolver());
     register_maze(&mut engine);

@@ -129,6 +129,18 @@ impl ScriptError {
     }
 }
 
+/// A bare rhai engine for journal, lock and layout scripts. rhai halves
+/// how deeply expressions may nest in builds with debug assertions (32,
+/// and 16 in functions, against 64 and 32), for fear of the bigger stack
+/// frames of unoptimized code. rhai is optimized even in dev builds here
+/// (Cargo.toml), so this uses release's limits: debug builds and `cargo
+/// test` without --release take the scripts release builds do.
+pub fn rhai_engine() -> Engine {
+    let mut engine = Engine::new();
+    engine.set_max_expr_depths(64, 32);
+    engine
+}
+
 pub struct JournalEngine {
     engine: Engine,
     warnings: Rc<RefCell<Vec<String>>>,
@@ -157,7 +169,7 @@ impl JournalEngine {
     /// An engine with the lock files in `locks` and the layout files in
     /// `layouts`.
     pub fn with_sources(symdict: Rc<FontBook>, locks: Sources, layouts: Sources) -> Self {
-        let mut engine = Engine::new();
+        let mut engine = rhai_engine();
         let rng = random::register(&mut engine);
         let text: TextSource = (symdict.clone(), rng.clone());
 

@@ -519,7 +519,7 @@ mod tests {
     use std::collections::HashSet;
 
     fn engine() -> Engine {
-        let mut engine = Engine::new();
+        let mut engine = crate::journal::rhaientries::rhai_engine();
         register(&mut engine, Rc::new(LockLibrary::new(DEFAULT_LOCKS_DIR)));
         engine
     }

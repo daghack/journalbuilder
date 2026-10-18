@@ -442,6 +442,3 @@ look at those, then update the images and commit them with it:
 ```bash
 UPDATE_SVG_RENDERS=1 cargo test --release --test svg_renders
 ```
-
-Run the tests with `--release`, as `smoke.sh` does: in debug builds rhai
-rejects the bigger journal scripts as too complex.

@@ -114,5 +114,4 @@ CPU, with the images in `tests/svg_renders/`. A change that means to
 alter what's drawn will fail it: look at the diffs it writes to
 `target/svg-render-diffs/`, then update the images and commit them with
 the change (`UPDATE_SVG_RENDERS=1 cargo test --release --test
-svg_renders`). A new journal goes in its `first_pages!` list. Run tests
-with `--release`: debug builds reject the bigger scripts as too complex.
+svg_renders`). A new journal goes in its `first_pages!` list.
