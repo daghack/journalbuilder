@@ -22,8 +22,10 @@ page you pick in the middle. Pages redraw as you type.
   Shift S). In Chromium browsers, Save writes back to the file you opened;
   elsewhere it downloads. The Examples menu opens the repository's
   journals. Your work is kept in the browser between visits.
-- **Export.** Export as PDF (as `journalbuild --pdf` makes it) or as a zip
-  of PNGs, one per page, rendered with Darkly, with a progress bar. Cancel
+- **Export.** One Export button opens a dialog: export as PDF (as
+  `journalbuild --pdf` makes it) or as a zip of PNGs, one per page, rendered
+  with Darkly, with a progress bar. The dialog sets the scale, supersample,
+  parchment, and (for PNGs) `stitch`, as journalbuild's flags do. Cancel
   stops it.
 
 Darkly previews and exports need WebGPU: a current Chrome, Edge or Safari.
