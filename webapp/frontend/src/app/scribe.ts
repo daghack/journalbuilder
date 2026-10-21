@@ -24,13 +24,15 @@ export interface Evaluation {
   error: ScriptError | null;
   millis: number;
   /** What the workspace changed: edited fonts, lock files of its own. */
-  workspace?: { editedFonts: boolean; locks: string[] };
+  workspace?: { editedFonts: boolean; locks: string[]; renderers?: string[]; chains?: string[] };
 }
 
 /** What the workers are sent of the workspace (see WorkspaceService). */
 export interface WorkspacePayload {
   fonts: string | null;
   locks: Record<string, string>;
+  renderers: Record<string, string>;
+  chains: Record<string, string>;
 }
 
 /** How Darkly renders pages, as journalbuild's flags set it. */
@@ -74,7 +76,48 @@ export type DarklyReply =
 // ---- the tools worker: font previews and the lock editor ----
 
 /** The renderer functions the tools worker calls (see webapp/wasm). */
-export type ToolFunction = 'previewSvg' | 'builtinFonts' | 'lockTypes' | 'lockPorts' | 'runChain' | 'readChain' | 'checkLock';
+export type ToolFunction = 'previewSvg' | 'builtinFonts' | 'lockTypes' | 'lockPorts' | 'chainTypes' | 'runChain' | 'readChain' | 'valueKinds'
+  | 'rendererTypes' | 'rendererPorts' | 'renderPreview' | 'rendererSource';
+
+/** A chain file: chains/*.rhai, lock types wired together that journals use with chain(name). */
+export interface ChainType {
+  name: string;
+  description?: string;
+  /** Whether it's one of the workspace's chain files. */
+  workspace: boolean;
+  /** Whether it's compiled in, from webapp/chains/ (a workspace copy stands in for it). */
+  builtin?: boolean;
+  /** Why it doesn't load, if it doesn't. */
+  error?: string;
+}
+
+/** A renderer type: a renderers/*.rhai file that draws lock values as canvases. */
+export interface RendererType {
+  name: string;
+  file?: string;
+  description?: string;
+  /** Its options' defaults: every option is optional, its type its default's. */
+  options?: Record<string, unknown>;
+  /** Its inputs, `[name, type]`, with its default options. */
+  inputs?: [string, string][];
+  /** Whether it has an example() to preview with. */
+  example?: boolean;
+  /** Whether it's one of the workspace's renderer files. */
+  workspace: boolean;
+  /** Why it doesn't load, if it doesn't. */
+  error?: string;
+}
+
+/** What a renderer draws, a page per canvas, as SVG. */
+export interface RenderPreview {
+  pages: { svg: string | null; view: [number, number, number, number] | null }[];
+}
+
+/** A value kind: a lock value type of plain data, and rhai that makes one. */
+export interface ValueKind {
+  name: string;
+  example: string | null;
+}
 
 export type ToolsRequest =
   | { type: 'init'; wasmUrl: string }
@@ -131,7 +174,13 @@ export interface LockValue {
   type: string;
   text?: string;
   json: unknown;
-  maze?: { width: number; height: number; cells: { x: number; y: number; step: number; symbol: number }[]; path: string };
+  /** A value kind's default drawing (a StarChart's pages, a HuffmanCode's tree). */
+  art?: {
+    viewBox: [number, number, number, number];
+    parts: { name: string; d: string }[];
+    labels: { x: number; y: number; text: string }[];
+    labelSize: number;
+  };
 }
 
 export interface ChainRun {
@@ -142,7 +191,7 @@ export interface ChainRun {
   unlockError: string | null;
 }
 
-/** A composite lock file read back: `chain` is what its chain(o) returned. */
+/** A chain file read back: `chain` is what its chain(o) returned. */
 export interface ChainFile {
   name: string;
   description: string;
@@ -151,12 +200,12 @@ export interface ChainFile {
     locks: Record<string, { type: string; options?: Record<string, unknown> }>;
     connect?: [string, string][];
     fixed?: Record<string, unknown>;
-    inputs: Record<string, string>;
-    outputs: Record<string, string>;
+    /** Renderers attached, each input drawing a port, "lock.port". */
+    renderers?: Record<string, { type: string; options?: Record<string, unknown>; inputs?: Record<string, string> }>;
   };
   layout: Record<string, [number, number]> | null;
-  /** What its examples() returns, if it has one. */
-  examples: { options?: Record<string, unknown>; inputs?: Record<string, unknown> }[] | null;
+  /** What its example() returns, if it has one: a value for each open input, by port. */
+  example: Record<string, unknown> | null;
   promotionsLost: boolean;
 }
 

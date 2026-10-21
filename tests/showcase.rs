@@ -1,6 +1,6 @@
 //! Keeps webapp/journals/showcase up to date: it should show everything journals
-//! can draw with. These fail when something scripts can call, a font, or a
-//! lock type isn't in it (see CLAUDE.md). Brushes and glyphs needn't be
+//! can draw with. These fail when something scripts can call, a font, a
+//! lock type, a renderer or a chain file isn't in it (see CLAUDE.md). Brushes and glyphs needn't be
 //! listed: the showcase draws every one of `brush_names()`, and every
 //! variant of every glyph of every font in `font_names()`.
 
@@ -71,6 +71,40 @@ fn every_lock_type_is_in_the_showcase() {
         }
     }
     assert!(missing.is_empty(), "add these lock types to the showcase's locks page: {:?}", missing);
+}
+
+#[test]
+fn every_chain_file_is_in_the_showcase() {
+    let script = showcase();
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/webapp/chains");
+    let mut missing = Vec::new();
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_some_and(|x| x == "rhai") {
+            let name = path.file_stem().unwrap().to_string_lossy().into_owned();
+            if !script.contains(&format!("chain(\"{}\"", name)) {
+                missing.push(name);
+            }
+        }
+    }
+    assert!(missing.is_empty(), "use these chain files with chain(name) in the showcase: {:?}", missing);
+}
+
+#[test]
+fn every_renderer_is_in_the_showcase() {
+    let script = showcase();
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/webapp/renderers");
+    let mut missing = Vec::new();
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_some_and(|x| x == "rhai") {
+            let name = path.file_stem().unwrap().to_string_lossy().into_owned();
+            if !script.contains(&format!("\"{}\"", name)) {
+                missing.push(name);
+            }
+        }
+    }
+    assert!(missing.is_empty(), "attach these renderers on the showcase's renderers page: {:?}", missing);
 }
 
 #[test]

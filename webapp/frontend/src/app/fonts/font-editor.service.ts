@@ -195,6 +195,14 @@ export class FontEditorService {
       this.picked.set([]);
       this.pickedSegment.set(null);
     });
+    // The workspace cleared: start again from the built-in fonts.
+    effect(() => {
+      if (!this.workspace.cleared()) return;
+      untracked(() => {
+        const builtin = this.builtin();
+        if (builtin !== null) this.load(builtin, 'fonts.json', null);
+      });
+    });
     void this.start();
   }
 

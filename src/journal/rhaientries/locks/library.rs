@@ -3,13 +3,16 @@
 //! values; webapp/locks/README.md describes what a lock file defines. Helpers
 //! they share live in `<locks dir>/lib/`, for `import "lib/<name>"`. A
 //! composite lock file wires other lock types together instead (`chain`).
+//! Chain files, `<chains dir>/<name>.rhai`, wire lock types together for
+//! journals to use with `chain(name)` (`chain_file`).
 
 mod chain;
+mod chain_file;
 mod inspect;
 
 pub use inspect::{from_json, to_json, value_from_test, value_view, OptionInfo, Ports, RunResult, TypeInfo, ValueView};
 
-use super::{parse_type, register_maze, Maze};
+use super::parse_type;
 use crate::lockbuilder::{base_n_symbols, symbols_to_string, InfoVar, InfoVarSet, InfoVarType, InfoVarTypeSet, Lock};
 use super::super::sources::Sources;
 use rhai::{Array, Dynamic, Engine, EvalAltResult, FuncArgs, Map, Scope, AST};
@@ -24,6 +27,9 @@ type RhaiResult<T> = Result<T, Box<EvalAltResult>>;
 
 /// The repository's lock files.
 pub const DEFAULT_LOCKS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/webapp/locks");
+
+/// The repository's chain files.
+pub const DEFAULT_CHAINS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/webapp/chains");
 
 /// The functions every lock file defines: name, parameter count, and how
 /// errors show it.
@@ -47,8 +53,11 @@ pub type ExampleResults = Vec<(String, Result<usize, String>)>;
 /// The lock types in a directory of lock files, each loaded when first used.
 pub struct LockLibrary {
     sources: Sources,
+    /// The chain files, run in the same engine.
+    chains: Sources,
     engine: Engine,
     types: RefCell<HashMap<String, Rc<LockType>>>,
+    chain_files: RefCell<HashMap<String, Rc<LockType>>>,
     /// The composite types being built, outermost first, to catch one
     /// that includes itself.
     building: RefCell<Vec<String>>,
@@ -122,6 +131,35 @@ impl OptionKind {
     }
 }
 
+/// The `given` options, each `declared` and of its declared type, with
+/// defaults for those not given.
+fn check_options(declared: &BTreeMap<String, OptionSpec>, given: Map) -> Result<Map, String> {
+    if let Some(unknown) = given.keys().find(|name| !declared.contains_key(name.as_str())) {
+        let known = match declared.len() {
+            0 => "it takes no options".to_string(),
+            _ => {
+                let options: Vec<String> = declared.iter()
+                    .map(|(name, spec)| format!("{} ({})", name, spec.kind.describe()))
+                    .collect();
+                format!("options are {}", options.join(", "))
+            }
+        };
+        return Err(format!("unknown option '{}'; {}", unknown, known));
+    }
+    let mut options = Map::new();
+    for (name, spec) in declared {
+        let value = match given.get(name.as_str()) {
+            None => spec.default.clone()
+                .ok_or_else(|| format!("missing option '{}' ({})", name, spec.kind.describe()))?,
+            Some(value) => spec.kind.accept(value.clone()).ok_or_else(|| format!(
+                "option '{}' should be {}, got {}", name, spec.kind.describe(), spec.kind.describe_value(value),
+            ))?,
+        };
+        options.insert(name.into(), value);
+    }
+    Ok(options)
+}
+
 fn option_spec(function: &str, kind: OptionKind, default: Option<Dynamic>) -> RhaiResult<OptionSpec> {
     let default = match default {
         None => None,
@@ -168,9 +206,24 @@ impl LockLibrary {
         Self::with_sources(Sources::dir(dir))
     }
 
-    /// The lock types in `sources`, with their helpers in `lib/`.
+    /// The lock types in `sources`, with their helpers in `lib/`, and no
+    /// chain files.
     pub fn with_sources(sources: Sources) -> Self {
-        LockLibrary { engine: lock_engine(&sources), sources, types: RefCell::default(), building: RefCell::default() }
+        LockLibrary {
+            engine: lock_engine(&sources),
+            sources,
+            chains: Sources::embedded("chains", &[]),
+            types: RefCell::default(),
+            chain_files: RefCell::default(),
+            building: RefCell::default(),
+        }
+    }
+
+    /// The library with the chain files in `chains`.
+    pub fn with_chains(mut self, chains: Sources) -> Self {
+        self.chains = chains;
+        self.chain_files = RefCell::default();
+        self
     }
 
     /// The lock types in the directory, sorted.
@@ -357,19 +410,24 @@ impl LockLibrary {
                 return Err(format!("{} doesn't define {}", lock_type.file, missing.join(", ")));
             }
         }
-        let declared = self.call(&lock_type, "options", ())
+        lock_type.options = self.declared_options(&lock_type)?;
+        Ok(lock_type)
+    }
+
+    /// The options a file's options() declares.
+    fn declared_options(&self, lock_type: &LockType) -> Result<BTreeMap<String, OptionSpec>, String> {
+        let declared = self.call(lock_type, "options", ())
             .map_err(|e| e.located(&lock_type.file))?
             .try_cast::<Map>()
             .ok_or_else(|| format!("{}: options() must return a map of option names to types, e.g. #{{ base: integer() }}", lock_type.file))?;
-        for (name, spec) in declared {
+        declared.into_iter().map(|(name, spec)| {
             let got = describe(spec.type_name());
             let spec = spec.try_cast::<OptionSpec>().ok_or_else(|| format!(
                 "{}: options() should declare '{}' with its type, e.g. integer(), string(\"default\") or one_of([...]), got {}",
                 lock_type.file, name, got,
             ))?;
-            lock_type.options.insert(name.to_string(), spec);
-        }
-        Ok(lock_type)
+            Ok((name.to_string(), spec))
+        }).collect()
     }
 
     fn call(&self, lock_type: &LockType, function: &str, args: impl FuncArgs) -> Result<Dynamic, ScriptError> {
@@ -404,6 +462,9 @@ impl LockLibrary {
     /// imported helpers by their import path.
     fn shown_path(&self, source: &str) -> String {
         let path = Path::new(source);
+        if let Ok(relative) = path.strip_prefix(self.chains.root()) {
+            return format!("chains/{}", relative.to_string_lossy());
+        }
         let relative = path.strip_prefix(self.sources.root()).unwrap_or(path);
         let mut shown = relative.to_string_lossy().into_owned();
         if relative.extension().is_none() {
@@ -438,31 +499,7 @@ impl RhaiLock {
     /// The given options, each declared and of its declared type, with
     /// defaults for those not given.
     fn checked_options(&self, given: Map) -> Result<Map, String> {
-        let declared = &self.lock_type.options;
-        if let Some(unknown) = given.keys().find(|name| !declared.contains_key(name.as_str())) {
-            let known = match declared.len() {
-                0 => "it takes no options".to_string(),
-                _ => {
-                    let options: Vec<String> = declared.iter()
-                        .map(|(name, spec)| format!("{} ({})", name, spec.kind.describe()))
-                        .collect();
-                    format!("options are {}", options.join(", "))
-                }
-            };
-            return Err(self.error(format!("unknown option '{}'; {}", unknown, known)));
-        }
-        let mut options = Map::new();
-        for (name, spec) in declared {
-            let value = match given.get(name.as_str()) {
-                None => spec.default.clone()
-                    .ok_or_else(|| self.error(format!("missing option '{}' ({})", name, spec.kind.describe())))?,
-                Some(value) => spec.kind.accept(value.clone()).ok_or_else(|| self.error(format!(
-                    "option '{}' should be {}, got {}", name, spec.kind.describe(), spec.kind.describe_value(value),
-                )))?,
-            };
-            options.insert(name.into(), value);
-        }
-        Ok(options)
+        check_options(&self.lock_type.options, given).map_err(|e| self.error(e))
     }
 
     /// `inputs(o)` or `outputs(o)`: value names and their types.
@@ -559,13 +596,23 @@ impl Lock for RhaiLock {
 }
 
 /// The engine lock files run in: rhai's standard library, option types,
-/// symbol helpers and mazes. Nothing random and nothing drawn, so a lock is
-/// a pure function of its options and values.
+/// symbol helpers, value kinds' kernels and seeded generators. Nothing
+/// unseeded and nothing drawn, so a lock is a pure function of its options
+/// and values.
 fn lock_engine(sources: &Sources) -> Engine {
     let mut engine = crate::journal::rhaientries::rhai_engine();
     // `import "lib/permutations" as perm;` loads <dir>/lib/permutations.rhai.
     engine.set_module_resolver(sources.module_resolver());
-    register_maze(&mut engine);
+    // Every value kind's kernels, as their modules (stars::layout(code)),
+    // and new_maze, maze.cells() and maze.fill(symbols).
+    crate::journal::kinds::register(&mut engine, |_, _| {});
+    // new_random(seed): the only randomness a lock file has, the same
+    // every run for the same seed.
+    engine.register_type_with_name::<Random>("Random")
+        .register_fn("new_random", |seed: rhai::INT| Random::new(seed))
+        .register_fn("next", |r: &mut Random| r.next())
+        .register_fn("range", |r: &mut Random, low: Dynamic, high: Dynamic| -> RhaiResult<f64> { r.range(&low, &high) })
+        .register_fn("pick", |r: &mut Random, items: Array| -> RhaiResult<Dynamic> { r.pick(&items) });
     // Option types for options(): integer() is a required integer,
     // integer(3) one that defaults to 3, and so on.
     engine.register_type_with_name::<OptionSpec>("OptionSpec");
@@ -613,6 +660,35 @@ fn lock_engine(sources: &Sources) -> Engine {
     engine
 }
 
+/// A seeded generator for lock files: `next()` from 0 up to 1, `range(low,
+/// high)` and `pick(items)`. Copies share it, so a helper handed one moves
+/// it on for its caller too.
+#[derive(Clone)]
+pub struct Random(std::rc::Rc<std::cell::RefCell<rand::rngs::StdRng>>);
+
+impl Random {
+    fn new(seed: rhai::INT) -> Random {
+        use rand::SeedableRng;
+        Random(std::rc::Rc::new(std::cell::RefCell::new(rand::rngs::StdRng::seed_from_u64(seed as u64))))
+    }
+    fn next(&mut self) -> f64 {
+        use rand::Rng;
+        self.0.borrow_mut().random_range(0.0..1.0)
+    }
+    fn range(&mut self, low: &Dynamic, high: &Dynamic) -> RhaiResult<f64> {
+        let n = |v: &Dynamic| v.as_float().or_else(|_| v.as_int().map(|i| i as f64)).map_err(|_| -> Box<EvalAltResult> { "range: low and high should be numbers".into() });
+        let (low, high) = (n(low)?, n(high)?);
+        Ok(low + (high - low) * self.next())
+    }
+    fn pick(&mut self, items: &Array) -> RhaiResult<Dynamic> {
+        if items.is_empty() {
+            return Err("pick: there's nothing to pick from".into());
+        }
+        let i = ((self.next() * items.len() as f64) as usize).min(items.len() - 1);
+        Ok(items[i].clone())
+    }
+}
+
 /// `symbols(base, text[, #{ lenient }])` in lock files: the symbols as an
 /// array of whole numbers.
 fn lock_file_symbols(base: Dynamic, text: &str, options: Map) -> RhaiResult<Array> {
@@ -636,14 +712,28 @@ fn valid_type_name(name: &str) -> bool {
 }
 
 /// A value a lock file returned, checked against its declared type.
+/// A value as lock files write it (symbols as arrays), as a value of
+/// `var_type`: how a chain file's fixed values go in.
+pub(super) fn value_from_script(value: Dynamic, var_type: &InfoVarType) -> Result<InfoVar, String> {
+    from_script(value, var_type)
+}
+
 fn from_script(value: Dynamic, var_type: &InfoVarType) -> Result<InfoVar, String> {
     let expected = match var_type {
         InfoVarType::BaseNSymbol(base) => {
             check_symbols(value.clone(), *base)?;
             None
         }
-        InfoVarType::Named(name) if name == "Maze" => Some((value.is::<Maze>(), "a Maze")),
         InfoVarType::Named(name) if name == "String" => Some((value.is_string(), "a string")),
+        InfoVarType::Named(name) => match crate::journal::kinds::get(name) {
+            // A value kind's values are checked against its schema.
+            Some(_) if !value.is_map() => return Err(format!("expected a {}, got {}", name, describe(value.type_name()))),
+            Some(kind) => {
+                crate::journal::kinds::check(kind, &value).map_err(|err| format!("a bad {}: {}", name, err))?;
+                None
+            }
+            None => None,
+        },
         _ => None,
     };
     if let Some((false, expected)) = expected {

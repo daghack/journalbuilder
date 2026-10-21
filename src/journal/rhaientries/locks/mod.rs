@@ -12,44 +12,108 @@
 //! result.text("vig.cipher_text");
 //! lock.unlock(result).text("vig.plain_text");   // "SECRET"
 //! ```
+//!
+//! `chain(name)` builds the same from a chain file, `webapp/chains/<name>.rhai`,
+//! with the renderers it attaches.
 
 mod library;
 
-pub use library::{LockLibrary, DEFAULT_LOCKS_DIR};
+pub use library::{LockLibrary, DEFAULT_CHAINS_DIR, DEFAULT_LOCKS_DIR};
 pub use library::{from_json, to_json, value_from_test, value_view, OptionInfo, Ports, RunResult, TypeInfo, ValueView};
 
 use rhai::{Array, CustomType, Dynamic, Engine, EvalAltResult, Map, TypeBuilder};
 use crate::lockbuilder::{
     base_n_symbols, compatible, symbols_to_string, CompositeLock, InfoVar, InfoVarSet, InfoVarType, Lock,
 };
-use crate::journal::canvas::artistic::{BuiltMaze, MazeTraversalStrategy};
-use rand::Fill;
 use super::Path;
+use super::renderers::RendererLibrary;
 use std::collections::HashMap;
 use std::rc::Rc;
 
 type RhaiResult<T> = Result<T, Box<EvalAltResult>>;
 
-/// Register the lock API, with lock types from `library`.
-pub fn register(engine: &mut Engine, library: Rc<LockLibrary>) {
+/// Register the lock API, with lock types from `library` and renderer
+/// types from `renderers`.
+pub fn register(engine: &mut Engine, library: Rc<LockLibrary>, renderers: Rc<RendererLibrary>) {
     engine
         .build_type::<LockBuilder>()
         .build_type::<LockValue>()
         .build_type::<LockResult>()
-        .register_fn("new_lock", move |name: &str| LockBuilder::new(library.clone(), name))
+        .register_fn("new_lock", {
+            let (library, renderers) = (library.clone(), renderers.clone());
+            move |name: &str| LockBuilder::new(library.clone(), renderers.clone(), name)
+        })
+        .register_fn("chain", {
+            let (library, renderers) = (library.clone(), renderers.clone());
+            move |ctx: rhai::NativeCallContext, name: &str| LockBuilder::from_chain(&ctx, library.clone(), renderers.clone(), name, Map::new())
+        })
+        .register_fn("chain", move |ctx: rhai::NativeCallContext, name: &str, options: Map| LockBuilder::from_chain(&ctx, library.clone(), renderers.clone(), name, options))
         .register_fn("symbols", |base: i64, text: &str| symbols(base, text, &Map::new()))
         .register_fn("symbols", |base: i64, text: &str, options: Map| symbols(base, text, &options));
-    register_maze(engine);
-    // Paths are for drawing, so lock files don't get this one.
-    engine.register_fn("path", |maze: &mut Maze| maze.path());
+    // A maze's corridors as a path: paths are for drawing, so lock files
+    // don't get this one.
+    engine.register_fn("path", |maze: &mut Map| -> RhaiResult<Path> {
+        Ok(Path::new(crate::journal::kinds::maze::built("path", maze)?.corridors()))
+    });
+    // Every value kind's kernels, as in lock files; journals' huffman::code
+    // also takes a symbols(...) value, its base its own.
+    crate::journal::kinds::register(engine, |name, module| {
+        if name == "huffman" {
+            module.set_native_fn("code", |ctx: rhai::NativeCallContext, symbols: LockValue, output_base: i64| -> RhaiResult<Map> {
+                huffman_code(&ctx, &symbols, output_base, &Map::new())
+            });
+            module.set_native_fn("code", |ctx: rhai::NativeCallContext, symbols: LockValue, output_base: i64, options: Map| -> RhaiResult<Map> {
+                huffman_code(&ctx, &symbols, output_base, &options)
+            });
+            // As lock files write it, the base given too: the same text
+            // runs in both.
+            module.set_native_fn("code", |ctx: rhai::NativeCallContext, symbols: LockValue, input_base: i64, output_base: i64| -> RhaiResult<Map> {
+                same_base(&ctx, &symbols, input_base)?;
+                huffman_code(&ctx, &symbols, output_base, &Map::new())
+            });
+            module.set_native_fn("code", |ctx: rhai::NativeCallContext, symbols: LockValue, input_base: i64, output_base: i64, options: Map| -> RhaiResult<Map> {
+                same_base(&ctx, &symbols, input_base)?;
+                huffman_code(&ctx, &symbols, output_base, &options)
+            });
+        }
+    });
 }
 
-/// `new_maze` and the `Maze` type, for journals and lock files alike.
-fn register_maze(engine: &mut Engine) {
-    engine
-        .build_type::<Maze>()
-        .register_fn("new_maze", |width: i64, height: i64| new_maze(width, height, &Map::new()))
-        .register_fn("new_maze", |width: i64, height: i64, options: Map| new_maze(width, height, &options));
+/// `huffman::code(symbols(base, text), output_base[, #{ smoothing }])` in
+/// journals.
+fn huffman_code(ctx: &rhai::NativeCallContext, symbols: &LockValue, output_base: i64, options: &Map) -> RhaiResult<Map> {
+    use crate::journal::kinds::{fail, huffman_code::build, Options};
+    const CALLER: &str = "huffman::code";
+    let err = |m: String| fail(ctx, CALLER, m);
+    let (base, data) = symbols.base_and_symbols().map_err(|e| err(e.to_string()))?;
+    let smoothing = Options::new(options, &["smoothing"]).and_then(|o| o.index("smoothing", 1)).map_err(err)? as u32;
+    let output_base = u32::try_from(output_base).ok().filter(|b| (2..=27).contains(b))
+        .ok_or_else(|| err(format!("output_base must be from 2 to 27, got {}", output_base)))?;
+    build(&data, base, output_base, smoothing).map_err(err)
+}
+
+/// Fails unless `input_base` is the symbols' own.
+fn same_base(ctx: &rhai::NativeCallContext, symbols: &LockValue, input_base: i64) -> RhaiResult<()> {
+    let (base, _) = symbols.base_and_symbols().map_err(|e| crate::journal::kinds::fail(ctx, "huffman::code", e))?;
+    if base as i64 != input_base {
+        return Err(crate::journal::kinds::fail(ctx, "huffman::code", format!("the symbols are base {}, not {}", base, input_base)));
+    }
+    Ok(())
+}
+
+/// A value for a lock's port: a lock value as it is, or a value kind's
+/// data (a map with a `kind`), checked and typed as that kind.
+fn port_value(value: Dynamic, what: &str, name: &str) -> RhaiResult<InfoVar> {
+    if let Some(value) = value.clone().try_cast::<LockValue>() {
+        return Ok(value.var);
+    }
+    match crate::journal::kinds::kind_of(&value) {
+        Some(kind) => {
+            crate::journal::kinds::check(kind, &value).map_err(|err| format!("{}: '{}' is a bad {}: {}", what, name, kind.name(), err))?;
+            Ok(InfoVar::new(InfoVarType::Named(kind.name().to_string()), value))
+        }
+        None => Err(format!("{}: '{}' must be a lock value, e.g. symbols(27, \"TEXT\"), or a value kind's data, e.g. huffman::code(...)", what, name).into()),
+    }
 }
 
 /// A lock chain under construction: named locks, connections from one
@@ -58,6 +122,9 @@ fn register_maze(engine: &mut Engine) {
 #[derive(Clone)]
 pub struct LockBuilder {
     library: Rc<LockLibrary>,
+    renderer_library: Rc<RendererLibrary>,
+    /// Renderers attached, in the order they were.
+    renderers: Vec<Attachment>,
     name: String,
     locks: HashMap<String, Rc<dyn Lock>>,
     connections: Vec<(String, String)>,
@@ -66,17 +133,49 @@ pub struct LockBuilder {
 }
 
 impl LockBuilder {
-    fn new(library: Rc<LockLibrary>, name: &str) -> RhaiResult<Self> {
+    fn new(library: Rc<LockLibrary>, renderer_library: Rc<RendererLibrary>, name: &str) -> RhaiResult<Self> {
         let lock = CompositeLock::new(name.to_string(), HashMap::new(), Vec::new())
             .map_err(|e| format!("new_lock: {}", e))?;
         Ok(Self {
             library,
+            renderer_library,
             name: name.to_string(),
             locks: HashMap::new(),
             connections: Vec::new(),
             fixed_inputs: Vec::new(),
+            renderers: Vec::new(),
             lock,
         })
+    }
+
+    /// `chain(name[, options])`: chain file `name`'s locks, wiring, fixed
+    /// values and renderers, built as a journal would build them.
+    fn from_chain(ctx: &rhai::NativeCallContext, library: Rc<LockLibrary>, renderer_library: Rc<RendererLibrary>, name: &str, options: Map) -> RhaiResult<Self> {
+        let spec = library.chain_spec(name, options).map_err(|e| format!("chain: {}", e))?;
+        let at = |e: Box<EvalAltResult>| -> Box<EvalAltResult> { format!("chain: {}: {}", spec.file, super::options::unwrap_runtime(&e)).into() };
+        let mut lock = Self::new(library.clone(), renderer_library, name)?;
+        for (id, type_name, options) in &spec.locks {
+            lock.add(id, type_name, options.clone()).map_err(at)?;
+        }
+        for (from, to) in &spec.connect {
+            lock.connect(from, to).map_err(at)?;
+        }
+        for (port, value) in &spec.fixed {
+            let var_type = lock.lock.inputs().get(port).cloned()
+                .ok_or_else(|| at(format!("fixed: '{}' isn't an open input", port).into()))?;
+            let var = library::value_from_script(value.clone(), &var_type).map_err(|e| at(format!("fixed: '{}': {}", port, e).into()))?;
+            lock.update("fixed", |next| {
+                next.fixed_inputs.push((port.clone(), var));
+                Ok(())
+            }).map_err(at)?;
+        }
+        for renderer in spec.renderers {
+            lock.attach(ctx, &renderer.id, &renderer.renderer, renderer.options).map_err(at)?;
+            for (input, port) in &renderer.inputs {
+                lock.connect_renderer(port, &renderer.id, input).map_err(at)?;
+            }
+        }
+        Ok(lock)
     }
 
     /// Apply `change` to a copy, keeping it only if the result still builds.
@@ -100,13 +199,68 @@ impl LockBuilder {
             if next.locks.contains_key(name) {
                 return Err(format!("a lock named '{}' was already added", name));
             }
+            if next.renderers.iter().any(|r| r.id == name) {
+                return Err(format!("there's a renderer named '{}' already", name));
+            }
             let lock = next.library.build(name, type_name, options)?;
             next.locks.insert(name.to_string(), Rc::new(lock));
             Ok(())
         })
     }
 
+    /// `lock.attach(id, renderer[, options])`: a renderer, to draw values
+    /// of the chain wired to its inputs with `connect`.
+    fn attach(&mut self, ctx: &rhai::NativeCallContext, id: &str, renderer: &str, options: Map) -> RhaiResult<Self> {
+        let loaded = self.renderer_library.load(ctx.engine(), renderer).map_err(|e| format!("attach: {}", e))?;
+        let merged = loaded.options(&options).map_err(|e| format!("attach: {}", e))?;
+        let types = loaded.inputs(ctx.engine(), &merged).map_err(|e| format!("attach: {}", e))?;
+        if id.is_empty() || id.contains('.') {
+            return Err(format!("attach: renderer id '{}' must be non-empty and contain no '.'", id).into());
+        }
+        if self.locks.contains_key(id) || self.renderers.iter().any(|r| r.id == id) {
+            return Err(format!("attach: there's a lock or renderer named '{}' already", id).into());
+        }
+        self.renderers.push(Attachment { id: id.to_string(), renderer: renderer.to_string(), options, wires: Vec::new(), types });
+        Ok(self.clone())
+    }
+
+    /// The type of the chain's port `port` ("lock.name"), input or output.
+    fn port_type(&self, port: &str) -> Option<InfoVarType> {
+        let (part, name) = port.split_once('.')?;
+        let lock = self.locks.get(part)?;
+        lock.outputs().get(name).cloned().or_else(|| lock.inputs().get(name).cloned())
+    }
+
+    /// A wire from a port of the chain to a renderer's input: kept apart
+    /// from the chain, whose port stays as it was.
+    fn connect_renderer(&mut self, from: &str, id: &str, input: &str) -> RhaiResult<Self> {
+        let from_type = self.port_type(from).ok_or_else(|| format!("connect: '{}' isn't a port of the chain", from))?;
+        let attachment = self.renderers.iter_mut().find(|r| r.id == id).ok_or_else(|| format!("connect: no renderer '{}' is attached", id))?;
+        let types = &attachment.types;
+        let (_, input_type) = types.iter().find(|(name, _)| name == input).ok_or_else(|| {
+            format!("connect: renderer '{}' ({}) has no input '{}'; inputs: {}", id, attachment.renderer, input, types.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", "))
+        })?;
+        if !compatible(&from_type, &parse_type(input_type)) {
+            return Err(format!("connect: can't connect {} ({}) to {}.{} ({})", from, from_type, id, input, input_type).into());
+        }
+        if attachment.wires.iter().any(|(name, _)| name == input) {
+            return Err(format!("connect: renderer input '{}.{}' is already connected", id, input).into());
+        }
+        attachment.wires.push((input.to_string(), from.to_string()));
+        Ok(self.clone())
+    }
+
+    /// Every renderer attached: #{ ID: renderer type }.
+    fn renderers(&mut self) -> Map {
+        self.renderers.iter().map(|r| (r.id.as_str().into(), r.renderer.as_str().into())).collect()
+    }
+
     fn connect(&mut self, from: &str, to: &str) -> RhaiResult<Self> {
+        if let Some((id, input)) = to.split_once('.') {
+            if self.renderers.iter().any(|r| r.id == id) {
+                return self.connect_renderer(from, id, input);
+            }
+        }
         // CompositeLock::new checks the ports exist, their types match, the
         // input isn't already wired and nothing loops.
         self.update("connect", |next| {
@@ -115,10 +269,11 @@ impl LockBuilder {
         })
     }
 
-    fn set_input(&mut self, name: &str, value: LockValue) -> RhaiResult<Self> {
+    fn set_input(&mut self, name: &str, value: Dynamic) -> RhaiResult<Self> {
+        let var = port_value(value, "set_input", name)?;
         self.update("set_input", |next| {
             next.fixed_inputs.retain(|(existing, _)| existing != name);
-            next.fixed_inputs.push((name.to_string(), value.var));
+            next.fixed_inputs.push((name.to_string(), var));
             Ok(())
         })
     }
@@ -141,7 +296,7 @@ impl LockBuilder {
             return Err(format!("run: '{}' isn't an open input; open inputs: {}", unknown, keys(&open)).into());
         }
         let (values, trace) = self.lock.trace_lock_info(&inputs).map_err(|e| format!("run: {}", e))?;
-        Ok(LockResult { values, trace })
+        Ok(self.result(values, trace))
     }
 
     /// Recover the inputs from a `run` result.
@@ -157,8 +312,25 @@ impl LockBuilder {
 
     fn unlock_values(&mut self, outputs: InfoVarSet) -> RhaiResult<LockResult> {
         let (values, trace) = self.lock.trace_unlock_info(&outputs).map_err(|e| format!("unlock: {}", e))?;
-        Ok(LockResult { values, trace })
+        Ok(self.result(values, trace))
     }
+
+    fn result(&self, values: InfoVarSet, trace: InfoVarSet) -> LockResult {
+        LockResult { values, trace, renderers: Rc::new(self.renderers.clone()), renderer_library: self.renderer_library.clone() }
+    }
+}
+
+/// A renderer attached to a chain, and what's wired to it.
+#[derive(Clone)]
+struct Attachment {
+    id: String,
+    renderer: String,
+    /// Its options as given, over its defaults when it draws.
+    options: Map,
+    /// Its input -> the port of the chain wired to it.
+    wires: Vec<(String, String)>,
+    /// Its inputs' types, as it gave them when attached.
+    types: Vec<(String, String)>,
 }
 
 impl CustomType for LockBuilder {
@@ -168,6 +340,9 @@ impl CustomType for LockBuilder {
             .with_fn("add", Self::add)
             .with_fn("add", |lock: &mut Self, name: &str, type_name: &str| lock.add(name, type_name, Map::new()))
             .with_fn("connect", Self::connect)
+            .with_fn("attach", |ctx: rhai::NativeCallContext, lock: &mut Self, id: &str, renderer: &str| lock.attach(&ctx, id, renderer, Map::new()))
+            .with_fn("attach", |ctx: rhai::NativeCallContext, lock: &mut Self, id: &str, renderer: &str, options: Map| lock.attach(&ctx, id, renderer, options))
+            .with_fn("renderers", Self::renderers)
             .with_fn("set_input", Self::set_input)
             .with_fn("inputs", Self::inputs)
             .with_fn("outputs", Self::outputs)
@@ -224,7 +399,7 @@ impl LockValue {
     }
 
     /// The value as lock files see it: symbols as an array of integers, a
-    /// maze as a `Maze`, and so on.
+    /// value kind's data (a maze, a star chart) as its map, and so on.
     fn value(&mut self) -> Dynamic {
         self.var.data.clone()
     }
@@ -237,10 +412,30 @@ impl LockValue {
         self.text().unwrap_or_else(|_| format!("<{}>", self.type_name()))
     }
 
-    /// A maze output as a `Maze`, for drawing.
-    fn maze(&mut self) -> RhaiResult<Maze> {
-        self.var.data.clone().try_cast::<Maze>()
-            .ok_or_else(|| format!("maze: a {} value isn't a maze", type_name(&self.var.var_type)).into())
+    /// A maze output's data, for drawing: `maze.cells()`, `maze.path()`.
+    fn maze(&mut self) -> RhaiResult<Map> {
+        match crate::journal::kinds::kind_of(&self.var.data) {
+            Some(kind) if kind.name() == "Maze" => Ok(self.var.data.clone().cast::<Map>()),
+            _ => Err(format!("maze: a {} value isn't a maze", type_name(&self.var.var_type)).into()),
+        }
+    }
+
+    /// A value kind's default drawing, as a parts map (see `art::sketch`).
+    fn sketch(&mut self) -> RhaiResult<Map> {
+        match crate::journal::kinds::sketch(&self.var.data) {
+            Ok(Some(sketch)) => Ok(super::art::sketch_parts(sketch)),
+            Ok(None) => Err(format!("sketch: a {} value has no sketch", type_name(&self.var.var_type)).into()),
+            Err(_) => Err(format!("sketch: a {} value isn't a value kind's, so it has no sketch", type_name(&self.var.var_type)).into()),
+        }
+    }
+
+    /// The base and symbols of a value of symbols, for drawing from.
+    pub(in crate::journal::rhaientries) fn base_and_symbols(&self) -> RhaiResult<(u32, Vec<u32>)> {
+        let symbols = self.symbol_data()?;
+        match self.var.var_type {
+            InfoVarType::BaseNSymbol(base) => Ok((base, symbols)),
+            _ => unreachable!("symbol_data fails for values that aren't symbols"),
+        }
     }
 
     fn symbol_data(&self) -> RhaiResult<Vec<u32>> {
@@ -262,6 +457,7 @@ impl CustomType for LockValue {
             .with_fn("symbols", Self::symbols)
             .with_get("type_name", Self::type_name)
             .with_fn("maze", Self::maze)
+            .with_fn("sketch", Self::sketch)
             .with_fn("value", Self::value)
             .with_fn("to_string", Self::display)
             .with_fn("to_debug", Self::display);
@@ -274,6 +470,9 @@ impl CustomType for LockValue {
 pub struct LockResult {
     values: InfoVarSet,
     trace: InfoVarSet,
+    /// The renderers attached to the chain, to draw its values.
+    renderers: Rc<Vec<Attachment>>,
+    renderer_library: Rc<RendererLibrary>,
 }
 
 impl LockResult {
@@ -296,6 +495,28 @@ impl LockResult {
     fn trace(&mut self) -> Map {
         value_map(&self.trace)
     }
+
+    /// `result.canvases(id)`: what the renderer `id` draws of this result's
+    /// values, an array of canvases.
+    fn canvases(&mut self, ctx: &rhai::NativeCallContext, id: &str) -> RhaiResult<Array> {
+        let attachment = self.renderers.iter().find(|r| r.id == id).ok_or_else(|| {
+            let ids: Vec<&str> = self.renderers.iter().map(|r| r.id.as_str()).collect();
+            format!("canvases: no renderer '{}' is attached; renderers: {}", id, if ids.is_empty() { "none".to_string() } else { ids.join(", ") })
+        })?;
+        let fail = |e: String| -> Box<EvalAltResult> { format!("canvases: {}", e).into() };
+        let loaded = self.renderer_library.load(ctx.engine(), &attachment.renderer).map_err(fail)?;
+        let options = loaded.options(&attachment.options).map_err(fail)?;
+        let mut inputs = Map::new();
+        for (input, _) in loaded.inputs(ctx.engine(), &options).map_err(fail)? {
+            let port = attachment.wires.iter().find(|(name, _)| *name == input).map(|(_, port)| port)
+                .ok_or_else(|| fail(format!("renderer '{}' has nothing connected to its input '{}'", id, input)))?;
+            let value = self.trace.get(port).or_else(|| self.values.get(port))
+                .ok_or_else(|| fail(format!("renderer '{}' draws '{}', which this result has no value for", id, port)))?;
+            inputs.insert(input.into(), value.data.clone());
+        }
+        let canvases = loaded.render(ctx.engine(), &options, inputs).map_err(fail)?;
+        Ok(canvases.into_iter().map(Dynamic::from).collect())
+    }
 }
 
 impl CustomType for LockResult {
@@ -305,116 +526,9 @@ impl CustomType for LockResult {
             .with_fn("get", Self::get)
             .with_fn("text", Self::text)
             .with_fn("values", Self::values)
-            .with_fn("trace", Self::trace);
+            .with_fn("trace", Self::trace)
+            .with_fn("canvases", |ctx: rhai::NativeCallContext, result: &mut Self, id: &str| result.canvases(&ctx, id));
     }
-}
-
-/// A maze for drawing, from a maze lock or `new_maze`. Cells sit on an
-/// integer grid: nodes at even coordinates, passages between connected
-/// nodes. In a lock's maze each cell holds one symbol of the locked text.
-#[derive(Clone)]
-pub struct Maze {
-    maze: BuiltMaze<SymbolInfo>,
-    /// The order cells are walked in: for a lock's maze, the order the text
-    /// was written in.
-    strategy: MazeTraversalStrategy,
-}
-
-/// What a maze cell holds: a symbol, random in a new maze.
-#[derive(Clone, Debug, Default)]
-struct SymbolInfo {
-    symbol: u32,
-}
-
-impl Fill for SymbolInfo {
-    fn fill<R: rand::Rng + ?Sized>(&mut self, rng: &mut R) {
-        self.symbol = rng.random_range(0..27);
-    }
-}
-
-impl Maze {
-    /// Grid width in cells (passages included).
-    fn width(&mut self) -> i64 {
-        self.maze.all_cells().iter().map(|c| c.position.0).max().map_or(0, |x| x as i64 + 1)
-    }
-
-    /// Grid height in cells (passages included).
-    fn height(&mut self) -> i64 {
-        self.maze.all_cells().iter().map(|c| c.position.1).max().map_or(0, |y| y as i64 + 1)
-    }
-
-    /// Every cell, in traversal order (the order a lock writes its text):
-    /// `#{ x, y, step, symbol }`. `symbol` is 0-26: the text's symbol in a
-    /// lock's maze, random in `new_maze`'s.
-    fn cells(&mut self) -> Array {
-        self.maze.iter_inners(self.strategy)
-            .enumerate()
-            .map(|(step, ((x, y), inner))| {
-                let mut cell = Map::new();
-                cell.insert("x".into(), Dynamic::from(x as i64));
-                cell.insert("y".into(), Dynamic::from(y as i64));
-                cell.insert("step".into(), Dynamic::from(step as i64));
-                cell.insert("symbol".into(), Dynamic::from(inner.symbol as i64));
-                Dynamic::from_map(cell)
-            })
-            .collect()
-    }
-
-    /// Write `symbols` into the cells in traversal order, and 0 into any
-    /// cells left over.
-    fn fill(&mut self, symbols: Array) -> RhaiResult<()> {
-        let cells = self.maze.all_cells().len();
-        if symbols.len() > cells {
-            return Err(format!("fill: {} symbols don't fit in the maze's {} cells", symbols.len(), cells).into());
-        }
-        let symbols = symbols.iter().enumerate()
-            .map(|(i, item)| item.as_int().ok().and_then(|s| u32::try_from(s).ok())
-                .ok_or_else(|| -> Box<EvalAltResult> { format!("fill: item {} ({:?}) isn't a symbol", i, item).into() }))
-            .collect::<RhaiResult<Vec<u32>>>()?;
-        let mut symbols = symbols.into_iter();
-        self.maze.map_inners(self.strategy, |inner| inner.symbol = symbols.next().unwrap_or(0));
-        Ok(())
-    }
-
-    /// A path along the corridors, in grid units, following the same
-    /// traversal the text was written in.
-    fn path(&mut self) -> Path {
-        Path::new(self.maze.corridor_path(self.strategy))
-    }
-}
-
-impl CustomType for Maze {
-    fn build(mut builder: TypeBuilder<Self>) {
-        builder
-            .with_name("Maze")
-            .with_get("width", Self::width)
-            .with_get("height", Self::height)
-            .with_fn("cells", Self::cells)
-            .with_fn("fill", Self::fill);
-    }
-}
-
-/// `new_maze(width, height[, strategy], #{ seed: seed })`: a maze of `width` x `height`
-/// nodes (so a grid of 2w-1 x 2h-1 cells), traversed "LeftHanded" (the
-/// default) or "RightHanded". Its layout depends only on the seed and size.
-/// `new_maze(width, height[, #{ seed, strategy }])`.
-fn new_maze(width: i64, height: i64, options: &Map) -> RhaiResult<Maze> {
-    const CALLER: &str = "new_maze";
-    super::options::check_keys(CALLER, options, &["seed", "strategy"])?;
-    let seed = match options.get("seed") {
-        None => 0,
-        Some(s) => s.as_int().map_err(|t| format!("{}: 'seed' should be a whole number, got {}", CALLER, t))?,
-    };
-    let strategy = options.get("strategy").map_or("LeftHanded".to_string(), |s| s.to_string());
-    let strategy = match strategy.as_str() {
-        "LeftHanded" => MazeTraversalStrategy::LeftHanded,
-        "RightHanded" => MazeTraversalStrategy::RightHanded,
-        other => return Err(format!("new_maze: unknown strategy '{}'; expected \"LeftHanded\" or \"RightHanded\"", other).into()),
-    };
-    let size = |n: i64, what: &str| u32::try_from(n).ok().filter(|&n| n >= 1)
-        .ok_or_else(|| -> Box<EvalAltResult> { format!("new_maze: {} must be at least 1, got {}", what, n).into() });
-    let (width, height) = (size(width, "width")?, size(height, "height")?);
-    Ok(Maze { maze: BuiltMaze::new(seed as u64, width, height), strategy })
 }
 
 /// `symbols(base, text)`: text as symbols in `base`. Base 10 takes digits,
@@ -492,10 +606,7 @@ fn value_map(values: &InfoVarSet) -> Map {
 
 fn value_set(map: Map, what: &str) -> RhaiResult<InfoVarSet> {
     map.into_iter()
-        .map(|(name, value)| match value.try_cast::<LockValue>() {
-            Some(value) => Ok((name.to_string(), value.var)),
-            None => Err(format!("{}: '{}' must be a lock value, e.g. symbols(27, \"TEXT\")", what, name).into()),
-        })
+        .map(|(name, value)| Ok((name.to_string(), port_value(value, what, &name)?)))
         .collect()
 }
 
@@ -516,11 +627,13 @@ fn sorted_names_of<'a>(names: impl Iterator<Item = &'a String>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::journal::canvas::artistic::{BuiltMaze, MazeTraversalStrategy};
     use std::collections::HashSet;
 
     fn engine() -> Engine {
         let mut engine = crate::journal::rhaientries::rhai_engine();
-        register(&mut engine, Rc::new(LockLibrary::new(DEFAULT_LOCKS_DIR)));
+        let renderers = super::super::sources::Sources::dir(super::super::renderers::DEFAULT_RENDERERS_DIR);
+        register(&mut engine, Rc::new(LockLibrary::new(DEFAULT_LOCKS_DIR)), Rc::new(RendererLibrary::new(renderers)));
         engine
     }
 
@@ -786,6 +899,30 @@ mod tests {
             let err = error(script);
             assert!(err.contains(want) && err.contains("line 2"), "{}", err);
         }
+    }
+
+    #[test]
+    fn value_kinds_go_in_and_come_out_of_chains() {
+        // A HuffmanCode is the same as journals and lock files write it; a
+        // chain's star chart comes out as plain data, and as a drawing.
+        let ok: Array = eval(r#"
+            let a = huffman::code(symbols(27, "THE QUICK BROWN FOX"), 3);
+            let b = huffman::code(symbols(27, "THE QUICK BROWN FOX"), 27, 3);
+            let lock = new_lock("sky")
+                .add("enc", "huffman_encode", #{ input_base: 27, output_base: 3 })
+                .add("sky", "star_chart", #{ input_base: 27, output_base: 3 })
+                .connect("enc.code", "sky.code");
+            let result = lock.run(#{ "enc.plain_text": symbols(27, "FOX") });
+            let chart = result.get("sky.chart");
+            let by_hand = lock.unlock(#{ "enc.cipher_text": result.get("enc.cipher_text"), "sky.chart": chart.value() });
+            [`${a}` == `${b}`, chart.type_name == "StarChart", chart.value().kind == "StarChart",
+             "stars" in chart.sketch(), by_hand.text("enc.plain_text") == "FOX"]
+        "#);
+        assert!(ok.iter().all(|b| b.as_bool().unwrap()), "{:?}", ok);
+        let err = error("let ok = 1;\nhuffman::code(symbols(27, \"AB\"), 10, 3);");
+        assert!(err.contains("huffman::code: the symbols are base 27, not 10") && err.contains("line 2"), "{}", err);
+        let err = error("let ok = 1;\nnew_lock(\"l\").add(\"s\", \"star_chart\", #{ input_base: 27, output_base: 3 }).set_input(\"s.code\", #{ kind: \"HuffmanCode\", input_base: 27, output_base: 3, nodes: [] });");
+        assert!(err.contains("set_input: 's.code' is a bad HuffmanCode: a code needs a root and at least one leaf"), "{}", err);
     }
 
     #[test]

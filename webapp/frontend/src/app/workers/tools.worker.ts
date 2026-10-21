@@ -3,13 +3,15 @@
 // ToolsService): text previews, and lock types, ports and test runs. Kept
 // apart from the script worker so neither waits on, or crashes, the other.
 
-import init, { builtinFonts, checkLock, lastPanic, lockPorts, lockTypes, previewSvg, readChain, runChain, setWorkspace } from '../../../wasm-pkg/scribe_wasm.js';
+import init, {
+  builtinFonts, chainTypes, lastPanic, lockPorts, lockTypes, previewSvg, readChain, renderPreview, rendererPorts, rendererSource, rendererTypes, runChain, setWorkspace, valueKinds,
+} from '../../../wasm-pkg/scribe_wasm.js';
 import type { ToolFunction, ToolsReply, ToolsRequest } from '../scribe';
 
 const post = (reply: ToolsReply) => postMessage(reply);
 
 const tools: Record<ToolFunction, (...args: never[]) => unknown> = {
-  previewSvg, builtinFonts, lockTypes, lockPorts, runChain, readChain, checkLock,
+  previewSvg, builtinFonts, lockTypes, lockPorts, chainTypes, runChain, readChain, valueKinds, rendererTypes, rendererPorts, renderPreview, rendererSource,
 };
 
 let ready: Promise<void> = Promise.reject(new Error('not started'));
@@ -27,7 +29,7 @@ addEventListener('message', ({ data }: MessageEvent<ToolsRequest>) => {
       );
       break;
     case 'workspace':
-      void ready.then(() => guard(() => setWorkspace(data.workspace.fonts, data.workspace.locks)), () => {});
+      void ready.then(() => guard(() => setWorkspace(data.workspace.fonts, data.workspace.locks, data.workspace.renderers ?? {}, data.workspace.chains ?? {})), () => {});
       break;
     case 'call':
       void ready.then(

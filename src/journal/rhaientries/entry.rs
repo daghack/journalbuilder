@@ -18,7 +18,7 @@ pub struct Entry {
 }
 
 impl Entry {
-    fn add_page(&mut self, page: Page) -> Result<(), Box<EvalAltResult>> {
+    pub(super) fn add_page(&mut self, page: Page) -> Result<(), Box<EvalAltResult>> {
         let label = page.label(self.pages.len());
         if self.pages.iter().enumerate().any(|(i, p)| p.label(i) == label) {
             return Err(format!("journal_entry.add: the entry already has a page named '{}'", label).into());

@@ -10,7 +10,7 @@ import {
   highlightSpecialChars, keymap, lineNumbers, rectangularSelection,
 } from '@codemirror/view';
 import { tags as t } from '@lezer/highlight';
-import { JournalService } from '../services/journal.service';
+import { EDITOR_DOCUMENT } from './editor-document';
 import { RenderService } from '../services/render.service';
 import { rhai, rhaiCompletions } from './rhai-language';
 
@@ -53,7 +53,7 @@ const theme = EditorView.theme({
   `,
 })
 export class EditorComponent implements OnDestroy {
-  private readonly journal = inject(JournalService);
+  private readonly doc = inject(EDITOR_DOCUMENT);
   private readonly render = inject(RenderService);
   private readonly host = viewChild.required<ElementRef<HTMLElement>>('host');
   private view: EditorView | null = null;
@@ -68,7 +68,7 @@ export class EditorComponent implements OnDestroy {
     });
     // A new document (opened, or an example) replaces the editor's.
     effect(() => {
-      const source = this.journal.source();
+      const source = this.doc.source();
       const view = this.view;
       if (view && source !== view.state.doc.toString()) {
         view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: source }, selection: { anchor: 0 } });
@@ -82,14 +82,14 @@ export class EditorComponent implements OnDestroy {
     });
     // Mark the last run's error and warnings.
     effect(() => {
-      const error = this.journal.error();
-      const evaluation = this.journal.evaluation();
+      const error = this.doc.error();
+      const warnings = this.doc.warnings();
       const view = this.view;
       if (!view) return;
       const doc = view.state.doc;
       const diagnostics: Diagnostic[] = [];
-      if (error?.line) diagnostics.push(at(doc, error.line, error.column, 'error', error.message));
-      for (const warning of evaluation?.warnings ?? []) {
+      if (error?.line) diagnostics.push(at(doc, error.line, error.column ?? null, 'error', error.message));
+      for (const warning of warnings) {
         const line = warning.match(/\(line (\d+)\)$/);
         if (line) diagnostics.push(at(doc, Number(line[1]), null, 'warning', warning));
       }
@@ -100,7 +100,7 @@ export class EditorComponent implements OnDestroy {
   private create(parent: HTMLElement) {
     if (this.view) return;
     const state = EditorState.create({
-      doc: this.journal.source(),
+      doc: this.doc.source(),
       extensions: [
         lineNumbers(),
         highlightActiveLineGutter(),
@@ -123,7 +123,7 @@ export class EditorComponent implements OnDestroy {
         syntaxHighlighting(highlight),
         theme,
         EditorView.updateListener.of((update) => {
-          if (update.docChanged) this.journal.setSource(update.state.doc.toString());
+          if (update.docChanged) this.doc.setSource(update.state.doc.toString());
         }),
       ],
     });

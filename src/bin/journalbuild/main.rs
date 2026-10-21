@@ -1,4 +1,4 @@
-use scribe::journal::rhaientries::{JournalEngine, LockLibrary, DEFAULT_LAYOUTS_DIR, DEFAULT_LOCKS_DIR};
+use scribe::journal::rhaientries::{JournalEngine, LockLibrary, Sources, DEFAULT_CHAINS_DIR, DEFAULT_LAYOUTS_DIR, DEFAULT_LOCKS_DIR, DEFAULT_RENDERERS_DIR};
 use scribe::journal::{fonts, darkly, publish};
 use scribe::journal::progress::{clock, Progress};
 use std::cell::RefCell;
@@ -44,8 +44,9 @@ const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--svg
                     [--scale S] [--supersample K] [--strict-glyphs]
                     [--parchment] [--pdf] [--stitch N]
                     [--journals-dir DIR] [--output-dir DIR] [--fonts PATH]
-                    [--locks-dir DIR] [--layouts-dir DIR]
-       journalbuild --check-locks [--locks-dir DIR]
+                    [--locks-dir DIR] [--layouts-dir DIR] [--renderers-dir DIR]
+                    [--chains-dir DIR]
+       journalbuild --check-locks [--locks-dir DIR] [--chains-dir DIR]
        journalbuild --check-gpu
 
   --page P,...        Render only these pages, by index (0-based) or by
@@ -93,8 +94,13 @@ const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--svg
                       the repository's webapp/locks/).
   --layouts-dir DIR   Directory of page layout files, for layout(name)
                       (default: the repository's webapp/layouts/).
-  --check-locks       Run every lock file's examples through lock and
-                      unlock, instead of building a journal.
+  --renderers-dir DIR Directory of renderer files, for lock.attach
+                      (default: the repository's webapp/renderers/).
+  --chains-dir DIR    Directory of chain files, for chain(name) (default:
+                      the repository's webapp/chains/).
+  --check-locks       Run every lock file's examples, and every chain
+                      file's, through lock and unlock, instead of building
+                      a journal.
   --check-gpu         Check that Darkly can render (there's a GPU wgpu can
                       use), instead of building a journal; fails if not.
                       Without one, --svg renders still work, and cargo
@@ -114,6 +120,8 @@ struct Args {
     font_file: String,
     locks_dir: String,
     layouts_dir: String,
+    renderers_dir: String,
+    chains_dir: String,
     parchment: bool,
     pdf: bool,
     stitch: Option<usize>,
@@ -138,6 +146,8 @@ fn parse_args() -> Result<Args, String> {
     let mut font_file = fonts::DEFAULT_FONTS.to_string();
     let mut locks_dir = DEFAULT_LOCKS_DIR.to_string();
     let mut layouts_dir = DEFAULT_LAYOUTS_DIR.to_string();
+    let mut renderers_dir = DEFAULT_RENDERERS_DIR.to_string();
+    let mut chains_dir = DEFAULT_CHAINS_DIR.to_string();
     let mut output_dir = None;
     let mut parchment = false;
     let mut stitch = None;
@@ -177,6 +187,12 @@ fn parse_args() -> Result<Args, String> {
             "--layouts-dir" => {
                 layouts_dir = args.next().ok_or("--layouts-dir needs a directory")?;
             }
+            "--renderers-dir" => {
+                renderers_dir = args.next().ok_or("--renderers-dir needs a directory")?;
+            }
+            "--chains-dir" => {
+                chains_dir = args.next().ok_or("--chains-dir needs a directory")?;
+            }
             "--output-dir" => {
                 output_dir = Some(args.next().ok_or("--output-dir needs a directory")?);
             }
@@ -207,7 +223,7 @@ fn parse_args() -> Result<Args, String> {
     if stitch.is_some() && pdf {
         return Err("--stitch lays rendered pages side by side, so it can't go with --pdf".to_string());
     }
-    Ok(Args { strict_glyphs, check_locks, check_gpu, journal_name, journals_dir, pages, svg, scale, supersample, output_dir, font_file, locks_dir, layouts_dir, parchment, pdf, stitch })
+    Ok(Args { strict_glyphs, check_locks, check_gpu, journal_name, journals_dir, pages, svg, scale, supersample, output_dir, font_file, locks_dir, layouts_dir, renderers_dir, chains_dir, parchment, pdf, stitch })
 }
 
 fn main() {
@@ -219,7 +235,7 @@ fn main() {
         darkly::check_gpu().map(|()| println!("ok   Darkly can render: there's a GPU"))
             .map_err(|err| format!("Darkly can't render, no GPU: {}", err))
     } else if args.check_locks {
-        check_locks(&args.locks_dir)
+        check_locks(&args.locks_dir, &args.chains_dir)
     } else {
         run(&args)
     };
@@ -241,7 +257,7 @@ fn run(args: &Args) -> Result<(), String> {
     let default_output = args.output_dir.is_none();
     let output_dir = args.output_dir.clone()
         .unwrap_or_else(|| format!("{}_output", journal_name));
-    let mut engine = JournalEngine::with_dirs(symd.clone(), &args.locks_dir, &args.layouts_dir);
+    let mut engine = JournalEngine::with_dirs(symd.clone(), &args.locks_dir, &args.layouts_dir, &args.renderers_dir, &args.chains_dir);
     // A spinner while the script runs, which can take a while.
     let running = Rc::new(RefCell::new(Progress::new(&format!("Running {}", journal_name), 0)));
     let spinner = running.clone();
@@ -300,14 +316,17 @@ fn run(args: &Args) -> Result<(), String> {
     Ok(())
 }
 
-/// Run every lock file's examples, listing each lock type's result.
-fn check_locks(locks_dir: &str) -> Result<(), String> {
-    let results = Rc::new(LockLibrary::new(locks_dir)).check_all()?;
+/// Run every lock file's examples, then every chain file's, listing each
+/// one's result.
+fn check_locks(locks_dir: &str, chains_dir: &str) -> Result<(), String> {
+    let library = Rc::new(LockLibrary::new(locks_dir).with_chains(Sources::dir(chains_dir)));
+    let results = library.check_all()?;
     if results.is_empty() {
         return Err(format!("no lock files (*.rhai) in {}", locks_dir));
     }
+    let chains = library.check_all_chains()?;
     let mut failures = 0;
-    for (name, result) in &results {
+    for (name, result) in results.iter().chain(&chains) {
         match result {
             Ok(0) => println!("--   {:<24} no examples", name),
             Ok(n) => println!("ok   {:<24} {} example(s)", name, n),
@@ -318,7 +337,7 @@ fn check_locks(locks_dir: &str) -> Result<(), String> {
         }
     }
     if failures > 0 {
-        return Err(format!("{} of {} lock type(s) failed their examples", failures, results.len()));
+        return Err(format!("{} of {} lock type(s) and chain(s) failed their examples", failures, results.len() + chains.len()));
     }
     Ok(())
 }

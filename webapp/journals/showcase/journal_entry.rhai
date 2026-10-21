@@ -10,7 +10,7 @@
 //   art       shapes and paths (polygons, stars, ellipses, waves, points
 //             along a path), hatching, vectors, mazes, snakes, brambles,
 //             eyes, moons in every phase, paths cut by shapes, brambles
-//             thickening toward an origin
+//             thickening toward an origin, Huffman trees as star charts
 //   generators  point distributions, vec3 and vec4, spanning trees by
 //             algorithm and metric, balanced-ternary values (as glyphs, and
 //             along paths), angles in degrees
@@ -18,8 +18,10 @@
 //             (turned to them or held at an angle), scattered notes,
 //             words split round drawings, shaped boxes, and writing by
 //             hand: lines, blocks and glyphs set a little off true
-//   locks     every lock type, Huffman codes between bases, and a lock
-//             chain drawn as a maze
+//   locks     every lock type, Huffman codes between bases, a lock
+//             chain drawn as a maze, value kinds and their sketches, an
+//             art node: a lock keyed by a code drawn as a star chart, and
+//             renderers drawing a chain's values as canvases
 //   spread    one drawing across two pages: a page split into tiles
 //   layouts   pages typeset from layouts: an inline one, the layout files
 //             (the title page is one too), and marked-up text, markdown()
@@ -752,6 +754,94 @@ art.add(grown, BRAMBLE);
 art.add(new_circle(origin, 10), CAPTION);
 book.bind("art", art);
 
+// Huffman trees as star charts: art::huffman_stars(symbols, output_base,
+// center, width, height, options) charts the code the huffman lock would
+// make, rewriting the symbols in output_base: its nodes are stars, bigger
+// the commoner their symbols, its branches the links. The tree is grown
+// from its root at random angles and lengths, then tidied by forces, each
+// star with a space and a pull of its own and each link a length of its
+// own; links never cross. It gives #{ stars, links } as paths, points and
+// edges (as new_edges takes them) and nodes, each star's #{ position,
+// radius, weight, depth, code, symbol, text, parent }.
+let art = sheet("art");
+let pangram = "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG";
+art.add(caption("art::huffman_stars(symbols(27, TEXT), 3, center, width, height, #{ seed }): letters with their codes", TOP));
+art.add(caption(`${pangram}, base 27 to base 3; stars hatched, leaves in red`, TOP + 34));
+let chart = art::huffman_stars(symbols(27, pangram), 3, vec2(560, TOP + 340), 880, 520, #{ seed: 7 });
+art.add(chart.links, LINE);
+for node in chart.nodes {
+	let style = if node.symbol == () { LINE } else { CAPTION };
+	let star = new_circle(node.position, node.radius);
+	art.add(star, style);
+	art.add(star.hatch(2.5, #{ angle: 0.7 }), style);
+	if node.symbol != () {
+		let name = if node.text == " " { "SPACE" } else { node.text };
+		art.add(write_in(`${name} ${node.code.reduce(|t, d| t + d, "")}`, node.position.x + node.radius + 8, node.position.y, 18, CAPTION, PLAIN));
+	}
+}
+// Its options, a panel each, all from the same pangram in base 2.
+let panels = [
+	["#{ smoothing: 0, round: true }", #{ smoothing: 0, round: true }],
+	["#{ iterations: 0 }: as grown, untidied", #{ iterations: 0 }],
+	["#{ variation: 0 }: stars and links alike", #{ variation: 0 }],
+	["#{ variation: 1, star_size: 6, gap: 0 }, new_edges(points, edges)", #{ variation: 1, star_size: 6, gap: 0 }],
+];
+for (panel, i) in panels {
+	let x = LEFT + 245 + (i % 2) * 510;
+	let y = TOP + 680 + (i / 2) * 330;
+	art.add(write_in(panel[0], x - 245, y, 18, CAPTION, PLAIN));
+	let options = panel[1];
+	options.seed = 4;
+	let small = art::huffman_stars(symbols(27, pangram), 2, vec2(x, y + 155), 490, 260, options);
+	if i == 3 {
+		// The same chart from its points and edges, links meeting at the stars.
+		art.add(new_edges(small.points, small.edges), LINE);
+		art.add(small.stars, CAPTION);
+	} else {
+		art.add(small, #{ stars: CAPTION, links: LINE });
+	}
+}
+book.bind("art", art);
+
+// A chart cut into constellations, a page each: art::constellations(chart,
+// count, center, width, height, options) cuts its tree into count pieces
+// that hold together, neighbours sharing the star they meet at, fits each
+// to the box on its own and finds each star a spot for its label clear of
+// the links, the stars and the other labels. Each piece is #{ stars (the
+// chart's indices), points, pairs (links, into points), labels, scale }.
+let art = sheet("art");
+art.add(caption("art::constellations(chart, 4, center, width, height, #{ label_width, label_height, label_gap })", TOP));
+art.add(caption("the pangram's chart above in four pieces, each fitted to a 470 by 520 box, stars numbered at their labels", TOP + 34));
+let sky = art::huffman_stars(symbols(27, "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG"), 3, vec2(0, 0), 2000, 1400, #{ seed: 7, star_size: 12 });
+for (piece, i) in art::constellations(sky, 4, vec2(0, 0), 470, 520, #{ label_width: 24, label_height: 24, label_gap: 6 }) {
+	let at = vec2(LEFT + 250 + (i % 2) * 510, TOP + 380 + (i / 2) * 600);
+	art.add(new_edges(piece.points, piece.pairs).translate_by(at), LINE);
+	for (s, k) in piece.stars {
+		art.add(new_circle(piece.points[k] + at, sky.nodes[s].radius), if sky.nodes[s].symbol == () { LINE } else { CAPTION });
+		art.add(write_in(`${k}`, piece.labels[k].x + at.x - 6, piece.labels[k].y + at.y, 18, CAPTION, PLAIN));
+	}
+}
+book.bind("art", art);
+
+// #{ split_at: [stars] } splits the constellation holding each star in two
+// at it, its branches either side: here the root's, left and right.
+let art = sheet("art");
+art.add(caption("art::constellations(chart, 4, center, width, height, #{ split_at: [0] }): the root's piece split left and right", TOP));
+let split = art::constellations(sky, 4, vec2(0, 0), 470, 520, #{ label_width: 24, label_height: 24, label_gap: 6, split_at: [0] });
+art.add(caption(`${split.len()} pieces; those holding the root, star 0, below, the root ringed`, TOP + 34));
+let shown = 0;
+for piece in split {
+	if !piece.stars.contains(0) { continue; }
+	let at = vec2(LEFT + 250 + (shown % 2) * 510, TOP + 380 + (shown / 2) * 600);
+	art.add(new_edges(piece.points, piece.pairs).translate_by(at), LINE);
+	for (s, k) in piece.stars {
+		art.add(new_circle(piece.points[k] + at, sky.nodes[s].radius), if sky.nodes[s].symbol == () { LINE } else { CAPTION });
+		if s == 0 { art.add(new_circle(piece.points[k] + at, sky.nodes[s].radius + 10), CAPTION); }
+	}
+	shown += 1;
+}
+book.bind("art", art);
+
 // ---- generators: scattered points, trees, digits ----
 
 // distribute_points_2/3/4(kind, count, [[low, high], ...]) scatters count
@@ -1202,6 +1292,127 @@ blank.fill(symbols(27, "HELLO").symbols());
 assert(blank.cells()[0].symbol == 8, "fill writes symbols in walking order");
 locks.add(maze_canvas.translate_by(vec2(LEFT + 30, y + 80)));
 book.bind("locks", locks);
+
+// Value kinds: lock values that are plain data, tagged with their kind,
+// checked against its shape wherever they cross into or out of a lock.
+// Their functions are the same in journals and lock files, and a kind's
+// sketch is how it's drawn by default: art::sketch(data), or value.sketch()
+// for a lock result's value, gives its parts to canvas.add(parts, styles)
+// and its labels to write.
+
+// A kind's sketch fitted into the box at corner, w by h: the parts styles
+// names, and the labels.
+fn draw_sketch(sketch, styles, corner, w, h) {
+	let lo = vec2(1e9, 1e9);
+	let hi = vec2(-1e9, -1e9);
+	for name in styles.keys() {
+		let b = sketch[name].bounds();
+		lo = vec2(if b.min.x < lo.x { b.min.x } else { lo.x }, if b.min.y < lo.y { b.min.y } else { lo.y });
+		hi = vec2(if b.max.x > hi.x { b.max.x } else { hi.x }, if b.max.y > hi.y { b.max.y } else { hi.y });
+	}
+	let fx = w / (hi.x - lo.x + sketch.label_size * 2.0);
+	let fy = h / (hi.y - lo.y + sketch.label_size * 2.0);
+	let f = if fx < fy { fx } else { fy };
+	let place = |p| (p - lo + vec2(sketch.label_size, sketch.label_size)) * f + corner;
+	let c = new_canvas();
+	for name in styles.keys() {
+		c.add(sketch[name].copy().translate_by(vec2(sketch.label_size, sketch.label_size) - lo).scale_by(f).translate_by(corner), styles[name]);
+	}
+	let size = sketch.label_size * f;
+	for label in sketch.labels {
+		let at = place.call(label.at);
+		// Sketches mark a space ·, which plain hasn't.
+		let text = if label.text == "·" { "_" } else { label.text };
+		c.add(write_in(text, at.x - size * 0.3 * text.len(), at.y, size, global::CAPTION, global::PLAIN));
+	}
+	c
+}
+
+let kinds = sheet("locks");
+let corpus = "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG";
+let code = huffman::code(symbols(27, corpus), 3);
+kinds.add(caption("huffman::code(symbols(27, corpus), 3): the corpus's HuffmanCode, as the huffman lock builds it;", TOP));
+kinds.add(caption("art::sketch(code) draws its tree, each leaf's letter under it", TOP + 34));
+assert(code.kind == "HuffmanCode" && code.nodes[0].parent == (), "a code is plain data, the root first");
+kinds.add(draw_sketch(art::sketch(code), #{ links: LINE, nodes: LINE }, vec2(LEFT, TOP + 70), RIGHT - LEFT, 380));
+// The functions star_chart is made of: the tree laid out, then cut into
+// pieces fitted to a box.
+kinds.add(caption("stars::layout(code, #{ seed }) then stars::split(points, edges, sizes, #{ count: 2, width, height })", TOP + 520));
+let laid = stars::layout(code, #{ seed: 3 });
+let edges = [];
+for (node, k) in code.nodes { if node.parent != () { edges.push([node.parent, k]); } }
+for (piece, i) in stars::split(laid.points, edges, laid.sizes, #{ count: 2, width: 470, height: 560 }) {
+	let at = vec2(LEFT + i * 530, TOP + 580);
+	let points = piece.points.map(|p| vec2(p[0], p[1]));
+	kinds.add(new_edges(points, piece.pairs).translate_by(at), LINE);
+	for (s, k) in piece.stars {
+		kinds.add(new_circle(points[k] + at, laid.sizes[s] * 0.5), if code.nodes[s].symbol == () { LINE } else { CAPTION });
+	}
+}
+book.bind("locks", kinds);
+
+// An art node: a lock whose output is a drawing's data. Here the key
+// huffman_encode gives, the code its text builds, locks a message with
+// huffman_apply and is drawn by star_chart as named
+// stars over pages; star_chart unlocks from what the pages show (shared
+// star names, leaf names' letters, links' digits), so the pages are the key.
+let art_lock = sheet("locks");
+let sky = new_lock("sky")
+	.add("enc", "huffman_encode", #{ input_base: 27, output_base: 3 })
+	.add("msg", "huffman_apply", #{ input_base: 27, output_base: 3 })
+	.add("sky", "star_chart", #{ input_base: 27, output_base: 3, most_stars: 12, width: 480, height: 420, star_size: 14, label_width: 16, label_height: 16, label_gap: 6 })
+	.connect("enc.code", "msg.code")
+	.connect("enc.code", "sky.code");
+let locked = sky.run(#{ "enc.plain_text": symbols(27, corpus), "msg.plain_text": symbols(27, "EVERY LOCK OPENS") });
+assert(sky.unlock(locked).text("msg.plain_text") == "EVERY LOCK OPENS", "the chart should unlock the message");
+art_lock.add(caption("huffman_encode's code, the pangram's, applied by huffman_apply and drawn by star_chart: its chart is the key", TOP));
+art_lock.add(caption(`EVERY LOCK OPENS locks to ${locked.text("msg.cipher_text")}`, TOP + 34));
+art_lock.add(caption("result.get(\"sky.chart\").sketch(): its pages in a grid, stars numbered page by page", TOP + 68));
+let chart = locked.get("sky.chart");
+assert(chart.type_name == "StarChart" && chart.value().pages.len() > 1, "a star chart is pages of plain data");
+art_lock.add(draw_sketch(chart.sketch(), #{ links: LINE, stars: LINE }, vec2(LEFT, TOP + 120), RIGHT - LEFT, 900));
+book.bind("locks", art_lock);
+
+// Renderers: renderers/TYPE.rhai files that draw a lock's values as
+// canvases, in the journal's engine, apart from the lock. Attach one to a
+// chain, wire values to its inputs as locks are wired, and a run's
+// result.canvases(id) is what it draws: here a maze lock's maze in glyphs.
+// A chain file, chains/NAME.rhai, is a chain with its renderers that
+// chain(name) builds (the lock editor makes them, and journals follow its
+// edits): raven_sky locks a message with a text's code, draws the cipher
+// text in balanced-ternary marks and the star chart a page a constellation
+// (each page-sized canvas, shown small).
+let drawn = sheet("locks");
+drawn.add(caption("lock.attach(id, renderer, options), lock.connect(port, \"id.input\"), result.canvases(id): renderers", TOP));
+drawn.add(caption("chain(name, options): chains/raven_sky.rhai, its trit_message and star_pages renderers drawn", TOP + 34));
+let grid = new_lock("grid")
+	.add("maze", "maze_lock", #{ input_base: 27 })
+	.attach("drawn", "maze_glyphs", #{ cell: 46.0 })
+	.connect("maze.generated_maze", "drawn.maze");
+assert(grid.renderers()["drawn"] == "maze_glyphs", "renderers() lists what's attached");
+let gridded = grid.run(#{ "maze.maze_text": symbols(27, "HELLO WORLD"), "maze.random_seed": symbols(10, "4") });
+drawn.add(gridded.canvases("drawn")[0].translate_by(vec2(LEFT + 40, TOP + 120)));
+let raven = chain("raven_sky", #{ most_stars: 12 });
+assert(raven.renderers()["message"] == "trit_message" && raven.renderers()["pages"] == "star_pages", "a chain file's renderers come with it");
+let drawn_sky = raven.run(#{ "enc.plain_text": symbols(27, corpus), "msg.plain_text": symbols(27, "EVERY LOCK OPENS") });
+drawn.add(drawn_sky.canvases("message")[0].scale_by(0.42).translate_by(vec2(LEFT + 470, TOP + 70)));
+for (page, i) in drawn_sky.canvases("pages") {
+	if i >= 3 { break; }
+	drawn.add(page.scale_by(0.27).translate_by(vec2(LEFT + i * 340, TOP + 430)));
+}
+// eye: two texts in an eye on end, one round its iris, one in its pupil,
+// as Welcome Home draws a substitution cipher's ordering and cipher text.
+let watched = new_lock("watched")
+	.add("sub", "substitution_cipher", #{ base_n: 27 })
+	.set_input("sub.ordering", symbols(27, "MQ ZEHWBRKYDTXOAJGNLUFCVISP"))
+	.attach("eye", "eye", #{ top_ink: RED, bottom_ink: INK, pupil_ink: INK })
+	.connect("sub.ordering", "eye.iris")
+	.connect("sub.cipher_text", "eye.pupil")
+	.run(#{ "sub.plain_text": symbols(27, "EVERY LOCK OPENS") });
+drawn.add(watched.canvases("eye")[0].scale_by(0.22).translate_by(vec2(LEFT + 20, TOP + 890)));
+drawn.add(write_in("eye (iris_base, pupil_base, length, width, top_ink, bottom_ink, pupil_ink):", LEFT + 220, TOP + 1000, 22, CAPTION, PLAIN));
+drawn.add(write_in("a substitution cipher's ordering round the iris, its cipher text in the pupil", LEFT + 220, TOP + 1034, 22, CAPTION, PLAIN));
+book.bind("locks", drawn);
 
 // ---- a spread: one drawing over two pages ----
 //

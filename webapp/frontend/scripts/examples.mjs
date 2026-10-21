@@ -37,4 +37,4 @@ const fontsText = '{\n' + fontFiles.map((f) => {
   return [`\t${JSON.stringify(f.slice(0, -5))}: ${lines[0]}`, ...lines.slice(1).map((l) => `\t${l}`)].join('\n');
 }).join(',\n') + '\n}\n';
 writeFileSync(join(fixtures, 'fonts-json.ts'), `// fonts/, merged by scripts/examples.mjs.\nexport default ${JSON.stringify(fontsText)};\n`);
-fixture('shift-vigenere', 'locks/shift_vigenere.rhai');
+fixture('raven-sky', 'chains/raven_sky.rhai');

@@ -73,7 +73,7 @@ async function handle(request: Exclude<DarklyRequest, { type: 'init' | 'workspac
   try {
     const r = await getRenderer();
     if (workspace !== applied) {
-      setWorkspace(workspace?.fonts ?? null, workspace?.locks ?? {});
+      setWorkspace(workspace?.fonts ?? null, workspace?.locks ?? {}, workspace?.renderers ?? {}, workspace?.chains ?? {});
       applied = workspace;
     }
     if (request.type === 'renderPages') {

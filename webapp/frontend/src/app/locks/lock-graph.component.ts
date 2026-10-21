@@ -1,6 +1,6 @@
 import { Component, ElementRef, computed, effect, inject, signal, untracked, viewChild } from '@angular/core';
 import { failed } from '../services/tools.service';
-import { compatible, portType, portsOf, splitPort } from './chain-model';
+import { compatible, portType, portsOf, splitPort, testText } from './chain-model';
 import { LockEditorService } from './lock-editor.service';
 
 /** A lock's size in the graph: its width, its title's height, and a port row's. */
@@ -44,7 +44,7 @@ type Drag =
         <svg class="wires" width="1" height="1">
           @for (wire of wires(); track wire.to) {
             <path class="hit" [attr.d]="wire.d" (pointerdown)="pickWire($event, wire.to)" />
-            <path class="wire" [class.picked]="editor.selectedWire() === wire.to" [attr.d]="wire.d" />
+            <path class="wire" [class.render]="wire.render" [class.picked]="editor.selectedWire() === wire.to" [attr.d]="wire.d" />
             @if (wire.label) {
               <text class="value" [attr.x]="wire.mid.x" [attr.y]="wire.mid.y - 5">{{ wire.label }}</text>
             }
@@ -52,11 +52,13 @@ type Drag =
           @if (pending(); as d) { <path class="wire pending" [attr.d]="d" /> }
         </svg>
         @for (node of nodes(); track node.id) {
-          <div class="node" [class.picked]="editor.selected() === node.id" [class.broken]="node.error"
+          <div class="node" [class.picked]="editor.selected() === node.id" [class.broken]="node.error" [class.renderer]="node.renderer"
                [style.left.px]="node.x" [style.top.px]="node.y" [style.width.px]="width">
             <div class="head" (pointerdown)="downNode($event, node.id)">
+              @if (node.renderer) { <span class="kind" title="A renderer: it draws the values wired to it as canvases">▣</span> }
               <span class="id">{{ node.id }}</span>
               <span class="type">{{ node.type }}</span>
+              @if (node.canvases !== null) { <span class="canvases" [title]="node.canvases + ' canvases drawn from the last run'">{{ node.canvases }}</span> }
             </div>
             @if (node.error) {
               <p class="error">{{ node.error }}</p>
@@ -84,7 +86,7 @@ type Drag =
           }
         }
       </div>
-      @if (!editor.model().nodes.length) {
+      @if (!editor.model().nodes.length && !editor.model().renderers.length) {
         <p class="empty">Drag lock types here from the left, or click one, then wire outputs to inputs.</p>
       }
       @if (wireError(); as error) { <p class="wire-error">{{ error }}</p> }
@@ -102,6 +104,11 @@ type Drag =
     .wire { fill: none; stroke: #f2efe9; stroke-width: 2; pointer-events: none; }
     .wire.picked { stroke: #f2c94c; stroke-width: 3; }
     .wire.pending { stroke-dasharray: 6 4; }
+    .wire.render { stroke: #8fc1e3; stroke-dasharray: 2 4; }
+    .node.renderer { border-style: dashed; border-color: #8fc1e3; }
+    .node.renderer .head { background: color-mix(in srgb, #8fc1e3 18%, var(--surface-2)); }
+    .head .kind { color: #8fc1e3; }
+    .head .canvases { margin-left: auto; font: 11px var(--mono); padding: 0 6px; border-radius: 8px; background: #8fc1e3; color: #1d2b36; line-height: 16px; align-self: center; }
     .hit { fill: none; stroke: transparent; stroke-width: 12; cursor: pointer; pointer-events: stroke; }
     .value { fill: #f2efe9; font: 11px var(--mono); text-anchor: middle; paint-order: stroke; stroke: #3d3935; stroke-width: 3px; }
     .node { position: absolute; background: var(--surface); color: var(--fg); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 4px 14px rgb(0 0 0 / 0.25); font-size: 12px; }
@@ -167,11 +174,24 @@ export class LockGraphComponent {
     const model = this.editor.model();
     const ports = this.editor.ports();
     const errors = this.editor.nodeErrors();
-    const wiredIn = new Set(model.wires.map((w) => w.to));
+    const wiredIn = new Set([...model.wires, ...model.renderWires].map((w) => w.to));
     const wiredOut = new Set(model.wires.map((w) => w.from));
-    const inputs = new Map(this.editor.inputs().map((p) => [p.port, p.name]));
-    const outputs = new Map(this.editor.outputs().map((p) => [p.port, p.name]));
-    return model.nodes.map((node) => {
+    const previews = this.editor.previews();
+    const rendererErrors = this.editor.rendererErrors();
+    const renderers = model.renderers.map((renderer) => {
+      const p = portsOf(ports, renderer.id);
+      const rows = (p?.inputs ?? []).map(([name, type]) => {
+        const port = `${renderer.id}.${name}`;
+        return { input: { port, name, type, open: !wiredIn.has(port), fixed: false }, output: null };
+      });
+      const preview = previews[renderer.id];
+      return {
+        ...renderer, renderer: true, rows, tags: [], promoted: {},
+        error: rendererErrors[renderer.id] ?? (preview && 'error' in preview ? preview.error : null),
+        canvases: preview && !('error' in preview) ? preview.pages.length : null,
+      };
+    });
+    return [...model.nodes.map((node) => {
       const p = portsOf(ports, node.id);
       const ins = (p?.inputs ?? []).map(([name, type]) => {
         const port = `${node.id}.${name}`;
@@ -183,25 +203,20 @@ export class LockGraphComponent {
       });
       const rows = Array.from({ length: Math.max(ins.length, outs.length) }, (_, i) => ({ input: ins[i] ?? null, output: outs[i] ?? null }));
       const top = node.y + HEAD + (errors[node.id] ? 20 : 0);
-      const tags = [
-        ...ins.map((input, i) => {
-          const fixed = model.fixed[input.port];
-          const text = fixed ? `= ${'text' in fixed ? JSON.stringify(fixed.text) : JSON.stringify(fixed.json)}` : inputs.get(input.port);
-          return text ? { port: input.port, side: 'in' as const, y: top + i * ROW + ROW / 2, text: fixed ? text : `${text} →`, fixed: !!fixed } : null;
-        }),
-        ...outs.map((output, i) => {
-          const name = outputs.get(output.port);
-          return name ? { port: output.port, side: 'out' as const, y: top + i * ROW + ROW / 2, text: `→ ${name}`, fixed: false } : null;
-        }),
-      ].filter((t) => t !== null);
-      return { ...node, rows, error: errors[node.id] ?? null, tags };
-    });
+      // Fixed values show beside their inputs.
+      const tags = ins.map((input, i) => {
+        const fixed = model.fixed[input.port];
+        return fixed ? { port: input.port, side: 'in' as 'in' | 'out', y: top + i * ROW + ROW / 2, text: `= ${'text' in fixed ? JSON.stringify(fixed.text) : testText(fixed)}`, fixed: true } : null;
+      }).filter((t) => t !== null);
+      return { ...node, rows, error: errors[node.id] ?? null, tags, renderer: false, canvases: null as number | null };
+    }), ...renderers];
   });
 
   /** Where port "lock.name" sits, on its side of its lock. */
   private portPoint(port: string, side: 'in' | 'out'): Point | null {
     const [id, name] = splitPort(port);
-    const node = this.editor.model().nodes.find((n) => n.id === id);
+    const model = this.editor.model();
+    const node = model.nodes.find((n) => n.id === id) ?? model.renderers.find((r) => r.id === id);
     const p = portsOf(this.editor.ports(), id);
     if (!node || !p) return null;
     const list = side === 'in' ? p.inputs : p.outputs;
@@ -213,13 +228,16 @@ export class LockGraphComponent {
 
   protected readonly wires = computed(() => {
     const trace = this.trace();
-    return this.editor.model().wires.flatMap((wire) => {
+    const model = this.editor.model();
+    return [...model.wires.map((w) => ({ ...w, render: false })), ...model.renderWires.map((w) => ({ ...w, render: true }))].flatMap((wire) => {
       const a = this.portPoint(wire.from, 'out');
       const b = this.portPoint(wire.to, 'in');
       if (!a || !b) return [];
       const value = trace.get(wire.from);
-      const text = value ? (value.text ?? JSON.stringify(value.json)) : '';
-      return [{ to: wire.to, d: curve(a, b), mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, label: text.length > 18 ? `${text.slice(0, 17)}…` : text }];
+      // A value kind's value by its kind: its data is too long to show.
+      const kind = typeof value?.json === 'object' && value.json !== null && 'kind' in value.json ? String((value.json as { kind: unknown }).kind) : null;
+      const text = value ? (value.text ?? kind ?? JSON.stringify(value.json)) : '';
+      return [{ to: wire.to, render: wire.render, d: curve(a, b), mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, label: wire.render ? '' : text.length > 18 ? `${text.slice(0, 17)}…` : text }];
     });
   });
 
@@ -261,7 +279,8 @@ export class LockGraphComponent {
     this.editor.selected.set(id);
     this.editor.selectedWire.set(null);
     this.editor.settle();
-    const node = this.editor.model().nodes.find((n) => n.id === id)!;
+    const model = this.editor.model();
+    const node = (model.nodes.find((n) => n.id === id) ?? model.renderers.find((r) => r.id === id))!;
     this.area().nativeElement.setPointerCapture(event.pointerId);
     this.drag.set({ kind: 'node', id, from: this.at(event), at: { x: node.x, y: node.y } });
   }
@@ -314,9 +333,11 @@ export class LockGraphComponent {
 
   protected drop(event: DragEvent) {
     event.preventDefault();
+    const p = this.at(event);
+    const renderer = event.dataTransfer?.getData('application/x-renderer-type');
+    if (renderer) return this.editor.addRenderer(renderer, p.x - WIDTH / 2, p.y - HEAD / 2);
     const type = event.dataTransfer?.getData('application/x-lock-type');
     if (!type) return;
-    const p = this.at(event);
     this.editor.addNode(type, p.x - WIDTH / 2, p.y - HEAD / 2);
   }
 
@@ -338,7 +359,7 @@ export class LockGraphComponent {
 
   /** Show every lock. */
   fit() {
-    const nodes = this.editor.model().nodes;
+    const nodes = [...this.editor.model().nodes, ...this.editor.model().renderers];
     const rect = this.area().nativeElement.getBoundingClientRect();
     if (!nodes.length || !rect.width) return this.pan.set({ x: 20, y: 20 });
     const minX = Math.min(...nodes.map((n) => n.x)) - 120, maxX = Math.max(...nodes.map((n) => n.x)) + WIDTH + 140;

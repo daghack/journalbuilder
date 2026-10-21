@@ -1,5 +1,7 @@
 import { Injectable, inject, signal, untracked } from '@angular/core';
-import type { ChainFile, ChainRun, LockPorts, LockType, Preview, ToolError, ToolFunction, ToolsReply, ToolsRequest, WorkspacePayload } from '../scribe';
+import type {
+  ChainFile, ChainRun, ChainType, LockPorts, LockType, Preview, RenderPreview, RendererType, ToolError, ToolFunction, ToolsReply, ToolsRequest, ValueKind, WorkspacePayload,
+} from '../scribe';
 import { WorkspaceService } from './workspace.service';
 
 /** How long a call may take before the worker is taken to be stuck. */
@@ -54,19 +56,48 @@ export class ToolsService {
     return JSON.parse(await this.call<string>('lockPorts', type, JSON.stringify(options)));
   }
 
-  /** Run the composite lock file `source` with `inputs` (name -> `{ text }` or `{ json }`). */
+  /** Every renderer type: renderers/*.rhai, with the workspace's. */
+  async rendererTypes(): Promise<RendererType[]> {
+    return JSON.parse(await this.call<string>('rendererTypes'));
+  }
+
+  /** Renderer `type`'s inputs with `options`. */
+  async rendererPorts(type: string, options: Record<string, unknown>): Promise<Answer<{ inputs: [string, string][] }>> {
+    return JSON.parse(await this.call<string>('rendererPorts', type, JSON.stringify(options)));
+  }
+
+  /**
+   * What renderer `type` draws of `inputs` (name -> value, as a run shows
+   * it), or of its own example() if null; `source` stands in for its file
+   * if given.
+   */
+  async renderPreview(type: string, source: string | null, options: Record<string, unknown>, inputs: Record<string, unknown> | null): Promise<Answer<RenderPreview>> {
+    return JSON.parse(await this.call<string>('renderPreview', type, source, JSON.stringify(options), inputs === null ? null : JSON.stringify(inputs)));
+  }
+
+  /** Renderer `type`'s file, the workspace's if it has one. */
+  async rendererSource(type: string): Promise<Answer<{ source: string }>> {
+    return JSON.parse(await this.call<string>('rendererSource', type));
+  }
+
+  /** Every value kind, and rhai that makes one. */
+  async valueKinds(): Promise<ValueKind[]> {
+    return JSON.parse(await this.call<string>('valueKinds'));
+  }
+
+  /** Every chain file: chains/*.rhai, with the workspace's. */
+  async chainTypes(): Promise<Answer<ChainType[]>> {
+    return JSON.parse(await this.call<string>('chainTypes'));
+  }
+
+  /** Run the chain file `source` with `inputs` (port -> `{ text }`, `{ json }` or `{ rhai }`). */
   async runChain(source: string, options: Record<string, unknown>, inputs: Record<string, unknown>): Promise<Answer<ChainRun>> {
     return JSON.parse(await this.call<string>('runChain', source, JSON.stringify(options), JSON.stringify(inputs)));
   }
 
-  /** The composite lock type `type` read back, from `source` if given. */
-  async readChain(type: string, source: string | null = null): Promise<Answer<ChainFile>> {
-    return JSON.parse(await this.call<string>('readChain', type, source));
-  }
-
-  /** Run the examples of lock file `source` as type `name`. */
-  async checkLock(name: string, source: string): Promise<Answer<{ examples: number }>> {
-    return JSON.parse(await this.call<string>('checkLock', name, source));
+  /** The chain file `name` read back, from `source` if given. */
+  async readChain(name: string, source: string | null = null): Promise<Answer<ChainFile>> {
+    return JSON.parse(await this.call<string>('readChain', name, source));
   }
 
   private call<T>(fn: ToolFunction, ...args: unknown[]): Promise<T> {

@@ -50,38 +50,11 @@ impl Chain {
         }
 
         let mut locks: HashMap<String, Rc<dyn Lock>> = HashMap::new();
-        for (lock_name, entry) in map(&spec, "locks", true)? {
-            if lock_name.is_empty() || lock_name.contains('.') {
-                return Err(format!("locks: '{}' can't be a lock's name; names must be non-empty, without '.'", lock_name));
-            }
-            let entry = entry.try_cast::<Map>()
-                .ok_or_else(|| format!("locks: '{}' should be a map, #{{ type: \"shift_cipher\", options: #{{ ... }} }}", lock_name))?;
-            if let Some(unknown) = entry.keys().find(|key| !["type", "options"].contains(&key.as_str())) {
-                return Err(format!("locks: '{}' has '{}'; a lock takes type and options", lock_name, unknown));
-            }
-            let type_name = entry.get("type").and_then(|t| t.clone().into_string().ok())
-                .ok_or_else(|| format!("locks: '{}' needs its type, a lock type's name", lock_name))?;
-            let options = match entry.get("options") {
-                None => Map::new(),
-                Some(options) => options.clone().try_cast::<Map>()
-                    .ok_or_else(|| format!("locks: the options of '{}' should be a map", lock_name))?,
-            };
+        for (lock_name, type_name, options) in lock_entries(&spec)? {
             let lock = library.build(&format!("{}.{}", name, lock_name), &type_name, options)?;
-            locks.insert(lock_name.to_string(), Rc::new(lock));
+            locks.insert(lock_name, Rc::new(lock));
         }
-
-        let mut connections = Vec::new();
-        if let Some(connect) = spec.get("connect") {
-            let pairs = connect.clone().into_array().map_err(|_| "connect should be an array of [output, input] pairs")?;
-            for pair in pairs {
-                let pair: Option<Vec<String>> = pair.into_array().ok()
-                    .map(|items| items.into_iter().filter_map(|item| item.into_string().ok()).collect());
-                match pair.as_deref() {
-                    Some([from, to]) => connections.push((from.clone(), to.clone())),
-                    _ => return Err("connect should be an array of [output, input] pairs, e.g. [\"a.cipher_text\", \"b.key\"]".into()),
-                }
-            }
-        }
+        let connections = connections(&spec)?;
 
         let mut fixed = Vec::new();
         for (port, value) in map(&spec, "fixed", false)? {
@@ -133,8 +106,44 @@ impl Chain {
     }
 }
 
+/// `spec.locks`: each lock's name, type and options.
+pub(super) fn lock_entries(spec: &Map) -> Result<Vec<(String, String, Map)>, String> {
+    map(spec, "locks", true)?.into_iter().map(|(lock_name, entry)| {
+        if lock_name.is_empty() || lock_name.contains('.') {
+            return Err(format!("locks: '{}' can't be a lock's name; names must be non-empty, without '.'", lock_name));
+        }
+        let entry = entry.try_cast::<Map>()
+            .ok_or_else(|| format!("locks: '{}' should be a map, #{{ type: \"shift_cipher\", options: #{{ ... }} }}", lock_name))?;
+        if let Some(unknown) = entry.keys().find(|key| !["type", "options"].contains(&key.as_str())) {
+            return Err(format!("locks: '{}' has '{}'; a lock takes type and options", lock_name, unknown));
+        }
+        let type_name = entry.get("type").and_then(|t| t.clone().into_string().ok())
+            .ok_or_else(|| format!("locks: '{}' needs its type, a lock type's name", lock_name))?;
+        let options = match entry.get("options") {
+            None => Map::new(),
+            Some(options) => options.clone().try_cast::<Map>()
+                .ok_or_else(|| format!("locks: the options of '{}' should be a map", lock_name))?,
+        };
+        Ok((lock_name.to_string(), type_name, options))
+    }).collect()
+}
+
+/// `spec.connect`: [output, input] pairs.
+pub(super) fn connections(spec: &Map) -> Result<Vec<(String, String)>, String> {
+    let Some(connect) = spec.get("connect") else { return Ok(Vec::new()) };
+    let pairs = connect.clone().into_array().map_err(|_| "connect should be an array of [output, input] pairs")?;
+    pairs.into_iter().map(|pair| {
+        let pair: Option<Vec<String>> = pair.into_array().ok()
+            .map(|items| items.into_iter().filter_map(|item| item.into_string().ok()).collect());
+        match pair.as_deref() {
+            Some([from, to]) => Ok((from.clone(), to.clone())),
+            _ => Err("connect should be an array of [output, input] pairs, e.g. [\"a.cipher_text\", \"b.key\"]".to_string()),
+        }
+    }).collect()
+}
+
 /// `spec[key]` as a map, empty if it's missing and not `required`.
-fn map(spec: &Map, key: &str, required: bool) -> Result<Map, String> {
+pub(super) fn map(spec: &Map, key: &str, required: bool) -> Result<Map, String> {
     match spec.get(key) {
         None if required => Err(format!("chain(o) needs {}", key)),
         None => Ok(Map::new()),
@@ -143,7 +152,7 @@ fn map(spec: &Map, key: &str, required: bool) -> Result<Map, String> {
 }
 
 /// The type of `port`, "lock.name", among each lock's `ports`.
-fn port_type(locks: &HashMap<String, Rc<dyn Lock>>, port: &str, ports: impl Fn(&Rc<dyn Lock>) -> InfoVarTypeSet) -> Option<crate::lockbuilder::InfoVarType> {
+pub(super) fn port_type(locks: &HashMap<String, Rc<dyn Lock>>, port: &str, ports: impl Fn(&Rc<dyn Lock>) -> InfoVarTypeSet) -> Option<crate::lockbuilder::InfoVarType> {
     let (lock, name) = port.split_once('.')?;
     ports(locks.get(lock)?).get(name).cloned()
 }

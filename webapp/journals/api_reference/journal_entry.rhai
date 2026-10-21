@@ -213,7 +213,7 @@ doc += api("canvas.add(glyph, style), canvas.add(glyphs, style)", "Adds a placed
 doc += api("canvas.add(other), canvas.add(canvases)", "Adds every stroke on another canvas, or each of an array of canvases (as fill_with_text gives), in its own style.", [
 	arg("other, canvases", "The canvases whose strokes are copied.", "a canvas (this one included), or an array of them."),
 ]);
-doc += api("canvas.add(parts, styles)", "Adds each path of a map of parts, as art::bramble, art::eye, art::moon and art::snake give them, in the style styles has under its name, in name order; parts with no style aren't drawn.", [
+doc += api("canvas.add(parts, styles)", "Adds each path of a map of parts, as art::bramble, art::eye, art::huffman_stars, art::moon and art::snake give them, in the style styles has under its name, in name order; parts with no style aren't drawn.", [
 	arg("parts", "The paths, by name.", "a map of names to paths, and to anything else so long as it isn't styled (as an eye's iris_radius)."),
 	arg("styles", "Their styles, by part name.", "a map of part names to styles, every name one of the parts'."),
 ]);
@@ -788,6 +788,34 @@ doc += api("art::moon(center, radius, phase)", "The moon in a phase, seen from t
 	arg("phase", "How far through its month it is: 0 new, 0.25 first quarter (the right half lit), 0.5 full, 0.75 last quarter (the left half lit). Phases wrap, so 1.25 is 0.25 and -0.25 is 0.75.", "a number."),
 ]);
 
+doc += api("art::huffman_stars(symbols, output_base, center, width, height), art::huffman_stars(symbols, output_base, center, width, height, options)", "A star chart whose constellation is a Huffman tree: the code the huffman lock would build from the symbols, rewriting them in output_base (ties go to the lower symbol, so it is the lock's code exactly). Its nodes are stars, bigger the more often their symbols come up (a branch weighs its symbols together, so the root is biggest, the rarest symbols a third its size, on a log scale); its branches are the links, each one digit of the code. The tree is grown out from its root, near the middle, at random angles and lengths, each subtree looking for room, then tidied by forces: each star has a space of its own (stars nearer than their spaces push apart, and off the chart's edge), each link a length of its own (longer links pull together), and links push away stars that aren't theirs. Links never cross, and no link passes nearer a star than its radius and the gap. Gives #{ stars, links, points, edges, nodes }: stars, a circle for every star, and links, a line for every link stopping gap short of its stars, as paths (canvas.add(parts, styles) draws them); points, the stars' centres, and edges, [parent, child] index pairs into them, as new_edges takes; and nodes, a map for every star in the order of points, the root first then breadth first: position, its centre; radius; weight, how often its symbol comes up, smoothing included, or its leaves together; depth, 0 for the root; code, its digits from the root, an array of whole numbers (a leaf's is its symbol's code); symbol, a leaf's symbol, or () for a branch; text, that symbol as text (space for 0 in base 27), or (); and parent, its parent's index, or () for the root. Weightless leaves the lock pads merges with take digits but aren't stars.", [
+	arg("symbols", "What to build the code from.", "a lock value of symbols, as symbols(27, TEXT) gives; its base is the input base."),
+	arg("output_base", "The base the code writes in: how many children a branch has, at most.", "a whole number from 2 to 27."),
+	vec_arg("center", "The middle of the chart's box."),
+	arg("width", "How wide the box is: every star is wholly inside it.", "a positive number."),
+	arg("height", "How tall the box is.", "a positive number."),
+	opt("options.smoothing", "1", "As the lock's: how many times every symbol of the input base counts besides its uses, so with 1 every symbol is a star; with 0 only those used are.", "a whole number of at least 0; with 0, symbols must not be empty."),
+	seed_opt("chart"),
+	opt("options.variation", "0.6", "How much stars' spaces and pulls, links' lengths and the growth's reaches differ: 0 makes them all alike, 1 as uneven as they get.", "a number from 0 to 1."),
+	opt("options.iterations", "150", "How many steps the forces tidy the grown tree by; 0 leaves it as grown.", "a whole number from 0 to 10000."),
+	opt("options.star_size", "a seventh of how far apart the stars spread evenly through the box would be", "The biggest star's radius.", "a positive number, less than half the box's width and height."),
+	opt("options.gap", "star_size / 4", "How far short of stars links stop.", "a number of at least 0."),
+	opt("options.round", "false", "Keeps the stars in the ellipse inscribed in the box rather than the box.", "true or false."),
+]);
+
+doc += api("art::constellations(chart, count, center, width, height), art::constellations(chart, count, center, width, height, options)", "A chart's tree cut into constellations, a page each: pieces that hold together, neighbouring pieces sharing the star they meet at, so laid over each other on their shared stars they make the whole. The tree is cut leaves up into pieces of about the same number of links, as many as count or as near as the tree allows. Each piece is fitted, on its own, to the box, across and down apart (an affine stretch, so links still don't cross, neither way more than 4 times the other), so a cluster gets the room the box has its way, and each of its stars gets a spot for a label, clear of its links, its other stars and the labels placed before it, inside the box where it can be, a little toward the upper right all else equal. Gives an array of #{ stars, points, pairs, labels, scale }: stars, the chart's indices of the piece's stars, in order; points, where each goes in the box; pairs, its links as [parent, child] indices into points, as new_edges takes; labels, the middle of each star's label; and scale, how much the chart was scaled by to fit, a vec2: across and down.", [
+	arg("chart", "The stars and links to cut.", "a map with points (vec2s), edges ([parent, child] index pairs making one tree) and nodes (maps with a radius), as art::huffman_stars gives."),
+	arg("count", "How many pieces.", "a whole number of at least 1."),
+	vec_arg("center", "The middle of the box each piece is fitted to."),
+	arg("width", "How wide the box is.", "a positive number."),
+	arg("height", "How tall the box is.", "a positive number."),
+	opt("options.label_width", "30", "How wide a label's box is.", "a number of at least 0."),
+	opt("options.label_height", "24", "How tall a label's box is.", "a number of at least 0."),
+	opt("options.label_gap", "6", "How far from its star's edge a label sits, at least.", "a number of at least 0."),
+	opt("options.most_stars", "no limit", "The most stars a constellation may have: the cut is the one nearest count pieces whose pieces all fit, so there are more pieces than count if that's what it takes (with count 1, as few as fit).", "a whole number of at least 2."),
+	opt("options.split_at", "[]", "Stars whose constellation is split in two at them, one more piece each, both keeping the star: its branches from the star (the parts of it that meet only there) are taken round the star by the way they go, from the widest gap between them, and cut into two runs with about as many links each, so the pieces lie either side of it, the leftmost first.", "an array of star indices, each with a constellation that has two or more branches from it."),
+]);
+
 // ---- books ----
 
 doc += heading("Books");
@@ -816,7 +844,7 @@ doc += api("escape_markdown(text)", "The text with markdown's marks escaped, so 
 
 doc += heading("Page Layouts");
 doc += para("A layout describes pages as trees of flexbox boxes, and typeset pours text, art and ornaments into their slots, chaining text through columns and pages until it runs out. Typeset pages are named NAME_N and are exactly the layout's size; they split and go into PDFs like any page.");
-doc += api("layout(name)", "Loads a layout file, which defines page(n, info) and optionally page_size(); see Lock and Layout Files.", [
+doc += api("layout(name)", "Loads a layout file, which defines page(n, info) and optionally page_size(); see Lock, Renderer and Layout Files.", [
 	arg("name", "Which file: layouts/NAME.rhai, or NAME.rhai in --layouts-dir.", "a layout file's name without .rhai: no slashes, not starting with a dot."),
 ]);
 doc += api("new_layout(name, Fn(page_function))", "A layout from a function in the script.", [
@@ -950,29 +978,39 @@ doc += para("Locks encipher text for a journal to draw. A chain is lock types wi
 doc += api("new_lock(name)", "An empty lock chain. The chain is checked after every change, so a mistake fails at the line that made it.", [
 	arg("name", "The chain's name, for messages.", "a string."),
 ]);
+doc += api("chain(name), chain(name, options)", "The chain a chain file, chains/NAME.rhai, describes: its locks added, wired and given their fixed values, and its renderers attached and wired, as new_lock and its calls would build it, so its values are named ID.NAME and more can be added or attached. The web editor's lock editor makes chain files, and as it edits one, journals using it follow along.", [
+	arg("name", "Which chain file: chains/NAME.rhai, or in --chains-dir.", "a chain file's name (see Lock, Renderer and Layout Files)."),
+	opt("options", "the chain file's defaults", "Its options, as its options() declares them.", "a map of its option names to values, each required unless it has a default."),
+]);
 doc += api("lock.add(id, lock_type), lock.add(id, lock_type, options)", "Adds a lock to the chain. Returns the chain.", [
 	arg("id", "The lock's name in the chain, as in ID.NAME.", "a string, not empty, with no dot, that no other lock in the chain has."),
 	arg("lock_type", "Which lock file: locks/TYPE.rhai, or in --locks-dir.", "a lock type's name (see Lock types)."),
 	opt("options", "none", "The type's options.", "a map of the type's option names to values: each required unless the type gives it a default."),
 ]);
-doc += api("lock.connect(from, to)", "Wires one lock's output to another's input. Returns the chain.", [
-	arg("from", "The output.", "ID.NAME of a lock's output."),
-	arg("to", "The input it feeds.", "ID.NAME of an input not already wired, of the output's type (or Any), making no loop."),
+doc += api("lock.connect(from, to)", "Wires one lock's output to another's input, or a value of the chain to an attached renderer's input. Returns the chain.", [
+	arg("from", "The output, or for a renderer any value of the chain.", "ID.NAME of a lock's output; for a renderer, of any lock's input or output."),
+	arg("to", "The input it feeds.", "ID.NAME of an input not already wired, of the output's type (or Any), making no loop; or RENDERER.NAME of a renderer's input, of the value's type, not already wired. A renderer's wire leaves the chain as it was: the value is still an output, or still needs its input."),
 ]);
 doc += api("lock.set_input(input, value)", "Fixes an input, so running doesn't need it. Returns the chain.", [
 	arg("input", "The input.", "ID.NAME of an input not wired to an output."),
-	arg("value", "Its value.", "a lock value of the input's type, as symbols(27, TEXT) gives."),
+	arg("value", "Its value.", "a lock value of the input's type, as symbols(27, TEXT) gives, or a value kind's data, as huffman::code gives (checked against the kind's shape)."),
 ]);
+doc += api("lock.attach(id, renderer), lock.attach(id, renderer, options)", "Attaches a renderer, a renderers/TYPE.rhai file drawing the values wired to its inputs with lock.connect as canvases, which result.canvases gives. It runs in the journal's engine, not the lock's: locking and unlocking never see it. Returns the chain.", [
+	arg("id", "The renderer's name in the chain, as in ID.NAME for its inputs.", "a string, not empty, with no dot, that no lock or renderer in the chain has."),
+	arg("renderer", "Which renderer file: renderers/TYPE.rhai, or in --renderers-dir.", "a renderer type's name (see Renderers)."),
+	opt("options", "the renderer's defaults", "Its options.", "a map of names its options() gives to values like their defaults: a whole number is fine for a number."),
+]);
+doc += api("lock.renderers()", "Every renderer attached, a chain file's included: #{ ID: renderer type }.");
 doc += api("lock.inputs()", "The inputs still needing a value when it's run: #{ NAME: type }.");
 doc += api("lock.outputs()", "The chain's final outputs: #{ NAME: type }.");
 doc += api("lock.run(), lock.run(inputs)", "Runs the chain: a lock result of its outputs.", [
-	opt("inputs", "none, for a chain whose inputs are all set", "A value for every open input.", "a map of the names lock.inputs() gives to lock values of their types."),
+	opt("inputs", "none, for a chain whose inputs are all set", "A value for every open input.", "a map of the names lock.inputs() gives to lock values of their types, or value kinds' data."),
 ]);
 doc += api("lock.unlock(result)", "Recovers the inputs from a run's result: a lock result.", [
 	arg("result", "What running the chain gave.", "a lock result, from run."),
 ]);
-doc += api("lock.unlock(outputs)", "Recovers the inputs from outputs given by hand: a lock result. Chains with maze outputs need a run's result instead.", [
-	arg("outputs", "The chain's outputs.", "a map of the names lock.outputs() gives to lock values."),
+doc += api("lock.unlock(outputs)", "Recovers the inputs from outputs given by hand: a lock result.", [
+	arg("outputs", "The chain's outputs.", "a map of the names lock.outputs() gives to lock values or value kinds' data."),
 ]);
 doc += api("result.get(name)", "One value, as a lock value.", [
 	arg("name", "Which value.", "one of the result's names, as values() lists them."),
@@ -982,6 +1020,9 @@ doc += api("result.text(name)", "One value as text.", [
 ]);
 doc += api("result.values()", "Every value: #{ NAME: lock value }.");
 doc += api("result.trace()", "Every value computed along the way, intermediate ones included.");
+doc += api("result.canvases(id)", "What an attached renderer draws of this result's values: an array of canvases, one or more, to add to pages.", [
+	arg("id", "Which renderer.", "an id lock.renderers() gives, every input of it connected."),
+]);
 doc += api("symbols(base, text), symbols(base, text, options)", "Text as a lock value of symbols in a base.", [
 	arg("base", "Which symbols: 10 is digits; 27 is space (0) and A to Z (1 to 26); other bases the first base letters, A being 0.", "a whole number from 2 to 27."),
 	arg("text", "The text.", "a string of the base's symbols, letters in any case."),
@@ -990,39 +1031,85 @@ doc += api("symbols(base, text), symbols(base, text, options)", "Text as a lock 
 doc += api("value.symbols()", "The value's symbols, as an array of whole numbers. Fails for values that aren't symbols.");
 doc += api("value.text()", "The value as text, for symbols and strings.");
 doc += api("value.base", "Read only: the base of a value of symbols.");
-doc += api("value.value()", "The value as lock files see it: symbols as an array of whole numbers, a maze as a maze.");
-doc += api("value.type_name", "Read only: the value's type, such as Base27Symbol or Maze.");
-doc += api("value.maze()", "A maze output, for drawing.");
+doc += api("value.value()", "The value as lock files see it: symbols as an array of whole numbers, a value kind's (a maze, a code, a star chart) as its map of plain data.");
+doc += api("value.type_name", "Read only: the value's type, such as Base27Symbol, Maze or StarChart.");
+doc += api("value.maze()", "A maze output's data, a Maze map, for maze.cells() and maze.path(). Fails for values that aren't mazes.");
+doc += api("value.sketch()", "A value kind's default drawing, as art::sketch draws its data. Fails for values that aren't a value kind's, or whose kind has no sketch.");
 doc += api("value.to_string(), value.to_debug()", "The value as text, for print and debug.");
-doc += api("new_maze(width, height), new_maze(width, height, options)", "A maze of width by height nodes, in a grid of 2w - 1 by 2h - 1 cells. Its layout depends only on the seed and size; its cells hold random symbols from 0 to 26.", [
+doc += api("new_maze(width, height), new_maze(width, height, options)", "A maze of width by height nodes, in a grid of 2w - 1 by 2h - 1 cells, as a Maze value (see Value Kinds). Its corridors depend only on the seed and size; its cells hold random symbols from 0 to 26, from the seed.", [
 	arg("width", "How many nodes across.", "a whole number of at least 1."),
 	arg("height", "How many nodes down.", "a whole number of at least 1."),
 	opt("options.seed", "0", "Which maze.", "a whole number."),
 	opt("options.strategy", "LeftHanded", "The order its cells are walked in.", "LeftHanded or RightHanded."),
 ]);
-doc += api("maze.width, maze.height", "Read only: its grid size in cells, passages included.");
+doc += api("maze.width, maze.height", "Its grid size in cells, passages included: fields of its data.");
 doc += api("maze.cells()", "Every cell in walking order, the order a lock writes its text: #{ x, y, step, symbol }. Nodes are at even coordinates, passages between them.");
-doc += api("maze.fill(symbols)", "Writes symbols into the cells in walking order, and 0 into any left over.", [
+doc += api("maze.fill(symbols)", "Writes symbols into the cells in walking order, and 0 into any left over: its symbols field, rewritten.", [
 	arg("symbols", "What to write.", "an array of whole numbers of at least 0, no more of them than the maze has cells."),
 ]);
 doc += api("maze.path()", "A path along its corridors, in grid units, walked in the same order.");
 doc += listing("Lock types: the files in locks/, with the options lock.add gives them and the values they take and give.", [
 	arg("doublering", "The 26 letters in two rings of 13, each swapping with the one across; locking and unlocking are the same. Takes plain_text, gives cipher_text, both base 26.", "options: canonical_order (required), the rings: a string of the 26 letters, each once."),
+	arg("huffman_encode", "Text rewritten from input_base to output_base by the Huffman code its own symbols build, as huffman::code(plain_text, input_base, output_base) builds it. Takes plain_text (in input_base); gives cipher_text (in output_base) and code, a HuffmanCode: the key, which unlocking reads the cipher text back with and an art node such as star_chart can show.", "options: input_base and output_base (required), whole numbers from 2 to 27; smoothing (optional, default 1), a whole number of at least 0, how many times every symbol counts besides its uses, as huffman::code takes it."),
+	arg("huffman_apply", "Text rewritten from input_base to output_base by a Huffman code given as its tree, a HuffmanCode: one huffman_encode gives, or huffman::code builds from a corpus, so a message can be locked with another text's code. Takes plain_text (in input_base) and code; gives cipher_text (in output_base) and code, passed through: the key, which unlocking reads the cipher text back with.", "options: input_base and output_base (required), whole numbers from 2 to 27, the code's own."),
 	arg("huffman", "A Huffman code built from a corpus: symbols common in it get short codes, rare ones long, rewriting text from input_base to output_base. Ties go to the lower symbol, so a corpus always gives the same code. Takes corpus and plain_text, both in input_base; gives cipher_text, in output_base, and corpus, which unlocking rebuilds the code from.", "options: input_base and output_base (required), whole numbers from 2 to 27; smoothing (optional, default 1), a whole number of at least 0, how many times every symbol counts besides its uses in the corpus. With smoothing 0, a symbol the corpus lacks has no code, and locking text with one fails."),
 	arg("keyed_doublering", "A doublering whose order is an input. Takes plain_text and base_ordering, gives cipher_text and base_ordering, in the base.", "options: base (required), an even whole number."),
 	arg("maze_lock", "The text written into a square maze's cells, one symbol each, in walking order, the maze laid out by the seed. Takes maze_text (in input_base) and random_seed (base 10); gives generated_maze, random_seed and text_length.", "options: input_base (required), a whole number from 2 to 27; strategy (optional, default LeftHanded), LeftHanded or RightHanded."),
 	arg("merge_alpha", "Texts joined end to end. Takes input_0 to input_N, gives merged_output and location_info, which unlocking splits them by.", "options: base_n (required), a whole number from 2 to 27; input_count (required), a whole number of at least 1."),
 	arg("shift_cipher", "Every symbol moved shift places along the base, wrapping round (a Caesar cipher). Takes plain_text, gives cipher_text.", "options: base (required), a whole number from 2 to 27; shift (required), a whole number, negative moving the other way."),
 	arg("shift_vigenere", "The key shifted along the alphabet, then used as a Vigenere key; a composite of shift_cipher and vigenere_cipher, base 27. Takes key and plain_text, gives cipher_text and shifted_key.", "options: shift (optional, default 3), a whole number."),
+	arg("star_chart", "An art node: a HuffmanCode drawn as a StarChart, every node a named star, every link carrying its digit, the sky cut into constellations of at most most_stars stars, a page each, every one fitted to its page; neighbouring pages share a star under the same name. The root is Shiathri, a letter's star is named for its letter (the space's, in base 27, Vacii). Unlocking reads only what the pages show: it joins them on their shared names, takes the root as the star no link points to, a leaf's symbol from its name's first letter and each digit from its link. Takes code, gives chart.", "options: input_base and output_base (required), the code's (input_base 27 or a base of letters, 2 to 26 but not 10); most_stars (default 9), at least 2; seed (7), the sky's shape; name_seed (11), the names; size_seed (29), the stars' sizes; star_size (22), the biggest star's radius as it's laid out; width and height (1000 and 860), each page's sky; label_width, label_height and label_gap (26.4, 33.6 and 14), the room each star's label needs, as art::constellations takes them."),
 	arg("split_symbols", "A text cut into pieces each as long as the first, the last ones shorter or empty. Takes plain_text, gives output_0 to output_N.", "options: base_n (required), a whole number from 2 to 27; output_count (required), a whole number of at least 1."),
 	arg("substitution_cipher", "Each symbol replaced by the ordering's symbol at its position. Takes plain_text and ordering (every symbol of the base once), gives cipher_text and ordering.", "options: base_n (required), a whole number from 2 to 27."),
 	arg("vigenere_cipher", "Each plain symbol plus the key symbol under it, the key repeating, mod cipher_base. Takes plain_text and key, gives cipher_text and key.", "options: plain_base, key_base and cipher_base (all required), whole numbers from 2 to 27."),
 ]);
 
+// ---- value kinds ----
+
+doc += heading("Value Kinds");
+doc += para("A value kind is a lock value type whose values are plain data, maps of arrays, numbers and strings tagged with kind, so they cross between journals, lock files and the web editor as they are. Each is checked against its shape wherever it goes into or comes out of a lock, with errors naming the field; a kind's value holds only what its drawing shows. Its functions are the same in journals and lock files, and its sketch, if it has one, is how value.sketch, art::sketch and the editor draw it.");
+doc += listing("The kinds and their data.", [
+	arg("HuffmanCode", "An M-ary Huffman code as its tree: #{ kind, input_base, output_base, nodes }, nodes an array of #{ parent, digit, symbol }, the root first (its parent and digit ()), then breadth first, each node's children in digit order; a leaf's symbol is the input symbol its digits from the root encode, a branch's ().", "sketch: the tree, top down, each leaf's symbol under it."),
+	arg("Maze", "A maze: #{ kind, width, height, seed, strategy, symbols }: its grid in cells (odd), the seed its corridors come from, the order (LeftHanded or RightHanded) its cells are walked in, and each cell's symbol in that order.", "sketch: the corridors, and each cell's symbol as a letter."),
+	arg("StarChart", "A sky of named stars over pages, as it's drawn: #{ kind, input_base, output_base, pages }, each page #{ name, stars, links }: its stars #{ name, point, size, label } (where it is, how far its mark reaches, where its label goes, points as [x, y]), and its links [parent, child, digit], indices into its stars. A star on more than one page has the same name on each.", "sketch: the pages in a grid, each star a ring, its links, its number at its label and the page's name over it."),
+]);
+doc += api("huffman::code(symbols, output_base), huffman::code(symbols, output_base, options), huffman::code(symbols, input_base, output_base), huffman::code(symbols, input_base, output_base, options)", "The HuffmanCode of a corpus, as the huffman lock builds its code: symbols common in it get short codes. In journals symbols is a symbols(...) value, its base the input base (given too, as lock files write it, it must match); in lock files it's an array and its base is given. The lock editor takes this as a test value.", [
+	arg("symbols", "The corpus.", "a symbols(base, text) value, or an array of whole numbers from 0 to input_base - 1."),
+	arg("input_base", "With an array: its base.", "a whole number from 2 to 27."),
+	arg("output_base", "The base the code writes in: how many children a branch has, at most.", "a whole number from 2 to 27."),
+	opt("options.smoothing", "1", "How many times every symbol of the input base counts besides its uses: with 1 every symbol has a code.", "a whole number of at least 0."),
+]);
+doc += api("stars::layout(code), stars::layout(code, options)", "A HuffmanCode's tree laid out as art::huffman_stars lays out its stars: grown from the root at random angles and lengths, then tidied by forces, links never crossing. Its stars are sized by depth, the root biggest, the deepest a third its size. Gives #{ points, sizes }, a [x, y] point and a radius for each node, in the code's order.", [
+	arg("code", "The tree.", "a HuffmanCode."),
+	opt("options.seed", "0", "Which layout.", "a whole number."),
+	opt("options.variation", "0.6", "As art::huffman_stars's.", "a number from 0 to 1."),
+	opt("options.iterations", "150", "As art::huffman_stars's.", "a whole number from 0 to 10000."),
+	opt("options.star_size", "a seventh of how far apart the stars spread evenly would be", "The root's radius.", "a positive number."),
+	opt("options.width, options.height", "1000 and 800", "The box it's laid out in, from (0, 0); only its proportions matter once stars::split fits each piece.", "positive numbers."),
+]);
+doc += api("stars::split(points, edges, sizes), stars::split(points, edges, sizes, options)", "A laid-out tree cut into constellations, as art::constellations cuts a chart: pieces sharing the stars they meet at, each fitted to the box from (0, 0) to (width, height), each star given a spot for its label. Gives an array of #{ stars, points, labels, pairs }, as art::constellations's pieces, points as [x, y].", [
+	arg("points", "Where each star is.", "an array of [x, y] points."),
+	arg("edges", "The links, [parent, child] indices into points, making one tree.", "an array of pairs."),
+	arg("sizes", "How far each star's mark reaches, which links and labels keep clear of.", "an array of numbers."),
+	opt("options.count", "1", "As art::constellations's count.", "a whole number of at least 1."),
+	opt("options.most_stars, options.split_at", "no limit, []", "As art::constellations's.", "as there."),
+	opt("options.width, options.height", "1000 and 860", "The box.", "positive numbers."),
+	opt("options.label_width, options.label_height, options.label_gap", "30, 24 and 6", "As art::constellations's.", "numbers of at least 0."),
+]);
+doc += listing("Renderers: the files in renderers/, with the options lock.attach gives them and the values they draw.", [
+	arg("eye", "An eye stood on end, its corners top and bottom: one text's symbols round its iris as balanced-ternary glyphs, clockwise from the top, and another's filling its pupil, as large as they fit; each symbol shifted to sit round 0. One canvas, width across and length down. Draws iris, symbols in iris_base, and pupil, symbols in pupil_base; Welcome Home's eye holds a substitution cipher's ordering and cipher text.", "options: iris_base and pupil_base (27 and 27), whole numbers from 2 to 27; length and width (1640 and 717.2), the eye's size; top_ink and bottom_ink (#09603d and #0b2a1c), its lines' gradient, top to bottom; pupil_ink (#000000), the pupil's glyphs."),
+	arg("maze_glyphs", "A Maze on a grid, cell by cell: its corridors in one ink and each cell's symbol (0 to 26) as its balanced-ternary glyph, shifted to sit round 0, in another. One canvas. Draws maze, a Maze.", "options: cell (70), a cell's size; corridors and glyphs (#9b2318 and #2b1d12), their inks."),
+	arg("star_pages", "A StarChart page by page, a canvas each, page-sized: its constellation's name over it, each star's mark, each link's digit in balanced-ternary marks, each star numbered on its page in balanced ternary at its label, and an index of the numbers to the names in the bottom right corner; leaves in red. Draws chart, a StarChart.", "options: width and height (1200 and 1600), the canvas; sky_x and sky_y (100 and 180), where the chart's sky starts; large_star (33), the size from which a star takes large_shape rather than small_shape; large_shape and small_shape (corona and rayed), each one of celestial, corona, orrery, rayed, sparkle or star (anything else a disc); digit (24), the link marks' size; index_x and index_y (600 and 1110), where the name index starts."),
+	arg("trit_message", "Symbols in balanced-ternary marks, row after row under a heading, each shifted to sit round 0 and written in as many trits as its base needs. One canvas. Draws message, symbols in base.", "options: base (3), the symbols' base, a whole number from 2 to 27; title (MESSAGE), the heading; per_row (36), marks a row; width (1200), the canvas's width."),
+]);
+doc += api("art::sketch(value)", "A value kind's default drawing as a parts map for canvas.add(parts, styles): each part a path (a StarChart's links and stars, a HuffmanCode's links and nodes, a Maze's corridors), plus labels, an array of #{ at, text } to write, and label_size, how big to write them, in the drawing's units.", [
+	arg("value", "What to draw.", "a value kind's data whose kind has a sketch."),
+]);
+
 // ---- files ----
 
-doc += heading("Lock and Layout Files");
-doc += para("A lock file, locks/TYPE.rhai, defines functions that lock and unlock run, and can call rhai's standard library, the functions below, and new_maze, but nothing random and nothing to draw with; see locks/README.md. o, in each, is the lock's options, checked against their types first.");
+doc += heading("Lock, Renderer and Layout Files");
+doc += para("A lock file, locks/TYPE.rhai, defines functions that lock and unlock run, and can call rhai's standard library, the functions below, new_maze and value kinds' functions (huffman::code, stars::layout, stars::split), but nothing unseeded and nothing to draw with; see locks/README.md. o, in each, is the lock's options, checked against their types first.");
 doc += api("fn options()", "Gives each option's type: #{ NAME: type }, a type being one of the option types below.");
 doc += api("fn check(o)", "Optional: throws to reject options, for what their types can't say, such as a base that must be even. Runs at lock.add.", [
 	arg("o", "The options.", "a map of option names to values."),
@@ -1032,7 +1119,7 @@ doc += api("fn inputs(o), fn outputs(o)", "Give the lock's values and their type
 ]);
 doc += api("fn lock(o, inputs)", "Gives every output: #{ NAME: value }, each checked against its type.", [
 	arg("o", "The options.", "a map."),
-	arg("inputs", "The input values.", "a map of input names to values: symbols as arrays of whole numbers, mazes as mazes."),
+	arg("inputs", "The input values.", "a map of input names to values: symbols as arrays of whole numbers, value kinds' data as maps."),
 ]);
 doc += api("fn unlock(o, outputs)", "Gives the inputs it recovers: #{ NAME: value }; passed-through ones needn't be.", [
 	arg("o", "The options.", "a map."),
@@ -1044,14 +1131,24 @@ doc += api("fn examples()", "Optional: test cases, run by --check-locks and carg
 	opt("outputs", "not checked", "What locking must give.", "a map of names to values."),
 	opt("error", "none", "Text the example must fail with, instead of locking.", "a string."),
 ]);
-doc += api("fn chain(o)", "In place of inputs, outputs, lock and unlock: a composite lock's chain, #{ locks, connect, fixed, inputs, outputs }.", [
+doc += api("fn chain(o)", "In place of inputs, outputs, lock and unlock: a composite lock's chain, #{ locks, connect, fixed, inputs, outputs }; composite lock files are written by hand.", [
 	arg("o", "The options.", "a map."),
 	req("locks", "Each part.", "a map of ids to #{ type, options }, options able to use o."),
 	req("connect", "The wiring.", "an array of [output, input] pairs, as lock.connect takes them."),
 	req("fixed", "Values for inputs, as lock.set_input sets them.", "a map of ID.NAME to values."),
 	req("inputs, outputs", "The composite's own names for the chain's open ports.", "a map of names to ID.NAME."),
 ]);
-doc += api("fn layout()", "Optional: where the web editor's lock editor draws each part of a composite: #{ ID: [x, y] }.");
+doc += para("A chain file, chains/NAME.rhai, is a chain of lock types and the renderers drawing its values, which chain(name) builds; the web editor's lock editor writes them. It runs in the lock files' engine, so it writes values as they do (symbols(27, TEXT) as an array); see chains/README.md.");
+doc += api("fn options() in a chain file", "Optional: the chain's options, as a lock file's options() declares them, which chain(name, options) gives.");
+doc += api("fn chain(o) in a chain file", "The chain: #{ locks, connect, fixed, renderers }.", [
+	arg("o", "The options.", "a map."),
+	req("locks", "Each lock.", "a map of ids to #{ type, options }, options able to use o."),
+	opt("connect", "none", "The wiring.", "an array of [output, input] pairs, as lock.connect takes them."),
+	opt("fixed", "none", "Values for inputs, as lock.set_input sets them.", "a map of ID.NAME to values."),
+	opt("renderers", "none", "Renderers attached, as lock.attach attaches them.", "a map of ids to #{ type, options, inputs }: options able to use o, inputs a map of each renderer input to the ID.NAME it draws."),
+]);
+doc += api("fn layout() in a chain file", "Optional: where the lock editor draws each lock and renderer: #{ ID: [x, y] }.");
+doc += api("fn example() in a chain file", "Optional: a value for each of the chain's open inputs, #{ ID.NAME: value }, run with its default options by --check-locks and cargo test, which lock and unlock it and need the inputs back; the lock editor's test case.");
 doc += api("integer(), number(), string(), bool(), array()", "Option types, in options(): an option of that type, required unless given a default. An integer is fine for a number.", [
 	opt("default", "none, so it's required", "What the option is when lock.add leaves it out.", "a value of the type."),
 ]);
@@ -1059,7 +1156,7 @@ doc += api("one_of(choices), one_of(choices, default)", "An option type: one of 
 	arg("choices", "The values it can be.", "a non-empty array."),
 	opt("default", "none, so it's required", "What it is when left out.", "one of the choices."),
 ]);
-doc += api("symbol_type(base)", "The type of symbols in a base, such as Base27Symbol: an array of whole numbers from 0 to base - 1. Other types are Maze, String, Any (which matches every type) or a name of the file's own.", [
+doc += api("symbol_type(base)", "The type of symbols in a base, such as Base27Symbol: an array of whole numbers from 0 to base - 1. Other types are a value kind's (HuffmanCode, Maze, StarChart: values checked against the kind's shape), String, Any (which matches every type) or a name of the file's own.", [
 	arg("base", "The base.", "a whole number from 2 to 27."),
 ]);
 doc += api("symbols(base, text), symbols(base, text, options) in lock files", "Text as an array of symbols: symbols(27, HI) is [8, 9].", [
@@ -1071,6 +1168,26 @@ doc += api("symbol_text(base, symbols)", "Symbols back as text: symbol_text(27, 
 	arg("base", "The base.", "a whole number from 2 to 27."),
 	arg("symbols", "The symbols.", "an array of whole numbers from 0 to base - 1."),
 ]);
+doc += api("new_random(seed)", "A generator for lock files, the only randomness they have: the same seed gives the same numbers every run. Copies share it, so a helper handed one moves it on for its caller too.", [
+	arg("seed", "Which numbers.", "a whole number."),
+]);
+doc += api("random.next()", "A number from 0 up to 1.");
+doc += api("random.range(low, high)", "A number from low up to high.", [
+	arg("low, high", "The range.", "numbers."),
+]);
+doc += api("random.pick(items)", "One of the items.", [
+	arg("items", "What to pick from.", "a non-empty array."),
+]);
+doc += para("A renderer file, renderers/TYPE.rhai, runs in the journal's engine, so it can call everything a journal can, and draws lock values as canvases; see renderers/README.md. o, in each, is its options: its defaults with what lock.attach gave over them.");
+doc += api("fn options()", "Optional, in a renderer file: its options and their defaults, #{ NAME: value }; lock.attach can give only these, each like its default.");
+doc += api("fn inputs(o)", "In a renderer file: the values it draws and their types, #{ NAME: type }, as a lock file's inputs are written (Base27Symbol, Maze, StarChart, Any...).", [
+	arg("o", "The options.", "a map."),
+]);
+doc += api("fn render(o, i)", "In a renderer file: a canvas, or an array of canvases, drawing the values.", [
+	arg("o", "The options.", "a map."),
+	arg("i", "The values, as lock files see them: symbols as arrays of whole numbers, value kinds' data as maps.", "a map of its input names to values."),
+]);
+doc += api("fn example()", "Optional, in a renderer file: values to draw it with when nothing's connected, as the web editor previews it and cargo test checks it: #{ NAME: value }.");
 doc += para("A layout file, layouts/NAME.rhai, runs in the journal's engine, so it can call everything a journal can; see layouts/README.md.");
 doc += api("fn page(n, info)", "Gives page n's tree of boxes.", [
 	arg("n", "Which page, from 0.", "a whole number."),
@@ -1096,9 +1213,12 @@ doc += api("journalbuild NAME [flags]", "Runs journals/NAME/journal_entry.rhai a
 	opt("--fonts PATH", "the repository's fonts/", "The fonts: a directory with a NAME.json for each font, or one file with every font in it by name.", "a directory or a file."),
 	opt("--locks-dir DIR", "the repository's locks/", "Where lock files are.", "a directory."),
 	opt("--layouts-dir DIR", "the repository's layouts/", "Where layout files are, for layout(name).", "a directory."),
+	opt("--renderers-dir DIR", "the repository's renderers/", "Where renderer files are, for lock.attach.", "a directory."),
+	opt("--chains-dir DIR", "the repository's chains/", "Where chain files are, for chain(name).", "a directory."),
 ]);
-doc += api("journalbuild --check-locks [--locks-dir DIR]", "Runs every lock file's examples through lock and unlock instead of building a journal.", [
+doc += api("journalbuild --check-locks [--locks-dir DIR] [--chains-dir DIR]", "Runs every lock file's examples, and every chain file's, through lock and unlock instead of building a journal.", [
 	opt("--locks-dir DIR", "the repository's locks/", "Where lock files are.", "a directory."),
+	opt("--chains-dir DIR", "the repository's chains/", "Where chain files are.", "a directory."),
 ]);
 doc += api("journalbuild --check-gpu", "Checks that Darkly can render here, that there's a GPU wgpu can use, instead of building a journal. Fails if there isn't one; --svg renders still work without one.");
 
