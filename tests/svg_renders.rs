@@ -191,6 +191,7 @@ macro_rules! first_pages {
 first_pages!(
     api_reference,
     becoming_us,
+    black_priests,
     copper_letter_1,
     first_codex,
     journal_entry_17,
