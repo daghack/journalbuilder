@@ -351,6 +351,7 @@ let samples = [
 	#{ label: "font(\"lang\")", font: font("lang"), lines: [alphabet.to_upper(), alphabet, "Lorem ipsum dolor sit amet."] },
 	#{ label: "font(\"eldritch\")", font: font("eldritch"), lines: [alphabet, "lorem ipsum dolor sit amet"] },
 	#{ label: "font(\"sharp_lower\")", font: font("sharp_lower"), lines: [alphabet, "lorem ipsum dolor sit amet"] },
+	#{ label: "font(\"black_priests\"): thirteen symbols, a to m", font: font("black_priests"), lines: ["abcdefghijklm", "fadlem bicgke hajmdl"] },
 	#{ label: "ternary_font(\"balanced_ternary\", #{ character_padding: 0.2 }): letters to the ternary digits", font: ternary_font("balanced_ternary", #{ character_padding: 0.2 }), lines: ["abcdefghijklm", "nopqrstuvwxyz", "lorem ipsum dolor"] },
 ];
 let fonts = sheet("fonts");
