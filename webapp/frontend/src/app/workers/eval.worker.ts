@@ -27,7 +27,7 @@ addEventListener('message', ({ data }: MessageEvent<EvalRequest>) => {
       // on `ready`, and run in the order they came.
       void ready?.then(() => {
         try {
-          setWorkspace(data.workspace.fonts, data.workspace.locks);
+          setWorkspace(data.workspace.fonts, data.workspace.locks, data.workspace.renderers ?? {}, data.workspace.chains ?? {});
         } catch (err) {
           crashed(err);
         }

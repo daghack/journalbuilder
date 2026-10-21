@@ -62,37 +62,63 @@ the font's options on the right.
 
 ## Locks
 
-Lock chains, built as graphs: the lock types (every `locks/*.rhai`) on the
-left, the chain in the middle, and on the right its name, the picked
-lock's options, and the chain's inputs and outputs with a test case.
+Chains, built as graphs: the chains (every `chains/*.rhai`, and this
+browser's), lock types (every `locks/*.rhai`) and renderers (every
+`renderers/*.rhai`) on the left, the chain in the middle, and on the right
+its name, the picked lock's or renderer's options, and the chain's inputs
+and outputs with a test case. A journal uses a chain by name:
 
+```rhai
+let c = chain("my_chain_1");
+let result = c.run(#{ "ml.maze_text": symbols(27, "HELLO"), "ml.random_seed": symbols(10, "4") });
+let pages = result.canvases("mg");
+```
+
+- **Live.** As you edit, the chain is a chain file in this browser under
+  its name, so a journal using `chain("name")` follows along, as one using
+  an edited font does, mistakes and all. Click a chain on the left to edit
+  it (a compiled-in one too: the browser's copy then stands in for it until
+  removed with ×); New starts another, and the last one stays. Renamed, a
+  chain moves.
 - **Building.** Drag a lock type into the middle (or click it). Drag from
   an output to an input to wire them: only ports of the same type (or
   `Any`) take a wire, an input takes one wire, and nothing can feed back
   into itself. One output can feed several inputs. A lock's ports follow
   its options (`merge_alpha`'s `input_count`, say).
-- **Ports.** The inputs and outputs left unwired are the chain's own; name
-  them as the chain should show them. Fix an input to give it its value in
-  the chain itself. "Chain's" makes a lock's option one of the chain's own,
-  set where the chain is used.
-- **Testing.** Give each input a test value (text, for symbols) and the
-  chain runs as you edit: its outputs, the values along each wire, and
-  whether unlocking gives the inputs back.
-- **Saving** checks the test case as the chain's example, then saves a
-  composite lock file (see locks/README.md) and adds it to this browser's
-  lock types: in the palette, to use in other chains, and in journals as
-  `.add("x", "name", #{...})`. To add it to the repository, put the file
-  in `locks/`, give it a row on the showcase's locks page, and rebuild the
-  renderer. Open… reads a composite lock file back, as the palette's Open
-  does one compiled in. The snippets copy journal script for the chain.
+- **Ports.** The inputs and outputs left unwired are the chain's, named
+  as its locks name them, `lock.port`. Fix an input to give it its value
+  in the chain itself. "Chain's" makes a lock's or renderer's option one
+  of the chain's own, which a journal gives as `chain("name", #{...})`.
+- **Testing.** Give each input a test value and the chain runs as you
+  edit: its outputs, the values along each wire, and whether unlocking
+  gives the inputs back. Symbols take text. A value kind (a HuffmanCode, a
+  Maze) takes JSON, or the rhai that makes it, run as lock files run it;
+  the box suggests one, e.g. `huffman::code(symbols(27, "THE QUICK BROWN
+  FOX"), 27, 3)`. A value kind with a sketch, such as a StarChart from
+  `star_chart`, is drawn under its output. The test case is the chain
+  file's `example()`.
+- **Renderers.** A renderer draws the chain's values as canvases: a star
+  chart's pages, a maze with its glyphs. Drag one in (or click it) and wire
+  a value to its inputs; the chain itself is left as it was. Pick it to set
+  its options and see what it draws of the test run. New writes a renderer
+  file in the browser and Edit opens one; the middle becomes its editor,
+  previewing its `example()` as you type, and it's usable as it draws (see
+  renderers/README.md). A journal's `result.canvases("id")` is what it draws.
+- **Saving** writes the chain file. To add it to the repository, put it in
+  `chains/` (see chains/README.md), use it in the showcase, and rebuild
+  the renderer. Open… reads a chain file back. The snippets copy journal
+  script: `chain("name")` in use, or the chain built lock by lock with
+  `new_lock`.
 
 ## The workspace
 
-Fonts edited and lock types saved here are the workspace: every script,
-in every editor, runs with them (the diagnostics say when), and Darkly
-renders and exports do too. They're kept in this browser only until
-exported into the repository; the tabs show what's in use. If
-the files in fonts/ change after edits began, the font editor says so.
+Fonts edited, and chains, renderers and lock types made here, are the
+workspace: every script, in every editor, runs with them (the diagnostics
+say when), and Darkly renders and exports do too. They're kept in this
+browser only until exported into the repository; the tabs show what's in
+use, and Clear workspace, beside them, throws it all away (and the
+editors' drafts) to use the repository's files again. If the files in
+fonts/ change after edits began, the font editor says so.
 
 ## Running it
 
@@ -142,13 +168,13 @@ reuse BuildKit's caches.
 
 | path | what's there |
 |---|---|
-| `wasm/` | `scribe-wasm`, the renderer for the browser: the `scribe` library with the layout and lock files and fonts compiled in (its `embedded-assets` feature). `evaluate(source)` runs a script and lists its pages, `pageSvg(i)` draws one as SVG, and `Renderer` renders pages with Darkly (`renderPage`, `exportPdf`). `setWorkspace(fonts, locks)` has scripts run with edited fonts and extra lock files. For the font and lock editors: `previewSvg`, `builtinFonts`, `lockTypes`, `lockPorts`, `runChain`, `readChain` and `checkLock`. |
+| `wasm/` | `scribe-wasm`, the renderer for the browser: the `scribe` library with the layout, lock, renderer and chain files and fonts compiled in (its `embedded-assets` feature). `evaluate(source)` runs a script and lists its pages, `pageSvg(i)` draws one as SVG, and `Renderer` renders pages with Darkly (`renderPage`, `exportPdf`). `setWorkspace(fonts, locks, renderers, chains)` has scripts run with edited fonts and extra lock, renderer and chain files. For the font and lock editors: `previewSvg`, `builtinFonts`, `lockTypes`, `lockPorts`, `chainTypes`, `runChain`, `readChain`, `valueKinds`, `rendererTypes`, `rendererPorts`, `renderPreview` and `rendererSource`. |
 | `frontend/` | the Angular app (standalone components, signals, no zone.js) |
 | `frontend/src/app/workers/` | the web workers the renderer runs in. `eval.worker` runs the script as you type, sends its pages, then sends each page's SVG, the page shown first. `darkly.worker` renders with Darkly. `tools.worker` answers the font and lock editors. Typing never waits on any of them. |
-| `frontend/src/app/services/` | `JournalService` (the script, its pages, the file), `RenderService` (the script and Darkly workers), `ToolsService` (the tools worker), `WorkspaceService` (edited fonts and lock files), `FileService` (opening, saving, downloads) |
+| `frontend/src/app/services/` | `JournalService` (the script, its pages, the file), `RenderService` (the script and Darkly workers), `ToolsService` (the tools worker), `WorkspaceService` (edited fonts, and lock, renderer and chain files), `FileService` (opening, saving, downloads) |
 | `frontend/src/app/shell/`, `layout/` | the tabs, and the three resizable columns every editor has |
 | `frontend/src/app/fonts/` | the font editor. `font-file.ts` reads and writes fonts.json; `glyph-path.ts` reads and writes path data; `glyph-edit.ts` is what the canvas does to a path. |
-| `frontend/src/app/locks/` | the lock editor. `chain-model.ts` is the graph and its rules; `chain-source.ts` writes it as a composite lock file. |
+| `frontend/src/app/locks/` | the lock editor. `chain-model.ts` is the graph and its rules; `chain-source.ts` writes it as a chain file; `renderer-editor.component.ts` edits renderer files. |
 | `frontend/src/app/editor/` | the CodeMirror editor and its rhai highlighting (`rhai-language.ts`) |
 | `frontend/scripts/examples.mjs` | copies `journals/*/journal_entry.rhai` into `generated/examples/` for the Examples menu, and the repository files the unit tests check against into `generated/fixtures/` |
 

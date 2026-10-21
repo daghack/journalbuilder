@@ -1249,7 +1249,7 @@ mod tests {
         std::fs::write(dir.join("bad.rhai"), "fn page(n, info) {\n\trow([], #{ colour: 1 })\n}\n").unwrap();
         std::fs::write(dir.join("pageless.rhai"), "fn other() {}\n").unwrap();
         let symd = FontBook::from_file(crate::journal::fonts::DEFAULT_FONTS).unwrap();
-        let mut engine = JournalEngine::with_dirs(Rc::new(symd), crate::journal::rhaientries::DEFAULT_LOCKS_DIR, &dir);
+        let mut engine = JournalEngine::with_dirs(Rc::new(symd), crate::journal::rhaientries::DEFAULT_LOCKS_DIR, &dir, crate::journal::rhaientries::DEFAULT_RENDERERS_DIR, crate::journal::rhaientries::DEFAULT_CHAINS_DIR);
         let err = engine.build_entry_str("layout(\"bad\").typeset(#{ width: 10, height: 10 });").expect_err("bad layout");
         assert!(err.contains("layout 'bad' page 0") && err.contains("unknown option 'colour'") && err.contains("line 2"), "{}", err);
         let err = engine.build_entry_str("layout(\"pageless\");").expect_err("no page()");

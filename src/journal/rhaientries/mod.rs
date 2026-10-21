@@ -8,6 +8,7 @@ mod glyphs;
 mod gradient;
 mod layout;
 mod locks;
+mod renderers;
 mod markdown;
 mod options;
 mod path;
@@ -22,7 +23,8 @@ pub use layout::DEFAULT_LAYOUTS_DIR;
 pub use sources::Sources;
 #[cfg(feature = "embedded-assets")]
 pub use sources::embedded;
-pub use locks::{LockLibrary, DEFAULT_LOCKS_DIR};
+pub use locks::{LockLibrary, DEFAULT_CHAINS_DIR, DEFAULT_LOCKS_DIR};
+pub use renderers::{RendererLibrary, DEFAULT_RENDERERS_DIR};
 /// What the web editor's lock editor asks of lock types.
 pub mod lock_inspection {
     pub use super::locks::{from_json, to_json, value_from_test, value_view, OptionInfo, Ports, RunResult, TypeInfo, ValueView};
@@ -144,6 +146,28 @@ pub fn rhai_engine() -> Engine {
 pub struct JournalEngine {
     engine: Engine,
     warnings: Rc<RefCell<Vec<String>>>,
+    renderers: Rc<RendererLibrary>,
+}
+
+/// A JSON object (or null) as a rhai map.
+fn json_map(value: &serde_json::Value, what: &str) -> Result<rhai::Map, String> {
+    match value {
+        serde_json::Value::Null => Ok(rhai::Map::new()),
+        serde_json::Value::Object(_) => Ok(locks::from_json(value).cast::<rhai::Map>()),
+        _ => Err(format!("the {} should be a JSON object", what)),
+    }
+}
+
+/// A renderer type, as the lock editor's palette lists it: what it is, its
+/// options' defaults, and its inputs with those options.
+#[derive(serde::Serialize)]
+pub struct RendererInfo {
+    pub name: String,
+    pub file: String,
+    pub description: String,
+    pub options: serde_json::Value,
+    pub inputs: Vec<(String, String)>,
+    pub example: bool,
 }
 
 impl JournalEngine {
@@ -153,22 +177,24 @@ impl JournalEngine {
     }
     /// An engine whose lock types are the lock files in `locks_dir`.
     pub fn with_locks_dir(symdict: Rc<FontBook>, locks_dir: impl Into<std::path::PathBuf>) -> Self {
-        Self::with_dirs(symdict, locks_dir, DEFAULT_LAYOUTS_DIR)
+        Self::with_dirs(symdict, locks_dir, DEFAULT_LAYOUTS_DIR, DEFAULT_RENDERERS_DIR, DEFAULT_CHAINS_DIR)
     }
-    /// An engine with the lock files in `locks_dir` and the layout files
-    /// in `layouts_dir`.
-    pub fn with_dirs(symdict: Rc<FontBook>, locks_dir: impl Into<std::path::PathBuf>, layouts_dir: impl Into<std::path::PathBuf>) -> Self {
-        Self::with_sources(symdict, Sources::dir(locks_dir), Sources::dir(layouts_dir))
+    /// An engine with the lock files in `locks_dir`, the layout files in
+    /// `layouts_dir`, the renderer files in `renderers_dir` and the chain
+    /// files in `chains_dir`.
+    pub fn with_dirs(symdict: Rc<FontBook>, locks_dir: impl Into<std::path::PathBuf>, layouts_dir: impl Into<std::path::PathBuf>, renderers_dir: impl Into<std::path::PathBuf>, chains_dir: impl Into<std::path::PathBuf>) -> Self {
+        Self::with_sources(symdict, Sources::dir(locks_dir), Sources::dir(layouts_dir), Sources::dir(renderers_dir), Sources::dir(chains_dir))
     }
-    /// An engine with the repository's lock and layout files compiled in,
-    /// for builds with no files to read.
+    /// An engine with the repository's lock, layout, renderer and chain
+    /// files compiled in, for builds with no files to read.
     #[cfg(feature = "embedded-assets")]
     pub fn embedded(symdict: Rc<FontBook>) -> Self {
-        Self::with_sources(symdict, embedded::locks(), embedded::layouts())
+        Self::with_sources(symdict, embedded::locks(), embedded::layouts(), embedded::renderers(), embedded::chains())
     }
-    /// An engine with the lock files in `locks` and the layout files in
-    /// `layouts`.
-    pub fn with_sources(symdict: Rc<FontBook>, locks: Sources, layouts: Sources) -> Self {
+    /// An engine with the lock files in `locks`, the layout files in
+    /// `layouts`, the renderer files in `renderers` and the chain files in
+    /// `chains`.
+    pub fn with_sources(symdict: Rc<FontBook>, locks: Sources, layouts: Sources, renderers: Sources, chains: Sources) -> Self {
         let mut engine = rhai_engine();
         let rng = random::register(&mut engine);
         let text: TextSource = (symdict.clone(), rng.clone());
@@ -226,11 +252,13 @@ impl JournalEngine {
         gradient::register(&mut engine);
         generate::register(&mut engine, rng.clone());
         text::register(&mut engine, symdict.clone(), rng.clone());
-        locks::register(&mut engine, Rc::new(LockLibrary::with_sources(locks)));
+        let renderers = Rc::new(RendererLibrary::new(renderers));
+        locks::register(&mut engine, Rc::new(LockLibrary::with_sources(locks).with_chains(chains)), renderers.clone());
 
         JournalEngine {
             engine,
             warnings,
+            renderers,
         }
     }
     /// The name of every function scripts can call that this crate
@@ -260,6 +288,47 @@ impl JournalEngine {
         self.engine.run_with_scope(&mut scope, script_str).map_err(|err| ScriptError::new(&err))?;
         scope.get_value("journal_entry")
             .ok_or_else(|| ScriptError { message: "the script replaced journal_entry with something that isn't an entry".to_string(), line: None, column: None })
+    }
+    /// The renderer types' names.
+    pub fn renderer_names(&self) -> Vec<String> {
+        self.renderers.names()
+    }
+    /// What renderer `name` is and takes.
+    pub fn describe_renderer(&self, name: &str) -> Result<RendererInfo, String> {
+        let renderer = self.renderers.load(&self.engine, name)?;
+        Ok(RendererInfo {
+            name: renderer.name.clone(),
+            file: renderer.file.clone(),
+            description: renderer.description.clone(),
+            options: locks::to_json(&Dynamic::from_map(renderer.defaults.clone())),
+            inputs: renderer.inputs(&self.engine, &renderer.defaults)?,
+            example: renderer.example(&self.engine)?.is_some(),
+        })
+    }
+    /// Renderer `name`'s inputs with `options` (a JSON object) over its
+    /// defaults.
+    pub fn renderer_inputs(&self, name: &str, options: &serde_json::Value) -> Result<Vec<(String, String)>, String> {
+        let renderer = self.renderers.load(&self.engine, name)?;
+        renderer.inputs(&self.engine, &renderer.options(&json_map(options, "options")?)?)
+    }
+    /// What renderer `name` draws, `options` (a JSON object) over its
+    /// defaults, of `inputs` (JSON, name -> value as lock files see it), or
+    /// of its own `example()` if `None`: an entry with a page for each
+    /// canvas.
+    pub fn render(&self, name: &str, options: &serde_json::Value, inputs: Option<&serde_json::Value>) -> Result<Entry, String> {
+        let renderer = self.renderers.load(&self.engine, name)?;
+        let options = renderer.options(&json_map(options, "options")?)?;
+        let inputs = match inputs {
+            Some(inputs) => json_map(inputs, "inputs")?,
+            None => renderer.example(&self.engine)?.ok_or_else(|| format!("renderer '{}' has no example() to draw", name))?,
+        };
+        let mut entry = Entry::default();
+        for canvas in renderer.render(&self.engine, &options, inputs)? {
+            let mut page = Page::default();
+            page.add_canvas(canvas).map_err(|e| e.to_string())?;
+            entry.add_page(page).map_err(|e| e.to_string())?;
+        }
+        Ok(entry)
     }
     /// Call `f` with what the script passes to `print` and `debug`.
     pub fn on_print(&mut self, f: impl Fn(&str) + 'static) {

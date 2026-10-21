@@ -65,6 +65,8 @@ export class DiagnosticsComponent {
     const parts = [
       workspace?.editedFonts ? 'the fonts as edited in the font editor' : '',
       workspace?.locks.length ? `the workspace's lock files (${workspace.locks.join(', ')})` : '',
+      workspace?.renderers?.length ? `its renderers (${workspace.renderers.join(', ')})` : '',
+      workspace?.chains?.length ? `its chains (${workspace.chains.join(', ')})` : '',
     ].filter(Boolean);
     return parts.length ? `Ran with ${parts.join(' and ')}, which only this browser has.` : null;
   });

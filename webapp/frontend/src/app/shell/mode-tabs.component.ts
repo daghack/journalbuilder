@@ -41,6 +41,20 @@ import { ShellService, type Mode } from './shell.service';
         {{ lockNames().length }} workspace lock{{ lockNames().length === 1 ? '' : 's' }}
       </span>
     }
+    @if (chainNames().length) {
+      <span class="chip" [title]="'Chain files only in this browser, or edited here: ' + chainNames().join(', ')">
+        {{ chainNames().length }} workspace chain{{ chainNames().length === 1 ? '' : 's' }}
+      </span>
+    }
+    @if (rendererNames().length) {
+      <span class="chip" [title]="'Renderer files only in this browser: ' + rendererNames().join(', ')">
+        {{ rendererNames().length }} workspace renderer{{ rendererNames().length === 1 ? '' : 's' }}
+      </span>
+    }
+    @if (!workspace.empty()) {
+      <button type="button" class="clear" (click)="clear()"
+              title="Throw away every edit in this browser (fonts, chains, renderers and lock files) and use the repository's files again">Clear workspace</button>
+    }
   `,
   styles: `
     :host { display: flex; align-items: center; gap: 8px; padding: 4px 10px; background: var(--rail-bg); color: var(--rail-fg); font-size: 12px; }
@@ -61,13 +75,21 @@ import { ShellService, type Mode } from './shell.service';
     .list button { background: transparent; border: 0; color: inherit; cursor: pointer; border-radius: 4px; }
     .list button:hover, .list button:focus-visible { background: var(--surface-2); }
     .list .removed { color: var(--muted); }
+    .clear { padding: 2px 8px; border-radius: 10px; background: transparent; border: 1px solid var(--rail-selected); color: var(--rail-fg); font: inherit; cursor: pointer; }
+    .clear:hover { background: var(--rail-hover); }
     em { font-style: normal; color: var(--muted); font-family: var(--font); margin-left: 4px; }
   `,
 })
 export class ModeTabsComponent {
   protected readonly shell = inject(ShellService);
   protected readonly workspace = inject(WorkspaceService);
+  protected clear() {
+    if (confirm('Throw away every edit in this browser (fonts, chains, renderers and lock files) and use the repository\'s files again? Export anything you want to keep first.')) this.workspace.clear();
+  }
+
   protected readonly lockNames = computed(() => Object.keys(this.workspace.locks()));
+  protected readonly rendererNames = computed(() => Object.keys(this.workspace.renderers()));
+  protected readonly chainNames = computed(() => Object.keys(this.workspace.chains()));
   /** the built-in fonts as built in, read; null until the renderer gives it. */
   protected readonly builtinFonts = signal<FontsFile | null>(null);
   /** The fonts the edited fonts change from the built-in ones. */

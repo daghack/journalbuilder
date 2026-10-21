@@ -1,9 +1,10 @@
 // A lock chain as the lock editor holds it: lock types placed as nodes,
-// wires from outputs to inputs, values fixed, the chain's own names for the
-// ports left open, options of its own, and a test case. Saved, it's a
-// composite lock file (see chain-source.ts and webapp/locks/README.md).
+// wires from outputs to inputs, values fixed, options of its own and a test
+// case; and renderers attached to it, which draw its values. It's a chain
+// file (see chain-source.ts and webapp/chains/README.md), which journals use
+// with chain(name); its values are its locks' own ports, "lock.port".
 
-import type { LockOption, LockPorts, LockValue } from '../scribe';
+import type { LockOption, LockPorts } from '../scribe';
 
 /** A lock in the chain. */
 export interface ChainNode {
@@ -18,14 +19,42 @@ export interface ChainNode {
   y: number;
 }
 
+/**
+ * A renderer attached to the chain: a renderers/*.rhai file that draws
+ * values wired to its inputs as canvases. It has no outputs, and isn't part
+ * of the lock: the values it draws stay the chain's.
+ */
+export interface RendererNode {
+  id: string;
+  type: string;
+  /** Options given a value (over the renderer's defaults), by name. */
+  options: Record<string, unknown>;
+  /** Options that take one of the chain's own: option -> the chain's option. */
+  promoted: Record<string, string>;
+  x: number;
+  y: number;
+}
+
 /** A wire: an output ("lock.port") feeding an input. */
 export interface Wire {
   from: string;
   to: string;
 }
 
-/** A test value: text for symbols or strings, or JSON for anything. */
-export type TestValue = { text: string } | { json: unknown };
+/**
+ * A test value: text for symbols or strings, JSON for anything, or rhai
+ * that makes it in the lock files' engine, as a value kind's example does
+ * (`huffman::code(symbols(27, "CORPUS"), 27, 3)`).
+ */
+export type TestValue = { text: string } | { json: unknown } | { rhai: string };
+
+/** A test value as typed: text for symbols and strings, its rhai, else JSON. */
+export function testText(value: TestValue | undefined): string {
+  if (!value) return '';
+  if ('text' in value) return value.text;
+  if ('rhai' in value) return value.rhai;
+  return JSON.stringify(value.json);
+}
 
 /** An option of the chain's own, which its locks' options can take. */
 export interface ChainOption {
@@ -36,30 +65,29 @@ export interface ChainOption {
 }
 
 export interface ChainModel {
-  /** The lock type it's saved as. */
+  /** The chain file it's saved as, and what journals call it: chain("name"). */
   name: string;
   description: string;
   options: ChainOption[];
   nodes: ChainNode[];
   wires: Wire[];
+  /** Renderers attached, and the wires from locks' outputs to their inputs ("pages.chart"). */
+  renderers: RendererNode[];
+  renderWires: Wire[];
   /** Inputs given a value in the chain itself, by port. */
   fixed: Record<string, TestValue>;
-  /** The chain's names for open ports, where they aren't the default, by port. */
-  inputNames: Record<string, string>;
-  outputNames: Record<string, string>;
-  /** The test case's inputs, by the chain's input names. */
+  /** The test case's inputs, by port. */
   test: Record<string, TestValue>;
 }
 
-export function emptyChain(): ChainModel {
-  return { name: 'my_chain', description: '', options: [], nodes: [], wires: [], fixed: {}, inputNames: {}, outputNames: {}, test: {} };
+export function emptyChain(name = 'my_chain'): ChainModel {
+  return { name, description: '', options: [], nodes: [], wires: [], renderers: [], renderWires: [], fixed: {}, test: {} };
 }
 
-/** A port of the chain open for the outside: its port inside, type and name. */
+/** A port of the chain open for the outside, "lock.port", and its type. */
 export interface OpenPort {
   port: string;
   type: string;
-  name: string;
 }
 
 /** Each lock's ports, as the renderer gives them (or why it can't). */
@@ -92,52 +120,29 @@ export function splitPort(port: string): [string, string] {
   return dot < 0 ? [port, ''] : [port.slice(0, dot), port.slice(dot + 1)];
 }
 
-/** The inputs no wire feeds and no value's fixed for, named as the chain shows them. */
+/** The inputs no wire feeds and no value's fixed for: what running the chain needs. */
 export function openInputs(model: ChainModel, ports: PortsByNode): OpenPort[] {
   const wired = new Set(model.wires.map((w) => w.to));
-  const open = model.nodes.flatMap((node) =>
+  return model.nodes.flatMap((node) =>
     (portsOf(ports, node.id)?.inputs ?? [])
-      .map(([name, type]) => ({ port: `${node.id}.${name}`, type, short: name }))
+      .map(([name, type]) => ({ port: `${node.id}.${name}`, type }))
       .filter(({ port }) => !wired.has(port) && !(port in model.fixed)));
-  return named(open, model.inputNames, new Map());
 }
 
 /**
- * The outputs no wire takes, named as the chain shows them. An output
- * passing a fixed input straight through isn't shown: unlocking puts it back.
+ * The outputs no wire takes: what running the chain gives. An output
+ * passing a fixed input straight through isn't shown.
  */
 export function openOutputs(model: ChainModel, ports: PortsByNode): OpenPort[] {
   const wired = new Set(model.wires.map((w) => w.from));
-  const inputs = openInputs(model, ports);
-  const open = model.nodes.flatMap((node) =>
+  return model.nodes.flatMap((node) =>
     (portsOf(ports, node.id)?.outputs ?? [])
-      .map(([name, type]) => ({ port: `${node.id}.${name}`, type, short: name }))
+      .map(([name, type]) => ({ port: `${node.id}.${name}`, type }))
       .filter(({ port, type }) => !wired.has(port) && !(port in model.fixed && portType(ports, port, 'inputs') === type)));
-  // An output may share an input's name only if it's the same port, passed through.
-  const taken = new Map(inputs.map((input) => [input.name, input.port]));
-  return named(open, model.outputNames, taken);
 }
 
-/**
- * Names for ports: the one given, else the port's own name if no other
- * port has it, else "lock_port". `taken` are names in use elsewhere, by
- * the port they're for.
- */
-function named(ports: { port: string; type: string; short: string }[], given: Record<string, string>, taken: Map<string, string>): OpenPort[] {
-  const count = new Map<string, number>();
-  for (const p of ports) count.set(p.short, (count.get(p.short) ?? 0) + 1);
-  return ports.map(({ port, type, short }) => {
-    let name = given[port];
-    if (!name) {
-      const clash = taken.has(short) && taken.get(short) !== port;
-      name = count.get(short) === 1 && !clash ? short : port.replace('.', '_');
-    }
-    return { port, type, name };
-  });
-}
-
-/** The value of an option the lock is given: its own, or (promoted) the chain option's default. */
-export function resolvedOptions(model: ChainModel, node: ChainNode): Record<string, unknown> {
+/** The value of an option a lock (or renderer) is given: its own, or (promoted) the chain option's default. */
+export function resolvedOptions(model: ChainModel, node: ChainNode | RendererNode): Record<string, unknown> {
   const options = { ...node.options };
   for (const [option, chainOption] of Object.entries(node.promoted)) {
     const found = model.options.find((o) => o.name === chainOption);
@@ -168,15 +173,31 @@ export function wouldLoop(model: ChainModel, from: string, to: string): boolean 
   return false;
 }
 
+/** Whether `id` is one of the chain's renderers (not a lock). */
+export function isRenderer(model: ChainModel, id: string): boolean {
+  return model.renderers.some((r) => r.id === id);
+}
+
 /** Why `from` can't be wired to `to`, or null if it can. */
 export function wireProblem(model: ChainModel, ports: PortsByNode, from: string, to: string): string | null {
   const a = portType(ports, from, 'outputs');
   const b = portType(ports, to, 'inputs');
+  if (isRenderer(model, splitPort(from)[0])) return 'a renderer has no outputs to wire';
   if (a === null) return `${from} isn't an output`;
   if (b === null) return `${to} isn't an input`;
   if (!compatible(a, b)) return `${from} gives ${a}, but ${to} takes ${b}`;
-  if (wouldLoop(model, from, to)) return `that would feed ${splitPort(to)[0]} back into itself`;
+  if (!isRenderer(model, splitPort(to)[0]) && wouldLoop(model, from, to)) return `that would feed ${splitPort(to)[0]} back into itself`;
   return null;
+}
+
+/** `model` with `from` wired to renderer input `to`, in place of any wire into it. */
+export function connectRenderer(model: ChainModel, from: string, to: string): ChainModel {
+  return { ...model, renderWires: [...model.renderWires.filter((w) => w.to !== to), { from, to }] };
+}
+
+/** What each renderer draws: its input -> the port wired to it. */
+export function rendererInputs(model: ChainModel, id: string): Record<string, string> {
+  return Object.fromEntries(model.renderWires.filter((w) => splitPort(w.to)[0] === id).map((w) => [splitPort(w.to)[1], w.from]));
 }
 
 /** `model` with `from` wired to `to`, in place of any wire into `to`. */
@@ -186,16 +207,16 @@ export function connect(model: ChainModel, from: string, to: string): ChainModel
   return { ...model, fixed, wires: [...model.wires.filter((w) => w.to !== to), { from, to }] };
 }
 
-/** A name for a new lock of `type` not yet in the chain. */
+/** A name for a new lock (or renderer) of `type` not yet in the chain. */
 export function freshId(model: ChainModel, type: string): string {
   const base = type.split('_').map((word) => word[0]).join('') || 'lock';
   for (let n = 1; ; n++) {
     const id = n === 1 ? base : `${base}${n}`;
-    if (!model.nodes.some((node) => node.id === id)) return id;
+    if (!model.nodes.some((node) => node.id === id) && !model.renderers.some((r) => r.id === id)) return id;
   }
 }
 
-/** `model` with lock `id` renamed: its wires, fixed values and names follow. */
+/** `model` with lock `id` renamed: its wires, fixed values and test values follow. */
 export function renameNode(model: ChainModel, id: string, to: string): ChainModel {
   const port = (p: string) => (splitPort(p)[0] === id ? `${to}.${splitPort(p)[1]}` : p);
   const rekey = <T>(record: Record<string, T>) => Object.fromEntries(Object.entries(record).map(([k, v]) => [port(k), v]));
@@ -203,13 +224,14 @@ export function renameNode(model: ChainModel, id: string, to: string): ChainMode
     ...model,
     nodes: model.nodes.map((node) => (node.id === id ? { ...node, id: to } : node)),
     wires: model.wires.map((w) => ({ from: port(w.from), to: port(w.to) })),
+    renderers: model.renderers.map((r) => (r.id === id ? { ...r, id: to } : r)),
+    renderWires: model.renderWires.map((w) => ({ from: port(w.from), to: port(w.to) })),
     fixed: rekey(model.fixed),
-    inputNames: rekey(model.inputNames),
-    outputNames: rekey(model.outputNames),
+    test: rekey(model.test),
   };
 }
 
-/** `model` without lock `id` and what touches it. */
+/** `model` without lock (or renderer) `id` and what touches it. */
 export function removeNode(model: ChainModel, id: string): ChainModel {
   const keep = (p: string) => splitPort(p)[0] !== id;
   const filter = <T>(record: Record<string, T>) => Object.fromEntries(Object.entries(record).filter(([k]) => keep(k)));
@@ -217,9 +239,10 @@ export function removeNode(model: ChainModel, id: string): ChainModel {
     ...model,
     nodes: model.nodes.filter((node) => node.id !== id),
     wires: model.wires.filter((w) => keep(w.from) && keep(w.to)),
+    renderers: model.renderers.filter((r) => r.id !== id),
+    renderWires: model.renderWires.filter((w) => keep(w.from) && keep(w.to)),
     fixed: filter(model.fixed),
-    inputNames: filter(model.inputNames),
-    outputNames: filter(model.outputNames),
+    test: filter(model.test),
   };
 }
 
@@ -254,11 +277,4 @@ export function testValueOf(json: unknown, type: string | null): TestValue {
   }
   if (type === 'String' && typeof json === 'string') return { text: json };
   return { json };
-}
-
-/** A run's value as a test value, to pin in an example; null for ones that can't be written (mazes). */
-export function pinnable(value: LockValue): TestValue | null {
-  if (value.maze || (typeof value.json === 'object' && value.json !== null && '$type' in value.json)) return null;
-  if (value.text !== undefined && (symbolBase(value.type) !== null || value.type === 'String')) return { text: value.text };
-  return { json: value.json };
 }

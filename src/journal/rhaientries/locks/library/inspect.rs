@@ -3,7 +3,6 @@
 //! and a composite's chain read back. Values cross as JSON.
 
 use super::{check_symbols, from_script, same_value, sorted, LockLibrary, OptionKind, OptionSpec, RhaiLock};
-use super::super::Maze;
 use crate::lockbuilder::{base_n_symbols, symbols_to_string, InfoVar, InfoVarSet, InfoVarType, InfoVarTypeSet, Lock};
 use rhai::{Array, Dynamic, Map};
 use serde::Serialize;
@@ -50,18 +49,47 @@ pub struct ValueView {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
     pub json: Value,
+    /// A value kind's default drawing, for any kind that has one.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub maze: Option<MazeView>,
+    pub art: Option<ArtView>,
 }
 
-/// A maze, for drawing: its size in cells, its cells in walking order, and
-/// its corridors as an SVG path in cell units.
+/// A value kind's sketch, for drawing as SVG: its box, each part's path
+/// and its labels.
 #[derive(Serialize)]
-pub struct MazeView {
-    pub width: i64,
-    pub height: i64,
-    pub cells: Value,
-    pub path: String,
+#[serde(rename_all = "camelCase")]
+pub struct ArtView {
+    /// `[x, y, width, height]`.
+    pub view_box: [f32; 4],
+    pub parts: Vec<ArtPart>,
+    pub labels: Vec<ArtLabel>,
+    pub label_size: f32,
+}
+
+#[derive(Serialize)]
+pub struct ArtPart {
+    pub name: String,
+    pub d: String,
+}
+
+#[derive(Serialize)]
+pub struct ArtLabel {
+    pub x: f32,
+    pub y: f32,
+    pub text: String,
+}
+
+/// A value's sketch as an ArtView, padded by its label size.
+fn art_view(value: &Dynamic) -> Option<ArtView> {
+    let sketch = crate::journal::kinds::sketch(value).ok()??;
+    let bounds = sketch.bounds()?;
+    let pad = sketch.label_size;
+    Some(ArtView {
+        view_box: [bounds.mins.x - pad, bounds.mins.y - pad, bounds.maxs.x - bounds.mins.x + 2.0 * pad, bounds.maxs.y - bounds.mins.y + 2.0 * pad],
+        parts: sketch.parts.iter().map(|(name, path)| ArtPart { name: name.clone(), d: path.to_string() }).collect(),
+        labels: sketch.labels.iter().map(|l| ArtLabel { x: l.at.x, y: l.at.y, text: l.text.clone() }).collect(),
+        label_size: sketch.label_size,
+    })
 }
 
 /// A test run: the outputs and every value along the way, then the inputs
@@ -118,7 +146,7 @@ impl LockLibrary {
     /// a failure to unlock is part of the result.
     pub fn run_traced(self: &Rc<Self>, type_name: &str, options: &Value, inputs: &Value) -> Result<RunResult, String> {
         let lock = self.build(type_name, type_name, map_from_json(options)?)?;
-        let given = test_inputs(&lock.inputs, inputs)?;
+        let given = self.test_inputs(&lock.inputs, inputs)?;
         let (outputs, trace) = lock.lock_traced(&given)?;
         let (recovered, round_trip, unlock_error) = match lock.unlock_info(&outputs) {
             Ok(recovered) => {
@@ -130,47 +158,71 @@ impl LockLibrary {
         Ok(RunResult { outputs: views(&outputs), trace: views(&trace), recovered, round_trip, unlock_error })
     }
 
-    /// A composite lock file's chain, as the editor draws it: its options,
-    /// locks, connections, fixed values, ports, layout and examples. Options used
-    /// directly by a lock come back as `{"$option": name}`; if `chain(o)`
+    /// Lock `inputs` (JSON, "lock.port" -> `{ text }`, `{ json }` or
+    /// `{ rhai }`) with chain file `name` and `options` (JSON), then unlock
+    /// what it gives. Outputs and the trace are by port.
+    pub fn run_chain(self: &Rc<Self>, name: &str, options: &Value, inputs: &Value) -> Result<RunResult, String> {
+        let spec = self.chain_spec(name, map_from_json(options)?)?;
+        let lock = self.chain_lock(&spec)?;
+        let given = self.test_inputs(&Self::chain_inputs(&spec, &lock), inputs)?;
+        let (outputs, trace) = lock.trace_lock_info(&given).map_err(|e| e.to_string())?;
+        let (recovered, round_trip, unlock_error) = match lock.unlock_info(&outputs) {
+            Ok(recovered) => {
+                let same = given.iter().all(|(name, value)| recovered.get(name).is_some_and(|back| same_value(&back.data, &value.data)));
+                let recovered: InfoVarSet = recovered.into_iter().filter(|(port, _)| given.contains_key(port)).collect();
+                (Some(views(&recovered)), Some(same), None)
+            }
+            Err(e) => (None, None, Some(e.to_string())),
+        };
+        Ok(RunResult { outputs: views(&outputs), trace: views(&trace), recovered, round_trip, unlock_error })
+    }
+
+    /// Chain file `name`, as the editor draws it: its description, options,
+    /// locks, connections, fixed values, renderers, layout and example.
+    /// Options used directly come back as `{"$option": name}`; if `chain(o)`
     /// computes with them, it's read with the defaults instead and
     /// `promotionsLost` is set.
-    pub fn read_chain(&self, type_name: &str) -> Result<Value, String> {
-        let lock_type = self.lock_type(type_name)?;
-        if !lock_type.composite {
-            return Err(format!("{} isn't a composite lock file", lock_type.file));
-        }
-        let refs: Map = lock_type.options.keys().map(|name| (name.as_str().into(), Dynamic::from(OptionRef(name.to_string())))).collect();
-        let (spec, promotions_lost) = match self.call(&lock_type, "chain", (refs,)) {
+    pub fn read_chain(&self, name: &str) -> Result<Value, String> {
+        let chain_file = self.chain_file(name)?;
+        let refs: Map = chain_file.options.keys().map(|name| (name.as_str().into(), Dynamic::from(OptionRef(name.to_string())))).collect();
+        let (spec, promotions_lost) = match self.call(&chain_file, "chain", (refs,)) {
             Ok(spec) => (spec, false),
             Err(_) => {
-                let defaults = lock_type.options.iter()
+                let defaults = chain_file.options.iter()
                     .map(|(name, spec)| spec.default.clone().map(|value| (name.as_str().into(), value))
-                        .ok_or_else(|| format!("{}: chain(o) computes with option '{}', which has no default to read it with", lock_type.file, name)))
+                        .ok_or_else(|| format!("{}: chain(o) computes with option '{}', which has no default to read it with", chain_file.file, name)))
                     .collect::<Result<Map, String>>()?;
-                let spec = self.call(&lock_type, "chain", (defaults,)).map_err(|e| e.located(&lock_type.file))?;
+                let spec = self.call(&chain_file, "chain", (defaults,)).map_err(|e| e.located(&chain_file.file))?;
                 (spec, true)
             }
         };
-        let layout = match lock_type.defines("layout", 0) {
-            true => to_json(&self.call(&lock_type, "layout", ()).map_err(|e| e.located(&lock_type.file))?),
-            false => Value::Null,
+        super::chain_file::parse(name, &chain_file.file, spec.clone()).map_err(|e| format!("{}: chain(o): {}", chain_file.file, e))?;
+        let call = |function: &str| -> Result<Value, String> {
+            match chain_file.defines(function, 0) {
+                true => Ok(to_json(&self.call(&chain_file, function, ()).map_err(|e| e.located(&chain_file.file))?)),
+                false => Ok(Value::Null),
+            }
         };
-        let examples = match lock_type.defines("examples", 0) {
-            true => to_json(&self.call(&lock_type, "examples", ()).map_err(|e| e.located(&lock_type.file))?),
-            false => Value::Null,
-        };
-        let options: Vec<OptionInfo> = lock_type.options.iter().map(|(name, spec)| option_info(name, spec)).collect();
-        let source = self.sources.read(type_name).map_err(|e| e.to_string())?;
+        let options: Vec<OptionInfo> = chain_file.options.iter().map(|(name, spec)| option_info(name, spec)).collect();
+        let source = self.chain_source(name)?;
         Ok(json!({
-            "name": lock_type.name,
-            "description": description(&source, type_name),
+            "name": chain_file.name,
+            "description": description(&source, name),
             "options": options,
             "chain": to_json(&spec),
-            "layout": layout,
-            "examples": examples,
+            "layout": call("layout")?,
+            "example": call("example")?,
             "promotionsLost": promotions_lost,
         }))
+    }
+
+    /// Every chain file, as the editor lists them: name and description,
+    /// or the error reading it gave.
+    pub fn describe_chains(&self) -> Result<Vec<(String, Result<String, String>)>, String> {
+        Ok(self.chain_names()?.into_iter().map(|name| {
+            let info = self.chain_source(&name).map(|source| description(&source, &name));
+            (name, info)
+        }).collect())
     }
 }
 
@@ -223,18 +275,28 @@ fn views(values: &InfoVarSet) -> Vec<(String, ValueView)> {
 
 /// `inputs` (name -> `{ text }` or `{ json }`) as values of the lock's
 /// input types. Every input needs one.
-fn test_inputs(types: &InfoVarTypeSet, inputs: &Value) -> Result<InfoVarSet, String> {
-    let given = inputs.as_object().ok_or("the inputs should be an object, name -> { text } or { json }")?;
-    if let Some(unknown) = given.keys().find(|name| !types.contains_key(*name)) {
-        return Err(format!("'{}' isn't an input; inputs: {}", unknown, typed(types).into_iter().map(|(name, _)| name).collect::<Vec<_>>().join(", ")));
+impl LockLibrary {
+    /// Test values for inputs of `types`: name -> `{ text }`, `{ json }`
+    /// or `{ rhai }`, an expression run in the lock files' engine, such as
+    /// `huffman::code(symbols(27, "CORPUS"), 27, 3)`.
+    fn test_inputs(&self, types: &InfoVarTypeSet, inputs: &Value) -> Result<InfoVarSet, String> {
+        let given = inputs.as_object().ok_or("the inputs should be an object, name -> { text }, { json } or { rhai }")?;
+        if let Some(unknown) = given.keys().find(|name| !types.contains_key(*name)) {
+            return Err(format!("'{}' isn't an input; inputs: {}", unknown, typed(types).into_iter().map(|(name, _)| name).collect::<Vec<_>>().join(", ")));
+        }
+        sorted(types.keys()).into_iter()
+            .map(|name| {
+                let value = given.get(name).ok_or_else(|| format!("no value for input '{}'", name))?;
+                let var = match value.get("rhai").and_then(Value::as_str) {
+                    Some(source) => self.engine.eval_expression::<Dynamic>(source)
+                        .map_err(|e| super::super::super::options::unwrap_runtime(&e))
+                        .and_then(|data| from_script(data, &types[name])),
+                    None => value_from_test(value, &types[name]),
+                }.map_err(|e| format!("input '{}': {}", name, e))?;
+                Ok((name.clone(), var))
+            })
+            .collect()
     }
-    sorted(types.keys()).into_iter()
-        .map(|name| {
-            let value = given.get(name).ok_or_else(|| format!("no value for input '{}'", name))?;
-            let var = value_from_test(value, &types[name]).map_err(|e| format!("input '{}': {}", name, e))?;
-            Ok((name.clone(), var))
-        })
-        .collect()
 }
 
 /// A test value, `{ text }` (symbols or a string) or `{ json }`, as a value
@@ -255,24 +317,18 @@ pub fn value_from_test(value: &Value, var_type: &InfoVarType) -> Result<InfoVar,
 }
 
 /// A value as the editor shows it: its type, its text if it has one, the
-/// value as JSON, and a maze drawn out.
+/// value as JSON, and a value kind's sketch.
 pub fn value_view(var: &InfoVar) -> ValueView {
     let text = match &var.var_type {
         InfoVarType::BaseNSymbol(base) if *base <= 27 => check_symbols(var.data.clone(), *base).ok().map(|s| symbols_to_string(&s, *base)),
         _ => var.data.clone().into_string().ok(),
     };
-    let maze = var.data.clone().try_cast::<Maze>().map(|mut maze| MazeView {
-        width: maze.width(),
-        height: maze.height(),
-        cells: to_json(&Dynamic::from_array(maze.cells())),
-        path: maze.maze.corridor_path(maze.strategy).to_string(),
-    });
-    ValueView { type_name: var.var_type.to_string(), text, json: to_json(&var.data), maze }
+    ValueView { type_name: var.var_type.to_string(), text, json: to_json(&var.data), art: art_view(&var.data) }
 }
 
-/// A rhai value as JSON: maps, arrays and plain values as themselves, an
-/// option's place in `chain(o)` as `{"$option": name}`, a maze as
-/// `{"$type": "Maze"}` and any other value as `{"$type": its type}`.
+/// A rhai value as JSON: maps, arrays and plain values as themselves (a
+/// value kind's data among them), an option's place in `chain(o)` as
+/// `{"$option": name}` and any other value as `{"$type": its type}`.
 pub fn to_json(value: &Dynamic) -> Value {
     if let Some(option) = value.read_lock::<OptionRef>() {
         return json!({ "$option": option.0 });
@@ -383,35 +439,103 @@ mod tests {
         })).unwrap();
         let maze_view = view(&maze.outputs, "generated_maze");
         assert_eq!(maze_view.type_name, "Maze");
-        let drawn = maze_view.maze.as_ref().unwrap();
-        assert_eq!((drawn.width, drawn.height), (3, 3));
-        assert!(drawn.path.starts_with('M'), "{}", drawn.path);
+        // A maze is a value kind's data: it crosses as JSON and is drawn
+        // from its sketch.
+        assert_eq!((maze_view.json["width"].clone(), maze_view.json["height"].clone()), (json!(3), json!(3)));
+        let drawn = maze_view.art.as_ref().unwrap();
+        assert_eq!(drawn.parts[0].name, "corridors");
+        assert!(drawn.parts[0].d.starts_with('M'), "{}", drawn.parts[0].d);
+        assert_eq!(drawn.labels.iter().map(|l| l.text.as_str()).collect::<String>().trim_end_matches('·'), "HELLO");
         assert_eq!(view(&maze.outputs, "text_length").json, json!(5));
+
+        // A value kind's input can be written as the expression that makes
+        // it, run in the lock files' engine; an art node's output is drawn.
+        let code = json!({ "rhai": "huffman::code(symbols(27, \"THE QUICK BROWN FOX\"), 27, 3)" });
+        let encoded = library(&[]).run_traced("huffman_encode", &json!({ "input_base": 27, "output_base": 3 }), &json!({
+            "plain_text": { "text": "FOX" },
+        })).unwrap();
+        assert_eq!(encoded.round_trip, Some(true));
+        assert_eq!(view(&encoded.outputs, "code").type_name, "HuffmanCode");
+        let charted = library(&[]).run_traced("star_chart", &json!({ "input_base": 27, "output_base": 3 }), &json!({ "code": code })).unwrap();
+        assert_eq!(charted.round_trip, Some(true));
+        let chart = view(&charted.outputs, "chart");
+        assert!(chart.json["pages"].as_array().is_some_and(|p| !p.is_empty()), "the chart crosses as plain JSON");
+        assert_eq!(chart.art.as_ref().unwrap().parts.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["links", "stars"]);
+        // And as JSON, the chart is a test value of its own.
+        let read_back = library(&[]).run_traced("star_chart", &json!({ "input_base": 27, "output_base": 3 }), &json!({ "code": { "json": view(&charted.recovered.as_ref().unwrap(), "code").json } })).unwrap();
+        assert_eq!(read_back.round_trip, Some(true));
+        let err = library(&[]).run_traced("star_chart", &json!({ "input_base": 27, "output_base": 3 }), &json!({ "code": { "rhai": "new_maze(2, 2)" } })).err().unwrap();
+        assert_eq!(err, "input 'code': a bad HuffmanCode: kind should be \"HuffmanCode\", got \"Maze\"");
+        let err = library(&[]).run_traced("star_chart", &json!({ "input_base": 27, "output_base": 3 }), &json!({ "code": { "rhai": "huffman::nope()" } })).err().unwrap();
+        assert!(err.starts_with("input 'code': "), "{}", err);
 
         let err = library(&[]).run_traced("shift_cipher", &json!({ "base": 27, "shift": 1 }), &json!({ "plain_text": { "text": "a,b" } })).err().unwrap();
         assert_eq!(err, "input 'plain_text': ',' isn't a base-27 symbol (letters and spaces)");
     }
 
+    fn with_chains(chains: &[(&str, &str)]) -> Rc<LockLibrary> {
+        let chains = chains.iter().map(|(name, source)| (name.to_string(), source.to_string()));
+        Rc::new(LockLibrary::with_sources(Sources::dir(DEFAULT_LOCKS_DIR)).with_chains(Sources::embedded("chains", &[]).with_overlay(chains)))
+    }
+
+    const SHIFTED: &str = r#"// shifted: a shift cipher's key into a Vigenere cipher.
+        fn options() { #{ shift: integer(3) } }
+        fn chain(o) {
+            #{
+                locks: #{
+                    shift: #{ type: "shift_cipher", options: #{ base: 27, shift: o.shift } },
+                    vig: #{ type: "vigenere_cipher", options: #{ cipher_base: 27, key_base: 27, plain_base: 27 } },
+                },
+                connect: [["shift.cipher_text", "vig.key"]],
+                fixed: #{},
+                renderers: #{ msg: #{ type: "trit_message", options: #{ base: 27 }, inputs: #{ message: "vig.cipher_text" } } },
+            }
+        }
+        fn layout() { #{ shift: [120, 60], vig: [480, 60], msg: [480, 260] } }
+        fn example() { #{ "shift.plain_text": symbols(27, "KEY"), "vig.plain_text": symbols(27, "ATTACK AT DAWN") } }
+    "#;
+
     #[test]
-    fn reads_composite_lock_files_back() {
-        let chain = library(&[]).read_chain("shift_vigenere").unwrap();
+    fn reads_and_runs_chain_files() {
+        let library = with_chains(&[("shifted", SHIFTED)]);
+        let chain = library.read_chain("shifted").unwrap();
+        assert_eq!(chain["description"], json!("a shift cipher's key into a Vigenere cipher."));
         assert_eq!(chain["promotionsLost"], json!(false));
         assert_eq!(chain["chain"]["locks"]["shift"]["options"], json!({ "base": 27, "shift": { "$option": "shift" } }));
         assert_eq!(chain["chain"]["connect"], json!([["shift.cipher_text", "vig.key"]]));
-        assert_eq!(chain["layout"], json!({ "shift": [120, 60], "vig": [480, 60] }));
-        assert_eq!(chain["examples"][0]["inputs"]["key"], json!([11, 5, 25]));
+        assert_eq!(chain["chain"]["renderers"]["msg"]["inputs"], json!({ "message": "vig.cipher_text" }));
+        assert_eq!(chain["layout"]["msg"], json!([480, 260]));
+        assert_eq!(chain["example"]["shift.plain_text"], json!([11, 5, 25]));
+        assert_eq!(library.check_chain("shifted").unwrap(), 1);
 
-        let computed = r#"
-            fn options() { #{ shift: integer(2) } }
-            fn chain(o) {
-                #{ locks: #{ s: #{ type: "shift_cipher", options: #{ base: 27, shift: o.shift + 1 } } },
-                   inputs: #{ p: "s.plain_text" }, outputs: #{ c: "s.cipher_text" } }
-            }
-        "#;
-        let chain = library(&[("computed", computed)]).read_chain("computed").unwrap();
+        let inputs = json!({ "shift.plain_text": { "text": "KEY" }, "vig.plain_text": { "text": "attack at dawn" } });
+        let run = library.run_chain("shifted", &json!({}), &inputs).unwrap();
+        assert_eq!(view(&run.outputs, "vig.cipher_text").text.as_deref(), Some("OAUOKLNIUNLBJV"));
+        assert_eq!(view(&run.trace, "shift.cipher_text").text.as_deref(), Some("NHA"));
+        assert_eq!(run.round_trip, Some(true));
+        assert_eq!(view(run.recovered.as_ref().unwrap(), "vig.plain_text").text.as_deref(), Some("ATTACK AT DAWN"));
+
+        let computed = SHIFTED.replace("shift: o.shift }", "shift: o.shift + 1 }");
+        let chain = with_chains(&[("computed", &computed)]).read_chain("computed").unwrap();
         assert_eq!(chain["promotionsLost"], json!(true));
-        assert_eq!(chain["chain"]["locks"]["s"]["options"]["shift"], json!(3));
-        assert_eq!(chain["layout"], Value::Null);
-        assert!(library(&[]).read_chain("shift_cipher").is_err());
+        assert_eq!(chain["chain"]["locks"]["shift"]["options"]["shift"], json!(4));
+    }
+
+    #[test]
+    fn chain_files_name_their_mistakes() {
+        let cases = [
+            ("unknown_key", SHIFTED.replace("fixed: #{},", "fixed: #{}, inputs: #{},"), "chains/unknown_key.rhai: chain(o): returned 'inputs'; it returns locks, connect, fixed, renderers"),
+            ("lock_fns", format!("{}\nfn lock(o, i) {{ i }}", SHIFTED), "chains/lock_fns.rhai is a chain file, so it can't define lock: lock types go in locks/"),
+            ("bad_port", SHIFTED.replace("message: \"vig.cipher_text\"", "message: \"vig.nope\""), "chains/bad_port.rhai: renderers: 'msg' draws 'vig.nope' at its input 'message', which isn't a port of the chain's locks"),
+            ("bad_example", SHIFTED.replace("\"vig.plain_text\": symbols(27, \"ATTACK AT DAWN\")", "\"vig.nope\": 1"), "chains/bad_example.rhai: example(): 'vig.nope' isn't an open input of the chain; open: shift.plain_text, vig.plain_text"),
+        ];
+        for (name, source, expected) in &cases {
+            let err = with_chains(&[(name, source)]).check_chain(name).err().unwrap();
+            assert_eq!(&err, expected);
+        }
+        let err = with_chains(&[]).chain_spec("nope", Map::new()).err().unwrap();
+        assert_eq!(err, "no chain 'nope'; chains: none");
+        let err = with_chains(&[("shifted", SHIFTED)]).chain_spec("shifted", [("shift".into(), Dynamic::from("x"))].into_iter().collect()).err().unwrap();
+        assert_eq!(err, "chains/shifted.rhai: option 'shift' should be an integer, got a string");
     }
 }

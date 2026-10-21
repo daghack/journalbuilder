@@ -112,11 +112,42 @@
 //! canvas.add(moon.terminator, ink);
 //! canvas.add(moon.dark.hatch(4.0, #{ angle: 0.8, roughness: 0.5 }), ink);
 //! ```
+//!
+//! `huffman_stars` draws a star chart whose constellation is a Huffman
+//! tree: the code the `huffman` lock would make from the symbols, rewriting
+//! them in another base (here binary), its nodes stars and its branches
+//! the links between them. Stars are bigger the more often their symbols
+//! (or a branch's symbols together) come up, the root biggest. The tree is
+//! grown out from the root at random angles and lengths, then tidied by
+//! forces, each star with a space and a pull of its own and each link a
+//! length of its own, into a scatter that looks random, filling the box
+//! 900 by 600 about (0, 0), whose links never cross.
+//!
+//! ```rhai
+//! let chart = art::huffman_stars(symbols(27, "THE QUICK BROWN FOX"), 2, vec2(0, 0), 900, 600, #{ seed: 3 });
+//! canvas.add(chart, #{ stars: ink, links: ink });
+//! for node in chart.nodes {
+//!     if node.symbol != () { canvas.add(write_line(node.text, node.position + vec2(node.radius + 8, 0), label)); }
+//! }
+//! ```
+//!
+//! It gives `stars`, a circle for every star, and `links`, a line for
+//! every link stopping short of its stars, as paths; `points` and
+//! `edges`, the stars' centres and the links as [parent, child] index
+//! pairs into them, as `new_edges` takes; and `nodes`, each star's
+//! `#{ position, radius, weight, depth, code, symbol, text, parent }`.
+//! Options: `smoothing` (as the lock's, default 1: every symbol of the
+//! base is a star), `seed`, `variation` (how much stars and links differ,
+//! 0 to 1, default 0.6), `iterations` (how long the forces tidy, default
+//! 150), `star_size` (the biggest star's radius), `gap` (how far short of
+//! stars links stop) and `round` (stars kept in the ellipse in the box).
 
 use rhai::{Dynamic, Engine, EvalAltResult, Map, Module, NativeCallContext};
 
+use super::locks::LockValue;
 use super::options::{check_keys, float, number};
 use super::{Path, Vec2};
+use crate::lockbuilder::symbols_to_string;
 use crate::journal::art;
 
 use super::RhaiResult;
@@ -256,6 +287,145 @@ fn moon(ctx: &NativeCallContext, center: Vec2, radius: &Dynamic, phase: &Dynamic
     Ok(parts)
 }
 
+const HUFFMAN_STARS_KEYS: [&str; 7] = ["smoothing", "seed", "variation", "iterations", "star_size", "gap", "round"];
+
+/// A whole-number option of at least 0, `default` unless given.
+fn count_option(ctx: &NativeCallContext, caller: &str, options: &Map, key: &str, default: u64) -> RhaiResult<u64> {
+    match options.get(key) {
+        None => Ok(default),
+        Some(v) => v.as_int().ok().and_then(|n| u64::try_from(n).ok())
+            .ok_or_else(|| error(ctx, format!("{}: '{}' should be a whole number of at least 0, got {}", caller, key, v))),
+    }
+}
+
+/// `art::huffman_stars(symbols, output_base, center, width, height[, #{ smoothing, seed, variation, iterations, star_size, gap, round }])`:
+/// #{ stars, links, points, edges, nodes }.
+fn huffman_stars(ctx: &NativeCallContext, symbols: &Dynamic, output_base: i64, center: Vec2, width: &Dynamic, height: &Dynamic, options: &Map) -> RhaiResult<Map> {
+    const CALLER: &str = "art::huffman_stars";
+    let fail = |err: Box<EvalAltResult>| error(ctx, err.to_string());
+    check_keys(CALLER, options, &HUFFMAN_STARS_KEYS).map_err(fail)?;
+    let value = symbols.clone().try_cast::<LockValue>()
+        .ok_or_else(|| error(ctx, format!("{}: symbols should be symbols, as symbols(27, TEXT) gives, got {}", CALLER, symbols.type_name())))?;
+    let (input_base, data) = value.base_and_symbols().map_err(|err| error(ctx, format!("{}: {}", CALLER, err)))?;
+    let output_base = u32::try_from(output_base).map_err(|_| error(ctx, format!("{}: output_base must be from 2 to 27, got {}", CALLER, output_base)))?;
+    let optional = |key: &str| number(CALLER, options, key).map(|n| n.map(|n| n as f64)).map_err(fail);
+    let round = match options.get("round") {
+        None => false,
+        Some(round) => round.as_bool()
+            .map_err(|type_name| error(ctx, format!("{}: 'round' should be true or false, got {}", CALLER, type_name)))?,
+    };
+    let smoothing = u32::try_from(count_option(ctx, CALLER, options, "smoothing", 1)?)
+        .map_err(|_| error(ctx, format!("{}: 'smoothing' is too big", CALLER)))?;
+    let settings = art::StarChartSettings {
+        center: center.into(),
+        width: number_arg(ctx, CALLER, "width", width)? as f64,
+        height: number_arg(ctx, CALLER, "height", height)? as f64,
+        round,
+        smoothing,
+        variation: number_option(ctx, CALLER, options, "variation", 0.6)? as f64,
+        iterations: count_option(ctx, CALLER, options, "iterations", 150)? as usize,
+        star_size: optional("star_size")?,
+        gap: optional("gap")?,
+        seed: seed(ctx, CALLER, options)?,
+    };
+    let chart = art::huffman_stars(&data, input_base, output_base, &settings).map_err(|err| error(ctx, format!("{}: {}", CALLER, err)))?;
+    let point = |p: parry2d::math::Vec2| Dynamic::from(Vec2::new(p.x as f64, p.y as f64));
+    let mut nodes = rhai::Array::new();
+    for star in &chart.stars {
+        let mut node = Map::new();
+        node.insert("position".into(), point(star.position));
+        node.insert("radius".into(), Dynamic::from(star.radius));
+        node.insert("weight".into(), Dynamic::from(star.weight as i64));
+        node.insert("depth".into(), Dynamic::from(star.depth as i64));
+        node.insert("code".into(), Dynamic::from(star.code.iter().map(|&d| Dynamic::from(d as i64)).collect::<rhai::Array>()));
+        node.insert("symbol".into(), star.symbol.map_or(Dynamic::UNIT, |s| Dynamic::from(s as i64)));
+        node.insert("text".into(), star.symbol.map_or(Dynamic::UNIT, |s| Dynamic::from(symbols_to_string(&[s], input_base))));
+        node.insert("parent".into(), star.parent.map_or(Dynamic::UNIT, |p| Dynamic::from(p as i64)));
+        nodes.push(Dynamic::from(node));
+    }
+    let mut parts = Map::new();
+    parts.insert("stars".into(), Dynamic::from(Path::new(chart.outlines)));
+    parts.insert("links".into(), Dynamic::from(Path::new(chart.links)));
+    parts.insert("points".into(), Dynamic::from(chart.stars.iter().map(|s| point(s.position)).collect::<rhai::Array>()));
+    parts.insert("edges".into(), Dynamic::from(chart.edges.iter()
+        .map(|&(a, b)| Dynamic::from(vec![Dynamic::from(a as i64), Dynamic::from(b as i64)])).collect::<rhai::Array>()));
+    parts.insert("nodes".into(), Dynamic::from(nodes));
+    Ok(parts)
+}
+
+const CONSTELLATIONS_KEYS: [&str; 5] = ["label_width", "label_height", "label_gap", "split_at", "most_stars"];
+
+/// `art::constellations(chart, count, center, width, height[, #{ label_width, label_height, label_gap, split_at, most_stars }])`:
+/// an array of #{ stars, points, pairs, labels, scale }.
+fn constellations(ctx: &NativeCallContext, chart: &Map, count: i64, center: Vec2, width: &Dynamic, height: &Dynamic, options: &Map) -> RhaiResult<rhai::Array> {
+    const CALLER: &str = "art::constellations";
+    let fail = |message: String| error(ctx, format!("{}: {}", CALLER, message));
+    check_keys(CALLER, options, &CONSTELLATIONS_KEYS).map_err(|err| error(ctx, err.to_string()))?;
+    let part = |key: &str| chart.get(key).and_then(|v| v.clone().try_cast::<rhai::Array>())
+        .ok_or_else(|| fail(format!("the chart should have '{}', an array, as art::huffman_stars gives", key)));
+    let points = part("points")?.into_iter()
+        .map(|p| p.try_cast::<Vec2>().map(parry2d::math::Vec2::from).ok_or_else(|| fail("the chart's points should be vec2s".into())))
+        .collect::<RhaiResult<Vec<_>>>()?;
+    let index = |v: &Dynamic| v.as_int().ok().and_then(|i| usize::try_from(i).ok());
+    let edges = part("edges")?.into_iter().map(|e| {
+        let pair = e.try_cast::<rhai::Array>().filter(|p| p.len() == 2).and_then(|p| Some((index(&p[0])?, index(&p[1])?)));
+        pair.ok_or_else(|| fail("the chart's edges should be [parent, child] pairs of indices".into()))
+    }).collect::<RhaiResult<Vec<_>>>()?;
+    let radii = part("nodes")?.into_iter().map(|node| {
+        node.try_cast::<Map>().and_then(|m| m.get("radius").and_then(|r| r.as_float().ok()))
+            .ok_or_else(|| fail("the chart's nodes should each have a radius".into()))
+    }).collect::<RhaiResult<Vec<_>>>()?;
+    let count = usize::try_from(count).map_err(|_| fail(format!("count must be at least 1, got {}", count)))?;
+    let settings = art::ConstellationSettings {
+        center: center.into(),
+        width: number_arg(ctx, CALLER, "width", width)? as f64,
+        height: number_arg(ctx, CALLER, "height", height)? as f64,
+        label_width: number_option(ctx, CALLER, options, "label_width", 30.0)? as f64,
+        label_height: number_option(ctx, CALLER, options, "label_height", 24.0)? as f64,
+        label_gap: number_option(ctx, CALLER, options, "label_gap", 6.0)? as f64,
+        split_at: match options.get("split_at") {
+            None => Vec::new(),
+            Some(stars) => stars.clone().try_cast::<rhai::Array>().and_then(|a| a.iter().map(index).collect::<Option<Vec<_>>>())
+                .ok_or_else(|| fail("'split_at' should be an array of star indices".into()))?,
+        },
+        most_stars: match options.get("most_stars") {
+            None => None,
+            Some(most) => Some(index(most).ok_or_else(|| fail(format!("'most_stars' should be a whole number, got {}", most)))?),
+        },
+    };
+    let pieces = art::constellations(&points, &radii, &edges, count, &settings).map_err(fail)?;
+    let vecs = |ps: &[parry2d::math::Vec2]| ps.iter().map(|p| Dynamic::from(Vec2::new(p.x as f64, p.y as f64))).collect::<rhai::Array>();
+    Ok(pieces.into_iter().map(|piece| {
+        let mut m = Map::new();
+        m.insert("stars".into(), Dynamic::from(piece.stars.iter().map(|&s| Dynamic::from(s as i64)).collect::<rhai::Array>()));
+        m.insert("pairs".into(), Dynamic::from(piece.pairs.iter()
+            .map(|&(a, b)| Dynamic::from(vec![Dynamic::from(a as i64), Dynamic::from(b as i64)])).collect::<rhai::Array>()));
+        m.insert("points".into(), Dynamic::from(vecs(&piece.points)));
+        m.insert("labels".into(), Dynamic::from(vecs(&piece.labels)));
+        m.insert("scale".into(), Dynamic::from(Vec2::new(piece.scale.x as f64, piece.scale.y as f64)));
+        Dynamic::from(m)
+    }).collect())
+}
+
+/// A value kind's sketch as a parts map, for `canvas.add(parts, styles)`:
+/// each part a path, plus `labels`, an array of #{ at, text }, and
+/// `label_size`, how big to write them.
+pub(super) fn sketch_parts(sketch: crate::journal::kinds::Sketch) -> Map {
+    let mut parts = Map::new();
+    for (name, path) in sketch.parts {
+        parts.insert(name.into(), Dynamic::from(Path::new(path)));
+    }
+    let labels: rhai::Array = sketch.labels.into_iter().map(|l| {
+        let mut label = Map::new();
+        label.insert("at".into(), Dynamic::from(Vec2::new(l.at.x as f64, l.at.y as f64)));
+        label.insert("text".into(), l.text.into());
+        Dynamic::from_map(label)
+    }).collect();
+    parts.insert("labels".into(), Dynamic::from_array(labels));
+    parts.insert("label_size".into(), Dynamic::from_float(sketch.label_size as f64));
+    parts
+}
+
 pub fn register(engine: &mut Engine) {
     let mut module = Module::new();
     module.set_native_fn("moon", |ctx: NativeCallContext, center: Vec2, radius: Dynamic, phase: Dynamic| -> RhaiResult<Map> {
@@ -298,6 +468,26 @@ pub fn register(engine: &mut Engine) {
     });
     module.set_native_fn("eye", |ctx: NativeCallContext, center: Vec2, length: Dynamic, options: Map| -> RhaiResult<Map> {
         eye(&ctx, center, &length, &options)
+    });
+    module.set_native_fn("huffman_stars", |ctx: NativeCallContext, symbols: Dynamic, output_base: i64, center: Vec2, width: Dynamic, height: Dynamic| -> RhaiResult<Map> {
+        huffman_stars(&ctx, &symbols, output_base, center, &width, &height, &Map::new())
+    });
+    module.set_native_fn("huffman_stars", |ctx: NativeCallContext, symbols: Dynamic, output_base: i64, center: Vec2, width: Dynamic, height: Dynamic, options: Map| -> RhaiResult<Map> {
+        huffman_stars(&ctx, &symbols, output_base, center, &width, &height, &options)
+    });
+    module.set_native_fn("constellations", |ctx: NativeCallContext, chart: Map, count: i64, center: Vec2, width: Dynamic, height: Dynamic| -> RhaiResult<rhai::Array> {
+        constellations(&ctx, &chart, count, center, &width, &height, &Map::new())
+    });
+    module.set_native_fn("constellations", |ctx: NativeCallContext, chart: Map, count: i64, center: Vec2, width: Dynamic, height: Dynamic, options: Map| -> RhaiResult<rhai::Array> {
+        constellations(&ctx, &chart, count, center, &width, &height, &options)
+    });
+    // art::sketch(value): a value kind's default drawing, as parts.
+    module.set_native_fn("sketch", |ctx: NativeCallContext, value: Dynamic| -> RhaiResult<Map> {
+        match crate::journal::kinds::sketch(&value) {
+            Ok(Some(sketch)) => Ok(sketch_parts(sketch)),
+            Ok(None) => Err(error(&ctx, format!("art::sketch: a {} has no sketch", crate::journal::kinds::kind_of(&value).map_or("value", |k| k.name())))),
+            Err(err) => Err(error(&ctx, format!("art::sketch: {}", err))),
+        }
     });
     engine.register_static_module("art", module.into());
 }
@@ -473,6 +663,68 @@ mod tests {
         let err = engine().build_entry_str("let ok = 1;\nart::moon(vec2(0.0, 0.0), 0.0, 0.5);")
             .expect_err("a zero radius should fail").to_string();
         assert!(err.contains("art::moon: radius must be a positive number") && err.contains("line 2"), "{}", err);
+    }
+
+    #[test]
+    fn huffman_stars_charts_the_locks_code() {
+        let ok: rhai::Array = engine().engine.eval(r#"
+            let chart = art::huffman_stars(symbols(27, "SEE THE SEA"), 2, vec2(0, 0), 900, 600, #{ seed: 3, iterations: 40 });
+            let leaves = chart.nodes.filter(|n| n.symbol != ());
+            let e = leaves.filter(|n| n.text == "E")[0];
+            let z = leaves.filter(|n| n.text == "Z")[0];
+            let again = art::huffman_stars(symbols(27, "SEE THE SEA"), 2, vec2(0, 0), 900, 600, #{ seed: 3, iterations: 40 });
+            let other = art::huffman_stars(symbols(27, "SEE THE SEA"), 2, vec2(0, 0), 900, 600, #{ seed: 4, iterations: 40 });
+            // Without smoothing, only the six symbols used are stars, and
+            // base 3 joins them under three more.
+            let tight = art::huffman_stars(symbols(27, "SEE THE SEA"), 3, vec2(100, 100), 400, 400, #{ smoothing: 0, round: true, star_size: 10, gap: 0, variation: 0, iterations: 0 });
+            let b = new_canvas().add(tight.stars, new_style("black", new_brush("Ink Pen", 0.3, 0.7, 1.0))).bounds();
+            [chart.nodes.len() == 53, chart.points.len() == 53, chart.edges.len() == 52, leaves.len() == 27,
+             e.code.len() < z.code.len(), e.weight == 5 && z.weight == 1, chart.nodes[0].parent == () && chart.nodes[0].depth == 0,
+             chart.nodes[0].weight == 38 && chart.nodes[0].text == (), chart.edges[0][0] == 0,
+             !new_edges(chart.points, chart.edges).is_empty && !chart.stars.is_empty && !chart.links.is_empty,
+             `${again.links}` == `${chart.links}` && `${other.links}` != `${chart.links}`,
+             tight.nodes.len() == 9, b.min.x >= -100.5 && b.max.x <= 300.5 && b.min.y >= -100.5 && b.max.y <= 300.5]
+        "#).unwrap();
+        assert!(ok.iter().all(|b| b.as_bool().unwrap()), "{:?}", ok);
+        for (call, message) in [
+            ("art::huffman_stars(\"SEE\", 2, vec2(0, 0), 900, 600);", "art::huffman_stars: symbols should be symbols, as symbols(27, TEXT) gives, got string"),
+            ("art::huffman_stars(symbols(27, \"SEE\"), 1, vec2(0, 0), 900, 600);", "art::huffman_stars: output_base must be from 2 to 27"),
+            ("art::huffman_stars(symbols(27, \"SEE\"), 2, vec2(0, 0), 0, 600);", "art::huffman_stars: width and height must be positive numbers"),
+            ("art::huffman_stars(symbols(27, \"SEE\"), 2, vec2(0, 0), 900, 600, #{ colour: 1 });", "art::huffman_stars: unknown option 'colour'"),
+            ("art::huffman_stars(symbols(27, \"SEE\"), 2, vec2(0, 0), 900, 600, #{ round: 1 });", "art::huffman_stars: 'round' should be true or false"),
+            ("art::huffman_stars(symbols(27, \"SEE\"), 2, vec2(0, 0), 900, 600, #{ smoothing: -1 });", "art::huffman_stars: 'smoothing' should be a whole number of at least 0"),
+            ("art::huffman_stars(symbols(27, \"SEE\"), 2, vec2(0, 0), 900, 600, #{ variation: 2 });", "art::huffman_stars: variation runs from 0 to 1"),
+            ("art::huffman_stars(symbols(27, \"SEE\"), 2, vec2(0, 0), 900, 600, #{ star_size: 400 });", "art::huffman_stars: the chart, 900 by 600, is too small for stars 800 across"),
+            ("art::huffman_stars(symbols(10, \"\"), 2, vec2(0, 0), 900, 600, #{ smoothing: 0 });", "art::huffman_stars: there are no symbols and smoothing is 0"),
+        ] {
+            let err = engine().build_entry_str(&format!("let ok = 1;\n{}", call)).expect_err(call).to_string();
+            assert!(err.contains(message) && err.contains("line 2"), "{}", err);
+        }
+    }
+
+    #[test]
+    fn constellations_split_a_chart_into_pages() {
+        let ok: rhai::Array = engine().engine.eval(r#"
+            let chart = art::huffman_stars(symbols(27, "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG"), 3, vec2(0, 0), 2000, 1500, #{ seed: 2, iterations: 40 });
+            let pieces = art::constellations(chart, 4, vec2(600, 600), 1000, 900, #{ label_width: 40, label_height: 30, label_gap: 8 });
+            let links = 0;
+            for p in pieces { links += p.pairs.len(); }
+            let p = pieces[0];
+            [pieces.len() == 4, links == chart.edges.len(), p.points.len() == p.stars.len() && p.labels.len() == p.stars.len(),
+             p.scale.x > 0 && p.scale.y > 0, type_of(p.stars[0]) == "i64", art::constellations(chart, 1, vec2(0, 0), 500, 500).len() == 1,
+             art::constellations(chart, 4, vec2(0, 0), 500, 500, #{ split_at: [0] }).len() == 5]
+        "#).unwrap();
+        assert!(ok.iter().all(|b| b.as_bool().unwrap()), "{:?}", ok);
+        for (call, message) in [
+            ("art::constellations(#{ points: [] }, 2, vec2(0, 0), 900, 600);", "art::constellations: the chart should have 'edges'"),
+            ("art::constellations(#{ points: [vec2(0, 0)], edges: [], nodes: [#{ radius: 1.0 }] }, 0, vec2(0, 0), 900, 600);", "art::constellations: count must be at least 1"),
+            ("art::constellations(#{ points: [vec2(0, 0), vec2(1, 0)], edges: [], nodes: [#{ radius: 1.0 }, #{ radius: 1.0 }] }, 2, vec2(0, 0), 900, 600);", "art::constellations: 2 stars need 1 links"),
+            ("art::constellations(#{ points: [vec2(0, 0)], edges: [], nodes: [#{ radius: 1.0 }] }, 2, vec2(0, 0), 900, 600, #{ label: 3 });", "art::constellations: unknown option 'label'"),
+            ("art::constellations(#{ points: [vec2(0, 0)], edges: [], nodes: [#{ radius: 1.0 }] }, 2, vec2(0, 0), 900, 600, #{ split_at: 0 });", "art::constellations: 'split_at' should be an array of star indices"),
+        ] {
+            let err = engine().build_entry_str(&format!("let ok = 1;\n{}", call)).expect_err(call).to_string();
+            assert!(err.contains(message) && err.contains("line 2"), "{}", err);
+        }
     }
 
     #[test]

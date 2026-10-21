@@ -22,6 +22,10 @@ the same change:
 - **A brush**: the pens page draws every `brush_names()` entry by itself;
   add examples only for new brush settings.
 - **A lock type** (`webapp/locks/*.rhai`): add a row to the locks page.
+- **A renderer** (`webapp/renderers/*.rhai`): attach it on the renderers
+  page and draw what it gives.
+- **A chain file** (`webapp/chains/*.rhai`): use it with `chain(name)` on
+  the renderers page.
 - **A new kind of page or output** (layouts, splitting, ...): show it on
   its own page, and update the page list at the top of the showcase.
 
@@ -32,7 +36,8 @@ typeset pages go in with `book.add(section, pages)`. When a page fills
 up, bind it and start another sheet; the contents follow.
 
 `tests/showcase.rs` fails when a function scripts can call, a font (of
-20 glyphs or more), or a lock type isn't in the showcase. Don't
+20 glyphs or more), a lock type, a renderer or a chain file isn't in the
+showcase. Don't
 silence it by adding to its `NOT_SHOWN` list unless the function truly
 isn't a capability (printing, auto-generated fields).
 
@@ -80,8 +85,9 @@ draw; the reference says what they take. It must match the API exactly.
 Whenever a change adds, removes or changes anything scripts can call (a
 function, a method, an overload, an argument, an option or its default,
 a property, an operator, an `art::` tool, layout box styles or role
-settings, markdown span settings, what lock or layout files define or
-can call, or a `journalbuild` flag), update its `api("signature",
+settings, markdown span settings, what lock, renderer or layout files
+define or can call, a renderer or its options, what chain files define,
+or a `journalbuild` flag), update its `api("signature",
 "description")` entry in the same change, or add one in the section it
 belongs to. Remove entries for what's gone. Signatures can't contain a
 double quote, and both parts are written as plain text (markdown marks

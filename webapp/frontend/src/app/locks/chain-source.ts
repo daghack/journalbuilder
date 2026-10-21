@@ -1,11 +1,11 @@
-// A chain written as a composite lock file (webapp/locks/README.md), and as
+// A chain written as a chain file (webapp/chains/README.md), and as
 // journal script.
 
 import { rhaiKey, rhaiString, rhaiValue } from '../shared/rhai-literal';
 import type { LockOption } from '../scribe';
-import { openInputs, openOutputs, portType, symbolBase, type ChainModel, type ChainNode, type ChainOption, type PortsByNode, type TestValue } from './chain-model';
+import { openInputs, openOutputs, portType, rendererInputs, symbolBase, type ChainModel, type ChainNode, type ChainOption, type PortsByNode, type RendererNode, type TestValue } from './chain-model';
 
-/** What a lock file's options() writes for an option: `integer(3)`, `one_of(["a", "b"], "a")`. */
+/** What a chain file's options() writes for an option: `integer(3)`, `one_of(["a", "b"], "a")`. */
 export function optionDeclaration(option: ChainOption): string {
   const constructor = option.kind;
   const value = (v: unknown) => rhaiValue(v, option.kind === 'number');
@@ -28,6 +28,7 @@ export function valueSource(value: TestValue, type: string | null): string {
     const base = type ? symbolBase(type) : null;
     return base !== null ? `symbols(${base}, ${rhaiString(value.text)})` : rhaiString(value.text);
   }
+  if ('rhai' in value) return value.rhai;
   return rhaiValue(value.json);
 }
 
@@ -51,8 +52,10 @@ function comment(text: string, width = 76): string[] {
   return lines;
 }
 
-/** A lock's options as chain(o) gives them: its own values, and `o.name` for those it takes from the chain. */
-function nodeOptions(node: ChainNode, kinds: Record<string, LockOption['kind']>): string {
+const byId = <T extends { id: string }>(a: T, b: T) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
+/** A lock's or renderer's options as chain(o) gives them: its own values, and `o.name` for those it takes from the chain. */
+function nodeOptions(node: ChainNode | RendererNode, kinds: Record<string, LockOption['kind']>): string {
   const names = [...new Set([...Object.keys(node.options), ...Object.keys(node.promoted)])].sort();
   return mapLiteral(names.map((name) => [
     rhaiKey(name),
@@ -65,35 +68,28 @@ export interface SourceContext {
   ports: PortsByNode;
   /** Each lock type's options, for how to write their values. */
   optionKinds: (type: string) => Record<string, LockOption['kind']>;
-  /** The test case's outputs to pin in examples(), by the chain's output names; none to pin nothing. */
-  outputs?: Record<string, TestValue>;
-  /** Whether to write examples() (from the test case) at all. */
-  examples?: boolean;
 }
 
-/** Why the test case can't be an example, or null if it can. */
-export function exampleProblem(model: ChainModel, ports: PortsByNode): string | null {
-  for (const input of openInputs(model, ports)) {
-    const value = model.test[input.name];
-    if (!value) return `the test has no value for '${input.name}'`;
-    if (input.type === 'Maze') return `'${input.name}' takes a maze, which an example can't write`;
-  }
-  return null;
+/** Whether every input running the chain needs has a test value, so it can be the file's example(). */
+export function hasExample(model: ChainModel, ports: PortsByNode): boolean {
+  return openInputs(model, ports).every((input) => model.test[input.port]);
 }
 
-/** The chain as a composite lock file. */
+/** The chain as a chain file. */
 export function chainSource(model: ChainModel, context: SourceContext): string {
   const { ports } = context;
   const out: string[] = [];
-  out.push(...comment(model.description ? `${model.name}: ${model.description}` : `${model.name}: a composite lock.`));
-  out.push('');
-  out.push('fn options() {');
-  out.push(`\t${mapLiteral(model.options.map((o) => [rhaiKey(o.name), optionDeclaration(o)]))}`);
-  out.push('}');
+  out.push(...comment(model.description ? `${model.name}: ${model.description}` : `${model.name}: a chain of locks.`));
+  if (model.options.length) {
+    out.push('');
+    out.push('fn options() {');
+    out.push(`\t${mapLiteral(model.options.map((o) => [rhaiKey(o.name), optionDeclaration(o)]))}`);
+    out.push('}');
+  }
   out.push('');
   out.push('fn chain(o) {');
   out.push('\t#{');
-  const nodes = [...model.nodes].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const nodes = [...model.nodes].sort(byId);
   out.push('\t\tlocks: #{');
   for (const node of nodes) {
     out.push(`\t\t\t${rhaiKey(node.id)}: #{ type: ${rhaiString(node.type)}, options: ${nodeOptions(node, context.optionKinds(node.type))} },`);
@@ -109,63 +105,77 @@ export function chainSource(model: ChainModel, context: SourceContext): string {
   }
   const fixed = Object.entries(model.fixed).sort(([a], [b]) => (a < b ? -1 : 1));
   out.push(`\t\tfixed: ${mapLiteral(fixed.map(([port, value]) => [rhaiString(port), valueSource(value, portType(ports, port, 'inputs'))]))},`);
-  const byName = (a: { name: string }, b: { name: string }) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
-  const inputs = openInputs(model, ports).sort(byName);
-  const outputs = openOutputs(model, ports).sort(byName);
-  out.push(`\t\tinputs: ${mapLiteral(inputs.map((p) => [rhaiKey(p.name), rhaiString(p.port)]))},`);
-  out.push(`\t\toutputs: ${mapLiteral(outputs.map((p) => [rhaiKey(p.name), rhaiString(p.port)]))},`);
+  const renderers = [...model.renderers].sort(byId);
+  if (renderers.length) {
+    out.push('\t\trenderers: #{');
+    for (const renderer of renderers) {
+      const inputs = Object.entries(rendererInputs(model, renderer.id)).sort(([a], [b]) => (a < b ? -1 : 1));
+      out.push(`\t\t\t${rhaiKey(renderer.id)}: #{ type: ${rhaiString(renderer.type)}, options: ${nodeOptions(renderer, {})}, inputs: ${mapLiteral(inputs.map(([k, v]) => [rhaiKey(k), rhaiString(v)]))} },`);
+    }
+    out.push('\t\t},');
+  }
   out.push('\t}');
   out.push('}');
   out.push('');
-  out.push('// Where the web editor draws each lock.');
+  out.push(renderers.length ? '// Where the web editor draws each lock and renderer.' : '// Where the web editor draws each lock.');
   out.push('fn layout() {');
-  out.push(`\t${mapLiteral(nodes.map((node) => [rhaiKey(node.id), `[${Math.round(node.x)}, ${Math.round(node.y)}]`]))}`);
+  out.push(`\t${mapLiteral([...nodes, ...renderers].map((node) => [rhaiKey(node.id), `[${Math.round(node.x)}, ${Math.round(node.y)}]`]))}`);
   out.push('}');
-  if (context.examples !== false && exampleProblem(model, ports) === null) {
+  const inputs = openInputs(model, ports).sort((a, b) => (a.port < b.port ? -1 : 1));
+  if (inputs.length && hasExample(model, ports)) {
     out.push('');
-    out.push('fn examples() {');
-    out.push('\t[');
-    out.push('\t\t#{');
-    const options = model.options.filter((o) => o.default !== undefined);
-    if (options.length) out.push(`\t\t\toptions: ${mapLiteral(options.map((o) => [rhaiKey(o.name), optionValue(o.default, o.kind)]))},`);
-    out.push(`\t\t\tinputs: ${mapLiteral(inputs.map((p) => [rhaiKey(p.name), valueSource(model.test[p.name], p.type)]))},`);
-    const pinned = outputs.filter((p) => context.outputs?.[p.name]);
-    if (pinned.length) out.push(`\t\t\toutputs: ${mapLiteral(pinned.map((p) => [rhaiKey(p.name), valueSource(context.outputs![p.name], p.type)]))},`);
-    out.push('\t\t},');
-    out.push('\t]');
+    out.push('fn example() {');
+    out.push('\t#{');
+    for (const input of inputs) out.push(`\t\t${rhaiString(input.port)}: ${valueSource(model.test[input.port], input.type)},`);
+    out.push('\t}');
     out.push('}');
   }
   return out.join('\n') + '\n';
 }
 
-/** A journal script using the saved lock type: added as one lock, run on the test case. */
+/** The chain's options as a journal gives them to chain(name, options): their defaults. */
+function chainOptions(model: ChainModel): string {
+  return mapLiteral(model.options.filter((o) => o.default !== undefined).map((o) => [rhaiKey(o.name), optionValue(o.default, o.kind)]));
+}
+
+/** The test case as lock.run takes it, open inputs by port. */
+function runInputs(model: ChainModel, ports: PortsByNode): string {
+  return mapLiteral(openInputs(model, ports).map((p) => [rhaiString(p.port), model.test[p.port] ? valueSource(model.test[p.port], p.type) : `/* ${p.type} */ ()`]));
+}
+
+/** A journal script using the chain: chain(name), run on the test case. */
 export function journalSnippet(model: ChainModel, ports: PortsByNode): string {
-  const options = model.options.filter((o) => o.default !== undefined);
-  const inputs = openInputs(model, ports);
-  const outputs = openOutputs(model, ports);
+  const options = model.options.some((o) => o.default !== undefined) ? `, ${chainOptions(model)}` : '';
   const lines = [
-    `let lock = new_lock(${rhaiString(model.name)}).add("c", ${rhaiString(model.name)}, ${mapLiteral(options.map((o) => [rhaiKey(o.name), optionValue(o.default, o.kind)]))});`,
-    `let result = lock.run(${mapLiteral(inputs.map((p) => [rhaiString(`c.${p.name}`), model.test[p.name] ? valueSource(model.test[p.name], p.type) : `/* ${p.type} */ ()`]))});`,
-    ...outputs.map((p) => `// result.get(${rhaiString(`c.${p.name}`)}): ${p.type}`),
+    `let c = chain(${rhaiString(model.name)}${options});`,
+    `let result = c.run(${runInputs(model, ports)});`,
+    ...openOutputs(model, ports).map((p) => `// result.get(${rhaiString(p.port)}): ${p.type}`),
+    ...model.renderers.map((r) => `let ${r.id} = result.canvases(${rhaiString(r.id)});  // what ${r.type} draws, an array of canvases`),
   ];
   return lines.join('\n') + '\n';
 }
 
-/** A journal script building the same chain lock by lock, with no lock file of its own. */
+/** A journal script building the same chain lock by lock with new_lock, with no chain file of its own. */
 export function journalChain(model: ChainModel, context: SourceContext): string {
   const lines = [`let lock = new_lock(${rhaiString(model.name)})`];
+  const value = (name: string) => model.options.find((o) => o.name === name)?.default;
+  const withDefaults = (node: ChainNode | RendererNode) => ({ ...node.options, ...Object.fromEntries(Object.entries(node.promoted).map(([k, v]) => [k, value(v)])) });
   for (const node of model.nodes) {
     const kinds = context.optionKinds(node.type);
-    const options = Object.entries({ ...node.options, ...Object.fromEntries(Object.entries(node.promoted).map(([k, v]) => [k, model.options.find((o) => o.name === v)?.default])) })
-      .sort(([a], [b]) => (a < b ? -1 : 1));
+    const options = Object.entries(withDefaults(node)).sort(([a], [b]) => (a < b ? -1 : 1));
     lines.push(`\t.add(${rhaiString(node.id)}, ${rhaiString(node.type)}, ${mapLiteral(options.map(([k, v]) => [rhaiKey(k), optionValue(v, kinds[k])]))})`);
   }
   for (const wire of model.wires) lines.push(`\t.connect(${rhaiString(wire.from)}, ${rhaiString(wire.to)})`);
-  for (const [port, value] of Object.entries(model.fixed)) {
-    lines.push(`\t.set_input(${rhaiString(port)}, ${valueSource(value, portType(context.ports, port, 'inputs'))})`);
+  for (const [port, fixed] of Object.entries(model.fixed)) {
+    lines.push(`\t.set_input(${rhaiString(port)}, ${valueSource(fixed, portType(context.ports, port, 'inputs'))})`);
+  }
+  for (const renderer of model.renderers) {
+    const options = Object.entries(withDefaults(renderer)).sort(([a], [b]) => (a < b ? -1 : 1));
+    lines.push(`\t.attach(${rhaiString(renderer.id)}, ${rhaiString(renderer.type)}, ${mapLiteral(options.map(([k, v]) => [rhaiKey(k), rhaiValue(v, false)]))})`);
+    for (const wire of model.renderWires.filter((w) => w.to.startsWith(`${renderer.id}.`))) lines.push(`\t.connect(${rhaiString(wire.from)}, ${rhaiString(wire.to)})`);
   }
   lines[lines.length - 1] += ';';
-  const inputs = openInputs(model, context.ports);
-  lines.push(`let result = lock.run(${mapLiteral(inputs.map((p) => [rhaiString(p.port), model.test[p.name] ? valueSource(model.test[p.name], p.type) : `/* ${p.type} */ ()`]))});`);
+  lines.push(`let result = lock.run(${runInputs(model, context.ports)});`);
+  for (const renderer of model.renderers) lines.push(`let ${renderer.id} = result.canvases(${rhaiString(renderer.id)});`);
   return lines.join('\n') + '\n';
 }

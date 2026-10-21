@@ -1,4 +1,4 @@
-//! With the `embedded-assets` feature, lists every layout and lock file for
+//! With the `embedded-assets` feature, lists every layout, lock and renderer file for
 //! `rhaientries::embedded` to compile in (`$OUT_DIR/embedded_sources.rs`).
 
 use std::path::Path;
@@ -15,7 +15,7 @@ fn main() {
     let out_dir = std::env::var("OUT_DIR").unwrap();
     std::fs::write(Path::new(&out_dir).join("fonts.json"), merged).unwrap();
     let mut out = String::new();
-    for (constant, dir) in [("LAYOUTS", "webapp/layouts"), ("LOCKS", "webapp/locks")] {
+    for (constant, dir) in [("LAYOUTS", "webapp/layouts"), ("LOCKS", "webapp/locks"), ("RENDERERS", "webapp/renderers"), ("CHAINS", "webapp/chains")] {
         let dir = root.join(dir);
         println!("cargo:rerun-if-changed={}", dir.display());
         let mut scripts = Vec::new();

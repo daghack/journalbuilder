@@ -1,18 +1,19 @@
 import { Component, computed, effect, inject, signal } from '@angular/core';
 import type { LockOption } from '../scribe';
 import { failed } from '../services/tools.service';
-import { symbolBase, textSymbols, type TestValue } from './chain-model';
+import { symbolBase, testText, textSymbols, type TestValue } from './chain-model';
 import { optionDeclaration } from './chain-source';
 import { LockEditorService } from './lock-editor.service';
+import { RenderPagesComponent } from './render-pages.component';
 import { ValueViewComponent } from './value-view.component';
 
-/** A test or fixed value as typed: text for symbols and strings, else JSON. */
-function typed(value: TestValue | undefined): string {
-  if (!value) return '';
-  return 'text' in value ? value.text : JSON.stringify(value.json);
-}
+const typed = testText;
 
-/** What's typed as a value for a port of `type`, and what's wrong with it. */
+/**
+ * What's typed as a value for a port of `type`, and what's wrong with it:
+ * text for symbols and strings; otherwise JSON, or else rhai that makes
+ * the value (checked when the chain runs).
+ */
 function parseValue(text: string, type: string): { value: TestValue; problem: string | null } {
   const base = symbolBase(type);
   if (base !== null && base <= 27) {
@@ -27,36 +28,39 @@ function parseValue(text: string, type: string): { value: TestValue; problem: st
   try {
     return { value: { json: JSON.parse(text) }, problem: null };
   } catch {
-    return { value: { text }, problem: 'not JSON' };
+    return text.trim() ? { value: { rhai: text }, problem: null } : { value: { text }, problem: 'give JSON, or rhai that makes it' };
   }
 }
 
-/** The right: the lock type being made, the picked lock's options, the chain's ports, and the test. */
+/** The right: the chain being made, the picked lock's options, the chain's ports, and the test. */
 @Component({
   selector: 'app-lock-panel',
-  imports: [ValueViewComponent],
+  imports: [ValueViewComponent, RenderPagesComponent],
   template: `
     <section class="panel-section">
-      <h3>Lock type</h3>
+      <h3>Chain</h3>
       <label class="field">
         <span>Name</span>
         <input type="text" [value]="editor.model().name" (input)="editor.setName($any($event.target).value)" (blur)="editor.settle()" spellcheck="false" />
-        <span class="hint">Its file is webapp/locks/{{ editor.model().name }}.rhai.</span>
+        <span class="hint">Its file is webapp/chains/{{ editor.model().name }}.rhai.</span>
       </label>
       <label class="stack">
         <span class="hint">What it does (the file's opening comment)</span>
         <textarea rows="2" [value]="editor.model().description" (input)="editor.setDescription($any($event.target).value)" (blur)="editor.settle()"></textarea>
       </label>
       <div class="row">
-        <button type="button" class="primary" (click)="editor.save()" title="Check the chain's example, add it to this browser's lock types, and save its lock file">Save as lock type</button>
-        <button type="button" (click)="editor.openFile()" title="Open a composite lock file">Open…</button>
+        <button type="button" class="primary" (click)="editor.save()" title="Save the chain file, to put in webapp/chains/">Save file</button>
+        <button type="button" (click)="editor.openFile()" title="Open a chain file">Open…</button>
         <button type="button" (click)="editor.newChain()">New</button>
+        <button type="button" (click)="revert()" [disabled]="!editor.canRevert()"
+                [title]="editor.builtin() ? 'Throw away the edits made in this browser: put the chain back as it is in webapp/chains/' : 'Throw away the edits since the chain was opened'">Revert</button>
       </div>
       <div class="row">
-        <button type="button" (click)="copy('type')" title="A journal script using the saved lock type">Copy journal snippet</button>
-        <button type="button" (click)="copy('chain')" title="A journal script building the chain lock by lock: no lock file needed">Copy as chain</button>
+        <button type="button" (click)="copy('chain')" title="A journal script using the chain: chain(name)">Copy journal snippet</button>
+        <button type="button" (click)="copy('script')" title="A journal script building the chain lock by lock with new_lock: no chain file needed">Copy as script</button>
       </div>
       @if (copied(); as c) { <p class="hint">{{ c }}</p> }
+      <p class="hint">As you edit it, the chain is in this browser: journals using chain("{{ editor.model().name }}") follow along.</p>
       @if (editor.note(); as note) { <p [class]="note.kind === 'error' ? 'note-error' : note.kind === 'note' ? 'note-warning' : 'hint'">{{ note.text }}</p> }
     </section>
 
@@ -118,20 +122,61 @@ function parseValue(text: string, type: string): { value: TestValue; problem: st
       </section>
     }
 
+    @if (editor.renderer(); as renderer) {
+      <section class="panel-section">
+        <h3>Renderer</h3>
+        <div class="row">
+          <input type="text" class="mono" aria-label="Renderer name" [value]="nodeName() ?? renderer.id" (input)="nodeName.set($any($event.target).value)" (keydown.enter)="rename(renderer.id)" />
+          <button type="button" (click)="rename(renderer.id)" [disabled]="nodeName() === null || nodeName() === renderer.id">Rename</button>
+          <button type="button" class="danger" (click)="editor.removeNode(renderer.id)">Remove</button>
+        </div>
+        @if (renameError(); as error) { <p class="problem">{{ error }}</p> }
+        <p class="hint"><b>{{ renderer.type }}</b>: {{ editor.rendererByName().get(renderer.type)?.description }}</p>
+        @if (editor.rendererErrors()[renderer.id]; as error) { <p class="note-error">{{ error }}</p> }
+        @for (option of rendererOptions(); track option.name) {
+          <div class="field">
+            <span class="mono">{{ option.name }}</span>
+            @if (option.promoted) {
+              <span class="row"><span class="hint">the chain's <b>{{ option.promoted }}</b></span>
+                <button type="button" (click)="editor.demote(renderer.id, option.name)" title="Give this option a value of its own again">Own value</button></span>
+            } @else {
+              <span class="row">
+                @if (option.kind === 'bool') {
+                  <input type="checkbox" [checked]="option.value === true" (change)="editor.setRendererOption(renderer.id, option.name, $any($event.target).checked)" />
+                } @else {
+                  <input [type]="option.kind === 'number' ? 'number' : 'text'" class="mono value" step="any" [value]="show(option.value)" [placeholder]="show(option.default)"
+                         (change)="editor.setRendererOption(renderer.id, option.name, readRendererOption($any($event.target).value, option.kind))" />
+                }
+                <button type="button" (click)="editor.promote(renderer.id, option.name)" title="Make this one of the chain's own options, set where the chain is used">Chain's</button>
+              </span>
+            }
+          </div>
+        }
+        <div class="row">
+          <button type="button" (click)="editor.editRenderer(renderer.type)" title="Edit this renderer's file">Edit {{ renderer.type }}.rhai</button>
+        </div>
+        <h4>What it draws of the run</h4>
+        @if (editor.previews()[renderer.id]; as preview) {
+          <app-render-pages [preview]="preview" />
+        } @else {
+          <p class="hint">Wire each of its inputs from a lock's output, and give the chain a test that runs.</p>
+        }
+      </section>
+    }
+
     <section class="panel-section">
       <h3>Inputs</h3>
       @for (input of editor.inputs(); track input.port) {
         <div class="port">
           <div class="row">
-            <input type="text" class="mono name" [value]="input.name" aria-label="Input name" (change)="editor.setPortName('inputNames', input.port, $any($event.target).value)" />
-            <span class="hint">{{ input.port }} · {{ input.type }}</span>
+            <span class="mono">{{ input.port }}</span><span class="hint">{{ input.type }}</span>
           </div>
           <div class="row">
-            <input type="text" class="mono value" [class.invalid]="!!problemOf(input.name, input.type)" placeholder="test value" [value]="test(input.name)"
-                   (input)="setTest(input.name, input.type, $any($event.target).value)" (blur)="editor.settle()" />
-            <button type="button" (click)="fix(input.port, input.name)" title="Give this input its value in the chain itself, not where it's used">Fix</button>
+            <input type="text" class="mono value" [class.invalid]="!!problemOf(input.port, input.type)" [placeholder]="placeholder(input.type)" [value]="test(input.port)"
+                   [attr.aria-label]="input.port + ' test value'" (input)="setTest(input.port, input.type, $any($event.target).value)" (blur)="editor.settle()" />
+            <button type="button" (click)="fix(input.port)" title="Give this input its value in the chain itself, not where it's used">Fix</button>
           </div>
-          @if (problemOf(input.name, input.type); as p) { <span class="problem">{{ p }}</span> }
+          @if (problemOf(input.port, input.type); as p) { <span class="problem">{{ p }}</span> }
         </div>
       } @empty {
         <p class="hint">No open inputs.</p>
@@ -154,10 +199,9 @@ function parseValue(text: string, type: string): { value: TestValue; problem: st
       @for (output of editor.outputs(); track output.port) {
         <div class="port">
           <div class="row">
-            <input type="text" class="mono name" [value]="output.name" aria-label="Output name" (change)="editor.setPortName('outputNames', output.port, $any($event.target).value)" />
-            <span class="hint">{{ output.port }} · {{ output.type }}</span>
+            <span class="mono">{{ output.port }}</span><span class="hint">{{ output.type }}</span>
           </div>
-          @if (outputValue(output.name); as value) { <app-value-view [value]="value" /> }
+          @if (outputValue(output.port); as value) { <app-value-view [value]="value" /> }
         </div>
       } @empty {
         <p class="hint">No open outputs.</p>
@@ -233,6 +277,31 @@ export class LockPanelComponent {
     return this.run()?.outputs.find(([n]) => n === name)?.[1] ?? null;
   }
 
+  /** What to type for a port of `type`: a value kind's example, if it has one. */
+  protected placeholder(type: string): string {
+    if (symbolBase(type) !== null) return 'test value';
+    if (type === 'String') return 'text';
+    const example = this.editor.kinds().get(type);
+    return example ? `e.g. ${example}` : 'JSON, or rhai that makes it';
+  }
+
+  /** The picked renderer's options: its defaults, and what it's given. */
+  protected readonly rendererOptions = computed(() => {
+    const renderer = this.editor.renderer();
+    if (!renderer) return [];
+    const defaults = this.editor.rendererByName().get(renderer.type)?.options ?? {};
+    return Object.entries(defaults).map(([name, value]) => ({
+      name, default: value, value: renderer.options[name], promoted: renderer.promoted[name] ?? null,
+      kind: typeof value === 'number' ? 'number' : typeof value === 'boolean' ? 'bool' : 'text',
+    }));
+  });
+
+  /** A renderer option as typed: a number for a number's, else text; empty for its default. */
+  protected readRendererOption(text: string, kind: string): unknown {
+    if (text === '') return undefined;
+    return kind === 'number' ? Number(text) : text;
+  }
+
   protected test(name: string): string {
     return typed(this.editor.model().test[name]);
   }
@@ -252,9 +321,14 @@ export class LockPanelComponent {
   }
 
   /** Fix an input to its test value (or nothing yet). */
-  protected fix(port: string, name: string) {
-    this.editor.setFixed(port, this.editor.model().test[name] ?? { text: '' });
+  protected fix(port: string) {
+    this.editor.setFixed(port, this.editor.model().test[port] ?? { text: '' });
     this.editor.settle();
+  }
+
+  protected revert() {
+    const name = this.editor.model().name;
+    if (confirm(this.editor.builtin() ? `Throw away this browser's edits to ${name} and use webapp/chains/${name}.rhai again?` : `Throw away the edits to ${name} since it was opened?`)) void this.editor.revert();
   }
 
   protected rename(id: string) {
@@ -291,10 +365,11 @@ export class LockPanelComponent {
   }
 
   protected usedBy(name: string): string {
-    return this.editor.model().nodes.flatMap((n) => Object.entries(n.promoted).filter(([, v]) => v === name).map(([k]) => `${n.id}.${k}`)).join(', ') || 'nothing';
+    const model = this.editor.model();
+    return [...model.nodes, ...model.renderers].flatMap((n) => Object.entries(n.promoted).filter(([, v]) => v === name).map(([k]) => `${n.id}.${k}`)).join(', ') || 'nothing';
   }
 
-  protected async copy(kind: 'type' | 'chain') {
+  protected async copy(kind: 'chain' | 'script') {
     const text = this.editor.snippet(kind);
     try {
       await navigator.clipboard.writeText(text);

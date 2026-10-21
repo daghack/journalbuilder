@@ -13,6 +13,7 @@ pub mod pdf;
 pub mod progress;
 pub mod publish;
 pub mod hatch;
+pub mod kinds;
 pub mod spanning;
 pub mod ternary;
 pub mod markup;

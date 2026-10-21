@@ -143,7 +143,7 @@ impl ModuleResolver for SourcesResolver {
     }
 }
 
-/// The repository's layout and lock files, compiled in.
+/// The repository's layout, lock and renderer files, compiled in.
 #[cfg(feature = "embedded-assets")]
 pub mod embedded {
     use super::Sources;
@@ -161,6 +161,16 @@ pub mod embedded {
     /// The lock files and their helpers, as if in `webapp/locks/`.
     pub fn locks() -> Sources {
         Sources::embedded("locks", LOCKS)
+    }
+
+    /// The renderer files, as if in `webapp/renderers/`.
+    pub fn renderers() -> Sources {
+        Sources::embedded("renderers", RENDERERS)
+    }
+
+    /// The chain files, as if in `webapp/chains/`.
+    pub fn chains() -> Sources {
+        Sources::embedded("chains", CHAINS)
     }
 }
 
