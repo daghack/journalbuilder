@@ -2,11 +2,13 @@
 //! and shows its pages as SVG (`evaluate`), and renders them with Darkly
 //! over WebGPU (`Renderer`), as images, a PDF or PNGs.
 //!
-//! Layout, lock, renderer and chain files and the fonts are compiled in
-//! (see `rhaientries::embedded`), so scripts can use them with nothing to
-//! read. The editor's workspace (`setWorkspace`) can stand in for the fonts
-//! and add or stand in for lock, renderer and chain files, for edits not
-//! yet saved into the repository.
+//! The built-in library (layout, lock, illustration, chain and style files,
+//! helpers, glyphsets and content) is compiled in (see
+//! `rhaientries::embedded`), so scripts can use it with nothing to read.
+//! The editor's workspace (`setWorkspace`) can stand in for the glyphsets
+//! and add or stand in for lock, illustration and chain files, for edits
+//! not yet saved into the repository. (The JS names still say renderer
+//! for illustration.)
 //!
 //! The font and lock editors use the rest: `previewSvg` draws a script's
 //! first page without touching what `evaluate` keeps, and the lock and
@@ -18,7 +20,7 @@ use scribe::journal::darkly;
 use scribe::journal::fonts::FontBook;
 use scribe::journal::pdf::PdfWriter;
 use scribe::journal::publish::{self, Render, UNITS_PER_INCH};
-use scribe::journal::rhaientries::{embedded, Entry, JournalEngine, LockLibrary, Sources};
+use scribe::journal::rhaientries::{Entry, JournalEngine, LockLibrary, Resources, Sources};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::cell::RefCell;
@@ -136,37 +138,34 @@ pub fn set_workspace(fonts: Option<String>, locks: JsValue, renderers: JsValue, 
     Ok(json!({ "fontsError": error }).to_string())
 }
 
+/// The compiled-in library's glyphsets, as one glyphset file.
+fn builtin_glyphsets() -> &'static str {
+    static GLYPHSETS: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    GLYPHSETS.get_or_init(|| Resources::embedded().glyphsets_json().expect("the compiled-in glyphsets read"))
+}
+
 /// The workspace's fonts, or the compiled-in ones.
 fn font_book() -> Rc<FontBook> {
     let fonts = WORKSPACE.with_borrow(|workspace| workspace.fonts.clone());
-    let bytes: &[u8] = fonts.as_deref().map(Vec::as_slice).unwrap_or(embedded::FONTS);
+    let bytes: &[u8] = fonts.as_deref().map(Vec::as_slice).unwrap_or(builtin_glyphsets().as_bytes());
     Rc::new(FontBook::from_bytes(bytes).expect("the workspace's fonts were checked when set"))
 }
 
-/// The compiled-in lock files with the workspace's, and `extra`, over them.
-fn lock_sources(extra: &[(&str, &str)]) -> Sources {
-    let locks = WORKSPACE.with_borrow(|workspace| workspace.locks.clone());
-    embedded::locks()
-        .with_overlay(locks)
-        .with_overlay(extra.iter().map(|(name, source)| (name.to_string(), source.to_string())))
+/// `sources` with `files`, and `extra`, over them.
+fn overlaid(sources: Sources, files: BTreeMap<String, String>, extra: &[(&str, &str)]) -> Sources {
+    sources.with_overlay(files).with_overlay(extra.iter().map(|(name, source)| (name.to_string(), source.to_string())))
 }
 
-/// The compiled-in renderer files with the workspace's, and `extra`, over
-/// them.
-fn renderer_sources(extra: &[(&str, &str)]) -> Sources {
-    let renderers = WORKSPACE.with_borrow(|workspace| workspace.renderers.clone());
-    embedded::renderers()
-        .with_overlay(renderers)
-        .with_overlay(extra.iter().map(|(name, source)| (name.to_string(), source.to_string())))
-}
-
-/// The compiled-in chain files with the workspace's, and `extra`, over
-/// them.
-fn chain_sources(extra: &[(&str, &str)]) -> Sources {
-    let chains = WORKSPACE.with_borrow(|workspace| workspace.chains.clone());
-    embedded::chains()
-        .with_overlay(chains)
-        .with_overlay(extra.iter().map(|(name, source)| (name.to_string(), source.to_string())))
+/// The compiled-in library with the workspace's lock, illustration and
+/// chain files over it, and `illustrations` and `chains` over those.
+fn resources(illustrations: &[(&str, &str)], chains: &[(&str, &str)]) -> Resources {
+    let mut resources = Resources::embedded();
+    WORKSPACE.with_borrow(|workspace| {
+        resources.locks = overlaid(resources.locks.clone(), workspace.locks.clone(), &[]);
+        resources.illustrations = overlaid(resources.illustrations.clone(), workspace.renderers.clone(), illustrations);
+        resources.chains = overlaid(resources.chains.clone(), workspace.chains.clone(), chains);
+    });
+    resources
 }
 
 /// What the workspace changes, for the editor to say so.
@@ -191,7 +190,7 @@ fn run(source: &str) -> (Result<Entry, ScriptError>, Evaluation) {
 
 /// Run a journal script with `fonts`.
 fn run_with(source: &str, fonts: Rc<FontBook>) -> (Result<Entry, ScriptError>, Evaluation) {
-    let mut engine = JournalEngine::with_sources(fonts.clone(), lock_sources(&[]), embedded::layouts(), renderer_sources(&[]), chain_sources(&[]));
+    let mut engine = JournalEngine::with_resources(fonts.clone(), resources(&[], &[]));
     let prints: Rc<RefCell<Vec<String>>> = Rc::default();
     let printed = prints.clone();
     engine.on_print(move |text| printed.borrow_mut().push(text.to_string()));
@@ -295,13 +294,13 @@ pub fn preview_svg(source: &str, fonts: Option<String>) -> String {
 /// The compiled-in fonts.json.
 #[wasm_bindgen(js_name = builtinFonts)]
 pub fn builtin_fonts() -> String {
-    String::from_utf8_lossy(embedded::FONTS).into_owned()
+    builtin_glyphsets().to_string()
 }
 
 /// A lock library over the compiled-in lock files and the workspace's,
 /// with the chain files likewise and `chains` over them.
 fn locks(chains: &[(&str, &str)]) -> Rc<LockLibrary> {
-    Rc::new(LockLibrary::with_sources(lock_sources(&[])).with_chains(chain_sources(chains)))
+    Rc::new(LockLibrary::new(&resources(&[], chains)))
 }
 
 /// `result` as JSON, or `{ error }`.
@@ -357,7 +356,7 @@ pub fn chain_types() -> String {
     answer(locks(&[]).describe_chains().map(|chains| {
         chains.into_iter().map(|(name, info)| {
             let in_workspace = workspace.contains(&name);
-            let builtin = embedded::chains().has(&name);
+            let builtin = Resources::embedded().chains.has(&name);
             match info {
                 Ok(description) => json!({ "name": name, "description": description, "workspace": in_workspace, "builtin": builtin }),
                 Err(error) => json!({ "name": name, "error": error, "workspace": in_workspace, "builtin": builtin }),
@@ -392,7 +391,7 @@ pub fn read_chain(name: &str, source: Option<String>) -> String {
 /// (name, source) over the rest, for renderer types and previews.
 fn renderer_engine(extra: Option<(&str, &str)>) -> JournalEngine {
     let extra: Vec<(&str, &str)> = extra.into_iter().collect();
-    JournalEngine::with_sources(font_book(), lock_sources(&[]), embedded::layouts(), renderer_sources(&extra), chain_sources(&[]))
+    JournalEngine::with_resources(font_book(), resources(&extra, &[]))
 }
 
 /// Every renderer type, as JSON: `[{ name, file, description, options,
@@ -403,9 +402,9 @@ fn renderer_engine(extra: Option<(&str, &str)>) -> JournalEngine {
 pub fn renderer_types() -> String {
     let engine = renderer_engine(None);
     let workspace: Vec<String> = WORKSPACE.with_borrow(|workspace| workspace.renderers.keys().cloned().collect());
-    let types: Vec<Value> = engine.renderer_names().into_iter().map(|name| {
+    let types: Vec<Value> = engine.illustration_names().into_iter().map(|name| {
         let in_workspace = workspace.contains(&name);
-        match engine.describe_renderer(&name) {
+        match engine.describe_illustration(&name) {
             Ok(info) => {
                 let mut value = serde_json::to_value(info).unwrap_or(Value::Null);
                 value["workspace"] = json!(in_workspace);
@@ -422,7 +421,7 @@ pub fn renderer_types() -> String {
 #[wasm_bindgen(js_name = rendererPorts)]
 pub fn renderer_ports(type_name: &str, options: &str) -> String {
     answer(parse_json(options, "options").and_then(|options| {
-        renderer_engine(None).renderer_inputs(type_name, &options).map(|inputs| json!({ "inputs": inputs }))
+        renderer_engine(None).illustration_inputs(type_name, &options).map(|inputs| json!({ "inputs": inputs }))
     }))
 }
 
@@ -448,7 +447,7 @@ pub fn render_preview(type_name: &str, source: Option<String>, options: &str, in
 /// or `{ error }`.
 #[wasm_bindgen(js_name = rendererSource)]
 pub fn renderer_source(type_name: &str) -> String {
-    answer(renderer_sources(&[]).read(type_name).map(|source| json!({ "source": source })).map_err(|e| format!("no renderer file {}: {}", type_name, e)))
+    answer(resources(&[], &[]).illustrations.read(type_name).map(|source| json!({ "source": source })).map_err(|e| format!("no illustration file {}: {}", type_name, e)))
 }
 
 /// Every value kind, as JSON: `[{ name, example }]`, example a rhai
@@ -466,7 +465,7 @@ pub fn value_kinds() -> String {
 /// for the editor to highlight and complete.
 #[wasm_bindgen(js_name = apiNames)]
 pub fn api_names() -> Vec<String> {
-    let fonts = Rc::new(FontBook::from_bytes(embedded::FONTS).expect("the compiled-in fonts.json loads"));
+    let fonts = Rc::new(FontBook::from_bytes(builtin_glyphsets().as_bytes()).expect("the compiled-in glyphsets load"));
     JournalEngine::embedded(fonts).function_names().into_iter()
         .filter(|name| {
             let mut parts = name.split("::");

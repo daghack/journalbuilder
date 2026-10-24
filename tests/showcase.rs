@@ -1,14 +1,13 @@
 //! Keeps webapp/journals/showcase up to date: it should show everything journals
-//! can draw with. These fail when something scripts can call, a font, a
-//! lock type, a renderer or a chain file isn't in it (see CLAUDE.md). Brushes and glyphs needn't be
-//! listed: the showcase draws every one of `brush_names()`, and every
-//! variant of every glyph of every font in `glyphset_names()`.
+//! can draw with. These fail when something scripts can call, or a built-in
+//! (a lock type, illustration, chain, layout, text style, content or
+//! glyphset of the library's) isn't in it (see CLAUDE.md). Brushes and
+//! glyphs needn't be listed: the showcase draws every one of
+//! `brush_names()`, and every variant of every glyph of every glyphset in
+//! `glyphset_names()`.
 
-use scribe::journal::rhaientries::JournalEngine;
-use scribe::journal::fonts::{FontBook, DEFAULT_FONTS};
+use scribe::journal::rhaientries::{Journal, JournalEngine, Resources, DEFAULT_JOURNALS_DIR};
 use std::rc::Rc;
-
-const SHOWCASE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/webapp/journals/showcase/journal_entry.rhai");
 
 /// Functions scripts can call that aren't capabilities to show.
 const NOT_SHOWN: &[(&str, &str)] = &[
@@ -16,8 +15,10 @@ const NOT_SHOWN: &[(&str, &str)] = &[
     ("to_debug", "printing"),
 ];
 
+/// Every entry of the showcase, one after another.
 fn showcase() -> String {
-    std::fs::read_to_string(SHOWCASE).expect("webapp/journals/showcase/journal_entry.rhai")
+    let journal = Journal::open(format!("{}/showcase", DEFAULT_JOURNALS_DIR)).unwrap_or_else(|e| panic!("{}", e));
+    journal.manifest.entries.iter().map(|name| journal.entry_source(name).unwrap()).collect::<Vec<_>>().join("\n")
 }
 
 /// Whether `word` is in `text` as a whole word (or `module::name`).
@@ -32,9 +33,10 @@ fn mentions(text: &str, word: &str) -> bool {
 
 #[test]
 fn every_function_scripts_can_call_is_in_the_showcase() {
-    let symd = Rc::new(FontBook::from_file(DEFAULT_FONTS).unwrap());
+    let library = Resources::library();
+    let symd = Rc::new(library.glyphset_book().unwrap());
     let script = showcase();
-    let missing: Vec<String> = JournalEngine::new(symd).function_names().into_iter()
+    let missing: Vec<String> = JournalEngine::with_resources(symd, library).function_names().into_iter()
         // Properties: `get$name` and `set$name`.
         .map(|name| name.trim_start_matches("get$").trim_start_matches("set$").to_string())
         .filter(|name| !NOT_SHOWN.iter().any(|(n, _)| n == name))
@@ -44,72 +46,37 @@ fn every_function_scripts_can_call_is_in_the_showcase() {
 }
 
 #[test]
-fn every_font_is_in_the_showcase() {
-    // Fonts of 20 glyphs or more; smaller sets (the symbols) are only in
-    // the glyph catalogue, which draws every glyph.
-    let book = FontBook::from_file(DEFAULT_FONTS).unwrap();
+fn every_built_in_is_in_the_showcase() {
+    let library = Resources::library();
     let script = showcase();
-    let missing: Vec<String> = book.names().into_iter()
+    let mut missing = Vec::new();
+    let mut check = |kind: &str, names: Vec<String>, shown: &dyn Fn(&str) -> String, where_: &str| {
+        for name in names {
+            if !script.contains(&shown(&name)) {
+                missing.push(format!("{} {} ({})", kind, name, where_));
+            }
+        }
+    };
+    let names = |sources: &scribe::journal::rhaientries::Sources| sources.names().unwrap();
+    check("lock type", names(&library.locks), &|n| format!("\"{}\"", n), "a row on the locks page");
+    check("illustration", names(&library.illustrations), &|n| format!("\"{}\"", n), "attach it on the illustrations page");
+    check("chain", names(&library.chains), &|n| format!("chain(\"{}\"", n), "use it with chain(name)");
+    check("layout", names(&library.layouts), &|n| format!("layout(\"{}\"", n), "typeset pages with it");
+    check("text style", names(&library.styles), &|n| format!("text_style(\"{}\"", n), "write with it on the text styles page");
+    check("content", library.content_names(), &|n| format!("content(\"{}\"", n), "use it with content(name)");
+    // Glyphsets of 20 glyphs or more; smaller sets (the symbols) are only
+    // in the glyph catalogue, which draws every glyph.
+    let book = library.glyphset_book().unwrap();
+    let glyphsets = book.names().into_iter()
         .filter(|name| !name.starts_with("debug") && book.font(name).unwrap().characters().len() >= 20)
-        .filter(|name| !script.contains(&format!("\"{}\"", name)))
         .collect();
-    assert!(missing.is_empty(), "add these fonts to the showcase's fonts page: {:?}", missing);
-}
-
-#[test]
-fn every_lock_type_is_in_the_showcase() {
-    let script = showcase();
-    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/webapp/locks");
-    let mut missing = Vec::new();
-    for entry in std::fs::read_dir(dir).unwrap() {
-        let path = entry.unwrap().path();
-        if path.extension().is_some_and(|x| x == "rhai") {
-            let name = path.file_stem().unwrap().to_string_lossy().into_owned();
-            if !script.contains(&format!("\"{}\"", name)) {
-                missing.push(name);
-            }
-        }
-    }
-    assert!(missing.is_empty(), "add these lock types to the showcase's locks page: {:?}", missing);
-}
-
-#[test]
-fn every_chain_file_is_in_the_showcase() {
-    let script = showcase();
-    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/webapp/chains");
-    let mut missing = Vec::new();
-    for entry in std::fs::read_dir(dir).unwrap() {
-        let path = entry.unwrap().path();
-        if path.extension().is_some_and(|x| x == "rhai") {
-            let name = path.file_stem().unwrap().to_string_lossy().into_owned();
-            if !script.contains(&format!("chain(\"{}\"", name)) {
-                missing.push(name);
-            }
-        }
-    }
-    assert!(missing.is_empty(), "use these chain files with chain(name) in the showcase: {:?}", missing);
-}
-
-#[test]
-fn every_renderer_is_in_the_showcase() {
-    let script = showcase();
-    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/webapp/renderers");
-    let mut missing = Vec::new();
-    for entry in std::fs::read_dir(dir).unwrap() {
-        let path = entry.unwrap().path();
-        if path.extension().is_some_and(|x| x == "rhai") {
-            let name = path.file_stem().unwrap().to_string_lossy().into_owned();
-            if !script.contains(&format!("\"{}\"", name)) {
-                missing.push(name);
-            }
-        }
-    }
-    assert!(missing.is_empty(), "attach these renderers on the showcase's renderers page: {:?}", missing);
+    check("glyphset", glyphsets, &|n| format!("\"{}\"", n), "a line on the glyphsets pages");
+    assert!(missing.is_empty(), "the showcase is missing built-ins:\n  {}", missing.join("\n  "));
 }
 
 #[test]
 fn the_showcase_draws_every_brush_and_glyph() {
     let script = showcase();
     assert!(script.contains("brush_names()"), "the pens page should draw every brush from brush_names()");
-    assert!(script.contains("glyphset_names()") && script.contains(".variants("), "the glyphs page should draw every variant of every font's glyphs, from glyphset_names()");
+    assert!(script.contains("glyphset_names()") && script.contains(".variants("), "the glyphs page should draw every variant of every glyphset's glyphs, from glyphset_names()");
 }

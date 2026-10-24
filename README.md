@@ -1,10 +1,11 @@
 # journalbuilder
 
 Renders handwritten-looking journal pages from rhai scripts. Each journal
-is a script that lays out strokes, glyphs from hand-drawn symbol sets, and
-text enciphered through chains of locks; `journalbuild` runs it and renders
-every page with [Darkly](https://github.com/daghack/darkly), a GPU brush
-engine, and optionally as SVG.
+is a directory of entries, scripts that lay out strokes, glyphs from
+hand-drawn symbol sets, and text enciphered through chains of locks, with
+the files they use; `journalbuild` runs its entries and renders every page
+with [Darkly](https://github.com/daghack/darkly), a GPU brush engine, and
+optionally as SVG.
 
 ## Quick start
 
@@ -13,10 +14,12 @@ cargo build --release
 ```
 
 ```bash
-target/release/journalbuild journal_entry_17
+target/release/journalbuild journal_entries --entry entry_17
 ```
 
-Renders go to `journal_entry_17_output/` in the current directory (emptied first). Rendering needs a GPU
+Renders go to `journal_entries_output/entry_17/` in the current directory
+(emptied first), a directory for each entry built; leave out `--entry` for
+every entry. Rendering needs a GPU
 that wgpu can use (Metal on macOS). While it runs, one line of the
 terminal shows its progress: a spinner while the script runs, then a bar
 of the pages rendered, the page it's on and the time left
@@ -25,7 +28,8 @@ terminal).
 
 Useful flags (`journalbuild` with no arguments lists them all):
 
-- `--page 0,maze`: only these pages, by index or name.
+- `--entry letter_1,response_1`: only these entries.
+- `--page 0,maze`: only these pages of each entry, by index or name.
 - `--scale 0.25`: smaller output, much faster to render.
 - `--svg`: also render each canvas as an SVG, and that SVG as a PNG.
 - `--strict-glyphs`: fail if any character has no glyph, instead of
@@ -36,7 +40,7 @@ Useful flags (`journalbuild` with no arguments lists them all):
   a sheet the size of the page, and each tile of a split page a sheet of
   its own. Light inks are drawn as dark as they were light, hue kept, so
   they show.
-- `--pdf`: put the pages in one PDF, `{journal}.pdf`, instead of images:
+- `--pdf`: put each entry's pages in one PDF, `{entry}.pdf`, instead of images:
   each page's canvases layered into one image (on parchment, with
   `--parchment`), at 150 canvas units to the inch whatever the scale.
 - `--stitch N`: also lay every N pages side by side, tops level, named
@@ -44,11 +48,11 @@ Useful flags (`journalbuild` with no arguments lists them all):
   (the last may have fewer; a page left alone isn't stitched). Pages are
   rendered one image each, as with `--parchment`, on parchment with it.
   Not with `--pdf`.
-- `--journals-dir`, `--output-dir`, `--glyphsets`, `--locks-dir`,
-  `--layouts-dir`: read or write somewhere other than the repository's
-  defaults.
-- `--check-locks`: run every lock file's examples instead of building a
-  journal.
+- `--journals-dir`, `--library`, `--output-dir`: read or write somewhere
+  other than the repository's defaults. A journal can also be given as a
+  path, `journalbuild path/to/journal`.
+- `--check-locks`: run every lock and chain file's examples instead of
+  building a journal: the library's, or with a journal's name, its own.
 - `--check-gpu`: check that Darkly can render here (there's a GPU wgpu
   can use) instead of building a journal; fails if it can't.
 
@@ -67,24 +71,52 @@ cd webapp/frontend && npm install && npm start
 
 | path | what's there |
 |---|---|
-| `webapp/journals/<name>/journal_entry.rhai` | one journal per directory |
+| `webapp/journals/<name>/` | one journal per directory: `journal.json` (its title and entries in order), `entries/<entry>.rhai`, and files of its own in front of the library's (below) |
 | `webapp/journals/showcase` | a page each of every brush, glyphset, glyph, art tool, text layout and lock type, with the calls that make them |
 | `webapp/journals/api_reference` | the API reference: an entry for every function scripts can call, with its arguments, options and defaults |
-| `webapp/locks/` | lock types, one rhai file each; see [webapp/locks/README.md](webapp/locks/README.md) |
-| `webapp/layouts/` | page layouts, one rhai file each; see [webapp/layouts/README.md](webapp/layouts/README.md) |
-| `webapp/fonts/` | a `NAME.json` for each glyphset: its glyphs' SVG paths by character (a list for variants), `character_padding` (scripts' `glyph_outline_gap`), `space_width` and `fallback`; sets of symbols are glyphsets too |
+| `webapp/library/` | the built-in library every journal stands in front of, a directory for each kind of file: |
+| `webapp/library/locks/` | lock types, one rhai file each; see [webapp/library/locks/README.md](webapp/library/locks/README.md) |
+| `webapp/library/layouts/` | page layouts, one rhai file each; see [webapp/library/layouts/README.md](webapp/library/layouts/README.md) |
+| `webapp/library/illustrations/` | what chains draw their values with; see [webapp/library/illustrations/README.md](webapp/library/illustrations/README.md) |
+| `webapp/library/chains/` | locks wired together, for `chain(name)`; see [webapp/library/chains/README.md](webapp/library/chains/README.md) |
+| `webapp/library/styles/` | text styles, for `text_style(name)`: `options()` and `style(o)`, giving `#{ style, type, paragraph, spans }` |
+| `webapp/library/content/` | text (`.txt`, `.md`) and symbols (`.json`, `{ base, symbols }`), for `content(name)` |
+| `webapp/library/lib/` | helpers any script imports: `import "lib/NAME" as NAME;` |
+| `webapp/library/glyphsets/` | a `NAME.json` for each glyphset: its glyphs' SVG paths by character (a list for variants), `character_padding` (scripts' `glyph_outline_gap`), `space_width` and `fallback`; sets of symbols are glyphsets too |
 | `src/journal/` | canvases, paths, glyph placement, glyphsets, hatching, gradients, parchment, and Darkly and SVG rendering |
 | `src/journal/publish.rs` | writing an entry out: images per canvas or page, PDFs, SVGs |
 | `src/journal/art/` | procedural path art: snakes and brambles, free or along a path |
 | `src/journal/rhaientries/` | the rhai API journals and lock files use |
 | `src/lockbuilder/` | runs lock chains forward (lock) and backward (unlock) |
 | `src/bin/journalbuild/` | the command line |
-| `webapp/` | the web editor: `wasm/` (the renderer for the browser) and `frontend/` (the Angular app), with the journals, locks, layouts and glyphsets above it builds from; see [webapp/README.md](webapp/README.md) |
+| `webapp/` | the web editor: `wasm/` (the renderer for the browser) and `frontend/` (the Angular app), with the journals and library above it builds from; see [webapp/README.md](webapp/README.md) |
 | `tests/`, `scripts/smoke.sh` | tests, below |
 
 ## Writing a journal
 
-A journal script fills in `journal_entry` with pages, each holding one or
+A journal is a directory, `webapp/journals/<name>/`, with a manifest,
+`journal.json`:
+
+```json
+{
+  "version": 1,
+  "title": "Nivelia's Letters",
+  "description": "Her letter, and the reply.",
+  "entries": ["letter_1", "response_1"]
+}
+```
+
+Each entry is a script, `entries/<entry>.rhai`, run on its own. Beside
+them, a journal can have files of its own, each kind in a directory:
+`locks/`, `layouts/`, `illustrations/`, `chains/`, `styles/` (text
+styles, for `text_style(name)`), `lib/` (helpers, `import "lib/name" as
+name;`), `glyphsets/` and `content/` (text and symbols, for
+`content(name)`). They stand in front of the built-in library,
+`webapp/library/`: a journal's file stands in for the library's of the
+same name, and journalbuild notes when one does. Entries share these
+files, not code.
+
+An entry script fills in `journal_entry` with pages, each holding one or
 more canvases of strokes:
 
 ```rhai
@@ -97,7 +129,7 @@ let canvas = new_canvas()
 journal_entry.add(new_page(#{ name: "hello" }).add(canvas));
 ```
 
-This renders `darkly_hello_0.png`: one image per canvas, named
+This renders `darkly_hello_0.png` (in the entry's output directory): one image per canvas, named
 `darkly_{page}_{canvas}.png` after the page's and canvas's names, or their
 indices. With `--svg` there's also `hello_0.svg` and `hello_0.png`.
 
@@ -163,8 +195,8 @@ What to know:
   picks, text layout, hatching, handwriting and procedural art without a
   seed of its own all draw from one generator with a fixed seed, so a
   journal renders the same every run. `seed(n)` changes it.
-- **Glyphsets and glyphs.** Glyphsets come from `webapp/fonts/`, one file
-  each, with its glyphs and how text is set in it: `glyph_outline_gap`
+- **Glyphsets and glyphs.** Glyphsets come from `glyphsets/`, the
+  journal's and the library's, one file each, with its glyphs and how text is set in it: `glyph_outline_gap`
   between glyphs and `space_width` (both in glyph scales), and a
   `fallback` glyphset for characters it hasn't. Text is set with each
   glyph as close to the last as their outlines (the convex hulls of their
@@ -288,7 +320,7 @@ them, column after column and page after page, until it runs out.
 
 ### Typesetting with a layout file
 
-The layouts in `webapp/layouts/` are ready to use:
+The layouts in `webapp/library/layouts/` are ready to use:
 
 | layout | flows | art |
 |---|---|---|
@@ -332,7 +364,7 @@ journal_entry.add(layout("two_column_article").typeset(#{
   `markdown(text)`: `*emphasis*`, `**strong**`, `~~struck out~~`, and
   `[text]{settings}` and named spans for colour, size, lean, passes,
   spacing, and lines under and through, which break where the text does (see
-  [webapp/layouts/README.md](webapp/layouts/README.md#marked-up-text)).
+  [webapp/library/layouts/README.md](webapp/library/layouts/README.md#marked-up-text)).
 - **Roles** are `#{ style, type, paragraph, spans }`, by name. Text roles
   need a type with a glyphset and glyph scale; the style defaults to
   `default_style()`, the paragraph (`line_height`, `align`, `valign`,
@@ -370,9 +402,10 @@ fn two_up(n, info) {
 let pages = new_layout("two_up", Fn("two_up")).typeset(#{ width: 1200, height: 1600, flows: flows, roles: roles });
 ```
 
-To reuse it, put `page(n, info)` (and, optionally, `page_size()`) in
-`webapp/layouts/<name>.rhai` and load it with `layout("<name>")`; no rebuild is
-needed. Every box takes its flex style, `#{ flex }` (a `new_flex_style`
+To reuse it, put `page(n, info)` (and, optionally, `options()`,
+`page_size(o)` and `example()`) in a journal's `layouts/<name>.rhai`, or
+the library's, and load it with `layout("<name>")` or `layout("<name>",
+options)`; no rebuild is needed. Every box takes its flex style, `#{ flex }` (a `new_flex_style`
 or a map): rows and columns lay out their children with flexbox rules,
 `grow` shares out the space left, `width`/`height` take units or
 `"40%"`, and `gap`, `padding`, `margin`, `justify` and `align` work as in
@@ -403,7 +436,7 @@ breaks it round the figure instead, so lines hug the outline more
 tightly, and `split_padding` (in glyph scales) adds room at the breaks. An
 `initial` placed the same way is a drop cap the text wraps round.
 
-[webapp/layouts/README.md](webapp/layouts/README.md) has every box, flex setting and role
+[webapp/library/layouts/README.md](webapp/library/layouts/README.md) has every box, flex setting and role
 setting; `webapp/journals/showcase` uses each layout, and an inline one.
 
 ## Locks
@@ -423,9 +456,10 @@ for cell in result.get("maze.generated_maze").maze().cells() { /* ... */ }
 lock.unlock(result).text("sub.plain_text");   // "A SECRET"
 ```
 
-Each lock type is a rhai file in `webapp/locks/`, so adding one doesn't need a
-rebuild. [webapp/locks/README.md](webapp/locks/README.md) describes what a lock file
-defines; `journalbuild --check-locks` tests them.
+Each lock type is a rhai file in `locks/`, the library's or a journal's,
+so adding one doesn't need a rebuild.
+[webapp/library/locks/README.md](webapp/library/locks/README.md) describes
+what a lock file defines; `journalbuild --check-locks` tests them.
 
 ## Tests
 
@@ -434,18 +468,20 @@ defines; `journalbuild --check-locks` tests them.
 ```
 
 `smoke.sh` builds in release mode and runs `cargo test` (which also
-evaluates every journal script and every lock file's examples). It then runs
-`journalbuild --check-locks`, renders the smoke fixture in full, and renders
-page 0 of each journal at quarter scale. Last, it checks that the web
+evaluates every entry of every journal and every lock file's examples). It
+then runs `journalbuild --check-locks` for the library and each journal
+with lock or chain files of its own, renders the smoke fixture in full,
+and renders page 0 of each entry of each journal at quarter scale. Last, it checks that the web
 editor's renderer still builds for the browser and, if the editor's npm
 packages are installed and its wasm built, runs its unit tests and builds
 it. Renders go to a temporary directory; `--keep` keeps them.
 
 Where there's no GPU (a cloud sandbox, CI), `smoke.sh` skips the Darkly
 renders, but what journals draw is still checked: `cargo test` renders
-the smoke fixture, every page of the showcase and page 0 of every other
-journal as SVG, rasterised on the CPU, and compares each canvas with its
-image in `tests/svg_renders/` (`tests/svg_renders.rs`). Small differences
+the smoke fixture, every page of the showcase and page 0 of every entry
+of every other journal as SVG, rasterised on the CPU, and compares each
+canvas with its image in `tests/svg_renders/<journal>/<entry>/`
+(`tests/svg_renders.rs`). Small differences
 between machines pass; moved, missing or restyled strokes don't. A
 failure writes the new render and a diff (changed pixels in red) to
 `target/svg-render-diffs/`. When a change means to alter what's drawn,

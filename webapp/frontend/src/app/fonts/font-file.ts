@@ -1,4 +1,4 @@
-// webapp/fonts/ as the font editor holds it: fonts, their options and
+// webapp/library/glyphsets/ as the font editor holds it: fonts, their options and
 // glyphs in file order, written back in the layout fonts.json is kept in
 // (one glyph to a line), so a glyph changed is a line changed.
 

@@ -10,7 +10,7 @@ const B27 = 'Base27Symbol';
 const TEXT = 'ONCE UPON A MIDNIGHT DREARY WHILE I PONDERED WEAK AND WEARY';
 const CODE = 'huffman::code(symbols(27, "THE QUICK BROWN FOX"), 27, 3)';
 
-/** webapp/chains/raven_sky.rhai, as the editor holds it. */
+/** webapp/library/chains/raven_sky.rhai, as the editor holds it. */
 function ravenModel(): { model: ChainModel; ports: PortsByNode } {
   const option = (name: string, value: number) => ({ name, kind: 'integer' as const, default: value });
   return {
@@ -48,7 +48,7 @@ function ravenModel(): { model: ChainModel; ports: PortsByNode } {
 const kinds = () => ({ input_base: 'integer', output_base: 'integer' }) as Record<string, 'integer'>;
 
 describe('chain files', () => {
-  it('writes webapp/chains/raven_sky.rhai as it is', () => {
+  it('writes webapp/library/chains/raven_sky.rhai as it is', () => {
     const { model, ports } = ravenModel();
     expect(chainSource(model, { ports, optionKinds: kinds })).toBe(ravenSky);
   });
@@ -118,7 +118,7 @@ describe('renderers', () => {
   it('saves renderers with the ports they draw', () => {
     const { model, ports } = mazeModel();
     const source = chainSource(model, { ports, optionKinds: mazeKinds });
-    expect(source).toContain('\t\trenderers: #{\n\t\t\tdrawn: #{ type: "maze_glyphs", options: #{ cell: 30 }, inputs: #{ maze: "ml.generated_maze" } },');
+    expect(source).toContain('\t\tillustrations: #{\n\t\t\tdrawn: #{ type: "maze_glyphs", options: #{ cell: 30 }, inputs: #{ maze: "ml.generated_maze" } },');
     expect(source).toContain('drawn: [0, 200]');
   });
 

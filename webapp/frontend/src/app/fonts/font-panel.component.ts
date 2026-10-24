@@ -13,7 +13,7 @@ import { FALLBACK_GLYPH, fallbackLoop, fallbackOf, optionRaw, parseFonts, withOp
       </div>
       <div class="row">
         <button type="button" class="primary" (click)="editor.export()" [disabled]="!editor.file() || editor.problems().length > 0"
-                title="Save the whole fonts file: back where it came from in Chromium browsers, else as a download. Split it into webapp/fonts/ with npm run split-fonts.">Export fonts.json</button>
+                title="Save the whole fonts file: back where it came from in Chromium browsers, else as a download. Split it into webapp/library/glyphsets/ with npm run split-fonts.">Export fonts.json</button>
         <button type="button" (click)="editor.open()" title="Open a fonts file">Open…</button>
         <button type="button" (click)="revert()" [disabled]="editor.unchanged()" title="Throw away every font's edits: start again from the built-in fonts as built in">Revert all</button>
       </div>

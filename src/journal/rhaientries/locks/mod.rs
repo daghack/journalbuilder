@@ -1,6 +1,6 @@
 //! Rhai API for building and running lock chains (see `crate::lockbuilder`).
-//! Each lock type is a lock file, `webapp/locks/<type>.rhai` (see `library` and
-//! webapp/locks/README.md).
+//! Each lock type is a lock file, `locks/<type>.rhai`, a journal's or the
+//! library's (see `library` and webapp/library/locks/README.md).
 //!
 //! ```rhai
 //! let lock = new_lock("page_one_lock")
@@ -13,12 +13,12 @@
 //! lock.unlock(result).text("vig.plain_text");   // "SECRET"
 //! ```
 //!
-//! `chain(name)` builds the same from a chain file, `webapp/chains/<name>.rhai`,
-//! with the renderers it attaches.
+//! `chain(name)` builds the same from a chain file, `chains/<name>.rhai`,
+//! with the illustrations it attaches.
 
 mod library;
 
-pub use library::{LockLibrary, DEFAULT_CHAINS_DIR, DEFAULT_LOCKS_DIR};
+pub use library::LockLibrary;
 pub use library::{from_json, to_json, value_from_test, value_view, OptionInfo, Ports, RunResult, TypeInfo, ValueView};
 
 use rhai::{Array, CustomType, Dynamic, Engine, EvalAltResult, Map, TypeBuilder};
@@ -26,28 +26,28 @@ use crate::lockbuilder::{
     base_n_symbols, compatible, symbols_to_string, CompositeLock, InfoVar, InfoVarSet, InfoVarType, Lock,
 };
 use super::Path;
-use super::renderers::RendererLibrary;
+use super::illustrations::IllustrationLibrary;
 use std::collections::HashMap;
 use std::rc::Rc;
 
 type RhaiResult<T> = Result<T, Box<EvalAltResult>>;
 
-/// Register the lock API, with lock types from `library` and renderer
-/// types from `renderers`.
-pub fn register(engine: &mut Engine, library: Rc<LockLibrary>, renderers: Rc<RendererLibrary>) {
+/// Register the lock API, with lock types from `library` and illustration
+/// types from `illustrations`.
+pub fn register(engine: &mut Engine, library: Rc<LockLibrary>, illustrations: Rc<IllustrationLibrary>) {
     engine
         .build_type::<LockBuilder>()
         .build_type::<LockValue>()
         .build_type::<LockResult>()
         .register_fn("new_lock", {
-            let (library, renderers) = (library.clone(), renderers.clone());
-            move |name: &str| LockBuilder::new(library.clone(), renderers.clone(), name)
+            let (library, illustrations) = (library.clone(), illustrations.clone());
+            move |name: &str| LockBuilder::new(library.clone(), illustrations.clone(), name)
         })
         .register_fn("chain", {
-            let (library, renderers) = (library.clone(), renderers.clone());
-            move |ctx: rhai::NativeCallContext, name: &str| LockBuilder::from_chain(&ctx, library.clone(), renderers.clone(), name, Map::new())
+            let (library, illustrations) = (library.clone(), illustrations.clone());
+            move |ctx: rhai::NativeCallContext, name: &str| LockBuilder::from_chain(&ctx, library.clone(), illustrations.clone(), name, Map::new())
         })
-        .register_fn("chain", move |ctx: rhai::NativeCallContext, name: &str, options: Map| LockBuilder::from_chain(&ctx, library.clone(), renderers.clone(), name, options))
+        .register_fn("chain", move |ctx: rhai::NativeCallContext, name: &str, options: Map| LockBuilder::from_chain(&ctx, library.clone(), illustrations.clone(), name, options))
         .register_fn("symbols", |base: i64, text: &str| symbols(base, text, &Map::new()))
         .register_fn("symbols", |base: i64, text: &str, options: Map| symbols(base, text, &options));
     // A maze's corridors as a path: paths are for drawing, so lock files
@@ -122,9 +122,9 @@ fn port_value(value: Dynamic, what: &str, name: &str) -> RhaiResult<InfoVar> {
 #[derive(Clone)]
 pub struct LockBuilder {
     library: Rc<LockLibrary>,
-    renderer_library: Rc<RendererLibrary>,
-    /// Renderers attached, in the order they were.
-    renderers: Vec<Attachment>,
+    illustration_library: Rc<IllustrationLibrary>,
+    /// Illustrations attached, in the order they were.
+    illustrations: Vec<Attachment>,
     name: String,
     locks: HashMap<String, Rc<dyn Lock>>,
     connections: Vec<(String, String)>,
@@ -133,27 +133,27 @@ pub struct LockBuilder {
 }
 
 impl LockBuilder {
-    fn new(library: Rc<LockLibrary>, renderer_library: Rc<RendererLibrary>, name: &str) -> RhaiResult<Self> {
+    fn new(library: Rc<LockLibrary>, illustration_library: Rc<IllustrationLibrary>, name: &str) -> RhaiResult<Self> {
         let lock = CompositeLock::new(name.to_string(), HashMap::new(), Vec::new())
             .map_err(|e| format!("new_lock: {}", e))?;
         Ok(Self {
             library,
-            renderer_library,
+            illustration_library,
             name: name.to_string(),
             locks: HashMap::new(),
             connections: Vec::new(),
             fixed_inputs: Vec::new(),
-            renderers: Vec::new(),
+            illustrations: Vec::new(),
             lock,
         })
     }
 
     /// `chain(name[, options])`: chain file `name`'s locks, wiring, fixed
-    /// values and renderers, built as a journal would build them.
-    fn from_chain(ctx: &rhai::NativeCallContext, library: Rc<LockLibrary>, renderer_library: Rc<RendererLibrary>, name: &str, options: Map) -> RhaiResult<Self> {
+    /// values and illustrations, built as a journal would build them.
+    fn from_chain(ctx: &rhai::NativeCallContext, library: Rc<LockLibrary>, illustration_library: Rc<IllustrationLibrary>, name: &str, options: Map) -> RhaiResult<Self> {
         let spec = library.chain_spec(name, options).map_err(|e| format!("chain: {}", e))?;
         let at = |e: Box<EvalAltResult>| -> Box<EvalAltResult> { format!("chain: {}: {}", spec.file, super::options::unwrap_runtime(&e)).into() };
-        let mut lock = Self::new(library.clone(), renderer_library, name)?;
+        let mut lock = Self::new(library.clone(), illustration_library, name)?;
         for (id, type_name, options) in &spec.locks {
             lock.add(id, type_name, options.clone()).map_err(at)?;
         }
@@ -169,10 +169,10 @@ impl LockBuilder {
                 Ok(())
             }).map_err(at)?;
         }
-        for renderer in spec.renderers {
-            lock.attach(ctx, &renderer.id, &renderer.renderer, renderer.options).map_err(at)?;
-            for (input, port) in &renderer.inputs {
-                lock.connect_renderer(port, &renderer.id, input).map_err(at)?;
+        for illustration in spec.illustrations {
+            lock.attach(ctx, &illustration.id, &illustration.illustration, illustration.options).map_err(at)?;
+            for (input, port) in &illustration.inputs {
+                lock.connect_illustration(port, &illustration.id, input).map_err(at)?;
             }
         }
         Ok(lock)
@@ -199,8 +199,8 @@ impl LockBuilder {
             if next.locks.contains_key(name) {
                 return Err(format!("a lock named '{}' was already added", name));
             }
-            if next.renderers.iter().any(|r| r.id == name) {
-                return Err(format!("there's a renderer named '{}' already", name));
+            if next.illustrations.iter().any(|r| r.id == name) {
+                return Err(format!("there's an illustration named '{}' already", name));
             }
             let lock = next.library.build(name, type_name, options)?;
             next.locks.insert(name.to_string(), Rc::new(lock));
@@ -208,19 +208,19 @@ impl LockBuilder {
         })
     }
 
-    /// `lock.attach(id, renderer[, options])`: a renderer, to draw values
+    /// `lock.attach(id, illustration[, options])`: an illustration, to draw values
     /// of the chain wired to its inputs with `connect`.
-    fn attach(&mut self, ctx: &rhai::NativeCallContext, id: &str, renderer: &str, options: Map) -> RhaiResult<Self> {
-        let loaded = self.renderer_library.load(ctx.engine(), renderer).map_err(|e| format!("attach: {}", e))?;
+    fn attach(&mut self, ctx: &rhai::NativeCallContext, id: &str, illustration: &str, options: Map) -> RhaiResult<Self> {
+        let loaded = self.illustration_library.load(ctx.engine(), illustration).map_err(|e| format!("attach: {}", e))?;
         let merged = loaded.options(&options).map_err(|e| format!("attach: {}", e))?;
         let types = loaded.inputs(ctx.engine(), &merged).map_err(|e| format!("attach: {}", e))?;
         if id.is_empty() || id.contains('.') {
-            return Err(format!("attach: renderer id '{}' must be non-empty and contain no '.'", id).into());
+            return Err(format!("attach: illustration id '{}' must be non-empty and contain no '.'", id).into());
         }
-        if self.locks.contains_key(id) || self.renderers.iter().any(|r| r.id == id) {
-            return Err(format!("attach: there's a lock or renderer named '{}' already", id).into());
+        if self.locks.contains_key(id) || self.illustrations.iter().any(|r| r.id == id) {
+            return Err(format!("attach: there's a lock or illustration named '{}' already", id).into());
         }
-        self.renderers.push(Attachment { id: id.to_string(), renderer: renderer.to_string(), options, wires: Vec::new(), types });
+        self.illustrations.push(Attachment { id: id.to_string(), illustration: illustration.to_string(), options, wires: Vec::new(), types });
         Ok(self.clone())
     }
 
@@ -231,34 +231,34 @@ impl LockBuilder {
         lock.outputs().get(name).cloned().or_else(|| lock.inputs().get(name).cloned())
     }
 
-    /// A wire from a port of the chain to a renderer's input: kept apart
+    /// A wire from a port of the chain to an illustration's input: kept apart
     /// from the chain, whose port stays as it was.
-    fn connect_renderer(&mut self, from: &str, id: &str, input: &str) -> RhaiResult<Self> {
+    fn connect_illustration(&mut self, from: &str, id: &str, input: &str) -> RhaiResult<Self> {
         let from_type = self.port_type(from).ok_or_else(|| format!("connect: '{}' isn't a port of the chain", from))?;
-        let attachment = self.renderers.iter_mut().find(|r| r.id == id).ok_or_else(|| format!("connect: no renderer '{}' is attached", id))?;
+        let attachment = self.illustrations.iter_mut().find(|r| r.id == id).ok_or_else(|| format!("connect: no illustration '{}' is attached", id))?;
         let types = &attachment.types;
         let (_, input_type) = types.iter().find(|(name, _)| name == input).ok_or_else(|| {
-            format!("connect: renderer '{}' ({}) has no input '{}'; inputs: {}", id, attachment.renderer, input, types.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", "))
+            format!("connect: illustration '{}' ({}) has no input '{}'; inputs: {}", id, attachment.illustration, input, types.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", "))
         })?;
         if !compatible(&from_type, &parse_type(input_type)) {
             return Err(format!("connect: can't connect {} ({}) to {}.{} ({})", from, from_type, id, input, input_type).into());
         }
         if attachment.wires.iter().any(|(name, _)| name == input) {
-            return Err(format!("connect: renderer input '{}.{}' is already connected", id, input).into());
+            return Err(format!("connect: illustration input '{}.{}' is already connected", id, input).into());
         }
         attachment.wires.push((input.to_string(), from.to_string()));
         Ok(self.clone())
     }
 
-    /// Every renderer attached: #{ ID: renderer type }.
-    fn renderers(&mut self) -> Map {
-        self.renderers.iter().map(|r| (r.id.as_str().into(), r.renderer.as_str().into())).collect()
+    /// Every illustration attached: #{ ID: illustration type }.
+    fn illustrations(&mut self) -> Map {
+        self.illustrations.iter().map(|r| (r.id.as_str().into(), r.illustration.as_str().into())).collect()
     }
 
     fn connect(&mut self, from: &str, to: &str) -> RhaiResult<Self> {
         if let Some((id, input)) = to.split_once('.') {
-            if self.renderers.iter().any(|r| r.id == id) {
-                return self.connect_renderer(from, id, input);
+            if self.illustrations.iter().any(|r| r.id == id) {
+                return self.connect_illustration(from, id, input);
             }
         }
         // CompositeLock::new checks the ports exist, their types match, the
@@ -316,15 +316,15 @@ impl LockBuilder {
     }
 
     fn result(&self, values: InfoVarSet, trace: InfoVarSet) -> LockResult {
-        LockResult { values, trace, renderers: Rc::new(self.renderers.clone()), renderer_library: self.renderer_library.clone() }
+        LockResult { values, trace, illustrations: Rc::new(self.illustrations.clone()), illustration_library: self.illustration_library.clone() }
     }
 }
 
-/// A renderer attached to a chain, and what's wired to it.
+/// An illustration attached to a chain, and what's wired to it.
 #[derive(Clone)]
 struct Attachment {
     id: String,
-    renderer: String,
+    illustration: String,
     /// Its options as given, over its defaults when it draws.
     options: Map,
     /// Its input -> the port of the chain wired to it.
@@ -340,9 +340,9 @@ impl CustomType for LockBuilder {
             .with_fn("add", Self::add)
             .with_fn("add", |lock: &mut Self, name: &str, type_name: &str| lock.add(name, type_name, Map::new()))
             .with_fn("connect", Self::connect)
-            .with_fn("attach", |ctx: rhai::NativeCallContext, lock: &mut Self, id: &str, renderer: &str| lock.attach(&ctx, id, renderer, Map::new()))
-            .with_fn("attach", |ctx: rhai::NativeCallContext, lock: &mut Self, id: &str, renderer: &str, options: Map| lock.attach(&ctx, id, renderer, options))
-            .with_fn("renderers", Self::renderers)
+            .with_fn("attach", |ctx: rhai::NativeCallContext, lock: &mut Self, id: &str, illustration: &str| lock.attach(&ctx, id, illustration, Map::new()))
+            .with_fn("attach", |ctx: rhai::NativeCallContext, lock: &mut Self, id: &str, illustration: &str, options: Map| lock.attach(&ctx, id, illustration, options))
+            .with_fn("illustrations", Self::illustrations)
             .with_fn("set_input", Self::set_input)
             .with_fn("inputs", Self::inputs)
             .with_fn("outputs", Self::outputs)
@@ -470,9 +470,9 @@ impl CustomType for LockValue {
 pub struct LockResult {
     values: InfoVarSet,
     trace: InfoVarSet,
-    /// The renderers attached to the chain, to draw its values.
-    renderers: Rc<Vec<Attachment>>,
-    renderer_library: Rc<RendererLibrary>,
+    /// The illustrations attached to the chain, to draw its values.
+    illustrations: Rc<Vec<Attachment>>,
+    illustration_library: Rc<IllustrationLibrary>,
 }
 
 impl LockResult {
@@ -496,22 +496,22 @@ impl LockResult {
         value_map(&self.trace)
     }
 
-    /// `result.canvases(id)`: what the renderer `id` draws of this result's
+    /// `result.canvases(id)`: what the illustration `id` draws of this result's
     /// values, an array of canvases.
     fn canvases(&mut self, ctx: &rhai::NativeCallContext, id: &str) -> RhaiResult<Array> {
-        let attachment = self.renderers.iter().find(|r| r.id == id).ok_or_else(|| {
-            let ids: Vec<&str> = self.renderers.iter().map(|r| r.id.as_str()).collect();
-            format!("canvases: no renderer '{}' is attached; renderers: {}", id, if ids.is_empty() { "none".to_string() } else { ids.join(", ") })
+        let attachment = self.illustrations.iter().find(|r| r.id == id).ok_or_else(|| {
+            let ids: Vec<&str> = self.illustrations.iter().map(|r| r.id.as_str()).collect();
+            format!("canvases: no illustration '{}' is attached; illustrations: {}", id, if ids.is_empty() { "none".to_string() } else { ids.join(", ") })
         })?;
         let fail = |e: String| -> Box<EvalAltResult> { format!("canvases: {}", e).into() };
-        let loaded = self.renderer_library.load(ctx.engine(), &attachment.renderer).map_err(fail)?;
+        let loaded = self.illustration_library.load(ctx.engine(), &attachment.illustration).map_err(fail)?;
         let options = loaded.options(&attachment.options).map_err(fail)?;
         let mut inputs = Map::new();
         for (input, _) in loaded.inputs(ctx.engine(), &options).map_err(fail)? {
             let port = attachment.wires.iter().find(|(name, _)| *name == input).map(|(_, port)| port)
-                .ok_or_else(|| fail(format!("renderer '{}' has nothing connected to its input '{}'", id, input)))?;
+                .ok_or_else(|| fail(format!("illustration '{}' has nothing connected to its input '{}'", id, input)))?;
             let value = self.trace.get(port).or_else(|| self.values.get(port))
-                .ok_or_else(|| fail(format!("renderer '{}' draws '{}', which this result has no value for", id, port)))?;
+                .ok_or_else(|| fail(format!("illustration '{}' draws '{}', which this result has no value for", id, port)))?;
             inputs.insert(input.into(), value.data.clone());
         }
         let canvases = loaded.render(ctx.engine(), &options, inputs).map_err(fail)?;
@@ -540,6 +540,19 @@ fn symbols(base: i64, text: &str, options: &Map) -> RhaiResult<LockValue> {
     let text = if lenient("symbols", options)? { lenient_text(base, text) } else { text.to_string() };
     let data: Array = base_n_symbols(base, &text).map_err(|e| format!("symbols: {}", e))?
         .into_iter().map(|s| Dynamic::from_int(s as i64)).collect();
+    Ok(LockValue { var: InfoVar::new(InfoVarType::BaseNSymbol(base), data.into()) })
+}
+
+/// `symbols` in `base` as a value of symbols, as `symbols(base, text)`
+/// makes: for symbols read from a content file.
+pub(super) fn symbols_value(base: u32, symbols: &[u32]) -> Result<LockValue, String> {
+    if !(2..=27).contains(&base) {
+        return Err(format!("symbols: base must be between 2 and 27, got {}", base));
+    }
+    if let Some((i, symbol)) = symbols.iter().enumerate().find(|(_, s)| **s >= base) {
+        return Err(format!("symbols: symbol {} (item {}) is outside Base{}'s 0-{}", symbol, i, base, base - 1));
+    }
+    let data: Array = symbols.iter().map(|s| Dynamic::from_int(*s as i64)).collect();
     Ok(LockValue { var: InfoVar::new(InfoVarType::BaseNSymbol(base), data.into()) })
 }
 
@@ -632,8 +645,8 @@ mod tests {
 
     fn engine() -> Engine {
         let mut engine = crate::journal::rhaientries::rhai_engine();
-        let renderers = super::super::sources::Sources::dir(super::super::renderers::DEFAULT_RENDERERS_DIR);
-        register(&mut engine, Rc::new(LockLibrary::new(DEFAULT_LOCKS_DIR)), Rc::new(RendererLibrary::new(renderers)));
+        let library = super::super::Resources::library();
+        register(&mut engine, Rc::new(LockLibrary::new(&library)), Rc::new(IllustrationLibrary::new(library.illustrations)));
         engine
     }
 

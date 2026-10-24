@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "title": "API Reference",
+  "description": "Every function journal scripts can call, with its arguments, options and what it gives back, typeset as a book.",
+  "entries": [
+    "api_reference"
+  ]
+}

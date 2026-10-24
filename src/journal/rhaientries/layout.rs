@@ -4,11 +4,14 @@
 //! until the text runs out.
 //!
 //! A layout is a rhai function from a page number to that page's tree,
-//! usually in a layout file, `webapp/layouts/<name>.rhai`, which defines
-//! `page(n, info)` and, optionally, `page_size()`:
+//! usually in a layout file, `layouts/<name>.rhai` (a journal's or the
+//! library's), which defines `page(n, info)` and, optionally, `options()`
+//! (`#{ NAME: default }`, which `layout(name, options)` sets and pages see
+//! as `info.options`), `page_size(o)` and `example()` (content to preview
+//! it with):
 //!
 //! ```rhai
-//! // webapp/layouts/two_columns.rhai
+//! // layouts/two_columns.rhai
 //! fn page_size() { #{ width: 1400, height: 1000 } }
 //! fn page(n, info) {
 //!     row([
@@ -128,9 +131,6 @@ use crate::journal::fonts::FontBook;
 use crate::journal::typeset::{fitting_size, set_text, TextStyle};
 
 use super::RhaiResult;
-
-/// The repository's layout files.
-pub const DEFAULT_LAYOUTS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/webapp/layouts");
 
 #[derive(Clone, Debug, PartialEq)]
 enum Kind {
@@ -487,11 +487,13 @@ impl Node {
     }
 }
 
-/// A layout: where its pages come from.
+/// A layout: where its pages come from, and the options its file's pages
+/// get.
 #[derive(Clone)]
 pub struct Layout {
     name: String,
     source: Source,
+    options: Map,
 }
 
 #[derive(Clone)]
@@ -512,21 +514,25 @@ impl Layout {
         let type_name = tree.type_name();
         tree.try_cast::<Node>().ok_or_else(|| format!("layout '{}' page {}: {} returned a {}, not a layout box", self.name, n, from, type_name).into())
     }
-    /// The page size its file gives, if it does.
+    /// The page size its file gives, if it does: `page_size(o)`, or
+    /// `page_size()`.
     fn page_size(&self, ctx: &NativeCallContext) -> RhaiResult<Option<Map>> {
         let Source::File { ast, .. } = &self.source else { return Ok(None) };
-        if !ast.iter_functions().any(|f| f.name == "page_size" && f.params.is_empty()) {
+        let size = if ast.iter_functions().any(|f| f.name == "page_size" && f.params.len() == 1) {
+            ctx.engine().call_fn::<Dynamic>(&mut Scope::new(), ast, "page_size", (Dynamic::from_map(self.options.clone()),))
+        } else if ast.iter_functions().any(|f| f.name == "page_size" && f.params.is_empty()) {
+            ctx.engine().call_fn::<Dynamic>(&mut Scope::new(), ast, "page_size", ())
+        } else {
             return Ok(None);
-        }
-        let size = ctx.engine().call_fn::<Dynamic>(&mut Scope::new(), ast, "page_size", ())
-            .map_err(|e| format!("layout '{}' page_size(): {}", self.name, e))?;
+        };
+        let size = size.map_err(|e| format!("layout '{}' page_size(): {}", self.name, e))?;
         let type_name = size.type_name();
         size.try_cast::<Map>().map(Some)
             .ok_or_else(|| format!("layout '{}': page_size() should return #{{ width, height }}, got {}", self.name, type_name).into())
     }
 }
 
-fn load_layout(ctx: &NativeCallContext, layouts: &Sources, name: &str) -> RhaiResult<Layout> {
+fn load_layout(ctx: &NativeCallContext, layouts: &Sources, name: &str, options: &Map) -> RhaiResult<Layout> {
     if name.is_empty() || name.contains(['/', '\\']) || name.starts_with('.') {
         return Err(format!("layout: '{}' isn't a layout name; layouts are files in {}", name, layouts.root().display()).into());
     }
@@ -540,7 +546,24 @@ fn load_layout(ctx: &NativeCallContext, layouts: &Sources, name: &str) -> RhaiRe
     if !ast.iter_functions().any(|f| f.name == "page" && f.params.len() == 2) {
         return Err(format!("layout '{}': {} doesn't define page(n, info)", name, file).into());
     }
-    Ok(Layout { name: name.to_string(), source: Source::File { ast: Rc::new(ast), file } })
+    let what = format!("layout '{}'", name);
+    let defaults = super::options::declared_defaults(ctx.engine(), &ast, &what)?;
+    let options = super::options::over_defaults(&format!("layout: {}", what), &defaults, options)?;
+    Ok(Layout { name: name.to_string(), source: Source::File { ast: Rc::new(ast), file }, options })
+}
+
+/// What a layout file gives to preview it with: its `example()`, the
+/// content to typeset (`#{ flows, roles, art, ... }`), if it has one.
+pub fn layout_example(engine: &Engine, layouts: &Sources, name: &str) -> Result<Option<Map>, String> {
+    let ast = layouts.compile(engine, name).map_err(|e| format!("layout '{}': {}", name, e))?;
+    if !ast.iter_functions().any(|f| f.name == "example" && f.params.is_empty()) {
+        return Ok(None);
+    }
+    let value = engine.call_fn::<Dynamic>(&mut Scope::new(), &ast, "example", ())
+        .map_err(|e| format!("layout '{}' example(): {}", name, e))?;
+    let type_name = value.type_name();
+    value.try_cast::<Map>().map(Some)
+        .ok_or_else(|| format!("layout '{}': example() should return what to typeset, #{{ flows, roles, art }}, got {}", name, type_name))
 }
 
 /// How a slot's text and strokes look: its role's settings with its own
@@ -1097,6 +1120,7 @@ fn typeset(ctx: NativeCallContext, layout: &mut Layout, content: Map, symdict: &
         info.insert("height".into(), Dynamic::from(content.height as f64));
         info.insert("flows".into(), Dynamic::from_map(content.flows.iter().map(|(name, f)| (name.into(), Dynamic::from(f.remaining() as i64))).collect()));
         info.insert("art".into(), Dynamic::from_array(content.art.keys().map(|k| Dynamic::from(k.to_string())).collect()));
+        info.insert("options".into(), Dynamic::from_map(layout.options.clone()));
         let root = layout.page(&ctx, n, info)?;
         let (mut canvas, moved) = typeset_page(&ctx, &root, n, &mut content, symdict, rng)?;
         let left: Vec<String> = content.flows.iter().filter(|(_, f)| f.remaining() > 0).map(|(name, _)| format!("'{}'", name)).collect();
@@ -1135,9 +1159,11 @@ pub fn register(engine: &mut Engine, symdict: Rc<FontBook>, rng: SharedRng, layo
         engine.register_fn(name, move || Node::new(name, k.clone(), Map::new(), Array::new()));
         engine.register_fn(name, move |options: Map| Node::new(name, kind.clone(), options, Array::new()));
     }
-    engine.register_fn("layout", move |ctx: NativeCallContext, name: &str| load_layout(&ctx, &layouts, name));
+    let given_options = layouts.clone();
+    engine.register_fn("layout", move |ctx: NativeCallContext, name: &str| load_layout(&ctx, &layouts, name, &Map::new()));
+    engine.register_fn("layout", move |ctx: NativeCallContext, name: &str, options: Map| load_layout(&ctx, &given_options, name, &options));
     engine.register_fn("new_layout", |name: &str, page: FnPtr| -> RhaiResult<Layout> {
-        Ok(Layout { name: super::check_name("new_layout", Dynamic::from(name.to_string()))?, source: Source::Function(page) })
+        Ok(Layout { name: super::check_name("new_layout", Dynamic::from(name.to_string()))?, source: Source::Function(page), options: Map::new() })
     });
     engine.register_get("name", |l: &mut Layout| l.name.clone());
     engine.register_fn("typeset", move |ctx: NativeCallContext, layout: &mut Layout, content: Map| typeset(ctx, layout, content, &symdict, &rng));
@@ -1151,7 +1177,7 @@ mod tests {
     use std::rc::Rc;
 
     fn engine() -> JournalEngine {
-        let symd = FontBook::from_file(crate::journal::fonts::DEFAULT_FONTS).expect("Failed to load fonts.json");
+        let symd = FontBook::from_file(crate::journal::fonts::DEFAULT_GLYPHSETS).expect("Failed to load fonts.json");
         JournalEngine::new(Rc::new(symd))
     }
 
@@ -1306,13 +1332,56 @@ mod tests {
     }
 
     #[test]
+    fn every_layout_file_previews_its_example() {
+        let mut engine = engine();
+        let names = engine.layout_names();
+        assert!(names.len() >= 3, "{:?}", names);
+        for name in names {
+            let entry = engine.preview_layout(&name, &serde_json::json!({})).unwrap_or_else(|e| panic!("{}: {}", name, e));
+            assert!(entry.page_count() > 0 && entry.empty_canvases().is_empty(), "{} should typeset its example", name);
+        }
+    }
+
+    #[test]
+    fn layout_files_take_options() {
+        let mut engine = engine();
+        let strokes = |entry: &Entry| entry.pages.iter().flat_map(|page| &page.canvases).map(|canvas| canvas.strokes.len()).sum::<usize>();
+        let titled = engine.preview_layout("bordered_title", &serde_json::json!({})).unwrap();
+        let bare = engine.preview_layout("bordered_title", &serde_json::json!({ "border": 30 })).unwrap();
+        assert!(strokes(&bare) != strokes(&titled), "a narrower border has fewer leaves");
+        for (script, want) in [
+            (r#"layout("captioned_figure", #{ size: 3 })"#, "layout: layout 'captioned_figure' has no option 'size'; its options: height, width"),
+            (r#"layout("captioned_figure", #{ width: "wide" })"#, "layout: layout 'captioned_figure': option 'width' should be like its default, 1400.0, got wide"),
+        ] {
+            let err = engine.build_entry_str(script).expect_err(script);
+            assert!(err.contains(want), "{}\n  wanted: {}\n  got: {}", script, want, err);
+        }
+        // A layout's pages and page size see its options.
+        let mut resources = crate::journal::rhaientries::Resources::library();
+        resources.layouts = resources.layouts.with_overlay([("marks".to_string(), r#"
+            fn options() { #{ marks: "I", width: 300.0 } }
+            fn page_size(o) { #{ width: o.width, height: 200 } }
+            fn page(n, info) { label(info.options.marks, #{ role: "body", flex: #{ grow: 1 } }) }
+        "#.to_string())]);
+        let mut engine = JournalEngine::with_resources(Rc::new(FontBook::from_file(crate::journal::fonts::DEFAULT_GLYPHSETS).unwrap()), resources);
+        let marks = |engine: &mut JournalEngine, options: &str| engine.build_entry_str(&format!("{}\njournal_entry.add(layout(\"marks\", {}).typeset(#{{ roles: roles }}));", SETUP, options)).unwrap();
+        let one = marks(&mut engine, "#{}");
+        let three = marks(&mut engine, "#{ marks: \"III\", width: 500 }");
+        assert_eq!(strokes(&three), 3 * strokes(&one));
+        let width = |entry: &Entry| entry.pages[0].canvases[0].frame.as_ref().map(|frame| frame.page.maxs.x);
+        assert_eq!((width(&one), width(&three)), (Some(300.0), Some(500.0)));
+    }
+
+    #[test]
     fn layout_file_mistakes_name_the_file_and_line() {
         let dir = std::env::temp_dir().join(format!("journal_layouts_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("bad.rhai"), "fn page(n, info) {\n\trow([], #{ colour: 1 })\n}\n").unwrap();
         std::fs::write(dir.join("pageless.rhai"), "fn other() {}\n").unwrap();
-        let symd = FontBook::from_file(crate::journal::fonts::DEFAULT_FONTS).unwrap();
-        let mut engine = JournalEngine::with_dirs(Rc::new(symd), crate::journal::rhaientries::DEFAULT_LOCKS_DIR, &dir, crate::journal::rhaientries::DEFAULT_RENDERERS_DIR, crate::journal::rhaientries::DEFAULT_CHAINS_DIR);
+        let symd = FontBook::from_file(crate::journal::fonts::DEFAULT_GLYPHSETS).unwrap();
+        let mut resources = crate::journal::rhaientries::Resources::library();
+        resources.layouts = crate::journal::rhaientries::Sources::dir(&dir);
+        let mut engine = JournalEngine::with_resources(Rc::new(symd), resources);
         let err = engine.build_entry_str("layout(\"bad\").typeset(#{ width: 10, height: 10 });").expect_err("bad layout");
         assert!(err.contains("layout 'bad' page 0") && err.contains("unknown option 'colour'") && err.contains("line 2"), "{}", err);
         let err = engine.build_entry_str("layout(\"pageless\");").expect_err("no page()");

@@ -85,7 +85,7 @@ export interface ChainType {
   description?: string;
   /** Whether it's one of the workspace's chain files. */
   workspace: boolean;
-  /** Whether it's compiled in, from webapp/chains/ (a workspace copy stands in for it). */
+  /** Whether it's compiled in, from webapp/library/chains/ (a workspace copy stands in for it). */
   builtin?: boolean;
   /** Why it doesn't load, if it doesn't. */
   error?: string;
@@ -200,8 +200,8 @@ export interface ChainFile {
     locks: Record<string, { type: string; options?: Record<string, unknown> }>;
     connect?: [string, string][];
     fixed?: Record<string, unknown>;
-    /** Renderers attached, each input drawing a port, "lock.port". */
-    renderers?: Record<string, { type: string; options?: Record<string, unknown>; inputs?: Record<string, string> }>;
+    /** Illustrations attached, each input drawing a port, "lock.port". */
+    illustrations?: Record<string, { type: string; options?: Record<string, unknown>; inputs?: Record<string, string> }>;
   };
   layout: Record<string, [number, number]> | null;
   /** What its example() returns, if it has one: a value for each open input, by port. */

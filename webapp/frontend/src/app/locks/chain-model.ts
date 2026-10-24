@@ -1,7 +1,7 @@
 // A lock chain as the lock editor holds it: lock types placed as nodes,
 // wires from outputs to inputs, values fixed, options of its own and a test
 // case; and renderers attached to it, which draw its values. It's a chain
-// file (see chain-source.ts and webapp/chains/README.md), which journals use
+// file (see chain-source.ts and webapp/library/chains/README.md), which journals use
 // with chain(name); its values are its locks' own ports, "lock.port".
 
 import type { LockOption, LockPorts } from '../scribe';

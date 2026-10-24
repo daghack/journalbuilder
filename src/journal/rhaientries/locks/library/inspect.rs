@@ -178,7 +178,7 @@ impl LockLibrary {
     }
 
     /// Chain file `name`, as the editor draws it: its description, options,
-    /// locks, connections, fixed values, renderers, layout and example.
+    /// locks, connections, fixed values, illustrations, layout and example.
     /// Options used directly come back as `{"$option": name}`; if `chain(o)`
     /// computes with them, it's read with the defaults instead and
     /// `promotionsLost` is set.
@@ -387,12 +387,12 @@ fn map_from_json(value: &Value) -> Result<Map, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::DEFAULT_LOCKS_DIR;
-    use crate::journal::rhaientries::Sources;
+    use crate::journal::rhaientries::{Resources, Sources};
 
     fn library(extra: &[(&str, &str)]) -> Rc<LockLibrary> {
         let overlay = extra.iter().map(|(name, source)| (name.to_string(), source.to_string()));
-        Rc::new(LockLibrary::with_sources(Sources::dir(DEFAULT_LOCKS_DIR).with_overlay(overlay)))
+        let library = Resources::library();
+        Rc::new(LockLibrary::with_sources(library.locks.with_overlay(overlay), library.lib))
     }
 
     fn view<'a>(values: &'a [(String, ValueView)], name: &str) -> &'a ValueView {
@@ -475,7 +475,8 @@ mod tests {
 
     fn with_chains(chains: &[(&str, &str)]) -> Rc<LockLibrary> {
         let chains = chains.iter().map(|(name, source)| (name.to_string(), source.to_string()));
-        Rc::new(LockLibrary::with_sources(Sources::dir(DEFAULT_LOCKS_DIR)).with_chains(Sources::embedded("chains", &[]).with_overlay(chains)))
+        let library = Resources::library();
+        Rc::new(LockLibrary::with_sources(library.locks, library.lib).with_chains(Sources::none("chains").with_overlay(chains)))
     }
 
     const SHIFTED: &str = r#"// shifted: a shift cipher's key into a Vigenere cipher.
@@ -488,7 +489,7 @@ mod tests {
                 },
                 connect: [["shift.cipher_text", "vig.key"]],
                 fixed: #{},
-                renderers: #{ msg: #{ type: "trit_message", options: #{ base: 27 }, inputs: #{ message: "vig.cipher_text" } } },
+                illustrations: #{ msg: #{ type: "trit_message", options: #{ base: 27 }, inputs: #{ message: "vig.cipher_text" } } },
             }
         }
         fn layout() { #{ shift: [120, 60], vig: [480, 60], msg: [480, 260] } }
@@ -503,7 +504,7 @@ mod tests {
         assert_eq!(chain["promotionsLost"], json!(false));
         assert_eq!(chain["chain"]["locks"]["shift"]["options"], json!({ "base": 27, "shift": { "$option": "shift" } }));
         assert_eq!(chain["chain"]["connect"], json!([["shift.cipher_text", "vig.key"]]));
-        assert_eq!(chain["chain"]["renderers"]["msg"]["inputs"], json!({ "message": "vig.cipher_text" }));
+        assert_eq!(chain["chain"]["illustrations"]["msg"]["inputs"], json!({ "message": "vig.cipher_text" }));
         assert_eq!(chain["layout"]["msg"], json!([480, 260]));
         assert_eq!(chain["example"]["shift.plain_text"], json!([11, 5, 25]));
         assert_eq!(library.check_chain("shifted").unwrap(), 1);
@@ -524,9 +525,9 @@ mod tests {
     #[test]
     fn chain_files_name_their_mistakes() {
         let cases = [
-            ("unknown_key", SHIFTED.replace("fixed: #{},", "fixed: #{}, inputs: #{},"), "chains/unknown_key.rhai: chain(o): returned 'inputs'; it returns locks, connect, fixed, renderers"),
+            ("unknown_key", SHIFTED.replace("fixed: #{},", "fixed: #{}, inputs: #{},"), "chains/unknown_key.rhai: chain(o): returned 'inputs'; it returns locks, connect, fixed, illustrations"),
             ("lock_fns", format!("{}\nfn lock(o, i) {{ i }}", SHIFTED), "chains/lock_fns.rhai is a chain file, so it can't define lock: lock types go in locks/"),
-            ("bad_port", SHIFTED.replace("message: \"vig.cipher_text\"", "message: \"vig.nope\""), "chains/bad_port.rhai: renderers: 'msg' draws 'vig.nope' at its input 'message', which isn't a port of the chain's locks"),
+            ("bad_port", SHIFTED.replace("message: \"vig.cipher_text\"", "message: \"vig.nope\""), "chains/bad_port.rhai: illustrations: 'msg' draws 'vig.nope' at its input 'message', which isn't a port of the chain's locks"),
             ("bad_example", SHIFTED.replace("\"vig.plain_text\": symbols(27, \"ATTACK AT DAWN\")", "\"vig.nope\": 1"), "chains/bad_example.rhai: example(): 'vig.nope' isn't an open input of the chain; open: shift.plain_text, vig.plain_text"),
         ];
         for (name, source, expected) in &cases {

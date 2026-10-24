@@ -55,7 +55,7 @@ type Drag =
           <div class="node" [class.picked]="editor.selected() === node.id" [class.broken]="node.error" [class.renderer]="node.renderer"
                [style.left.px]="node.x" [style.top.px]="node.y" [style.width.px]="width">
             <div class="head" (pointerdown)="downNode($event, node.id)">
-              @if (node.renderer) { <span class="kind" title="A renderer: it draws the values wired to it as canvases">▣</span> }
+              @if (node.renderer) { <span class="kind" title="An illustration: it draws the values wired to it as canvases">▣</span> }
               <span class="id">{{ node.id }}</span>
               <span class="type">{{ node.type }}</span>
               @if (node.canvases !== null) { <span class="canvases" [title]="node.canvases + ' canvases drawn from the last run'">{{ node.canvases }}</span> }

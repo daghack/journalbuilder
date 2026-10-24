@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "title": "Journal Entries",
+  "description": "Entry 17, a confession enciphered and written into a maze; entry 18, two texts in boxes along a walk through a maze.",
+  "entries": [
+    "entry_17",
+    "entry_18"
+  ]
+}

@@ -511,11 +511,11 @@ pub fn register(engine: &mut Engine, rng: SharedRng) {
 #[cfg(test)]
 mod tests {
     use super::super::JournalEngine;
-    use crate::journal::fonts::{FontBook, DEFAULT_FONTS};
+    use crate::journal::fonts::{FontBook, DEFAULT_GLYPHSETS};
     use std::rc::Rc;
 
     fn engine() -> JournalEngine {
-        JournalEngine::new(Rc::new(FontBook::from_file(DEFAULT_FONTS).expect("Failed to load fonts.json")))
+        JournalEngine::new(Rc::new(FontBook::from_file(DEFAULT_GLYPHSETS).expect("Failed to load fonts.json")))
     }
 
     #[test]

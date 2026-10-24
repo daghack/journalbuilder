@@ -2,29 +2,35 @@ mod art;
 mod avoid;
 mod book;
 mod canvas;
+mod content;
 mod entry;
 mod generate;
 mod glyphs;
 mod gradient;
 mod layout;
 mod locks;
-mod renderers;
+mod illustrations;
+mod manifest;
 mod markdown;
 mod options;
 mod path;
 mod random;
+mod resources;
 mod sources;
 mod style;
 mod text;
 mod text_settings;
+mod text_styles;
 mod vec;
 
-pub use layout::DEFAULT_LAYOUTS_DIR;
 pub use sources::Sources;
+pub use resources::{Resources, DEFAULT_JOURNALS_DIR, DEFAULT_LIBRARY_DIR, KINDS};
 #[cfg(feature = "embedded-assets")]
-pub use sources::embedded;
-pub use locks::{LockLibrary, DEFAULT_CHAINS_DIR, DEFAULT_LOCKS_DIR};
-pub use renderers::{RendererLibrary, DEFAULT_RENDERERS_DIR};
+pub use resources::embedded;
+pub use locks::LockLibrary;
+pub use manifest::{valid_name, Journal, Manifest, MANIFEST, MANIFEST_VERSION};
+pub use illustrations::IllustrationLibrary;
+use text_styles::TextStyleLibrary;
 /// What the web editor's lock editor asks of lock types.
 pub mod lock_inspection {
     pub use super::locks::{from_json, to_json, value_from_test, value_view, OptionInfo, Ports, RunResult, TypeInfo, ValueView};
@@ -146,7 +152,10 @@ pub fn rhai_engine() -> Engine {
 pub struct JournalEngine {
     engine: Engine,
     warnings: Rc<RefCell<Vec<String>>>,
-    renderers: Rc<RendererLibrary>,
+    symdict: Rc<FontBook>,
+    resources: Resources,
+    illustrations: Rc<IllustrationLibrary>,
+    text_styles: Rc<TextStyleLibrary>,
 }
 
 /// A JSON object (or null) as a rhai map.
@@ -158,10 +167,10 @@ fn json_map(value: &serde_json::Value, what: &str) -> Result<rhai::Map, String> 
     }
 }
 
-/// A renderer type, as the lock editor's palette lists it: what it is, its
+/// An illustration type, as the lock editor's palette lists it: what it is, its
 /// options' defaults, and its inputs with those options.
 #[derive(serde::Serialize)]
-pub struct RendererInfo {
+pub struct IllustrationInfo {
     pub name: String,
     pub file: String,
     pub description: String,
@@ -170,32 +179,37 @@ pub struct RendererInfo {
     pub example: bool,
 }
 
+/// A text style, as the editor lists it: its options' defaults, and the
+/// text it previews with, if its file gives one.
+#[derive(serde::Serialize)]
+pub struct TextStyleInfo {
+    pub name: String,
+    pub options: serde_json::Value,
+    pub example: Option<String>,
+}
+
+/// What a text style without an `example()` previews with.
+const PREVIEW_TEXT: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.";
+
 impl JournalEngine {
-    /// An engine with the repository's lock types (DEFAULT_LOCKS_DIR).
+    /// An engine with the built-in library's resources (`webapp/library/`).
     pub fn new(symdict: Rc<FontBook>) -> Self {
-        Self::with_locks_dir(symdict, DEFAULT_LOCKS_DIR)
+        Self::with_resources(symdict, Resources::library())
     }
-    /// An engine whose lock types are the lock files in `locks_dir`.
-    pub fn with_locks_dir(symdict: Rc<FontBook>, locks_dir: impl Into<std::path::PathBuf>) -> Self {
-        Self::with_dirs(symdict, locks_dir, DEFAULT_LAYOUTS_DIR, DEFAULT_RENDERERS_DIR, DEFAULT_CHAINS_DIR)
-    }
-    /// An engine with the lock files in `locks_dir`, the layout files in
-    /// `layouts_dir`, the renderer files in `renderers_dir` and the chain
-    /// files in `chains_dir`.
-    pub fn with_dirs(symdict: Rc<FontBook>, locks_dir: impl Into<std::path::PathBuf>, layouts_dir: impl Into<std::path::PathBuf>, renderers_dir: impl Into<std::path::PathBuf>, chains_dir: impl Into<std::path::PathBuf>) -> Self {
-        Self::with_sources(symdict, Sources::dir(locks_dir), Sources::dir(layouts_dir), Sources::dir(renderers_dir), Sources::dir(chains_dir))
-    }
-    /// An engine with the repository's lock, layout, renderer and chain
-    /// files compiled in, for builds with no files to read.
+    /// An engine with the built-in library compiled in, for builds with no
+    /// files to read.
     #[cfg(feature = "embedded-assets")]
     pub fn embedded(symdict: Rc<FontBook>) -> Self {
-        Self::with_sources(symdict, embedded::locks(), embedded::layouts(), embedded::renderers(), embedded::chains())
+        Self::with_resources(symdict, Resources::embedded())
     }
-    /// An engine with the lock files in `locks`, the layout files in
-    /// `layouts`, the renderer files in `renderers` and the chain files in
-    /// `chains`.
-    pub fn with_sources(symdict: Rc<FontBook>, locks: Sources, layouts: Sources, renderers: Sources, chains: Sources) -> Self {
+    /// An engine with `resources`: its lock, layout, illustration, chain
+    /// and style files, the helpers they and entries import from `lib/`,
+    /// and its content. The glyphsets are `symdict`'s
+    /// (`resources.glyphset_book()`).
+    pub fn with_resources(symdict: Rc<FontBook>, resources: Resources) -> Self {
         let mut engine = rhai_engine();
+        // Entries, layouts, illustrations and styles `import "lib/name"`.
+        engine.set_module_resolver(resources.lib.module_resolver());
         let rng = random::register(&mut engine);
         let text: TextSource = (symdict.clone(), rng.clone());
 
@@ -246,21 +260,36 @@ impl JournalEngine {
 
         art::register(&mut engine, rng.clone());
         avoid::register(&mut engine);
-        layout::register(&mut engine, symdict.clone(), rng.clone(), layouts);
+        layout::register(&mut engine, symdict.clone(), rng.clone(), resources.layouts.clone());
         markdown::register(&mut engine);
         text_settings::register(&mut engine);
         glyphs::register(&mut engine, symdict.clone(), rng.clone());
         gradient::register(&mut engine);
         generate::register(&mut engine, rng.clone());
         text::register(&mut engine, symdict.clone(), rng.clone());
-        let renderers = Rc::new(RendererLibrary::new(renderers));
-        locks::register(&mut engine, Rc::new(LockLibrary::with_sources(locks).with_chains(chains)), renderers.clone());
+        let illustrations = Rc::new(IllustrationLibrary::new(resources.illustrations.clone()));
+        locks::register(&mut engine, Rc::new(LockLibrary::new(&resources)), illustrations.clone());
+        let text_styles = Rc::new(TextStyleLibrary::new(resources.styles.clone()));
+        text_styles::register(&mut engine, text_styles.clone());
+        content::register(&mut engine, resources.clone());
 
         JournalEngine {
             engine,
             warnings,
-            renderers,
+            symdict,
+            resources,
+            illustrations,
+            text_styles,
         }
+    }
+    /// The resources scripts use.
+    pub fn resources(&self) -> &Resources {
+        &self.resources
+    }
+    /// The glyphsets scripts use, which note the characters they had no
+    /// glyph for.
+    pub fn glyphsets(&self) -> &Rc<FontBook> {
+        &self.symdict
     }
     /// The name of every function scripts can call that this crate
     /// registers (not rhai's standard library), with `module::` for those
@@ -290,46 +319,100 @@ impl JournalEngine {
         scope.get_value("journal_entry")
             .ok_or_else(|| ScriptError { message: "the script replaced journal_entry with something that isn't an entry".to_string(), line: None, column: None })
     }
-    /// The renderer types' names.
-    pub fn renderer_names(&self) -> Vec<String> {
-        self.renderers.names()
+    /// The illustration types' names.
+    pub fn illustration_names(&self) -> Vec<String> {
+        self.illustrations.names()
     }
-    /// What renderer `name` is and takes.
-    pub fn describe_renderer(&self, name: &str) -> Result<RendererInfo, String> {
-        let renderer = self.renderers.load(&self.engine, name)?;
-        Ok(RendererInfo {
-            name: renderer.name.clone(),
-            file: renderer.file.clone(),
-            description: renderer.description.clone(),
-            options: locks::to_json(&Dynamic::from_map(renderer.defaults.clone())),
-            inputs: renderer.inputs(&self.engine, &renderer.defaults)?,
-            example: renderer.example(&self.engine)?.is_some(),
+    /// What illustration `name` is and takes.
+    pub fn describe_illustration(&self, name: &str) -> Result<IllustrationInfo, String> {
+        let illustration = self.illustrations.load(&self.engine, name)?;
+        Ok(IllustrationInfo {
+            name: illustration.name.clone(),
+            file: illustration.file.clone(),
+            description: illustration.description.clone(),
+            options: locks::to_json(&Dynamic::from_map(illustration.defaults.clone())),
+            inputs: illustration.inputs(&self.engine, &illustration.defaults)?,
+            example: illustration.example(&self.engine)?.is_some(),
         })
     }
-    /// Renderer `name`'s inputs with `options` (a JSON object) over its
+    /// Illustration `name`'s inputs with `options` (a JSON object) over its
     /// defaults.
-    pub fn renderer_inputs(&self, name: &str, options: &serde_json::Value) -> Result<Vec<(String, String)>, String> {
-        let renderer = self.renderers.load(&self.engine, name)?;
-        renderer.inputs(&self.engine, &renderer.options(&json_map(options, "options")?)?)
+    pub fn illustration_inputs(&self, name: &str, options: &serde_json::Value) -> Result<Vec<(String, String)>, String> {
+        let illustration = self.illustrations.load(&self.engine, name)?;
+        illustration.inputs(&self.engine, &illustration.options(&json_map(options, "options")?)?)
     }
-    /// What renderer `name` draws, `options` (a JSON object) over its
+    /// What illustration `name` draws, `options` (a JSON object) over its
     /// defaults, of `inputs` (JSON, name -> value as lock files see it), or
     /// of its own `example()` if `None`: an entry with a page for each
     /// canvas.
     pub fn render(&self, name: &str, options: &serde_json::Value, inputs: Option<&serde_json::Value>) -> Result<Entry, String> {
-        let renderer = self.renderers.load(&self.engine, name)?;
-        let options = renderer.options(&json_map(options, "options")?)?;
+        let illustration = self.illustrations.load(&self.engine, name)?;
+        let options = illustration.options(&json_map(options, "options")?)?;
         let inputs = match inputs {
             Some(inputs) => json_map(inputs, "inputs")?,
-            None => renderer.example(&self.engine)?.ok_or_else(|| format!("renderer '{}' has no example() to draw", name))?,
+            None => illustration.example(&self.engine)?.ok_or_else(|| format!("illustration '{}' has no example() to draw", name))?,
         };
         let mut entry = Entry::default();
-        for canvas in renderer.render(&self.engine, &options, inputs)? {
+        for canvas in illustration.render(&self.engine, &options, inputs)? {
             let mut page = Page::default();
             page.add_canvas(canvas).map_err(|e| e.to_string())?;
             entry.add_page(page).map_err(|e| e.to_string())?;
         }
         Ok(entry)
+    }
+    /// The text styles' names.
+    pub fn text_style_names(&self) -> Vec<String> {
+        self.text_styles.names()
+    }
+    /// What text style `name` takes, and the text it previews with.
+    pub fn describe_text_style(&self, name: &str) -> Result<TextStyleInfo, String> {
+        let file = self.text_styles.load(&self.engine, name)?;
+        Ok(TextStyleInfo {
+            name: name.to_string(),
+            options: locks::to_json(&Dynamic::from_map(file.defaults.clone())),
+            example: file.example(&self.engine)?,
+        })
+    }
+    /// Text style `name` with `options` (a JSON object) over its defaults,
+    /// writing its `example()` text (or else a line of lorem ipsum) in a
+    /// block `width` wide: a page.
+    pub fn preview_text_style(&mut self, name: &str, options: &serde_json::Value, width: f64) -> Result<Entry, String> {
+        let text = self.describe_text_style(name)?.example.unwrap_or_else(|| PREVIEW_TEXT.to_string());
+        let mut scope = Scope::new();
+        scope.push("journal_entry", Entry::default());
+        scope.push_constant("NAME", name.to_string());
+        scope.push_constant("OPTIONS", json_map(options, "options")?);
+        scope.push_constant("TEXT", text);
+        scope.push_constant("WIDTH", width);
+        self.run_preview(scope, r#"
+            let style = text_style(NAME, OPTIONS);
+            let size = style.type.glyph_scale ?? 30.0;
+            let c = new_canvas();
+            c.add(write_block(TEXT, vec2(size, size * 2), WIDTH - size * 2, style).canvas);
+            let p = new_page();
+            p.add(c);
+            journal_entry.add(p);
+        "#)
+    }
+    /// The layouts' names.
+    pub fn layout_names(&self) -> Vec<String> {
+        self.resources.layouts.names().unwrap_or_default()
+    }
+    /// Layout `name` with `options` (a JSON object) over its defaults,
+    /// typesetting what its `example()` gives: its pages.
+    pub fn preview_layout(&mut self, name: &str, options: &serde_json::Value) -> Result<Entry, String> {
+        let example = layout::layout_example(&self.engine, &self.resources.layouts, name)?
+            .ok_or_else(|| format!("layout '{}' has no example() to preview", name))?;
+        let mut scope = Scope::new();
+        scope.push("journal_entry", Entry::default());
+        scope.push_constant("NAME", name.to_string());
+        scope.push_constant("OPTIONS", json_map(options, "options")?);
+        scope.push_constant("EXAMPLE", example);
+        self.run_preview(scope, "journal_entry.add(layout(NAME, OPTIONS).typeset(EXAMPLE));")
+    }
+    fn run_preview(&mut self, mut scope: Scope, script: &str) -> Result<Entry, String> {
+        self.engine.run_with_scope(&mut scope, script).map_err(|err| ScriptError::new(&err).message)?;
+        scope.get_value("journal_entry").ok_or_else(|| "the preview lost its entry".to_string())
     }
     /// Call `f` with what the script passes to `print` and `debug`.
     pub fn on_print(&mut self, f: impl Fn(&str) + 'static) {
@@ -364,7 +447,7 @@ mod tests {
     use crate::journal::publish;
 
     fn engine() -> JournalEngine {
-        let symd = FontBook::from_file(crate::journal::fonts::DEFAULT_FONTS).expect("Failed to load fonts.json");
+        let symd = FontBook::from_file(crate::journal::fonts::DEFAULT_GLYPHSETS).expect("Failed to load fonts.json");
         JournalEngine::new(Rc::new(symd))
     }
 
@@ -714,7 +797,7 @@ brush.color = \"darkredd\";", BRUSH)).expect_err("bad color should fail").to_str
         let tight = glyph_xs("iiii", 0.0);
         let gaps: Vec<f32> = tight.windows(2).map(|w| w[1] - w[0]).collect();
         let i_width = {
-            let symd = FontBook::from_file(crate::journal::fonts::DEFAULT_FONTS).unwrap();
+            let symd = FontBook::from_file(crate::journal::fonts::DEFAULT_GLYPHSETS).unwrap();
             let i = symd.font("loche_upper").unwrap().variants("I").unwrap().remove(0);
             i.hull_aabb().extents().x * 20.0 / 2.0
         };

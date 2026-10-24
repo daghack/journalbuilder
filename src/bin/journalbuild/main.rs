@@ -1,4 +1,4 @@
-use scribe::journal::rhaientries::{JournalEngine, LockLibrary, Sources, DEFAULT_CHAINS_DIR, DEFAULT_LAYOUTS_DIR, DEFAULT_LOCKS_DIR, DEFAULT_RENDERERS_DIR};
+use scribe::journal::rhaientries::{Journal, LockLibrary, Resources, DEFAULT_JOURNALS_DIR, DEFAULT_LIBRARY_DIR};
 use scribe::journal::{fonts, darkly, publish};
 use scribe::journal::progress::{clock, Progress};
 use std::cell::RefCell;
@@ -40,17 +40,24 @@ fn check_missing_glyphs(symd: &fonts::FontBook, strict: bool) -> Result<(), Stri
 
 const DEFAULT_SUPERSAMPLE: f32 = 1.2;
 
-const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--svg]
-                    [--scale S] [--supersample K] [--strict-glyphs]
+const USAGE: &str = "Usage: journalbuild <journal> [--entry E[,E...]] [--page N[,N...]]
+                    [--svg] [--scale S] [--supersample K] [--strict-glyphs]
                     [--parchment] [--pdf] [--stitch N]
-                    [--journals-dir DIR] [--output-dir DIR] [--glyphsets PATH]
-                    [--locks-dir DIR] [--layouts-dir DIR] [--renderers-dir DIR]
-                    [--chains-dir DIR]
-       journalbuild --check-locks [--locks-dir DIR] [--chains-dir DIR]
+                    [--journals-dir DIR] [--library DIR] [--output-dir DIR]
+       journalbuild --check-locks [<journal>] [--journals-dir DIR] [--library DIR]
        journalbuild --check-gpu
 
-  --page P,...        Render only these pages, by index (0-based) or by
-                      name. Other pages' existing output is kept.
+  <journal>           A journal's name in the journals directory, or the path
+                      of a journal's directory (anything with a /): its
+                      journal.json, its entries in entries/, and its own
+                      resources (locks/, layouts/, illustrations/, chains/,
+                      styles/, lib/, glyphsets/, content/) over the
+                      library's.
+  --entry E,...       Build only these entries, by name (default: every
+                      entry, in the manifest's order).
+  --page P,...        Render only these pages of each entry built, by index
+                      (0-based) or by name. Other pages' existing output is
+                      kept.
   --svg               Also render each canvas as an SVG ({page}_{canvas}.svg)
                       and that SVG as a PNG; by default only Darkly renders.
                       Stroke widths are geometric widths there, while in
@@ -61,8 +68,8 @@ const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--svg
                       a border of parchment round their strokes; each tile
                       of a split page is a sheet of its own. Light inks are
                       drawn dark, so they show.
-  --pdf               Put the pages in one PDF, {journal}.pdf, a page per
-                      page, rather than writing images: each page's
+  --pdf               Put each entry's pages in one PDF, {entry}.pdf, a page
+                      per page, rather than writing images: each page's
                       canvases layered into one image (on parchment,
                       with --parchment), 150 canvas units to the inch.
   --stitch N          Also lay every N pages side by side, in order, tops
@@ -83,24 +90,17 @@ const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--svg
                       grows with K squared.
   --journals-dir DIR  Directory containing journals (default: the
                       repository's webapp/journals/).
-  --glyphsets PATH    Glyphset files: a directory with a NAME.json for each
-                      glyphset, or one file with every glyphset (default:
-                      the repository's webapp/fonts/).
-  --output-dir DIR    Where to write renders (default: NAME_output in the current
-                      directory, emptied first unless --page). In a given
-                      directory, earlier .png/.svg/.pdf renders are cleared
-                      first (except with --page); other files are kept.
-  --locks-dir DIR     Directory of lock files, one per lock type (default:
-                      the repository's webapp/locks/).
-  --layouts-dir DIR   Directory of page layout files, for layout(name)
-                      (default: the repository's webapp/layouts/).
-  --renderers-dir DIR Directory of renderer files, for lock.attach
-                      (default: the repository's webapp/renderers/).
-  --chains-dir DIR    Directory of chain files, for chain(name) (default:
-                      the repository's webapp/chains/).
+  --library DIR       The built-in library journals' resources stand in
+                      front of (default: the repository's webapp/library/).
+  --output-dir DIR    Where to write renders, a directory per entry (default:
+                      NAME_output in the current directory, its entries'
+                      directories emptied first unless --page). In a given
+                      directory, earlier .png/.svg/.pdf renders in an
+                      entry's directory are cleared first (except with
+                      --page); other files are kept.
   --check-locks       Run every lock file's examples, and every chain
                       file's, through lock and unlock, instead of building
-                      a journal.
+                      a journal: the library's, or a journal's own.
   --check-gpu         Check that Darkly can render (there's a GPU wgpu can
                       use), instead of building a journal; fails if not.
                       Without one, --svg renders still work, and cargo
@@ -110,25 +110,30 @@ struct Args {
     strict_glyphs: bool,
     check_locks: bool,
     check_gpu: bool,
-    journal_name: String,
+    journal: Option<String>,
     journals_dir: String,
+    library_dir: String,
+    entries: Option<Vec<String>>,
     pages: Option<Vec<String>>,
     svg: bool,
     scale: f32,
     supersample: f32,
     output_dir: Option<String>,
-    font_file: String,
-    locks_dir: String,
-    layouts_dir: String,
-    renderers_dir: String,
-    chains_dir: String,
     parchment: bool,
     pdf: bool,
     stitch: Option<usize>,
 }
 
+/// A comma-separated list, `what` naming it in errors.
+fn list(value: &str) -> Result<Vec<String>, String> {
+    value.split(',').map(str::trim)
+        .map(|p| if p.is_empty() { Err(format!("empty item in '{}'", value)) } else { Ok(p.to_string()) })
+        .collect()
+}
+
 fn parse_args() -> Result<Args, String> {
-    let mut journal_name = None;
+    let mut journal = None;
+    let mut entries: Option<Vec<String>> = None;
     let mut pages: Option<Vec<String>> = None;
     let mut svg = false;
     let mut pdf = false;
@@ -142,12 +147,8 @@ fn parse_args() -> Result<Args, String> {
     // grows with K²).
     let mut supersample = DEFAULT_SUPERSAMPLE;
     // Defaults are found from the repository, not the working directory.
-    let mut journals_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/webapp/journals").to_string();
-    let mut font_file = fonts::DEFAULT_FONTS.to_string();
-    let mut locks_dir = DEFAULT_LOCKS_DIR.to_string();
-    let mut layouts_dir = DEFAULT_LAYOUTS_DIR.to_string();
-    let mut renderers_dir = DEFAULT_RENDERERS_DIR.to_string();
-    let mut chains_dir = DEFAULT_CHAINS_DIR.to_string();
+    let mut journals_dir = DEFAULT_JOURNALS_DIR.to_string();
+    let mut library_dir = DEFAULT_LIBRARY_DIR.to_string();
     let mut output_dir = None;
     let mut parchment = false;
     let mut stitch = None;
@@ -178,52 +179,38 @@ fn parse_args() -> Result<Args, String> {
             "--journals-dir" => {
                 journals_dir = args.next().ok_or("--journals-dir needs a directory")?;
             }
-            "--glyphsets" => {
-                font_file = args.next().ok_or("--glyphsets needs a path")?;
-            }
-            "--locks-dir" => {
-                locks_dir = args.next().ok_or("--locks-dir needs a directory")?;
-            }
-            "--layouts-dir" => {
-                layouts_dir = args.next().ok_or("--layouts-dir needs a directory")?;
-            }
-            "--renderers-dir" => {
-                renderers_dir = args.next().ok_or("--renderers-dir needs a directory")?;
-            }
-            "--chains-dir" => {
-                chains_dir = args.next().ok_or("--chains-dir needs a directory")?;
+            "--library" => {
+                library_dir = args.next().ok_or("--library needs a directory")?;
             }
             "--output-dir" => {
                 output_dir = Some(args.next().ok_or("--output-dir needs a directory")?);
             }
+            "--entry" => {
+                let value = args.next().ok_or("--entry needs an entry or list, e.g. --entry letter_1")?;
+                entries.get_or_insert_with(Vec::new).extend(list(&value)?);
+            }
             "--page" => {
-                let list = args.next().ok_or("--page needs a page or list, e.g. --page 0,2 or --page maze")?;
-                let parsed = list.split(',').map(str::trim)
-                    .map(|p| if p.is_empty() { Err(format!("empty page in '{}'", list)) } else { Ok(p.to_string()) })
-                    .collect::<Result<Vec<_>, _>>()?;
-                pages.get_or_insert_with(Vec::new).extend(parsed);
+                let value = args.next().ok_or("--page needs a page or list, e.g. --page 0,2 or --page maze")?;
+                pages.get_or_insert_with(Vec::new).extend(list(&value)?);
             }
             flag if flag.starts_with("--") => return Err(format!("unknown option '{}'", flag)),
-            name if journal_name.is_none() => journal_name = Some(name.to_string()),
+            name if journal.is_none() => journal = Some(name.to_string()),
             extra => return Err(format!("unexpected argument '{}'", extra)),
         }
     }
-    if check_gpu {
-        if journal_name.is_some() || check_locks {
-            return Err("--check-gpu only checks for a GPU, so it takes no journal name or --check-locks".to_string());
-        }
-        journal_name = Some(String::new());
+    if check_gpu && (journal.is_some() || check_locks) {
+        return Err("--check-gpu only checks for a GPU, so it takes no journal or --check-locks".to_string());
     }
-    let journal_name = match (journal_name, check_locks) {
-        (Some(name), false) => name,
-        (None, true) => String::new(),
-        (Some(_), true) => return Err("--check-locks checks lock files, so it takes no journal name".to_string()),
-        (None, false) => return Err("missing journal name".to_string()),
-    };
+    if !check_gpu && !check_locks && journal.is_none() {
+        return Err("missing journal name".to_string());
+    }
+    if check_locks && (entries.is_some() || pages.is_some()) {
+        return Err("--check-locks checks lock and chain files, so it takes no --entry or --page".to_string());
+    }
     if stitch.is_some() && pdf {
         return Err("--stitch lays rendered pages side by side, so it can't go with --pdf".to_string());
     }
-    Ok(Args { strict_glyphs, check_locks, check_gpu, journal_name, journals_dir, pages, svg, scale, supersample, output_dir, font_file, locks_dir, layouts_dir, renderers_dir, chains_dir, parchment, pdf, stitch })
+    Ok(Args { strict_glyphs, check_locks, check_gpu, journal, journals_dir, library_dir, entries, pages, svg, scale, supersample, output_dir, parchment, pdf, stitch })
 }
 
 fn main() {
@@ -235,7 +222,7 @@ fn main() {
         darkly::check_gpu().map(|()| println!("ok   Darkly can render: there's a GPU"))
             .map_err(|err| format!("Darkly can't render, no GPU: {}", err))
     } else if args.check_locks {
-        check_locks(&args.locks_dir, &args.chains_dir)
+        check_locks(&args)
     } else {
         run(&args)
     };
@@ -245,86 +232,147 @@ fn main() {
     }
 }
 
+/// The journal `name`: a directory in `journals_dir`, or, with a `/`, a
+/// path.
+fn open_journal(name: &str, journals_dir: &str) -> Result<Journal, String> {
+    let dir = if name.contains('/') { std::path::PathBuf::from(name) } else { std::path::Path::new(journals_dir).join(name) };
+    if !dir.is_dir() {
+        return Err(format!("no journal {}: {} isn't a directory", name, dir.display()));
+    }
+    Journal::open(dir)
+}
+
 fn run(args: &Args) -> Result<(), String> {
     let started = std::time::Instant::now();
-    let symd = fonts::FontBook::from_file(&args.font_file)
-        .map_err(|err| format!("couldn't load the glyphset files {}: {}", args.font_file, err))?;
-    let symd = Rc::new(symd);
-
-    let journal_name = &args.journal_name;
-    let journal_path = format!("{}/{}/journal_entry.rhai", args.journals_dir, journal_name);
-    // By default, NAME_output in the current directory, emptied first.
+    let journal = open_journal(args.journal.as_deref().unwrap_or_default(), &args.journals_dir)?;
+    let journal_name = journal.name();
+    for unlisted in journal.unlisted_entries() {
+        eprintln!("warning: {} isn't in {}'s journal.json, so it isn't built", journal.entry_path(&unlisted).display(), journal_name);
+    }
+    let library = Resources::dir(&args.library_dir);
+    for path in journal.resources(library.clone()).overrides() {
+        eprintln!("note: {}'s {} stands in for the library's", journal_name, path);
+    }
+    let entries = match &args.entries {
+        None => journal.manifest.entries.clone(),
+        Some(entries) => {
+            for entry in entries {
+                if !journal.manifest.entries.contains(entry) {
+                    return Err(format!("{} has no entry '{}'; entries: {}", journal_name, entry, journal.manifest.entries.join(", ")));
+                }
+            }
+            entries.clone()
+        }
+    };
+    // By default, NAME_output in the current directory, each entry's
+    // directory emptied first.
     let default_output = args.output_dir.is_none();
-    let output_dir = args.output_dir.clone()
-        .unwrap_or_else(|| format!("{}_output", journal_name));
-    let mut engine = JournalEngine::with_dirs(symd.clone(), &args.locks_dir, &args.layouts_dir, &args.renderers_dir, &args.chains_dir);
+    let output_dir = args.output_dir.clone().unwrap_or_else(|| format!("{}_output", journal_name));
+    // One Darkly engine for the whole run; canvases resize it as needed.
+    let mut darkly_engine = darkly::new_engine(1, 1);
+    let mut rendered = 0;
+    for entry_name in &entries {
+        rendered += build_entry(args, &journal, &library, entry_name, &format!("{}/{}", output_dir, entry_name), default_output, &mut darkly_engine)?;
+    }
+    eprintln!("Rendered {} page{} of {} ({}) to {} in {}", rendered, if rendered == 1 { "" } else { "s" }, journal_name, entries.join(", "), output_dir, clock(started.elapsed()));
+    Ok(())
+}
+
+/// Build entry `entry_name` and render it into `output_dir`, returning how
+/// many pages it rendered.
+fn build_entry(args: &Args, journal: &Journal, library: &Resources, entry_name: &str, output_dir: &str, default_output: bool, darkly_engine: &mut darkly::DarklyEngine) -> Result<usize, String> {
+    // Each entry runs in an engine of its own: entries share resources,
+    // not code.
+    let mut engine = journal.engine(library.clone())?;
+    let symd = engine.glyphsets().clone();
+    let entry_path = journal.entry_path(entry_name).display().to_string();
     // A spinner while the script runs, which can take a while.
-    let running = Rc::new(RefCell::new(Progress::new(&format!("Running {}", journal_name), 0)));
+    let running = Rc::new(RefCell::new(Progress::new(&format!("Running {}", entry_name), 0)));
     let spinner = running.clone();
     engine.on_progress(move |ops| {
         if ops % 256 == 0 {
             spinner.borrow_mut().tick("");
         }
     });
-    let entry = engine.build_entry_file(&journal_path);
+    let entry = journal.build_entry(&mut engine, entry_name);
     running.borrow_mut().finish();
     let entry = entry?;
     check_missing_glyphs(&symd, args.strict_glyphs)?;
     if entry.page_count() == 0 {
-        return Err(format!("{} produced no pages; add them with journal_entry.add(page)", journal_path));
+        return Err(format!("{} produced no pages; add them with journal_entry.add(page)", entry_path));
     }
     let empty = entry.empty_canvases();
     if !empty.is_empty() {
-        eprintln!("warning: skipping {} empty canvas(es), with nothing drawn on them: {}", empty.len(), empty.join(", "));
+        eprintln!("warning: skipping {} empty canvas(es) in {}, with nothing drawn on them: {}", empty.len(), entry_name, empty.join(", "));
     }
     let pages: Option<Vec<usize>> = match &args.pages {
         None => None,
         Some(pages) => Some(pages.iter().map(|page| entry.page_index(page))
             .collect::<Result<_, _>>()
-            .map_err(|err| format!("{} (in {})", err, journal_name))?),
+            .map_err(|err| format!("{} (in {})", err, entry_name))?),
     };
     if default_output && pages.is_none() {
-        match std::fs::remove_dir_all(&output_dir) {
+        match std::fs::remove_dir_all(output_dir) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(format!("couldn't clear {}: {}", output_dir, e)),
             _ => {}
         }
     }
     if pages.is_some() {
         // Rendering a subset: keep the other pages' existing output.
-        std::fs::create_dir_all(&output_dir).map_err(|e| format!("couldn't create {}: {}", output_dir, e))?;
+        std::fs::create_dir_all(output_dir).map_err(|e| format!("couldn't create {}: {}", output_dir, e))?;
     } else {
-        prepare_output_dir(&output_dir)?;
+        prepare_output_dir(output_dir)?;
     }
     let only = pages.as_deref();
     if args.svg {
-        publish::svgs(&entry, &output_dir, args.scale, only)?;
+        publish::svgs(&entry, output_dir, args.scale, only)?;
     }
-    // One Darkly engine for the whole run; canvases resize it as needed.
-    let mut darkly_engine = darkly::new_engine(1, 1);
     let render = publish::Render { scale: args.scale, supersample: args.supersample, parchment: args.parchment };
     if args.pdf {
-        let path = format!("{}/{}.pdf", output_dir, journal_name);
-        publish::pdf(&entry, &mut darkly_engine, &path, journal_name, &render, only)?;
+        let path = format!("{}/{}.pdf", output_dir, entry_name);
+        let title = format!("{}: {}", journal.manifest.title, entry_name);
+        publish::pdf(&entry, darkly_engine, &path, &title, &render, only)?;
         println!("Wrote {}", path);
     } else if render.parchment || args.stitch.is_some() {
-        publish::page_images(&entry, &mut darkly_engine, &output_dir, &render, only, args.stitch)?;
+        publish::page_images(&entry, darkly_engine, output_dir, &render, only, args.stitch)?;
     } else {
-        publish::canvas_images(&entry, &mut darkly_engine, &output_dir, &render, only)?;
+        publish::canvas_images(&entry, darkly_engine, output_dir, &render, only)?;
     }
-    let count = only.map_or(entry.page_count(), |pages| pages.len());
-    eprintln!("Rendered {} page{} of {} to {} in {}", count, if count == 1 { "" } else { "s" }, journal_name, output_dir, clock(started.elapsed()));
-    Ok(())
+    Ok(only.map_or(entry.page_count(), |pages| pages.len()))
 }
 
 /// Run every lock file's examples, then every chain file's, listing each
-/// one's result.
-fn check_locks(locks_dir: &str, chains_dir: &str) -> Result<(), String> {
-    let library = Rc::new(LockLibrary::new(locks_dir).with_chains(Sources::dir(chains_dir)));
-    let results = library.check_all()?;
-    if results.is_empty() {
-        return Err(format!("no lock files (*.rhai) in {}", locks_dir));
+/// one's result: the library's, or with a journal, the journal's own.
+fn check_locks(args: &Args) -> Result<(), String> {
+    let library = Resources::dir(&args.library_dir);
+    let (resources, own) = match &args.journal {
+        None => (library, None),
+        Some(name) => {
+            let journal = open_journal(name, &args.journals_dir)?;
+            let resources = journal.resources(library);
+            let locks = resources.locks.own_names().map_err(|e| e.to_string())?;
+            let chains = resources.chains.own_names().map_err(|e| e.to_string())?;
+            (resources, Some((journal.name(), locks, chains)))
+        }
+    };
+    let library = Rc::new(LockLibrary::new(&resources));
+    let (results, chains) = match &own {
+        None => {
+            let results = library.check_all()?;
+            if results.is_empty() {
+                return Err(format!("no lock files (*.rhai) in {}", resources.locks.root().display()));
+            }
+            (results, library.check_all_chains()?)
+        }
+        Some((_, locks, chains)) => (
+            locks.iter().map(|name| (name.clone(), library.check_examples(name))).collect(),
+            chains.iter().map(|name| (name.clone(), library.check_chain(name))).collect(),
+        ),
+    };
+    if let Some((name, _, _)) = &own
+        && results.is_empty() && chains.is_empty() {
+        println!("--   {} has no lock or chain files of its own", name);
     }
-    let chains = library.check_all_chains()?;
     let mut failures = 0;
     for (name, result) in results.iter().chain(&chains) {
         match result {

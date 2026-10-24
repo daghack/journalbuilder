@@ -20,10 +20,10 @@ interface Stored {
 
 /**
  * Edits not yet saved into the repository, which every script runs with:
- * fonts from the font editor in place of webapp/fonts/, chain files from
- * the lock editor added to webapp/chains/ (the chain being edited among
- * them, as it's edited), renderer files added to webapp/renderers/, and
- * lock files added to webapp/locks/. The renderer's workers are sent them
+ * fonts from the font editor in place of webapp/library/glyphsets/, chain files from
+ * the lock editor added to webapp/library/chains/ (the chain being edited among
+ * them, as it's edited), renderer files added to webapp/library/illustrations/, and
+ * lock files added to webapp/library/locks/. The renderer's workers are sent them
  * whenever they change.
  */
 @Injectable({ providedIn: 'root' })

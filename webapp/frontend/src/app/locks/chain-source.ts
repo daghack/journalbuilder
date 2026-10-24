@@ -1,4 +1,4 @@
-// A chain written as a chain file (webapp/chains/README.md), and as
+// A chain written as a chain file (webapp/library/chains/README.md), and as
 // journal script.
 
 import { rhaiKey, rhaiString, rhaiValue } from '../shared/rhai-literal';
@@ -107,7 +107,7 @@ export function chainSource(model: ChainModel, context: SourceContext): string {
   out.push(`\t\tfixed: ${mapLiteral(fixed.map(([port, value]) => [rhaiString(port), valueSource(value, portType(ports, port, 'inputs'))]))},`);
   const renderers = [...model.renderers].sort(byId);
   if (renderers.length) {
-    out.push('\t\trenderers: #{');
+    out.push('\t\tillustrations: #{');
     for (const renderer of renderers) {
       const inputs = Object.entries(rendererInputs(model, renderer.id)).sort(([a], [b]) => (a < b ? -1 : 1));
       out.push(`\t\t\t${rhaiKey(renderer.id)}: #{ type: ${rhaiString(renderer.type)}, options: ${nodeOptions(renderer, {})}, inputs: ${mapLiteral(inputs.map(([k, v]) => [rhaiKey(k), rhaiString(v)]))} },`);
@@ -117,7 +117,7 @@ export function chainSource(model: ChainModel, context: SourceContext): string {
   out.push('\t}');
   out.push('}');
   out.push('');
-  out.push(renderers.length ? '// Where the web editor draws each lock and renderer.' : '// Where the web editor draws each lock.');
+  out.push(renderers.length ? '// Where the web editor draws each lock and illustration.' : '// Where the web editor draws each lock.');
   out.push('fn layout() {');
   out.push(`\t${mapLiteral([...nodes, ...renderers].map((node) => [rhaiKey(node.id), `[${Math.round(node.x)}, ${Math.round(node.y)}]`]))}`);
   out.push('}');

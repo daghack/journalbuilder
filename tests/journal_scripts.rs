@@ -1,51 +1,52 @@
-//! Evaluates every rhai journal script (without rendering) so API changes
-//! that break a journal fail `cargo test` in well under a second, instead of
-//! surfacing minutes into a render.
+//! Evaluates every entry of every journal (without rendering) so API
+//! changes that break a journal fail `cargo test` in well under a second,
+//! instead of surfacing minutes into a render.
 
-use scribe::journal::rhaientries::JournalEngine;
-use scribe::journal::fonts::FontBook;
-use std::path::{Path, PathBuf};
-use std::rc::Rc;
+use scribe::journal::rhaientries::{Journal, Resources};
+use std::path::PathBuf;
 
-fn rhai_journals(dir: &str) -> Vec<PathBuf> {
-    let mut scripts: Vec<PathBuf> = std::fs::read_dir(dir)
+fn journals(dir: &str) -> Vec<PathBuf> {
+    let mut journals: Vec<PathBuf> = std::fs::read_dir(dir)
         .unwrap_or_else(|e| panic!("Failed to read {}: {}", dir, e))
-        .map(|entry| entry.expect("Failed to read directory entry").path().join("journal_entry.rhai"))
-        .filter(|script| script.is_file())
+        .map(|entry| entry.expect("Failed to read directory entry").path())
+        .filter(|path| path.is_dir())
         .collect();
-    scripts.sort();
-    scripts
+    journals.sort();
+    journals
 }
 
-fn check_scripts(scripts: &[PathBuf]) {
-    let symd = Rc::new(FontBook::from_file(scribe::journal::fonts::DEFAULT_FONTS).expect("Failed to load fonts.json"));
-    let failures: Vec<String> = scripts.iter()
-        .filter_map(|script| {
-            let mut engine = JournalEngine::new(symd.clone());
-            match engine.build_entry_file(script.to_str().unwrap()) {
-                Ok(entry) if entry.page_count() > 0 => None,
-                Ok(_) => Some(format!("{}: produced no pages", display(script))),
-                Err(err) => Some(format!("{}: {}", display(script), err)),
+fn check_journals(dirs: &[PathBuf]) {
+    let mut failures = Vec::new();
+    for dir in dirs {
+        let journal = match Journal::open(dir) {
+            Ok(journal) => journal,
+            Err(err) => {
+                failures.push(err);
+                continue;
             }
-        })
-        .collect();
-    assert!(failures.is_empty(), "journal scripts failed:\n{}", failures.join("\n"));
-}
-
-fn display(path: &Path) -> String {
-    path.parent().and_then(Path::file_name).map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned())
+        };
+        for name in &journal.manifest.entries {
+            let built = journal.engine(Resources::library()).and_then(|mut engine| journal.build_entry(&mut engine, name));
+            match built {
+                Ok(entry) if entry.page_count() > 0 => {}
+                Ok(_) => failures.push(format!("{}/{}: produced no pages", journal.name(), name)),
+                Err(err) => failures.push(format!("{}/{}: {}", journal.name(), name, err)),
+            }
+        }
+    }
+    assert!(failures.is_empty(), "journal entries failed:\n{}", failures.join("\n"));
 }
 
 #[test]
-fn every_rhai_journal_evaluates() {
-    let scripts = rhai_journals(concat!(env!("CARGO_MANIFEST_DIR"), "/webapp/journals"));
-    assert!(!scripts.is_empty(), "no rhai journals found in webapp/journals/");
-    check_scripts(&scripts);
+fn every_journal_entry_evaluates() {
+    let journals = journals(scribe::journal::rhaientries::DEFAULT_JOURNALS_DIR);
+    assert!(!journals.is_empty(), "no journals found in webapp/journals/");
+    check_journals(&journals);
 }
 
 #[test]
 fn smoke_fixture_evaluates() {
-    let scripts = rhai_journals(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/smoke_journals"));
-    assert!(!scripts.is_empty(), "smoke fixture missing from tests/smoke_journals/");
-    check_scripts(&scripts);
+    let journals = journals(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/smoke_journals"));
+    assert!(!journals.is_empty(), "smoke fixture missing from tests/smoke_journals/");
+    check_journals(&journals);
 }

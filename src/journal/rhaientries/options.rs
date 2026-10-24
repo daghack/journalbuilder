@@ -164,3 +164,41 @@ pub(super) fn unwrap_runtime(err: &EvalAltResult) -> String {
         other => other.to_string(),
     }
 }
+
+/// Options a file declares as `fn options() { #{ NAME: default } }`
+/// (illustrations, layouts, text styles): `given` over `defaults`. An
+/// option `what` (`illustration 'eye'`) doesn't have, or one of another
+/// type than its default, is an error; a whole number for a float option
+/// is that float, so the file sees its default's type.
+pub(super) fn over_defaults(what: &str, defaults: &Map, given: &Map) -> Result<Map, String> {
+    let mut options = defaults.clone();
+    for (key, value) in given {
+        let Some(default) = defaults.get(key.as_str()) else {
+            let known: Vec<&str> = defaults.keys().map(|k| k.as_str()).collect();
+            return Err(format!("{} has no option '{}'; its options: {}", what, key, if known.is_empty() { "none".to_string() } else { known.join(", ") }));
+        };
+        let number = |v: &Dynamic| v.is_int() || v.is_float();
+        let same = (number(default) && number(value)) || default.type_name() == value.type_name() || default.is_unit();
+        if !same {
+            return Err(format!("{}: option '{}' should be like its default, {}, got {}", what, key, default, value));
+        }
+        let value = match value.as_int() {
+            Ok(n) if default.is_float() => Dynamic::from_float(n as rhai::FLOAT),
+            _ => value.clone(),
+        };
+        options.insert(key.clone(), value);
+    }
+    Ok(options)
+}
+
+/// What a file's `options()` returns, `#{ NAME: default }`, or no options
+/// if it doesn't define one.
+pub(super) fn declared_defaults(engine: &rhai::Engine, ast: &rhai::AST, what: &str) -> Result<Map, String> {
+    if !ast.iter_functions().any(|f| f.name == "options" && f.params.is_empty()) {
+        return Ok(Map::new());
+    }
+    let value = engine.call_fn::<Dynamic>(&mut rhai::Scope::new(), ast, "options", ())
+        .map_err(|e| format!("{} options(): {}", what, e))?;
+    let type_name = value.type_name();
+    value.try_cast::<Map>().ok_or_else(|| format!("{}: options() should return #{{ NAME: default }}, got {}", what, type_name))
+}

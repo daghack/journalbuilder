@@ -47,13 +47,13 @@ import { ShellService, type Mode } from './shell.service';
       </span>
     }
     @if (rendererNames().length) {
-      <span class="chip" [title]="'Renderer files only in this browser: ' + rendererNames().join(', ')">
+      <span class="chip" [title]="'Illustration files only in this browser: ' + rendererNames().join(', ')">
         {{ rendererNames().length }} workspace renderer{{ rendererNames().length === 1 ? '' : 's' }}
       </span>
     }
     @if (!workspace.empty()) {
       <button type="button" class="clear" (click)="clear()"
-              title="Throw away every edit in this browser (fonts, chains, renderers and lock files) and use the repository's files again">Clear workspace</button>
+              title="Throw away every edit in this browser (fonts, chains, illustrations and lock files) and use the repository's files again">Clear workspace</button>
     }
   `,
   styles: `
@@ -84,7 +84,7 @@ export class ModeTabsComponent {
   protected readonly shell = inject(ShellService);
   protected readonly workspace = inject(WorkspaceService);
   protected clear() {
-    if (confirm('Throw away every edit in this browser (fonts, chains, renderers and lock files) and use the repository\'s files again? Export anything you want to keep first.')) this.workspace.clear();
+    if (confirm('Throw away every edit in this browser (fonts, chains, illustrations and lock files) and use the repository\'s files again? Export anything you want to keep first.')) this.workspace.clear();
   }
 
   protected readonly lockNames = computed(() => Object.keys(this.workspace.locks()));

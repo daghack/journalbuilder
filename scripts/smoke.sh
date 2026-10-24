@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
 # Quick end-to-end smoke test for journalbuild.
 #
-#   1. Runs `cargo test`, which evaluates every rhai journal script.
-#   2. Runs every lock file's examples with `journalbuild --check-locks`.
+#   1. Runs `cargo test`, which evaluates every entry of every journal.
+#   2. Runs every lock and chain file's examples with `journalbuild
+#      --check-locks`: the library's, and each journal's own.
 #   3. Renders the small fixture in tests/smoke_journals at full scale, one
 #      page of it supersampled, and all of it on parchment and as a PDF at
 #      reduced scale, and every page of webapp/journals/showcase at reduced scale.
-#   4. Renders page 0 of every journal in webapp/journals/ at reduced scale, Darkly
-#      output only.
+#   4. Renders page 0 of every entry of every journal in webapp/journals/ at
+#      reduced scale, Darkly output only.
 #      Steps 3 and 4 need a GPU and are skipped without one (journalbuild
 #      --check-gpu). Step 1 still checks what journals draw then: its
 #      tests/svg_renders.rs compares SVG renders, made on the CPU, with
 #      committed images.
-#   5. Checks the web editor (webapp/): its renderer still builds for the
+#   5. Checks the web editor (webapp/): its engine still builds for the
 #      browser and, once its npm packages are installed and its wasm built
 #      (webapp/README.md), its unit tests pass and it builds.
 #
@@ -54,22 +55,34 @@ else
 	FAILURES=$((FAILURES + 1))
 fi
 
-if embedded_output=$(cargo test --release --quiet --features embedded-assets --lib sources 2>&1); then
-	echo "ok   journals run the same with layout and lock files compiled in"
+if embedded_output=$(cargo test --release --quiet --features embedded-assets --lib resources 2>&1); then
+	echo "ok   the library compiled in is the library on disk"
 else
-	echo "FAIL embedded layout and lock files"
+	echo "FAIL the library compiled in"
 	grep -E "FAILED|panicked|failed:|error" <<<"$embedded_output" | sed 's/^/     /' || true
 	FAILURES=$((FAILURES + 1))
 fi
 
 echo "== lock checks"
 if lock_output=$("$BIN" --check-locks 2>&1); then
-	echo "ok   $(grep -c '^ok ' <<<"$lock_output") lock type(s) passed their examples"
+	echo "ok   $(grep -c '^ok ' <<<"$lock_output") of the library's lock type(s) and chain(s) passed their examples"
 else
 	echo "FAIL lock checks"
 	grep -vE '^ok ' <<<"$lock_output" | sed 's/^/     /' || true
 	FAILURES=$((FAILURES + 1))
 fi
+# Journals' own lock and chain files.
+for journal in webapp/journals/*/; do
+	name=$(basename "$journal")
+	[[ -d "$journal/locks" || -d "$journal/chains" ]] || continue
+	if lock_output=$("$BIN" --check-locks "$name" 2>&1); then
+		echo "ok   $name's lock and chain files passed their examples"
+	else
+		echo "FAIL $name's lock checks"
+		grep -vE '^ok ' <<<"$lock_output" | sed 's/^/     /' || true
+		FAILURES=$((FAILURES + 1))
+	fi
+done
 
 # render NAME EXPECTED_FILES... -- JOURNALBUILD_ARGS...
 render() {
@@ -105,37 +118,43 @@ if ! gpu_output=$("$BIN" --check-gpu 2>&1); then
 	echo "skip Darkly renders: no GPU ($(tail -n 1 <<<"$gpu_output" | cut -c1-120))"
 	echo "     SVG renders were still compared with tests/svg_renders/ by cargo test"
 else
-render fixture darkly_page_0_0.png darkly_page_1_0.png darkly_page_1_1.png darkly_lock_maze.png darkly_art_0.png \
-	darkly_art_0_0_0.png darkly_art_1_1_0.png darkly_book_0_0.png darkly_book_1_0.png \
-	page_0_0.png page_1_0.png page_1_1.png lock_maze.png art_0.png art_0_1_0.png \
-	page_0_0.svg page_1_0.svg page_1_1.svg lock_maze.svg art_0.svg \
+# Each entry's renders go in a directory of its own: smoke/ for the
+# fixture's one entry.
+render fixture smoke/darkly_page_0_0.png smoke/darkly_page_1_0.png smoke/darkly_page_1_1.png smoke/darkly_lock_maze.png smoke/darkly_art_0.png \
+	smoke/darkly_art_0_0_0.png smoke/darkly_art_1_1_0.png smoke/darkly_book_0_0.png smoke/darkly_book_1_0.png \
+	smoke/page_0_0.png smoke/page_1_0.png smoke/page_1_1.png smoke/lock_maze.png smoke/art_0.png smoke/art_0_1_0.png \
+	smoke/page_0_0.svg smoke/page_1_0.svg smoke/page_1_1.svg smoke/lock_maze.svg smoke/art_0.svg \
 	-- smoke --journals-dir tests/smoke_journals --strict-glyphs --svg
-render fixture-supersampled darkly_page_0_0.png \
+render fixture-supersampled smoke/darkly_page_0_0.png \
 	-- smoke --journals-dir tests/smoke_journals --page 0 --supersample 2
 # Pages on parchment: one image per page, split and typeset pages included.
-render fixture-paper darkly_page_0.png darkly_page_1.png darkly_art_0_0.png darkly_book_0.png \
+render fixture-paper smoke/darkly_page_0.png smoke/darkly_page_1.png smoke/darkly_art_0_0.png smoke/darkly_book_0.png \
 	-- smoke --journals-dir tests/smoke_journals --parchment --scale 0.5
-render fixture-pdf smoke.pdf \
+render fixture-pdf smoke/smoke.pdf \
 	-- smoke --journals-dir tests/smoke_journals --pdf --scale 0.25
 # Every page of the showcase, every character with a glyph.
-render showcase darkly_01_title_0.png darkly_02_contents_0.png darkly_03_pens_brushes.png darkly_05_pens_0.png darkly_06_pens_0.png darkly_07_pens_0.png darkly_08_pens_0.png \
-	darkly_09_glyphsets_0.png darkly_13_glyphsets_0.png darkly_14_glyphs_0.png darkly_17_art_0.png darkly_21_art_0.png darkly_22_art_0.png darkly_23_art_0.png darkly_24_art_0.png darkly_25_art_0.png \
-	darkly_26_generators_0.png darkly_27_generators_0.png darkly_28_generators_0.png darkly_29_text_0.png darkly_31_text_0.png darkly_32_text_0.png \
-	darkly_33_text_0.png darkly_34_text_0.png darkly_35_text_0.png darkly_36_locks_ciphers.png darkly_37_locks_0.png darkly_38_locks_0.png \
-	darkly_39_locks_0.png darkly_40_spread_0.png darkly_41_spread_0.png darkly_42_layouts_0.png darkly_44_layouts_0.png \
+render showcase showcase/darkly_01_title_0.png showcase/darkly_02_contents_0.png showcase/darkly_03_pens_brushes.png showcase/darkly_05_pens_0.png showcase/darkly_06_pens_0.png showcase/darkly_07_pens_0.png showcase/darkly_08_pens_0.png \
+	showcase/darkly_09_glyphsets_0.png showcase/darkly_12_glyphsets_0.png showcase/darkly_13_glyphs_0.png showcase/darkly_16_art_0.png showcase/darkly_20_art_0.png showcase/darkly_21_art_0.png showcase/darkly_22_art_0.png showcase/darkly_23_art_0.png showcase/darkly_24_art_0.png \
+	showcase/darkly_25_generators_0.png showcase/darkly_26_generators_0.png showcase/darkly_27_generators_0.png showcase/darkly_28_text_0.png showcase/darkly_30_text_0.png showcase/darkly_31_text_0.png \
+	showcase/darkly_32_text_0.png showcase/darkly_33_text_0.png showcase/darkly_34_text_0.png showcase/darkly_35_locks_ciphers.png showcase/darkly_36_locks_0.png showcase/darkly_37_locks_0.png \
+	showcase/darkly_38_locks_0.png showcase/darkly_39_spread_0.png showcase/darkly_40_spread_0.png showcase/darkly_41_layouts_0.png showcase/darkly_43_layouts_0.png showcase/darkly_47_files_0.png showcase/darkly_48_files_0.png \
 	-- showcase --strict-glyphs --scale 0.25
 
 for journal in webapp/journals/*/; do
 	name=$(basename "$journal")
 	# Rendered whole above.
 	[[ "$name" == showcase ]] && continue
-	if [[ -f "$journal/journal_entry.rhai" ]]; then
-		# Named pages name their files, so just require some Darkly output.
+	if [[ -f "$journal/journal.json" ]]; then
+		# Page 0 of every entry. Named pages name their files, so just
+		# require some Darkly output from each entry.
 		render "$name" -- "$name" --page 0 --scale 0.25
-		if [[ -z "$(ls "$OUT/$name"/darkly_*.png 2>/dev/null)" ]]; then
-			echo "FAIL $name: no Darkly output"
-			FAILURES=$((FAILURES + 1))
-		fi
+		for entry in "$journal"entries/*.rhai; do
+			entry=$(basename "$entry" .rhai)
+			if [[ -z "$(ls "$OUT/$name/$entry"/darkly_*.png 2>/dev/null)" ]]; then
+				echo "FAIL $name/$entry: no Darkly output"
+				FAILURES=$((FAILURES + 1))
+			fi
+		done
 	fi
 done
 fi

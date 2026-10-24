@@ -1,12 +1,12 @@
 //! Renders journals as SVG (rasterised on the CPU by resvg, as
 //! `journalbuild --svg` does) and compares each canvas's image with the one
-//! committed in tests/svg_renders/<journal>/. These need no GPU, so they
+//! committed in tests/svg_renders/<journal>/<entry>/. These need no GPU, so they
 //! check what journals draw where Darkly can't run (a cloud sandbox, CI).
 //!
 //! Images are compared with a tolerance, so float and rasteriser differences
 //! between machines pass while moved, missing or restyled strokes don't. On
 //! a failure the new render and a diff (changed pixels in red) are written
-//! to target/svg-render-diffs/<journal>/ to look at.
+//! to target/svg-render-diffs/<journal>/<entry>/ to look at.
 //!
 //! When a change means to alter what's drawn, look at the diffs, then
 //! update the committed images and commit them with the change:
@@ -16,12 +16,10 @@
 //! ```
 
 use image::{Rgba, RgbaImage};
-use scribe::journal::fonts::{FontBook, DEFAULT_FONTS};
 use scribe::journal::publish::page_svg_renders;
-use scribe::journal::rhaientries::JournalEngine;
+use scribe::journal::rhaientries::{Journal, Resources};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 
 const ROOT: &str = env!("CARGO_MANIFEST_DIR");
 
@@ -41,25 +39,45 @@ const SHIFT_PX: i64 = 1;
 /// An image differs when more than this fraction of its pixels do.
 const MAX_DIFFERING: f64 = 0.0005;
 
-/// Which pages of a journal to render: all, or only some (big journals
+/// Which pages of each entry to render: all, or only some (big journals
 /// would make slow tests and large images).
 enum Pages {
     All,
     Only(&'static [usize]),
 }
 
+/// Every entry of `journal`, in `journals_dir`.
 fn check(journals_dir: &str, journal: &str, pages: Pages) {
-    let symd = Rc::new(FontBook::from_file(DEFAULT_FONTS).expect("Failed to load the fonts"));
-    let mut engine = JournalEngine::new(symd);
-    let script = format!("{}/{}/{}/journal_entry.rhai", ROOT, journals_dir, journal);
-    let entry = engine.build_entry_file(&script).unwrap_or_else(|e| panic!("{}: {}", journal, e));
+    let journal = Journal::open(format!("{}/{}/{}", ROOT, journals_dir, journal)).unwrap_or_else(|e| panic!("{}", e));
     let only = match pages {
         Pages::All => None,
         Pages::Only(pages) => Some(pages),
     };
+    let failures: Vec<String> = journal.manifest.entries.iter().filter_map(|name| check_entry(&journal, name, only).err()).collect();
+    assert!(failures.is_empty(), "{}", failures.join("\n\n"));
+    // Committed images of entries no longer there.
+    let dir = PathBuf::from(format!("{}/tests/svg_renders/{}", ROOT, journal.name()));
+    let gone: Vec<String> = std::fs::read_dir(&dir).map(|entries| entries.flatten()
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|name| !journal.manifest.entries.contains(name))
+        .collect()).unwrap_or_default();
+    if std::env::var_os("UPDATE_SVG_RENDERS").is_some() {
+        for name in &gone {
+            std::fs::remove_dir_all(dir.join(name)).unwrap();
+        }
+    } else {
+        assert!(gone.is_empty(), "tests/svg_renders/{} has images of entries {} no longer has: {}", journal.name(), journal.name(), gone.join(", "));
+    }
+}
 
-    let expected_dir = PathBuf::from(format!("{}/tests/svg_renders/{}", ROOT, journal));
-    let diff_dir = PathBuf::from(format!("{}/target/svg-render-diffs/{}", ROOT, journal));
+/// Entry `name`'s images, or what's wrong with them.
+fn check_entry(journal: &Journal, name: &str, only: Option<&[usize]>) -> Result<(), String> {
+    let mut engine = journal.engine(Resources::library())?;
+    let entry = journal.build_entry(&mut engine, name)?;
+    let shown = format!("{}/{}", journal.name(), name);
+
+    let expected_dir = PathBuf::from(format!("{}/tests/svg_renders/{}", ROOT, shown));
+    let diff_dir = PathBuf::from(format!("{}/target/svg-render-diffs/{}", ROOT, shown));
     let _ = std::fs::remove_dir_all(&diff_dir);
     let update = std::env::var_os("UPDATE_SVG_RENDERS").is_some();
     if update {
@@ -98,13 +116,17 @@ fn check(journals_dir: &str, journal: &str, pages: Pages) {
             failures.push(format!("{}: committed, but the canvas is no longer drawn", file));
         }
     }
-    assert!(!rendered.is_empty(), "{} drew no canvases", journal);
-    assert!(
-        failures.is_empty(),
-        "{}'s SVG renders differ from tests/svg_renders/{}:\n  {}\nNew renders and diffs are in {}. If the change is meant, \
-         update them with UPDATE_SVG_RENDERS=1 cargo test --release --test svg_renders",
-        journal, journal, failures.join("\n  "), diff_dir.display()
-    );
+    if rendered.is_empty() {
+        return Err(format!("{} drew no canvases", shown));
+    }
+    if !failures.is_empty() {
+        return Err(format!(
+            "{}'s SVG renders differ from tests/svg_renders/{}:\n  {}\nNew renders and diffs are in {}. If the change is meant, \
+             update them with UPDATE_SVG_RENDERS=1 cargo test --release --test svg_renders",
+            shown, shown, failures.join("\n  "), diff_dir.display()
+        ));
+    }
+    Ok(())
 }
 
 fn committed(dir: &Path) -> BTreeSet<String> {
@@ -175,7 +197,8 @@ fn showcase() {
     check("webapp/journals", "showcase", Pages::All);
 }
 
-/// Page 0 of the other journals, as scripts/smoke.sh renders them.
+/// Page 0 of every entry of the other journals, as scripts/smoke.sh renders
+/// them.
 macro_rules! first_pages {
     ($($journal:ident),* $(,)?) => {
         const CHECKED_JOURNALS: &[&str] = &[$(stringify!($journal)),*];
@@ -194,14 +217,13 @@ first_pages!(
     black_priests,
     copper_letter_1,
     first_codex,
-    journal_entry_17,
-    journal_entry_18,
+    journal_entries,
     lang_font,
     loche_rules,
     matter_of_pyrius,
-    nivelia_letter,
-    nivelia_response,
+    nivelia_letters,
     raven_constellations,
+    the_collector_pages,
     welcome_home,
 );
 
@@ -210,7 +232,7 @@ fn every_journal_is_checked() {
     let checked = [CHECKED_JOURNALS, &["showcase"]].concat();
     let missing: Vec<String> = std::fs::read_dir(format!("{}/webapp/journals", ROOT)).unwrap()
         .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
-        .filter(|name| Path::new(&format!("{}/webapp/journals/{}/journal_entry.rhai", ROOT, name)).is_file())
+        .filter(|name| Path::new(&format!("{}/webapp/journals/{}/journal.json", ROOT, name)).is_file())
         .filter(|name| !checked.contains(&name.as_str()))
         .collect();
     assert!(missing.is_empty(), "add these journals to first_pages! in tests/svg_renders.rs: {}", missing.join(", "));

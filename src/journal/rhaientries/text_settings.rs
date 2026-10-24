@@ -391,8 +391,10 @@ pub(super) struct TextSettings {
     pub(super) options: Map,
 }
 
-/// The keys every text call takes, besides its own.
-pub(super) const TEXT_KEYS: [&str; 3] = ["style", "type", "paragraph"];
+/// The keys every text call takes, besides its own: a role's, so a role
+/// (or a text style) can be passed straight in. `spans` is for marked-up
+/// text, and ignored by calls that set plain text.
+pub(super) const TEXT_KEYS: [&str; 4] = ["style", "type", "paragraph", "spans"];
 
 impl TextSettings {
     /// `caller`'s settings: a style (default `default_style()`), a type
@@ -402,6 +404,7 @@ impl TextSettings {
         let mut known: Vec<&str> = TEXT_KEYS.to_vec();
         known.extend(own);
         check_keys(caller, &settings, &known)?;
+        settings.remove("spans");
         let style = match settings.remove("style") {
             None => Style::default_style(),
             Some(style) => Style::given(&format!("{} 'style'", caller), &style, &Style::default_style())?,

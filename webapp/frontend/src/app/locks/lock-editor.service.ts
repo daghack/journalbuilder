@@ -157,11 +157,11 @@ export class LockEditorService {
   private readonly untouched = signal<ChainModel | null>(this.model());
   /** The chain as last opened, and the workspace's copy it was read from (null: the file compiled in), for Revert. */
   private readonly loaded = signal<{ name: string; model: ChainModel; source: string | null } | null>(null);
-  /** Whether the chain being edited is one of webapp/chains/'s. */
+  /** Whether the chain being edited is one of webapp/library/chains/'s. */
   readonly builtin = computed(() => this.chainTypes().some((c) => c.name === this.model().name && c.builtin));
   /**
    * Whether there's something to revert: this browser's copy of a chain in
-   * webapp/chains/, or edits since a chain only this browser has was opened.
+   * webapp/library/chains/, or edits since a chain only this browser has was opened.
    */
   readonly canRevert = computed(() => {
     if (this.builtin()) return this.model().name in this.workspace.chains() || this.model() !== this.untouched();
@@ -418,7 +418,7 @@ export class LockEditorService {
   renameNode(id: string, to: string): string | null {
     if (to === id) return null;
     if (!to || to.includes('.')) return "a lock's name must be non-empty, without '.'";
-    if (this.model().nodes.some((n) => n.id === to) || this.model().renderers.some((r) => r.id === to)) return `there's already a lock or renderer named '${to}'`;
+    if (this.model().nodes.some((n) => n.id === to) || this.model().renderers.some((r) => r.id === to)) return `there's already a lock or illustration named '${to}'`;
     this.update((m) => chain.renameNode(m, id, to));
     if (this.selected() === id) this.selected.set(to);
     return null;
@@ -614,7 +614,7 @@ export class LockEditorService {
 
   private async previewEditing(draft: RendererDraft) {
     if (!/^[A-Za-z0-9_]+$/.test(draft.name)) {
-      this.editingPreview.set({ error: "A renderer's name is its file's: letters, digits and _ only." });
+      this.editingPreview.set({ error: "An illustration's name is its file's: letters, digits and _ only." });
       return;
     }
     const preview = await this.tools.renderPreview(draft.name, draft.source, {}, null).catch((err: Error) => ({ error: err.message }));
@@ -624,7 +624,7 @@ export class LockEditorService {
     if (!failed(preview)) this.workspace.setRenderer(draft.name, draft.source);
   }
 
-  /** Save the renderer file: into the workspace, and to a file to put in webapp/renderers/. */
+  /** Save the illustration file: into the workspace, and to a file to put in webapp/library/illustrations/. */
   async saveRenderer() {
     const draft = this.editing();
     if (!draft) return;
@@ -634,9 +634,9 @@ export class LockEditorService {
     try {
       await this.files.save(draft.source, `${draft.name}.rhai`, null, RHAI_FILES);
     } catch (err) {
-      return this.editingSaved.set(`Added ${draft.name} to this browser's renderers, but couldn't write the file: ${(err as Error).message}`);
+      return this.editingSaved.set(`Added ${draft.name} to this browser's illustrations, but couldn't write the file: ${(err as Error).message}`);
     }
-    this.editingSaved.set(`${draft.name} is a renderer in this browser now: in the palette, and in journals as lock.attach("x", "${draft.name}"). To add it to the repository, put ${draft.name}.rhai in webapp/renderers/ and rebuild the renderer (npm run wasm).`);
+    this.editingSaved.set(`${draft.name} is an illustration in this browser now: in the palette, and in journals as lock.attach("x", "${draft.name}"). To add it to the repository, put ${draft.name}.rhai in webapp/library/illustrations/ and rebuild the renderer (npm run wasm).`);
   }
 
   /** Remove a renderer type only this browser has. */
@@ -748,7 +748,7 @@ export class LockEditorService {
       nodes,
       wires: (file.chain.connect ?? []).map(([from, to]) => ({ from, to })),
     };
-    for (const [id, spec] of Object.entries(file.chain.renderers ?? {})) {
+    for (const [id, spec] of Object.entries(file.chain.illustrations ?? {})) {
       const [x, y] = file.layout?.[id] ?? [120 + 360 * nodes.length, 300];
       model.renderers.push({ id, type: spec.type, ...split(spec.options), x, y });
       for (const [input, port] of Object.entries(spec.inputs ?? {})) model.renderWires.push({ from: port, to: `${id}.${input}` });
@@ -768,7 +768,7 @@ export class LockEditorService {
   }
 
   /**
-   * Throw away this browser's edits to the chain. One in webapp/chains/ is
+   * Throw away this browser's edits to the chain. One in webapp/library/chains/ is
    * read again from there, its copy here gone, so journals use the file;
    * one only this browser has goes back to how it was opened.
    */
@@ -777,7 +777,7 @@ export class LockEditorService {
     if (this.builtin()) {
       if (this.liveTimer) clearTimeout(this.liveTimer);
       this.workspace.removeChain(name);
-      if (await this.read(name, null)) this.note.set({ kind: 'ok', text: `${name} is back as it is in webapp/chains/; journals use that again.` });
+      if (await this.read(name, null)) this.note.set({ kind: 'ok', text: `${name} is back as it is in webapp/library/chains/; journals use that again.` });
       return;
     }
     const loaded = this.loaded();
@@ -793,7 +793,7 @@ export class LockEditorService {
     this.note.set({ kind: 'ok', text: `${loaded.name} is back as it was opened.` });
   }
 
-  /** Save the chain file, to put in webapp/chains/; it's in this browser's workspace already. */
+  /** Save the chain file, to put in webapp/library/chains/; it's in this browser's workspace already. */
   async save() {
     const model = this.model();
     const name = model.name;
@@ -813,7 +813,7 @@ export class LockEditorService {
       : result && failed(result) ? ` Its test run fails, though: ${result.error}` : '';
     this.note.set({
       kind: 'ok',
-      text: `Saved ${name}.rhai. To add it to the repository, put it in webapp/chains/ and rebuild the renderer (npm run wasm).${unchecked}`,
+      text: `Saved ${name}.rhai. To add it to the repository, put it in webapp/library/chains/ and rebuild the renderer (npm run wasm).${unchecked}`,
     });
   }
 

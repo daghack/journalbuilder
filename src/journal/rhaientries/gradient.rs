@@ -163,7 +163,7 @@ mod tests {
     use std::rc::Rc;
 
     fn engine() -> JournalEngine {
-        JournalEngine::new(Rc::new(FontBook::from_file(crate::journal::fonts::DEFAULT_FONTS).unwrap()))
+        JournalEngine::new(Rc::new(FontBook::from_file(crate::journal::fonts::DEFAULT_GLYPHSETS).unwrap()))
     }
 
     fn gradient(script: &str) -> Gradient {

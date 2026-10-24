@@ -42,18 +42,18 @@ function parseValue(text: string, type: string): { value: TestValue; problem: st
       <label class="field">
         <span>Name</span>
         <input type="text" [value]="editor.model().name" (input)="editor.setName($any($event.target).value)" (blur)="editor.settle()" spellcheck="false" />
-        <span class="hint">Its file is webapp/chains/{{ editor.model().name }}.rhai.</span>
+        <span class="hint">Its file is webapp/library/chains/{{ editor.model().name }}.rhai.</span>
       </label>
       <label class="stack">
         <span class="hint">What it does (the file's opening comment)</span>
         <textarea rows="2" [value]="editor.model().description" (input)="editor.setDescription($any($event.target).value)" (blur)="editor.settle()"></textarea>
       </label>
       <div class="row">
-        <button type="button" class="primary" (click)="editor.save()" title="Save the chain file, to put in webapp/chains/">Save file</button>
+        <button type="button" class="primary" (click)="editor.save()" title="Save the chain file, to put in webapp/library/chains/">Save file</button>
         <button type="button" (click)="editor.openFile()" title="Open a chain file">Open…</button>
         <button type="button" (click)="editor.newChain()">New</button>
         <button type="button" (click)="revert()" [disabled]="!editor.canRevert()"
-                [title]="editor.builtin() ? 'Throw away the edits made in this browser: put the chain back as it is in webapp/chains/' : 'Throw away the edits since the chain was opened'">Revert</button>
+                [title]="editor.builtin() ? 'Throw away the edits made in this browser: put the chain back as it is in webapp/library/chains/' : 'Throw away the edits since the chain was opened'">Revert</button>
       </div>
       <div class="row">
         <button type="button" (click)="copy('chain')" title="A journal script using the chain: chain(name)">Copy journal snippet</button>
@@ -124,9 +124,9 @@ function parseValue(text: string, type: string): { value: TestValue; problem: st
 
     @if (editor.renderer(); as renderer) {
       <section class="panel-section">
-        <h3>Renderer</h3>
+        <h3>Illustration</h3>
         <div class="row">
-          <input type="text" class="mono" aria-label="Renderer name" [value]="nodeName() ?? renderer.id" (input)="nodeName.set($any($event.target).value)" (keydown.enter)="rename(renderer.id)" />
+          <input type="text" class="mono" aria-label="Illustration name" [value]="nodeName() ?? renderer.id" (input)="nodeName.set($any($event.target).value)" (keydown.enter)="rename(renderer.id)" />
           <button type="button" (click)="rename(renderer.id)" [disabled]="nodeName() === null || nodeName() === renderer.id">Rename</button>
           <button type="button" class="danger" (click)="editor.removeNode(renderer.id)">Remove</button>
         </div>
@@ -153,7 +153,7 @@ function parseValue(text: string, type: string): { value: TestValue; problem: st
           </div>
         }
         <div class="row">
-          <button type="button" (click)="editor.editRenderer(renderer.type)" title="Edit this renderer's file">Edit {{ renderer.type }}.rhai</button>
+          <button type="button" (click)="editor.editRenderer(renderer.type)" title="Edit this illustration's file">Edit {{ renderer.type }}.rhai</button>
         </div>
         <h4>What it draws of the run</h4>
         @if (editor.previews()[renderer.id]; as preview) {
@@ -328,7 +328,7 @@ export class LockPanelComponent {
 
   protected revert() {
     const name = this.editor.model().name;
-    if (confirm(this.editor.builtin() ? `Throw away this browser's edits to ${name} and use webapp/chains/${name}.rhai again?` : `Throw away the edits to ${name} since it was opened?`)) void this.editor.revert();
+    if (confirm(this.editor.builtin() ? `Throw away this browser's edits to ${name} and use webapp/library/chains/${name}.rhai again?` : `Throw away the edits to ${name} since it was opened?`)) void this.editor.revert();
   }
 
   protected rename(id: string) {

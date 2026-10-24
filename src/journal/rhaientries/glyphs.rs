@@ -1,6 +1,7 @@
 //! Glyphsets and glyphs for rhai scripts.
 //!
-//! Glyphsets come from the glyphset files (`webapp/fonts/`, see fonts.rs),
+//! Glyphsets come from the glyphset files (a journal's `glyphsets/` over
+//! the library's, see fonts.rs and resources.rs),
 //! each with its glyphs and the settings text is set with by default (a
 //! type style can override them). A glyphset is a value: changing one
 //! changes that copy, not the glyphset everywhere.
@@ -317,7 +318,7 @@ mod tests {
     use super::*;
 
     fn engine() -> JournalEngine {
-        let symd = FontBook::from_file(crate::journal::fonts::DEFAULT_FONTS).expect("Failed to load fonts.json");
+        let symd = FontBook::from_file(crate::journal::fonts::DEFAULT_GLYPHSETS).expect("Failed to load fonts.json");
         JournalEngine::new(Rc::new(symd))
     }
 

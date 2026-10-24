@@ -1,4 +1,4 @@
-//! Chain files: lock types wired together, with the renderers that draw
+//! Chain files: lock types wired together, with the illustrations that draw
 //! their values, saved as a file of their own, `<chains dir>/<name>.rhai`,
 //! for journals to use with `chain(name)`. A chain file defines
 //!
@@ -9,7 +9,7 @@
 //!         locks: #{ shift: #{ type: "shift_cipher", options: #{ base: 27, shift: o.shift } }, ... },
 //!         connect: [["shift.cipher_text", "vig.key"]],
 //!         fixed: #{ "vig.plain_text": symbols(27, "HELLO") },
-//!         renderers: #{ msg: #{ type: "trit_message", options: #{ base: 27 }, inputs: #{ message: "vig.cipher_text" } } },
+//!         illustrations: #{ msg: #{ type: "trit_message", options: #{ base: 27 }, inputs: #{ message: "vig.cipher_text" } } },
 //!     }
 //! }
 //! fn layout() { #{ shift: [120, 60], vig: [480, 60], msg: [480, 260] } }  // optional
@@ -18,7 +18,7 @@
 //!
 //! Its values are its locks' own, "lock.port", as `new_lock` names them.
 //! It runs in the lock files' engine, so `chain(o)` and `example()` write
-//! values as lock files do; renderers are only named here, and load in the
+//! values as lock files do; illustrations are only named here, and load in the
 //! journal's engine when a journal uses the chain.
 
 use super::chain::{connections, lock_entries, map, port_type};
@@ -30,7 +30,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
 /// The keys a chain file's `chain(o)` returns.
-const KEYS: [&str; 4] = ["locks", "connect", "fixed", "renderers"];
+const KEYS: [&str; 4] = ["locks", "connect", "fixed", "illustrations"];
 
 /// What a chain file's `chain(o)` gives, for some options.
 pub struct ChainSpec {
@@ -42,14 +42,14 @@ pub struct ChainSpec {
     pub connect: Vec<(String, String)>,
     /// Values for inputs, as `chain(o)` wrote them (symbols as arrays).
     pub fixed: Vec<(String, Dynamic)>,
-    pub renderers: Vec<RendererSpec>,
+    pub illustrations: Vec<IllustrationSpec>,
 }
 
-/// A renderer a chain file attaches: its id, type and options, and the
+/// An illustration a chain file attaches: its id, type and options, and the
 /// port of the chain each of its inputs draws.
-pub struct RendererSpec {
+pub struct IllustrationSpec {
     pub id: String,
-    pub renderer: String,
+    pub illustration: String,
     pub options: Map,
     pub inputs: Vec<(String, String)>,
 }
@@ -116,7 +116,7 @@ impl LockLibrary {
     }
 
     /// The chain's locks, wired and with their fixed values, without its
-    /// renderers: what running it locks with.
+    /// illustrations: what running it locks with.
     pub fn chain_lock(self: &Rc<Self>, spec: &ChainSpec) -> Result<CompositeLock, String> {
         let at = |e: String| format!("{}: {}", spec.file, e);
         let mut locks: HashMap<String, Rc<dyn Lock>> = HashMap::new();
@@ -129,10 +129,10 @@ impl LockLibrary {
                 .ok_or_else(|| at(format!("fixed: '{}' isn't an input of the chain's locks", port)))?;
             fixed.push((port.clone(), from_script(value.clone(), &var_type).map_err(|e| at(format!("fixed: '{}': {}", port, e)))?));
         }
-        for renderer in &spec.renderers {
-            for (input, port) in &renderer.inputs {
+        for illustration in &spec.illustrations {
+            for (input, port) in &illustration.inputs {
                 if port_type(&locks, port, |lock| lock.outputs()).or_else(|| port_type(&locks, port, |lock| lock.inputs())).is_none() {
-                    return Err(at(format!("renderers: '{}' draws '{}' at its input '{}', which isn't a port of the chain's locks", renderer.id, port, input)));
+                    return Err(at(format!("illustrations: '{}' draws '{}' at its input '{}', which isn't a port of the chain's locks", illustration.id, port, input)));
                 }
             }
         }
@@ -193,26 +193,26 @@ impl LockLibrary {
 
 /// What `chain(o)` returned, checked for its shape.
 pub(super) fn parse(name: &str, file: &str, spec: Dynamic) -> Result<ChainSpec, String> {
-    let spec = spec.try_cast::<Map>().ok_or("must return a map, #{ locks, connect, fixed, renderers }")?;
+    let spec = spec.try_cast::<Map>().ok_or("must return a map, #{ locks, connect, fixed, illustrations }")?;
     if let Some(unknown) = spec.keys().find(|key| !KEYS.contains(&key.as_str())) {
         return Err(format!("returned '{}'; it returns {}", unknown, KEYS.join(", ")));
     }
     let locks = lock_entries(&spec)?;
     let fixed = map(&spec, "fixed", false)?.into_iter().map(|(port, value)| (port.to_string(), value)).collect();
-    let mut renderers = Vec::new();
-    for (id, entry) in map(&spec, "renderers", false)? {
+    let mut illustrations = Vec::new();
+    for (id, entry) in map(&spec, "illustrations", false)? {
         if id.is_empty() || id.contains('.') {
-            return Err(format!("renderers: '{}' can't be a renderer's id; ids must be non-empty, without '.'", id));
+            return Err(format!("illustrations: '{}' can't be an illustration's id; ids must be non-empty, without '.'", id));
         }
         if locks.iter().any(|(lock, _, _)| lock == id.as_str()) {
-            return Err(format!("renderers: '{}' is a lock's name too", id));
+            return Err(format!("illustrations: '{}' is a lock's name too", id));
         }
-        let bad = |what: &str| format!("renderers: '{}' {}", id, what);
+        let bad = |what: &str| format!("illustrations: '{}' {}", id, what);
         let entry = entry.try_cast::<Map>().ok_or_else(|| bad("should be a map, #{ type, options, inputs }"))?;
         if let Some(unknown) = entry.keys().find(|key| !["type", "options", "inputs"].contains(&key.as_str())) {
-            return Err(bad(&format!("has '{}'; a renderer takes type, options and inputs", unknown)));
+            return Err(bad(&format!("has '{}'; an illustration takes type, options and inputs", unknown)));
         }
-        let renderer = entry.get("type").and_then(|t| t.clone().into_string().ok()).ok_or_else(|| bad("needs its type, a renderer's name"))?;
+        let illustration = entry.get("type").and_then(|t| t.clone().into_string().ok()).ok_or_else(|| bad("needs its type, an illustration's name"))?;
         let options = match entry.get("options") {
             None => Map::new(),
             Some(options) => options.clone().try_cast::<Map>().ok_or_else(|| bad("has options that aren't a map"))?,
@@ -224,7 +224,7 @@ pub(super) fn parse(name: &str, file: &str, spec: Dynamic) -> Result<ChainSpec, 
         let inputs = inputs.into_iter()
             .map(|(input, port)| Ok((input.to_string(), port.into_string().map_err(|_| bad(&format!("gives its input '{}' a port that isn't a string", input)))?)))
             .collect::<Result<Vec<_>, String>>()?;
-        renderers.push(RendererSpec { id: id.to_string(), renderer, options, inputs });
+        illustrations.push(IllustrationSpec { id: id.to_string(), illustration, options, inputs });
     }
-    Ok(ChainSpec { name: name.to_string(), file: file.to_string(), locks, connect: connections(&spec)?, fixed, renderers })
+    Ok(ChainSpec { name: name.to_string(), file: file.to_string(), locks, connect: connections(&spec)?, fixed, illustrations })
 }

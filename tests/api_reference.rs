@@ -2,11 +2,10 @@
 //! should have an entry there. This fails when one isn't in any entry's
 //! signature (see CLAUDE.md).
 
-use scribe::journal::rhaientries::JournalEngine;
-use scribe::journal::fonts::{FontBook, DEFAULT_FONTS};
+use scribe::journal::rhaientries::{JournalEngine, Resources};
 use std::rc::Rc;
 
-const REFERENCE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/webapp/journals/api_reference/journal_entry.rhai");
+const REFERENCE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/webapp/journals/api_reference/entries/api_reference.rhai");
 
 /// The signature of every `api("signature", "description")` entry.
 fn signatures(script: &str) -> Vec<&str> {
@@ -30,11 +29,12 @@ fn mentions(text: &str, word: &str) -> bool {
 
 #[test]
 fn every_function_scripts_can_call_has_an_entry() {
-    let script = std::fs::read_to_string(REFERENCE).expect("webapp/journals/api_reference/journal_entry.rhai");
+    let script = std::fs::read_to_string(REFERENCE).expect("webapp/journals/api_reference/entries/api_reference.rhai");
     let signatures = signatures(&script);
     assert!(signatures.len() > 100, "found only {} api(...) entries in the reference", signatures.len());
-    let symd = Rc::new(FontBook::from_file(DEFAULT_FONTS).unwrap());
-    let missing: Vec<String> = JournalEngine::new(symd).function_names().into_iter()
+    let library = Resources::library();
+    let symd = Rc::new(library.glyphset_book().unwrap());
+    let missing: Vec<String> = JournalEngine::with_resources(symd, library).function_names().into_iter()
         // Properties: `get$name` and `set$name`.
         .map(|name| name.trim_start_matches("get$").trim_start_matches("set$").to_string())
         .filter(|name| !signatures.iter().any(|signature| mentions(signature, name)))

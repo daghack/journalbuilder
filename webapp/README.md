@@ -33,7 +33,7 @@ The SVG preview works anywhere.
 
 ## Fonts
 
-The whole of `fonts/` (a file per font), one font at a time: its glyphs on the
+The whole of the library's `glyphsets/` (a file per glyphset), one font at a time: its glyphs on the
 left, each with its variants; the variant you pick in the middle, to draw;
 the font's options on the right.
 
@@ -57,15 +57,15 @@ the font's options on the right.
   fixed.
 - **Export** writes the whole fonts.json in the layout it is kept in,
   one glyph to a line, so a glyph changed is a line changed in the diff.
-  Split it into `fonts/` with `npm run split-fonts -- exported.json`. A new font of 20 glyphs or more needs a
+  Split it into `library/glyphsets/` with `npm run split-fonts -- exported.json`. A new font of 20 glyphs or more needs a
   line in the showcase.
 
 ## Locks
 
-Chains, built as graphs: the chains (every `chains/*.rhai`, and this
-browser's), lock types (every `locks/*.rhai`) and renderers (every
-`renderers/*.rhai`) on the left, the chain in the middle, and on the right
-its name, the picked lock's or renderer's options, and the chain's inputs
+Chains, built as graphs: the chains (every `library/chains/*.rhai`, and this
+browser's), lock types (every `library/locks/*.rhai`) and illustrations
+(every `library/illustrations/*.rhai`) on the left, the chain in the middle, and on the right
+its name, the picked lock's or illustration's options, and the chain's inputs
 and outputs with a test case. A journal uses a chain by name:
 
 ```rhai
@@ -87,7 +87,7 @@ let pages = result.canvases("mg");
   its options (`merge_alpha`'s `input_count`, say).
 - **Ports.** The inputs and outputs left unwired are the chain's, named
   as its locks name them, `lock.port`. Fix an input to give it its value
-  in the chain itself. "Chain's" makes a lock's or renderer's option one
+  in the chain itself. "Chain's" makes a lock's or illustration's option one
   of the chain's own, which a journal gives as `chain("name", #{...})`.
 - **Testing.** Give each input a test value and the chain runs as you
   edit: its outputs, the values along each wire, and whether unlocking
@@ -97,28 +97,28 @@ let pages = result.canvases("mg");
   FOX"), 27, 3)`. A value kind with a sketch, such as a StarChart from
   `star_chart`, is drawn under its output. The test case is the chain
   file's `example()`.
-- **Renderers.** A renderer draws the chain's values as canvases: a star
+- **Illustrations.** An illustration draws the chain's values as canvases: a star
   chart's pages, a maze with its glyphs. Drag one in (or click it) and wire
   a value to its inputs; the chain itself is left as it was. Pick it to set
-  its options and see what it draws of the test run. New writes a renderer
+  its options and see what it draws of the test run. New writes an illustration
   file in the browser and Edit opens one; the middle becomes its editor,
   previewing its `example()` as you type, and it's usable as it draws (see
-  renderers/README.md). A journal's `result.canvases("id")` is what it draws.
+  library/illustrations/README.md). A journal's `result.canvases("id")` is what it draws.
 - **Saving** writes the chain file. To add it to the repository, put it in
-  `chains/` (see chains/README.md), use it in the showcase, and rebuild
+  `library/chains/` (see library/chains/README.md), use it in the showcase, and rebuild
   the renderer. Open… reads a chain file back. The snippets copy journal
   script: `chain("name")` in use, or the chain built lock by lock with
   `new_lock`.
 
 ## The workspace
 
-Fonts edited, and chains, renderers and lock types made here, are the
+Fonts edited, and chains, illustrations and lock types made here, are the
 workspace: every script, in every editor, runs with them (the diagnostics
 say when), and Darkly renders and exports do too. They're kept in this
 browser only until exported into the repository; the tabs show what's in
 use, and Clear workspace, beside them, throws it all away (and the
 editors' drafts) to use the repository's files again. If the files in
-fonts/ change after edits began, the font editor says so.
+library/glyphsets/ change after edits began, the font editor says so.
 
 ## Running it
 
@@ -168,7 +168,7 @@ reuse BuildKit's caches.
 
 | path | what's there |
 |---|---|
-| `wasm/` | `scribe-wasm`, the renderer for the browser: the `scribe` library with the layout, lock, renderer and chain files and fonts compiled in (its `embedded-assets` feature). `evaluate(source)` runs a script and lists its pages, `pageSvg(i)` draws one as SVG, and `Renderer` renders pages with Darkly (`renderPage`, `exportPdf`). `setWorkspace(fonts, locks, renderers, chains)` has scripts run with edited fonts and extra lock, renderer and chain files. For the font and lock editors: `previewSvg`, `builtinFonts`, `lockTypes`, `lockPorts`, `chainTypes`, `runChain`, `readChain`, `valueKinds`, `rendererTypes`, `rendererPorts`, `renderPreview` and `rendererSource`. |
+| `wasm/` | `scribe-wasm`, the renderer for the browser: the `scribe` library with the built-in library (`library/`) compiled in (its `embedded-assets` feature). `evaluate(source)` runs a script and lists its pages, `pageSvg(i)` draws one as SVG, and `Renderer` renders pages with Darkly (`renderPage`, `exportPdf`). `setWorkspace(fonts, locks, renderers, chains)` has scripts run with edited fonts and extra lock, renderer and chain files. For the font and lock editors: `previewSvg`, `builtinFonts`, `lockTypes`, `lockPorts`, `chainTypes`, `runChain`, `readChain`, `valueKinds`, `rendererTypes`, `rendererPorts`, `renderPreview` and `rendererSource`. |
 | `frontend/` | the Angular app (standalone components, signals, no zone.js) |
 | `frontend/src/app/workers/` | the web workers the renderer runs in. `eval.worker` runs the script as you type, sends its pages, then sends each page's SVG, the page shown first. `darkly.worker` renders with Darkly. `tools.worker` answers the font and lock editors. Typing never waits on any of them. |
 | `frontend/src/app/services/` | `JournalService` (the script, its pages, the file), `RenderService` (the script and Darkly workers), `ToolsService` (the tools worker), `WorkspaceService` (edited fonts, and lock, renderer and chain files), `FileService` (opening, saving, downloads) |
@@ -176,7 +176,7 @@ reuse BuildKit's caches.
 | `frontend/src/app/fonts/` | the font editor. `font-file.ts` reads and writes fonts.json; `glyph-path.ts` reads and writes path data; `glyph-edit.ts` is what the canvas does to a path. |
 | `frontend/src/app/locks/` | the lock editor. `chain-model.ts` is the graph and its rules; `chain-source.ts` writes it as a chain file; `renderer-editor.component.ts` edits renderer files. |
 | `frontend/src/app/editor/` | the CodeMirror editor and its rhai highlighting (`rhai-language.ts`) |
-| `frontend/scripts/examples.mjs` | copies `journals/*/journal_entry.rhai` into `generated/examples/` for the Examples menu, and the repository files the unit tests check against into `generated/fixtures/` |
+| `frontend/scripts/examples.mjs` | copies every entry of every journal, `journals/*/entries/*.rhai`, into `generated/examples/` for the Examples menu, and the repository files the unit tests check against into `generated/fixtures/` |
 
 While one script runs, only the newest edit waits to run next. A script
 that runs for more than 20 seconds (an endless loop, say) is stopped and

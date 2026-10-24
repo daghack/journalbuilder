@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "title": "Raven Constellations",
+  "description": "A message locked with a text's Huffman code, and the code drawn as a sky of constellations, a page each.",
+  "entries": [
+    "raven_constellations"
+  ]
+}

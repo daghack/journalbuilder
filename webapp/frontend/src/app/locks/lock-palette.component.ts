@@ -7,7 +7,7 @@ import { LockEditorService } from './lock-editor.service';
   selector: 'app-lock-palette',
   template: `
     <div class="head">
-      <input type="text" placeholder="Find a lock type or renderer" aria-label="Find a lock type" [value]="filter()" (input)="filter.set($any($event.target).value)" />
+      <input type="text" placeholder="Find a lock type or illustration" aria-label="Find a lock type" [value]="filter()" (input)="filter.set($any($event.target).value)" />
     </div>
     @if (editor.typesError(); as error) { <p class="error">{{ error }}</p> }
     <h3 class="renderers-head">Chains <button type="button" class="open" (click)="editor.newChain()" title="Start a new chain">New</button></h3>
@@ -42,7 +42,7 @@ import { LockEditorService } from './lock-editor.service';
         </ul>
       }
     }
-    <h3 class="renderers-head">Renderers <button type="button" class="open" (click)="editor.newRenderer()" title="Write a new renderer file">New</button></h3>
+    <h3 class="renderers-head">Illustrations <button type="button" class="open" (click)="editor.newRenderer()" title="Write a new illustration file">New</button></h3>
     <p class="note">Draw a lock's values as canvases: wire an output to one. Journals attach them with lock.attach.</p>
     <ul>
       @for (type of renderers(); track type.name) {
@@ -50,9 +50,9 @@ import { LockEditorService } from './lock-editor.service';
             (click)="!type.error && addRenderer(type)" [title]="type.error ?? type.description ?? ''">
           <span class="name">{{ type.name }}</span>
           @if (type.workspace) { <span class="tag" title="Only in this browser">browser</span> }
-          <button type="button" class="open" (click)="$event.stopPropagation(); editor.editRenderer(type.name)" title="Edit this renderer's file">Edit</button>
+          <button type="button" class="open" (click)="$event.stopPropagation(); editor.editRenderer(type.name)" title="Edit this illustration's file">Edit</button>
           @if (type.workspace) {
-            <button type="button" class="remove" (click)="$event.stopPropagation(); editor.removeWorkspaceRenderer(type.name)" title="Remove this renderer from this browser">×</button>
+            <button type="button" class="remove" (click)="$event.stopPropagation(); editor.removeWorkspaceRenderer(type.name)" title="Remove this illustration from this browser">×</button>
           }
           <span class="about">{{ type.error ?? type.description }}</span>
         </li>

@@ -3,11 +3,11 @@
 //! and the helpers journals share.
 
 use super::JournalEngine;
-use crate::journal::fonts::{FontBook, DEFAULT_FONTS};
+use crate::journal::fonts::{FontBook, DEFAULT_GLYPHSETS};
 use std::rc::Rc;
 
 fn engine() -> JournalEngine {
-    JournalEngine::new(Rc::new(FontBook::from_file(DEFAULT_FONTS).expect("fonts.json")))
+    JournalEngine::new(Rc::new(FontBook::from_file(DEFAULT_GLYPHSETS).expect("fonts.json")))
 }
 
 fn eval_bool(script: &str) -> bool {

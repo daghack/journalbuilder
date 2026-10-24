@@ -1,6 +1,7 @@
-//! Fonts: glyphs by character, with the settings text is set with, loaded
-//! from the font files (by default the directory `webapp/fonts`, a file
-//! for each font, named for it: `copper.json` holds the font `copper`):
+//! Glyphsets (fonts, here): glyphs by character, with the settings text is
+//! set with, loaded from the glyphset files (a journal's `glyphsets/` over
+//! the library's `webapp/library/glyphsets/`, a file for each glyphset,
+//! named for it: `copper.json` holds the glyphset `copper`):
 //!
 //! ```json
 //! {
@@ -46,9 +47,9 @@ use std::rc::Rc;
 use super::paths::StrokePath;
 use super::symbol::{Symbol, SymbolBase, SymbolType};
 
-/// The repository's fonts directory. Resolved at build time, so it's found
-/// whatever directory journalbuild (or a test) runs from.
-pub const DEFAULT_FONTS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/webapp/fonts");
+/// The built-in library's glyphsets directory. Resolved at build time, so
+/// it's found whatever directory journalbuild (or a test) runs from.
+pub const DEFAULT_GLYPHSETS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/webapp/library/glyphsets");
 
 /// The fonts in directory `dir`, one `NAME.json` file each, as one font
 /// file's text: `{ "NAME": <that file's font>, ... }`, sorted by name.
@@ -263,6 +264,17 @@ impl FontBook {
     }
     pub fn from_bytes(bytes: &[u8]) -> Result<FontBook, String> {
         let entries: BTreeMap<String, FontEntry> = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
+        Self::from_entries(entries)
+    }
+    /// Load glyphset files, one glyphset each: (name, path, text). Errors
+    /// in a file name its path.
+    pub fn from_files(files: Vec<(String, String, String)>) -> Result<FontBook, String> {
+        let entries = files.into_iter()
+            .map(|(name, path, text)| serde_json::from_str(&text).map(|entry| (name, entry)).map_err(|e| format!("{}: {}", path, e)))
+            .collect::<Result<BTreeMap<String, FontEntry>, String>>()?;
+        Self::from_entries(entries)
+    }
+    fn from_entries(entries: BTreeMap<String, FontEntry>) -> Result<FontBook, String> {
         let mut loaded: BTreeMap<String, (Rc<Glyphs>, &FontEntry)> = BTreeMap::new();
         for (name, entry) in &entries {
             let bad = |what: String| format!("font '{}': {}", name, what);
@@ -536,7 +548,7 @@ mod tests {
 
     #[test]
     fn the_repository_font_file_loads() {
-        let b = FontBook::from_file(DEFAULT_FONTS).unwrap();
+        let b = FontBook::from_file(DEFAULT_GLYPHSETS).unwrap();
         for name in ["copper", "plain", "loche_upper", "loche_lower", "lang", "eldritch", "sharp_lower", "nivelia", "balanced_ternary", "symbols"] {
             assert!(b.font(name).is_some(), "{}", name);
         }

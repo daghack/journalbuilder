@@ -29,12 +29,12 @@ function rendererDocument(): EditorDocument {
   providers: [{ provide: EDITOR_DOCUMENT, useFactory: rendererDocument }],
   template: `
     <div class="toolbar">
-      <span class="label">Renderer</span>
-      <input type="text" class="mono" aria-label="Renderer name" [value]="editor.editing()?.name ?? ''"
+      <span class="label">Illustration</span>
+      <input type="text" class="mono" aria-label="Illustration name" [value]="editor.editing()?.name ?? ''"
              (change)="editor.setRendererName($any($event.target).value)" spellcheck="false" />
-      <span class="hint">renderers/{{ editor.editing()?.name }}.rhai</span>
+      <span class="hint">illustrations/{{ editor.editing()?.name }}.rhai</span>
       <span class="spacer"></span>
-      <button type="button" class="primary" (click)="editor.saveRenderer()" title="Check it draws its example, add it to this browser's renderers, and save its file">Save renderer</button>
+      <button type="button" class="primary" (click)="editor.saveRenderer()" title="Check it draws its example, add it to this browser's illustrations, and save its file">Save renderer</button>
       <button type="button" (click)="editor.closeRenderer()" title="Back to the chain">Close</button>
     </div>
     <div class="body">

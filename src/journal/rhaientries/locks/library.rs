@@ -1,9 +1,10 @@
-//! Lock types written in rhai, one file per type: `<locks dir>/<type>.rhai`.
-//! Lock files run in an engine of their own and work with plain rhai
-//! values; webapp/locks/README.md describes what a lock file defines. Helpers
-//! they share live in `<locks dir>/lib/`, for `import "lib/<name>"`. A
+//! Lock types written in rhai, one file per type: `locks/<type>.rhai`, a
+//! journal's over the library's (see resources.rs). Lock files run in an
+//! engine of their own and work with plain rhai values;
+//! webapp/library/locks/README.md describes what a lock file defines.
+//! Helpers they share live in `lib/`, for `import "lib/<name>"`. A
 //! composite lock file wires other lock types together instead (`chain`).
-//! Chain files, `<chains dir>/<name>.rhai`, wire lock types together for
+//! Chain files, `chains/<name>.rhai`, wire lock types together for
 //! journals to use with `chain(name)` (`chain_file`).
 
 mod chain;
@@ -14,22 +15,17 @@ pub use inspect::{from_json, to_json, value_from_test, value_view, OptionInfo, P
 
 use super::parse_type;
 use crate::lockbuilder::{base_n_symbols, symbols_to_string, InfoVar, InfoVarSet, InfoVarType, InfoVarTypeSet, Lock};
+use super::super::resources::Resources;
 use super::super::sources::Sources;
 use rhai::{Array, Dynamic, Engine, EvalAltResult, FuncArgs, Map, Scope, AST};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::rc::Rc;
 use chain::Chain;
 
 type RhaiResult<T> = Result<T, Box<EvalAltResult>>;
-
-/// The repository's lock files.
-pub const DEFAULT_LOCKS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/webapp/locks");
-
-/// The repository's chain files.
-pub const DEFAULT_CHAINS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/webapp/chains");
 
 /// The functions every lock file defines: name, parameter count, and how
 /// errors show it.
@@ -202,15 +198,17 @@ impl ScriptError {
 }
 
 impl LockLibrary {
-    pub fn new(dir: impl Into<PathBuf>) -> Self {
-        Self::with_sources(Sources::dir(dir))
+    /// The lock types and chain files in `resources`, with their helpers
+    /// in its `lib`.
+    pub fn new(resources: &Resources) -> Self {
+        Self::with_sources(resources.locks.clone(), resources.lib.clone()).with_chains(resources.chains.clone())
     }
 
-    /// The lock types in `sources`, with their helpers in `lib/`, and no
+    /// The lock types in `sources`, with their helpers in `lib`, and no
     /// chain files.
-    pub fn with_sources(sources: Sources) -> Self {
+    pub fn with_sources(sources: Sources, lib: Sources) -> Self {
         LockLibrary {
-            engine: lock_engine(&sources),
+            engine: lock_engine(&lib),
             sources,
             chains: Sources::embedded("chains", &[]),
             types: RefCell::default(),
@@ -462,10 +460,11 @@ impl LockLibrary {
     /// imported helpers by their import path.
     fn shown_path(&self, source: &str) -> String {
         let path = Path::new(source);
-        if let Ok(relative) = path.strip_prefix(self.chains.root()) {
-            return format!("chains/{}", relative.to_string_lossy());
+        let in_chains = self.chains.relative(path);
+        if in_chains != path {
+            return format!("chains/{}", in_chains.to_string_lossy());
         }
-        let relative = path.strip_prefix(self.sources.root()).unwrap_or(path);
+        let relative = self.sources.relative(path);
         let mut shown = relative.to_string_lossy().into_owned();
         if relative.extension().is_none() {
             shown.push_str(".rhai");
@@ -599,10 +598,10 @@ impl Lock for RhaiLock {
 /// symbol helpers, value kinds' kernels and seeded generators. Nothing
 /// unseeded and nothing drawn, so a lock is a pure function of its options
 /// and values.
-fn lock_engine(sources: &Sources) -> Engine {
+fn lock_engine(lib: &Sources) -> Engine {
     let mut engine = crate::journal::rhaientries::rhai_engine();
-    // `import "lib/permutations" as perm;` loads <dir>/lib/permutations.rhai.
-    engine.set_module_resolver(sources.module_resolver());
+    // `import "lib/permutations" as perm;` loads lib/permutations.rhai.
+    engine.set_module_resolver(lib.module_resolver());
     // Every value kind's kernels, as their modules (stars::layout(code)),
     // and new_maze, maze.cells() and maze.fill(symbols).
     crate::journal::kinds::register(&mut engine, |_, _| {});
@@ -822,7 +821,7 @@ mod tests {
     /// A lock directory holding `files` (type name, source), removed again
     /// when dropped.
     struct TempLocks {
-        dir: PathBuf,
+        dir: std::path::PathBuf,
     }
 
     impl TempLocks {
@@ -838,7 +837,7 @@ mod tests {
             TempLocks { dir }
         }
         fn library(&self) -> Rc<LockLibrary> {
-            Rc::new(LockLibrary::new(&self.dir))
+            Rc::new(LockLibrary::with_sources(Sources::dir(&self.dir), Sources::dir(self.dir.join("lib"))))
         }
     }
 
@@ -918,8 +917,8 @@ fn unlock(o, out) {{ #{{ text: out.out }} }}
         assert_eq!(err, "can't connect e.out (Base27Symbol) to b.text (Base10Symbol)");
     }
 
-    const SHIFT: &str = include_str!("../../../../webapp/locks/shift_cipher.rhai");
-    const VIGENERE: &str = include_str!("../../../../webapp/locks/vigenere_cipher.rhai");
+    const SHIFT: &str = include_str!("../../../../webapp/library/locks/shift_cipher.rhai");
+    const VIGENERE: &str = include_str!("../../../../webapp/library/locks/vigenere_cipher.rhai");
 
     /// A composite lock file: `options` and `chain`, with `chain`'s body.
     fn chain_file(options: &str, body: &str) -> String {
@@ -1215,9 +1214,9 @@ fn unlock(o, out) {{ #{{ text: out.out }} }}
 
     #[test]
     fn every_lock_file_passes_its_examples() {
-        let library = Rc::new(LockLibrary::new(DEFAULT_LOCKS_DIR));
-        let results = library.check_all().expect("the repository's webapp/locks/ should be readable");
-        assert!(!results.is_empty(), "no lock files in {}", DEFAULT_LOCKS_DIR);
+        let library = Rc::new(LockLibrary::new(&Resources::library()));
+        let results = library.check_all().expect("the library's locks/ should be readable");
+        assert!(!results.is_empty(), "no lock files in the library");
         let failures: Vec<String> = results.iter()
             .filter_map(|(name, result)| match result {
                 Ok(0) => Some(format!("{}: has no examples", name)),

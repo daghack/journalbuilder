@@ -191,7 +191,7 @@ mod tests {
     use std::rc::Rc;
 
     fn engine() -> JournalEngine {
-        let symd = FontBook::from_file(crate::journal::fonts::DEFAULT_FONTS).expect("Failed to load fonts.json");
+        let symd = FontBook::from_file(crate::journal::fonts::DEFAULT_GLYPHSETS).expect("Failed to load fonts.json");
         JournalEngine::new(Rc::new(symd))
     }
 
