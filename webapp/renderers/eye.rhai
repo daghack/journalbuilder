@@ -1,25 +1,25 @@
 // eye: an eye stood on end, its corners top and bottom, its iris ringed
-// with one text's symbols (iris, in iris_base) as balanced-ternary glyphs,
-// clockwise from the top, and its pupil filled with another's (pupil, in
-// pupil_base), as close as they fit. Each symbol is shifted to sit round
+// with one text's symbols (outer, in outer_base) as balanced-ternary glyphs,
+// clockwise from the top, and its pupil filled with another's (inner, in
+// inner_base), as close as they fit. Each symbol is shifted to sit round
 // 0, as a letter of the ternary font: in base 27, space is 0, A to M 1 to
 // 13 and N to Z -13 to -1. Welcome Home's eye holds a substitution
 // cipher's ordering in its iris and the cipher text in its pupil.
 //
 // The canvas is width across and length down, the eye's corners at the
 // middle of its top and bottom edges. Its lines run from top_ink down to
-// bottom_ink; the pupil's glyphs are in pupil_ink.
+// bottom_ink; the pupil's glyphs are in inner_ink.
 
 fn options() {
 	#{
-		iris_base: 27, pupil_base: 27,
+		outer_base: 27, inner_base: 27,
 		length: 1640.0, width: 717.2,
-		top_ink: "#09603d", bottom_ink: "#0b2a1c", pupil_ink: "#000000",
+		top_ink: "#09603d", bottom_ink: "#0b2a1c", inner_ink: "#000000",
 	}
 }
 
 fn inputs(o) {
-	#{ iris: `Base${o.iris_base}Symbol`, pupil: `Base${o.pupil_base}Symbol` }
+	#{ outer: `Base${o.outer_base}Symbol`, inner: `Base${o.inner_base}Symbol` }
 }
 
 fn render(o, i) {
@@ -27,13 +27,13 @@ fn render(o, i) {
 	let shape = eye_shape(centre, o.length, o.width);
 	let canvas = new_canvas();
 	let ink = new_gradient([o.top_ink, o.bottom_ink], #{ vertical: true });
-	draw_eye(canvas, centre, shape, ink, letters(i.iris, o.iris_base));
-	fill_pupil(canvas, centre, shape, o.pupil_ink, letters(i.pupil, o.pupil_base));
+	draw_eye(canvas, centre, shape, ink, letters(i.outer, o.outer_base));
+	fill_pupil(canvas, centre, shape, o.inner_ink, letters(i.inner, o.inner_base));
 	canvas
 }
 
 fn example() {
-	#{ iris: symbols(27, "MQ ZEHWBRKYDTXOAJGNLUFCVISP").symbols(), pupil: symbols(27, "WELCOME HOME").symbols() }
+	#{ outer: symbols(27, "MQ ZEHWBRKYDTXOAJGNLUFCVISP").symbols(), inner: symbols(27, "WELCOME HOME").symbols() }
 }
 
 // Symbols in `base` as the ternary font's letters, each shifted to sit

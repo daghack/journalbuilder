@@ -39,8 +39,8 @@ let lock = new_lock("welcome_home")
 	.add("sub", "substitution_cipher", #{ base_n: 27 })
 	.set_input("sub.ordering", symbols(27, ORDERING))
 	.attach("eye", "eye", #{ length: EYE_LENGTH, width: EYE_WIDTH })
-	.connect("sub.ordering", "eye.iris")
-	.connect("sub.cipher_text", "eye.pupil");
+	.connect("sub.ordering", "eye.outer")
+	.connect("sub.cipher_text", "eye.inner");
 
 // ---- the bramble ----
 

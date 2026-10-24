@@ -1405,12 +1405,12 @@ for (page, i) in drawn_sky.canvases("pages") {
 let watched = new_lock("watched")
 	.add("sub", "substitution_cipher", #{ base_n: 27 })
 	.set_input("sub.ordering", symbols(27, "MQ ZEHWBRKYDTXOAJGNLUFCVISP"))
-	.attach("eye", "eye", #{ top_ink: RED, bottom_ink: INK, pupil_ink: INK })
-	.connect("sub.ordering", "eye.iris")
-	.connect("sub.cipher_text", "eye.pupil")
+	.attach("eye", "eye", #{ top_ink: RED, bottom_ink: INK, inner_ink: INK })
+	.connect("sub.ordering", "eye.outer")
+	.connect("sub.cipher_text", "eye.inner")
 	.run(#{ "sub.plain_text": symbols(27, "EVERY LOCK OPENS") });
 drawn.add(watched.canvases("eye")[0].scale_by(0.22).translate_by(vec2(LEFT + 20, TOP + 890)));
-drawn.add(write_in("eye (iris_base, pupil_base, length, width, top_ink, bottom_ink, pupil_ink):", LEFT + 220, TOP + 1000, 22, CAPTION, PLAIN));
+drawn.add(write_in("eye (outer_base, inner_base, length, width, top_ink, bottom_ink, inner_ink):", LEFT + 220, TOP + 1000, 22, CAPTION, PLAIN));
 drawn.add(write_in("a substitution cipher's ordering round the iris, its cipher text in the pupil", LEFT + 220, TOP + 1034, 22, CAPTION, PLAIN));
 book.bind("locks", drawn);
 
