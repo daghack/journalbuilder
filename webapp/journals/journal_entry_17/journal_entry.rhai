@@ -6,8 +6,12 @@
 //   balanced_ternary  a dial of the 27 balanced-ternary glyphs and their
 //                     digits, with short notes scattered over it.
 
-let maze_brush = new_brush("Calligraphy", 0.15, 0.25, 1.5);
-let dial_brush = new_brush("Calligraphy", 0.15, 0.25, 1.5);
+// The Calligraphy nib in `color`, pressed `weight` times as hard as it
+// presses lightly (Darkly's pressure stops at 1).
+fn calligraphy(color, weight) {
+	let nib = new_brush_style(color, "Calligraphy", 1.5, #{ min_pressure: (0.15 * weight).min(1.0), max_pressure: (0.25 * weight).min(1.0) });
+	new_style(nib, new_handwriting_style())
+}
 let svg_look = #{ roughness: 2.0, noise_amplitude: 1.5 };
 
 // ---- page one: the maze ----
@@ -35,26 +39,26 @@ let cell_size = 50.0;
 let avoid = new_canvas();
 let cells = [];
 for cell in maze.cells() {
-	let g = font("balanced_ternary").glyph(cell.symbol - 13, #{ scale: cell_size, position: vec2(cell.x * cell_size, cell.y * cell_size) });
+	let g = glyphset("balanced_ternary").glyph(cell.symbol - 13, #{ scale: cell_size, position: vec2(cell.x * cell_size, cell.y * cell_size) });
 	cells.push(g);
-	avoid.add(g, new_style("black", maze_brush, #{ width: 2.0 }));
+	avoid.add(g, calligraphy("black", 2.0));
 }
 let b = avoid.bounds();
 
-let page_canvas = new_canvas().add(cells, new_style("black", maze_brush, #{ width: 5.0 }));
+let page_canvas = new_canvas().add(cells, calligraphy("black", 5.0));
 
 // The key, flowed through a box a little larger than the maze, each glyph
 // nudged a little off true.
 let around = new_textbox(#{
 	center: b.center, width: b.width * 1.2, height: b.height * 1.2,
-	size: 52.0, avoid: avoid,
-	position_jitter: 2.5 / 52.0, rotation_jitter: PI() / 32.0, scale_jitter: 0.025,
+	type: #{ glyph_scale: 52.0 }, avoid: avoid,
+	style: #{ glyph_position_jitter: 2.5, glyph_rotation_jitter: PI() / 32.0, glyph_scale_jitter: 0.025 },
 });
-let filled = around.fill(ternary_font("balanced_ternary").glyphs(key));
+let filled = around.fill(ternary_glyphset("balanced_ternary").glyphs(key));
 if filled.unplaced.len() > 0 {
 	warn(filled.unplaced.len() + " key symbols didn't fit around the maze");
 }
-page_canvas.add(filled.placed, new_style("darkred", maze_brush, #{ width: 1.5 }));
+page_canvas.add(filled.placed, calligraphy("darkred", 1.5));
 
 journal_entry.add(new_page(#{ name: "maze", svg_style: svg_look }).add(page_canvas));
 
@@ -67,7 +71,6 @@ let symbol_radius = 50.0;
 let circle_radius = symbol_radius / 1.5;
 let ring_step = symbol_radius * 4.0;
 let outer_ring = 600.0;
-let brush = dial_brush;
 
 fn ring_point(count, step, radius) {
 	let angle = step * 2.0 * PI() / count - PI() / 2.0;
@@ -76,7 +79,7 @@ fn ring_point(count, step, radius) {
 
 fn add_digit(digit, at, style) {
 	this.add(new_circle(at.center, 50.0 / 1.5), style);
-	this.add(font("balanced_ternary").glyph(digit, #{ scale: 50.0, position: at.center, rotation: at.angle + PI() / 2.0 }), style);
+	this.add(glyphset("balanced_ternary").glyph(digit, #{ scale: 50.0, position: at.center, rotation: at.angle + PI() / 2.0 }), style);
 }
 
 let dial = new_canvas();
@@ -87,7 +90,7 @@ let rings = [
 ];
 for (ring, r) in rings {
 	let radius = outer_ring - r * ring_step;
-	let style = new_style("black", brush, #{ width: ring.width });
+	let style = calligraphy("black", ring.width);
 	let half = ring.count / 2;
 	for i in -half..=half {
 		let at = ring_point(ring.count, i, radius);
@@ -104,7 +107,7 @@ for (ring, r) in rings {
 }
 
 // Concentric circles at the hub.
-let hub_style = new_style("black", brush, #{ width: 6.75 });
+let hub_style = calligraphy("black", 6.75);
 let hub_max = outer_ring - 2.0 * ring_step - symbol_radius / 2.0;
 for i in 0..5 {
 	dial.add(new_circle(vec2(0.0, 0.0), 15.0 + i / 5.0 * (hub_max - 15.0)), hub_style);
@@ -131,6 +134,12 @@ let shorts = [
 	"Do you see this world for what it is?",
 	"There is no number of walking sticks I could retrieve to balance out the ruin I have wrought",
 ];
-dial.add(dial.scatter_notes(shorts, [200, 500], [300, 600], #{ font: font("loche_upper"), style: new_style("darkred", brush, #{ width: 2.0 }), size: 30.0 }));
+// Notes set askew: each glyph turned and scaled a little before they're placed.
+let notes = calligraphy("darkred", 2.0);
+notes.glyph_rotation_jitter = PI() / 16.0;
+notes.glyph_scale_jitter = 0.15;
+dial.add(dial.scatter_notes(shorts, [200, 500], [300, 600], #{
+	style: notes, type: new_type_style(glyphset("loche_upper"), 30.0), paragraph: #{ line_start_jitter: 3.0 },
+}));
 
 journal_entry.add(new_page(#{ name: "balanced_ternary", svg_style: svg_look }).add(dial));

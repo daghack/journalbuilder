@@ -1,131 +1,460 @@
-//! Text settings: the one map every text call takes, with the keys layout
-//! roles take, so a role's settings can be passed straight in.
+//! Text styles, and the settings every text call takes.
 //!
 //! ```rhai
-//! const BODY = #{ font: font("plain"), size: 26, style: ink, line_height: 1.3 };
-//! path.fill_with_text("lorem ipsum", BODY);                 // role keys it doesn't use are ignored
-//! path.fill_with_text("lorem ipsum", BODY + #{ layout: "words", avoid: drawing });
-//! write_line("lorem ipsum", vec2(100, 100), BODY + #{ rotation_jitter: 0.05 });
+//! // Type: which glyphs, how big, shaped how.
+//! let body = new_type_style(glyphset("plain"), 26, #{
+//!     glyph_tracking: 0.05,      // extra room after each glyph, in glyph scales (default 0)
+//!     glyph_outline_gap: 0.1,    // room between glyphs' outlines, in glyph scales (default: the glyphset's)
+//!     space_width: 0.4,          // a space's width, in glyph scales (default: the glyphset's)
+//!     skew: 0.2,                 // glyphs leant 0.2 radians (default: the glyphset's); or italic: true
+//!     glyph_scale_factor: 1.5,   // times the glyph scale (default 1)
+//!     underline: true,           // one line under (or a number of lines, or #{ count, spacing, style })
+//!     strike: 2,                 // two lines through
+//! });
+//!
+//! // Paragraphs: how lines are built and set.
+//! let para = new_paragraph_style(#{
+//!     line_height: 1.3, paragraph_gap: 0.5, indent: 1,    // in glyph scales (paragraph_gap in lines)
+//!     align: "justify", valign: "top", fit: false,
+//!     layout: "words",            // or "flat", glyph by glyph (default: the call's)
+//!     split_words: true, split_padding: 0.3,
+//!     clearance: 3,               // from what text avoids, in canvas units (default 3)
+//!     line_gap_jitter: 2,         // each line up to 2 units off its even spacing
+//!     line_start_jitter: 4,       // each line starting up to 4 units further in
+//! });
+//!
+//! // Every text call takes a style, a type and a paragraph, each whole or
+//! // as a map of some settings (over the default style, no type, and the
+//! // default paragraph), and the call's own options.
+//! write_block("lorem ipsum", vec2(0, 0), 400, #{ style: ink, type: body, paragraph: para, avoid: drawing });
+//! path.fill_with_text("lorem ipsum", #{ type: #{ glyphset: glyphset("plain"), glyph_scale: 20 } });
 //! ```
 //!
-//! A call checks the keys it uses; role keys it doesn't use are ignored,
-//! and any other key is an error. Every text call, and every role, takes
-//! the jitters: each placed glyph moved, turned and scaled a little at
-//! random, from the script's generator, as a hand sets it.
-//!
-//! - `position_jitter`: how far each glyph strays, at most, either way,
-//!   in sizes; a number, or `[across, down]`.
-//! - `rotation_jitter`: how far it turns, at most, either way, in radians.
-//! - `scale_jitter`: how much its size changes, at most, either way, as a
-//!   fraction (below 1).
+//! A call uses the settings it needs and ignores the rest. Jitters, the
+//! handwriting's and the paragraph's, are in canvas units (rotation in
+//! radians, scale a fraction) and drawn from the journal's generator.
 
 use rand::{Rng, RngCore};
-use rhai::Map;
+use rhai::{Dynamic, Map};
 
-use super::options::{as_number, number, positive};
+use super::options::{above_zero, at_least_zero, check_keys, one_of, setting_number, Settings};
+use super::style::Style;
 use super::RhaiResult;
-use super::StrokeStyle;
+use crate::journal::canvas::textbox::TextBoxLineMode;
 use crate::journal::fonts::Font;
 use crate::journal::paths::StrokePath;
-use crate::journal::symbol::Symbol;
+use crate::journal::symbol::{Symbol, WordSplit};
+use crate::journal::typeset::Align;
 use parry2d::math::Vec2;
 
-/// The jitter settings.
-pub(super) const JITTER_KEYS: [&str; 3] = ["position_jitter", "rotation_jitter", "scale_jitter"];
+/// How far `italic: true` leans text, in radians.
+pub(super) const ITALIC_SKEW: f64 = 0.25;
+/// The most lines text can be underlined or struck through with.
+const MAX_RULES: i64 = 20;
 
-/// Role settings: what roles and slots take (see layout.rs). `role` is
-/// for slots only.
-pub(super) const ROLE_KEYS: [&str; 21] = [
-    "font", "style", "size", "line_height", "line_jitter", "align", "valign", "indent", "paragraph_gap", "spacing", "clearance", "jagged", "fit", "split_words", "split_padding", "em", "strong",
-    "position_jitter", "rotation_jitter", "scale_jitter", "role",
-];
+/// Lines under or through text.
+#[derive(Clone, Debug)]
+pub(super) struct RuleStyle {
+    pub(super) count: u32,
+    /// How far apart, in glyph scales; by default, as the pen sets them.
+    pub(super) spacing: Option<f32>,
+    /// What they're drawn in: a style, or a map of settings over the text's.
+    pub(super) style: Option<Dynamic>,
+}
 
-/// The settings `caller` uses, `own`, from a text settings map: role keys
-/// it doesn't use are dropped, and anything else unknown is an error.
-pub(super) fn settings(caller: &str, settings: Map, own: &[&str]) -> RhaiResult<Map> {
-    if let Some(key) = settings.keys().find(|k| !own.contains(&k.as_str()) && !ROLE_KEYS.contains(&k.as_str())) {
-        return Err(format!("{}: unknown option '{}'; options: {} (and role settings, which it ignores)", caller, key, own.join(", ")).into());
+impl RuleStyle {
+    pub(super) fn lines(count: u32) -> RuleStyle {
+        RuleStyle { count, spacing: None, style: None }
     }
-    Ok(settings.into_iter().filter(|(k, _)| own.contains(&k.as_str())).collect())
-}
-
-/// The `font` setting, which `caller` needs.
-pub(super) fn font(caller: &str, settings: &Map) -> RhaiResult<Font> {
-    let value = settings.get("font").ok_or_else(|| format!("{}: missing 'font', the font text is set in", caller))?;
-    value.clone().try_cast::<Font>().ok_or_else(|| format!("{}: 'font' should be a font, got {}", caller, value.type_name()).into())
-}
-
-/// The `style` setting, which `caller` needs.
-pub(super) fn style(caller: &str, settings: &Map) -> RhaiResult<StrokeStyle> {
-    let value = settings.get("style").ok_or_else(|| format!("{}: missing 'style', the style strokes are drawn in", caller))?;
-    value.clone().try_cast::<StrokeStyle>().ok_or_else(|| format!("{}: 'style' should be a style, got {}", caller, value.type_name()).into())
-}
-
-/// The `size` setting, the symbol scale, which `caller` needs.
-pub(super) fn size(caller: &str, settings: &Map) -> RhaiResult<f32> {
-    if !settings.contains_key("size") {
-        return Err(format!("{}: missing 'size', the size glyphs are set at", caller).into());
+    /// `true` (one line), `false` (none), a number of lines, or
+    /// `#{ count, spacing, style }`.
+    fn read(caller: &str, key: &str, value: &Dynamic) -> RhaiResult<Option<RuleStyle>> {
+        let count = |value: &Dynamic| -> RhaiResult<u32> {
+            match value.as_int() {
+                Ok(n) if (1..=MAX_RULES).contains(&n) => Ok(n as u32),
+                _ => Err(format!("{}: '{}' lines should be a whole number from 1 to {}, got {}", caller, key, MAX_RULES, value).into()),
+            }
+        };
+        if let Ok(on) = value.as_bool() {
+            return Ok(on.then(|| RuleStyle::lines(1)));
+        }
+        if value.is_int() {
+            return Ok(Some(RuleStyle::lines(count(value)?)));
+        }
+        let Some(settings) = value.clone().try_cast::<Map>() else {
+            return Err(format!("{}: '{}' should be true, false, a number of lines or #{{ count, spacing, style }}, got {}", caller, key, value.type_name()).into());
+        };
+        let caller = format!("{} '{}'", caller, key);
+        check_keys(&caller, &settings, &["count", "spacing", "style"])?;
+        let mut rule = RuleStyle::lines(1);
+        if let Some(n) = settings.get("count") {
+            rule.count = count(n)?;
+        }
+        if let Some(spacing) = settings.get("spacing") {
+            rule.spacing = Some(at_least_zero(&caller, "spacing", spacing)? as f32);
+        }
+        if let Some(style) = settings.get("style") {
+            // Checked now, though it's drawn over the text's style.
+            Style::given(&format!("{} style", caller), style, &Style::default_style())?;
+            rule.style = Some(style.clone());
+        }
+        Ok(Some(rule))
     }
-    positive(caller, settings, "size")
+    fn get(&self) -> Dynamic {
+        let mut map = Map::new();
+        map.insert("count".into(), (self.count as i64).into());
+        if let Some(spacing) = self.spacing {
+            map.insert("spacing".into(), (spacing as f64).into());
+        }
+        if let Some(style) = &self.style {
+            map.insert("style".into(), style.clone());
+        }
+        map.into()
+    }
+}
+
+/// Type: which glyphs text is set in, how big, and shaped how.
+#[derive(Clone)]
+pub struct TypeStyle {
+    glyphset: Option<Font>,
+    glyph_scale: Option<f64>,
+    glyph_scale_factor: f64,
+    glyph_outline_gap: Option<f64>,
+    glyph_tracking: f64,
+    space_width: Option<f64>,
+    skew: Option<f64>,
+    underline: Option<RuleStyle>,
+    strike: Option<RuleStyle>,
+}
+
+impl TypeStyle {
+    /// No glyphset or scale yet: what a map of type settings is read over.
+    pub(super) fn empty() -> TypeStyle {
+        TypeStyle {
+            glyphset: None,
+            glyph_scale: None,
+            glyph_scale_factor: 1.0,
+            glyph_outline_gap: None,
+            glyph_tracking: 0.0,
+            space_width: None,
+            skew: None,
+            underline: None,
+            strike: None,
+        }
+    }
+    /// The glyphset, as this type sets it: its gap, space and skew
+    /// overridden as the type says. `caller` needs one.
+    pub(super) fn glyphset(&self, caller: &str) -> RhaiResult<Font> {
+        let mut font = self.glyphset.clone().ok_or_else(|| format!("{}: the type has no 'glyphset', the glyphs text is set in", caller))?;
+        if let Some(gap) = self.glyph_outline_gap {
+            font.character_padding = gap as f32;
+        }
+        if let Some(width) = self.space_width {
+            font.space_width = width as f32;
+        }
+        if let Some(skew) = self.skew {
+            font.skew = skew as f32;
+        }
+        Ok(font)
+    }
+    /// The glyph scale text is set at, factor included. `caller` needs one.
+    pub(super) fn size(&self, caller: &str) -> RhaiResult<f32> {
+        let scale = self.glyph_scale.ok_or_else(|| format!("{}: the type has no 'glyph_scale', the size glyphs are set at", caller))?;
+        Ok((scale * self.glyph_scale_factor) as f32)
+    }
+    pub(super) fn has_size(&self) -> bool {
+        self.glyph_scale.is_some()
+    }
+    /// Extra room after each glyph, in glyph scales.
+    pub(super) fn tracking(&self) -> f32 {
+        self.glyph_tracking as f32
+    }
+    pub(super) fn scale_factor(&self) -> f64 {
+        self.glyph_scale_factor
+    }
+    pub(super) fn outline_gap(&self) -> Option<f64> {
+        self.glyph_outline_gap
+    }
+    pub(super) fn underline(&self) -> Option<&RuleStyle> {
+        self.underline.as_ref()
+    }
+    pub(super) fn strike(&self) -> Option<&RuleStyle> {
+        self.strike.as_ref()
+    }
+}
+
+impl Settings for TypeStyle {
+    const NAME: &'static str = "type_style";
+    const KEYS: &'static [&'static str] = &[
+        "glyphset", "glyph_scale", "glyph_scale_factor", "glyph_outline_gap", "glyph_tracking", "space_width", "skew", "italic", "underline", "strike",
+    ];
+    fn get(&self, key: &str) -> Dynamic {
+        let optional = |v: Option<f64>| v.map_or(Dynamic::UNIT, Dynamic::from);
+        let rule = |r: &Option<RuleStyle>| r.as_ref().map_or(Dynamic::from(false), RuleStyle::get);
+        match key {
+            "glyphset" => self.glyphset.clone().map_or(Dynamic::UNIT, Dynamic::from),
+            "glyph_scale" => optional(self.glyph_scale),
+            "glyph_scale_factor" => self.glyph_scale_factor.into(),
+            "glyph_outline_gap" => optional(self.glyph_outline_gap),
+            "glyph_tracking" => self.glyph_tracking.into(),
+            "space_width" => optional(self.space_width),
+            "skew" => optional(self.skew),
+            "italic" => self.skew.map_or(Dynamic::UNIT, |s| Dynamic::from(s != 0.0)),
+            "underline" => rule(&self.underline),
+            "strike" => rule(&self.strike),
+            _ => Dynamic::UNIT,
+        }
+    }
+    fn set(&mut self, caller: &str, key: &str, value: &Dynamic) -> RhaiResult<()> {
+        match key {
+            "glyphset" => {
+                self.glyphset = Some(value.clone().try_cast::<Font>()
+                    .ok_or_else(|| format!("{}: 'glyphset' should be a glyphset, got {}", caller, value.type_name()))?);
+            }
+            "glyph_scale" => self.glyph_scale = Some(above_zero(caller, key, value)?),
+            "glyph_scale_factor" => self.glyph_scale_factor = above_zero(caller, key, value)?,
+            "glyph_outline_gap" => self.glyph_outline_gap = Some(at_least_zero(caller, key, value)?),
+            "glyph_tracking" => {
+                let tracking = setting_number(caller, key, value)?;
+                // Down to glyphs touching their neighbours' centres.
+                if tracking <= -0.5 {
+                    return Err(format!("{}: 'glyph_tracking' must be above -0.5, got {}", caller, tracking).into());
+                }
+                self.glyph_tracking = tracking;
+            }
+            "space_width" => self.space_width = Some(above_zero(caller, key, value)?),
+            "skew" => self.skew = Some(super::glyphs::skew_angle(caller, value)? as f64),
+            "italic" => {
+                let italic = value.as_bool().map_err(|t| format!("{}: 'italic' should be true or false, got {}", caller, t))?;
+                self.skew = Some(if italic { ITALIC_SKEW } else { 0.0 });
+            }
+            "underline" => self.underline = RuleStyle::read(caller, key, value)?,
+            "strike" => self.strike = RuleStyle::read(caller, key, value)?,
+            _ => unreachable!("{} isn't a type setting", key),
+        }
+        Ok(())
+    }
+}
+
+/// Paragraphs: how lines of text are built and set.
+#[derive(Clone, Debug)]
+pub struct ParagraphStyle {
+    line_height: f64,
+    paragraph_gap: f64,
+    indent: f64,
+    align: String,
+    valign: String,
+    fit: bool,
+    layout: Option<String>,
+    angle: Option<f64>,
+    split_words: Option<usize>,
+    split_padding: f64,
+    clearance: f64,
+    line_gap_jitter: f64,
+    line_start_jitter: f64,
+}
+
+impl Default for ParagraphStyle {
+    fn default() -> Self {
+        ParagraphStyle {
+            line_height: 1.25,
+            paragraph_gap: 0.5,
+            indent: 0.0,
+            align: "left".into(),
+            valign: "top".into(),
+            fit: false,
+            layout: None,
+            angle: None,
+            split_words: None,
+            split_padding: 0.0,
+            clearance: 3.0,
+            line_gap_jitter: 0.0,
+            line_start_jitter: 0.0,
+        }
+    }
+}
+
+impl ParagraphStyle {
+    pub(super) fn line_height(&self) -> f32 {
+        self.line_height as f32
+    }
+    pub(super) fn paragraph_gap(&self) -> f32 {
+        self.paragraph_gap as f32
+    }
+    pub(super) fn indent(&self) -> f32 {
+        self.indent as f32
+    }
+    pub(super) fn align(&self) -> Align {
+        Align::from_name(&self.align).expect("checked when set")
+    }
+    /// How far down the room left text sits: 0 at the top, 1 at the bottom.
+    pub(super) fn valign(&self) -> f32 {
+        match self.valign.as_str() {
+            "center" => 0.5,
+            "bottom" => 1.0,
+            _ => 0.0,
+        }
+    }
+    pub(super) fn fit(&self) -> bool {
+        self.fit
+    }
+    pub(super) fn angle(&self) -> Option<f32> {
+        self.angle.map(|a| a as f32)
+    }
+    pub(super) fn clearance(&self) -> f32 {
+        self.clearance as f32
+    }
+    pub(super) fn line_gap_jitter(&self) -> f32 {
+        self.line_gap_jitter as f32
+    }
+    pub(super) fn line_start_jitter(&self) -> f32 {
+        self.line_start_jitter as f32
+    }
+    /// Whether words may break round what text avoids, and how.
+    pub(super) fn word_split(&self) -> Option<WordSplit> {
+        self.split_words.map(|min_piece| WordSplit { min_piece, padding: self.split_padding as f32 })
+    }
+    /// How lines are built: by words (wrapping at blanks) or glyph by
+    /// glyph, `words` unless the paragraph says.
+    pub(super) fn line_mode(&self, caller: &str, words: bool) -> RhaiResult<TextBoxLineMode> {
+        let words = self.layout.as_deref().map_or(words, |layout| layout == "words");
+        match (words, self.word_split()) {
+            (true, split) => Ok(TextBoxLineMode::WordsByBlankSymbol(split)),
+            (false, None) => Ok(TextBoxLineMode::Flat),
+            (false, Some(_)) => Err(format!("{}: 'split_words' needs layout: \"words\" (flat text is placed glyph by glyph already)", caller).into()),
+        }
+    }
+}
+
+impl Settings for ParagraphStyle {
+    const NAME: &'static str = "paragraph_style";
+    const KEYS: &'static [&'static str] = &[
+        "line_height", "paragraph_gap", "indent", "align", "valign", "fit", "layout", "angle", "split_words", "split_padding", "clearance", "line_gap_jitter", "line_start_jitter",
+    ];
+    fn get(&self, key: &str) -> Dynamic {
+        match key {
+            "line_height" => self.line_height.into(),
+            "paragraph_gap" => self.paragraph_gap.into(),
+            "indent" => self.indent.into(),
+            "align" => self.align.clone().into(),
+            "valign" => self.valign.clone().into(),
+            "fit" => self.fit.into(),
+            "layout" => self.layout.clone().map_or(Dynamic::UNIT, Dynamic::from),
+            "angle" => self.angle.map_or(Dynamic::UNIT, Dynamic::from),
+            "split_words" => self.split_words.map_or(Dynamic::from(false), |n| Dynamic::from(n as i64)),
+            "split_padding" => self.split_padding.into(),
+            "clearance" => self.clearance.into(),
+            "line_gap_jitter" => self.line_gap_jitter.into(),
+            "line_start_jitter" => self.line_start_jitter.into(),
+            _ => Dynamic::UNIT,
+        }
+    }
+    fn set(&mut self, caller: &str, key: &str, value: &Dynamic) -> RhaiResult<()> {
+        match key {
+            "line_height" => self.line_height = above_zero(caller, key, value)?,
+            "paragraph_gap" => self.paragraph_gap = at_least_zero(caller, key, value)?,
+            "indent" => self.indent = at_least_zero(caller, key, value)?,
+            "align" => self.align = one_of(caller, key, value, &Align::NAMES)?,
+            "valign" => self.valign = one_of(caller, key, value, &["top", "center", "bottom"])?,
+            "fit" => self.fit = value.as_bool().map_err(|t| format!("{}: 'fit' should be true or false, got {}", caller, t))?,
+            "layout" => self.layout = Some(one_of(caller, key, value, &["flat", "words"])?),
+            "angle" => self.angle = Some(setting_number(caller, key, value)?),
+            "split_words" => {
+                self.split_words = match (value.as_bool(), value.as_int()) {
+                    (Ok(on), _) => on.then_some(2),
+                    (_, Ok(n)) if n >= 1 => Some(n as usize),
+                    _ => return Err(format!("{}: 'split_words' should be true, false, or the fewest glyphs a piece may have (at least 1), got {}", caller, value).into()),
+                }
+            }
+            "split_padding" => self.split_padding = at_least_zero(caller, key, value)?,
+            "clearance" => self.clearance = at_least_zero(caller, key, value)?,
+            "line_gap_jitter" => self.line_gap_jitter = at_least_zero(caller, key, value)?,
+            "line_start_jitter" => self.line_start_jitter = at_least_zero(caller, key, value)?,
+            _ => unreachable!("{} isn't a paragraph setting", key),
+        }
+        Ok(())
+    }
+    fn check(&self, caller: &str) -> RhaiResult<()> {
+        if self.split_padding > 0.0 && self.split_words.is_none() {
+            return Err(format!("{}: 'split_padding' needs 'split_words'", caller).into());
+        }
+        Ok(())
+    }
+}
+
+/// What a text call is given: a style, a type and a paragraph, and the
+/// call's own options.
+pub(super) struct TextSettings {
+    pub(super) style: Style,
+    pub(super) type_: TypeStyle,
+    pub(super) paragraph: ParagraphStyle,
+    pub(super) options: Map,
+}
+
+/// The keys every text call takes, besides its own.
+pub(super) const TEXT_KEYS: [&str; 3] = ["style", "type", "paragraph"];
+
+impl TextSettings {
+    /// `caller`'s settings: a style (default `default_style()`), a type
+    /// and a paragraph, each whole or a map of settings, and the options
+    /// in `own`.
+    pub(super) fn read(caller: &str, mut settings: Map, own: &[&str]) -> RhaiResult<TextSettings> {
+        let mut known: Vec<&str> = TEXT_KEYS.to_vec();
+        known.extend(own);
+        check_keys(caller, &settings, &known)?;
+        let style = match settings.remove("style") {
+            None => Style::default_style(),
+            Some(style) => Style::given(&format!("{} 'style'", caller), &style, &Style::default_style())?,
+        };
+        let type_ = match settings.remove("type") {
+            None => TypeStyle::empty(),
+            Some(t) => TypeStyle::given(&format!("{} 'type'", caller), &t, &TypeStyle::empty())?,
+        };
+        let paragraph = match settings.remove("paragraph") {
+            None => ParagraphStyle::default(),
+            Some(p) => ParagraphStyle::given(&format!("{} 'paragraph'", caller), &p, &ParagraphStyle::default())?,
+        };
+        Ok(TextSettings { style, type_, paragraph, options: settings })
+    }
+    /// How far placed glyphs stray, as the style's hand sets them.
+    pub(super) fn jitter(&self) -> Jitter {
+        Jitter::of(&self.style)
+    }
 }
 
 /// Each placed glyph set a little off true.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Jitter {
-    /// Across and down, in sizes.
+    /// Across and down, in canvas units.
     position: (f64, f64),
     rotation: f64,
     scale: f64,
 }
 
 impl Jitter {
-    /// The jitter settings in `settings`, each 0 unless given.
-    pub fn parse(caller: &str, settings: &Map) -> RhaiResult<Jitter> {
-        let at_least_zero = |key: &str, value: f32| -> RhaiResult<f64> {
-            if value >= 0.0 && value.is_finite() {
-                Ok(value as f64)
-            } else {
-                Err(format!("{}: '{}' must be a number of at least 0, got {}", caller, key, value).into())
-            }
-        };
-        let position = match settings.get("position_jitter") {
-            None => (0.0, 0.0),
-            Some(v) if v.is_array() => {
-                let pair = v.clone().into_array().expect("checked");
-                match pair.as_slice() {
-                    [x, y] => (
-                        at_least_zero("position_jitter", as_number(caller, "'position_jitter'", x)?)?,
-                        at_least_zero("position_jitter", as_number(caller, "'position_jitter'", y)?)?,
-                    ),
-                    _ => return Err(format!("{}: 'position_jitter' should be a number or [across, down]", caller).into()),
-                }
-            }
-            Some(v) => {
-                let n = at_least_zero("position_jitter", as_number(caller, "'position_jitter'", v)?)?;
-                (n, n)
-            }
-        };
-        let rotation = at_least_zero("rotation_jitter", number(caller, settings, "rotation_jitter")?.unwrap_or(0.0))?;
-        let scale = at_least_zero("scale_jitter", number(caller, settings, "scale_jitter")?.unwrap_or(0.0))?;
-        if scale >= 1.0 {
-            return Err(format!("{}: 'scale_jitter' must be below 1, got {}", caller, scale).into());
-        }
-        Ok(Jitter { position, rotation, scale })
+    /// The jitter `style`'s hand sets glyphs with.
+    pub(super) fn of(style: &Style) -> Jitter {
+        let hand = style.handwriting();
+        Jitter { position: hand.glyph_position_jitter(), rotation: hand.glyph_rotation_jitter(), scale: hand.glyph_scale_jitter() }
+    }
+    /// Just the position jitter.
+    pub(super) fn position_only(&self) -> Jitter {
+        Jitter { position: self.position, ..Jitter::default() }
     }
     pub fn is_none(&self) -> bool {
         *self == Jitter::default()
     }
-    /// Jitter placed glyphs set at `size`: for each, across, down, the
-    /// turn and the scale, in that order. Nothing is drawn from the
-    /// generator for a jitter of 0.
-    pub fn apply(&self, glyphs: &mut [Symbol], size: f32, rng: &mut dyn RngCore) {
+    /// Jitter placed glyphs: for each, across, down, the turn and the
+    /// scale, in that order. Nothing is drawn from the generator for a
+    /// jitter of 0.
+    pub fn apply(&self, glyphs: &mut [Symbol], rng: &mut dyn RngCore) {
         if self.is_none() {
             return;
         }
         let mut either_way = |amount: f64| if amount > 0.0 { rng.random_range(-amount..amount) } else { 0.0 };
         for glyph in glyphs {
-            let x = either_way(self.position.0) * size as f64;
-            let y = either_way(self.position.1) * size as f64;
+            let x = either_way(self.position.0);
+            let y = either_way(self.position.1);
             glyph.translate_by(parry2d::math::Vec2::new(x as f32, y as f32));
             glyph.rotate_rad_by(either_way(self.rotation) as f32);
             glyph.scale_by((1.0 + either_way(self.scale)) as f32);
@@ -133,15 +462,24 @@ impl Jitter {
     }
 }
 
-/// The `path_jitter` setting, for `write_line` and `write_block`: how far,
-/// at most, either way, in sizes, the line text is written along strays
-/// up and down from straight, as a hand's lines do.
-pub(super) fn path_jitter(caller: &str, settings: &Map) -> RhaiResult<f32> {
-    match number(caller, settings, "path_jitter")? {
-        None => Ok(0.0),
-        Some(j) if j >= 0.0 && j.is_finite() => Ok(j),
-        Some(j) => Err(format!("{}: 'path_jitter' must be a number of at least 0, got {}", caller, j).into()),
-    }
+pub(super) fn register(engine: &mut rhai::Engine) {
+    engine.register_type_with_name::<TypeStyle>("TypeStyle");
+    super::options::register_settings::<TypeStyle>(engine);
+    let new_type_style = |glyphset: Font, glyph_scale: Dynamic| -> RhaiResult<TypeStyle> {
+        let mut style = TypeStyle::empty();
+        style.set("new_type_style", "glyphset", &Dynamic::from(glyphset))?;
+        style.set("new_type_style", "glyph_scale", &glyph_scale)?;
+        Ok(style)
+    };
+    engine.register_fn("new_type_style", new_type_style);
+    engine.register_fn("new_type_style", move |glyphset: Font, glyph_scale: Dynamic, options: Map| {
+        new_type_style(glyphset, glyph_scale)?.with("new_type_style", &options)
+    });
+
+    engine.register_type_with_name::<ParagraphStyle>("ParagraphStyle");
+    super::options::register_settings::<ParagraphStyle>(engine);
+    engine.register_fn("new_paragraph_style", ParagraphStyle::default);
+    engine.register_fn("new_paragraph_style", |options: Map| ParagraphStyle::default().with("new_paragraph_style", &options));
 }
 
 /// How far apart, in sizes, a wandering line's turns are.
@@ -156,13 +494,12 @@ pub(super) struct Wander {
 }
 
 impl Wander {
-    /// A line `length` long, straying up to `jitter` sizes either way, for
-    /// text set at `size`. Nothing is drawn from the generator for a
-    /// jitter of 0.
-    pub fn new(jitter: f32, size: f32, length: f32, rng: &mut dyn RngCore) -> Wander {
+    /// A line `length` long, straying up to `amount` canvas units either
+    /// way, for text set at `size`. Nothing is drawn from the generator
+    /// for an amount of 0.
+    pub fn new(amount: f32, size: f32, length: f32, rng: &mut dyn RngCore) -> Wander {
         let step = WANDER_STEP * size;
         let knots = (length / step).ceil().max(1.0) as usize + 1;
-        let amount = jitter * size;
         let offsets = (0..knots)
             .map(|k| if k == 0 || amount == 0.0 { 0.0 } else { rng.random_range(-amount..amount) })
             .collect();
@@ -232,7 +569,7 @@ mod tests {
     #[test]
     fn a_wander_starts_on_the_line_stays_near_it_and_matches_its_path() {
         let mut rng = rand::rngs::StdRng::seed_from_u64(0);
-        let wander = Wander::new(0.5, 10.0, 200.0, &mut rng);
+        let wander = Wander::new(5.0, 10.0, 200.0, &mut rng);
         assert_eq!(wander.offset(0.0), 0.0);
         let xs: Vec<f32> = (0..=200).map(|x| x as f32).collect();
         // Catmull-Rom overshoots its knots a little, never by half again.

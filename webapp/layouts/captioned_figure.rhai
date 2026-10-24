@@ -11,7 +11,7 @@ fn page_size() {
 
 fn page(n, info) {
 	column([
-		figure("figure", #{ grow: 1 }),
-		flow("caption", #{ align: "center", margin: [30, 0, 0, 0] }),
-	], #{ padding: [90, 200, 60, 200] })
+		figure("figure", #{ flex: #{ grow: 1 } }),
+		flow("caption", #{ flex: #{ margin: [30, 0, 0, 0] }, paragraph: #{ align: "center" } }),
+	], #{ flex: #{ padding: [90, 200, 60, 200] } })
 }

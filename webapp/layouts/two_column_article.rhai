@@ -15,36 +15,36 @@ fn page_size() {
 
 // The band between the columns, and the page number under them.
 fn divider() {
-	band("divider", #{ width: 22, margin: [10, 0] })
+	band("divider", #{ flex: #{ width: 22, margin: [10, 0] } })
 }
 
-// Page numbers in roman numerals, which fonts without digits can set.
+// Page numbers in roman numerals, which glyphsets without digits can set.
 fn folio(n) {
-	label(roman(n + 1), #{ role: "folio", align: "center", height: 40 })
+	label(roman(n + 1), #{ role: "folio", flex: #{ height: 40 }, paragraph: #{ align: "center" } })
 }
 
 fn page(n, info) {
 	let columns = if n == 0 {
 		let left = column([
-			flow("title", #{ role: "heading", height: 110, fit: true, valign: "center", align: "center" }),
-			rule(#{ height: 20, margin: [0, 120, 20, 120] }),
+			flow("title", #{ role: "heading", flex: #{ height: 110 }, paragraph: #{ fit: true, valign: "center", align: "center" } }),
+			rule(#{ flex: #{ height: 20, margin: [0, 120, 20, 120] } }),
 			column([
-				initial("body", #{ position: "absolute", top: 0, left: 0, width: 130, height: 130 }),
-				flow("body", #{ grow: 1 }),
-			], #{ grow: 1 }),
-		], #{ grow: 1 });
+				initial("body", #{ flex: #{ position: "absolute", top: 0, left: 0, width: 130, height: 130 } }),
+				flow("body", #{ flex: #{ grow: 1 } }),
+			], #{ flex: #{ grow: 1 } }),
+		], #{ flex: #{ grow: 1 } });
 		let right = if info.art.contains("illustration") {
 			column([
-				figure("illustration", #{ height: "48%", margin: [0, 30] }),
-				flow("caption", #{ margin: [10, 0, 24, 0] }),
-				flow("body", #{ grow: 1 }),
-			], #{ grow: 1 })
+				figure("illustration", #{ flex: #{ height: "48%", margin: [0, 30] } }),
+				flow("caption", #{ flex: #{ margin: [10, 0, 24, 0] } }),
+				flow("body", #{ flex: #{ grow: 1 } }),
+			], #{ flex: #{ grow: 1 } })
 		} else {
-			flow("body", #{ grow: 1 })
+			flow("body", #{ flex: #{ grow: 1 } })
 		};
-		row([left, divider(), right], #{ grow: 1, gap: 40 })
+		row([left, divider(), right], #{ flex: #{ grow: 1, gap: 40 } })
 	} else {
-		row([flow("body", #{ grow: 1 }), divider(), flow("body", #{ grow: 1 })], #{ grow: 1, gap: 40 })
+		row([flow("body", #{ flex: #{ grow: 1 } }), divider(), flow("body", #{ flex: #{ grow: 1 } })], #{ flex: #{ grow: 1, gap: 40 } })
 	};
-	column([columns, folio(n)], #{ padding: [80, 110, 40, 110] })
+	column([columns, folio(n)], #{ flex: #{ padding: [80, 110, 40, 110] } })
 }

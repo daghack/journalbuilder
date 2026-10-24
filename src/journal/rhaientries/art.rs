@@ -5,8 +5,8 @@
 //! // (angles are radians; 0 faces +x and PI() / 2.0 faces down the page;
 //! // by default it faces away from the tail), the tip of its tail at
 //! // (40, 400), 900 units long along its spine and 36 across at its widest
-//! // (by default a twelfth of its length). The seed picks its winding (0 by
-//! // default).
+//! // (by default a twelfth of its length). The seed picks its winding (one
+//! // from the journal's generator unless given).
 //! let snake = art::snake(vec2(0.0, 0.0), vec2(40.0, 400.0), 900.0, #{ head_angle: -PI() / 2.0, max_width: 36.0, seed: 7 });
 //! canvas.add(snake.outline, ink);
 //! ```
@@ -14,14 +14,14 @@
 //! `outline` is the snake's outline. Where the body crosses itself,
 //! the outline of the strand underneath stops at the edge of the one on top
 //! (the head always goes over), so the path is several strokes. The same
-//! seed gives the same snake; it doesn't use or change the script's
-//! generator (`seed`, `random`).
+//! seed gives the same snake; given one, it doesn't use or change the
+//! script's generator (`seed`, `random`), and left out, it's drawn from it.
 //!
 //! `spine` is the same snake's centre line from the back of its head to
 //! the tip of its tail, to write along:
 //!
 //! ```rhai
-//! canvas.add(snake.spine.fill_with_text("a snake", #{ font: font, size: 30.0, style: ink }));
+//! canvas.add(snake.spine.fill_with_text("a snake", #{ style: ink, type: new_type_style(font, 30.0) }));
 //! ```
 //!
 //! `bramble` grows a blackberry bramble and gives its parts as separate
@@ -85,8 +85,8 @@
 //! let eye = art::eye(vec2(0.0, 0.0), 300.0, #{ gaze_angle: -PI() / 4.0, messiness: 0.5, seed: 7 });
 //! let r = eye.iris_radius;
 //! canvas.add(eye, #{
-//!     wash: new_style(BLUE, new_brush("Smooth Watercolor", 0.2, 0.35, r * 0.3)),
-//!     rim: new_style(BLUE, new_brush("Rough Watercolor", 0.6, 0.95, r * 0.12)),
+//!     wash: new_style(new_brush_style(BLUE, "Smooth Watercolor", r * 0.3, #{ min_pressure: 0.2, max_pressure: 0.35 }), new_handwriting_style()),
+//!     rim: new_style(new_brush_style(BLUE, "Rough Watercolor", r * 0.12, #{ min_pressure: 0.6, max_pressure: 0.95 }), new_handwriting_style()),
 //!     accent: new_style(BLUE, pen), lines: ink,
 //! });
 //! ```
@@ -95,7 +95,7 @@
 //! how far it looks from 0 (ahead) to 1 (as far as it goes; default 0.5);
 //! `openness`, its height over its length (default 0.32); and `flat`, lids
 //! of straight lines meeting in a point above and below the middle, as
-//! the `symbols` font's eye has, rather than arcs (default false).
+//! the `symbols` glyphset's eye has, rather than arcs (default false).
 //!
 //! ```rhai
 //! let e = art::eye(vec2(0.0, 0.0), 300.0, #{ gaze_angle: PI(), messiness: 0.8, seed: 7, angle: 1.2, gaze: 1.0, openness: 0.6, flat: true });
@@ -142,10 +142,12 @@
 //! 150), `star_size` (the biggest star's radius), `gap` (how far short of
 //! stars links stop) and `round` (stars kept in the ellipse in the box).
 
+use rand::Rng;
 use rhai::{Dynamic, Engine, EvalAltResult, Map, Module, NativeCallContext};
 
 use super::locks::LockValue;
 use super::options::{check_keys, float, number};
+use super::random::SharedRng;
 use super::{Path, Vec2};
 use crate::lockbuilder::symbols_to_string;
 use crate::journal::art;
@@ -163,10 +165,11 @@ fn number_arg(ctx: &NativeCallContext, caller: &str, what: &str, v: &Dynamic) ->
     float(caller, what, v).map(|n| n as f32).map_err(|err| error(ctx, err.to_string()))
 }
 
-/// A seed option: which drawing, 0 unless given.
-fn seed(ctx: &NativeCallContext, caller: &str, options: &Map) -> RhaiResult<u64> {
+/// A seed option: which drawing; unless given, one from the journal's
+/// generator.
+fn seed(ctx: &NativeCallContext, rng: &SharedRng, caller: &str, options: &Map) -> RhaiResult<u64> {
     match options.get("seed") {
-        None => Ok(0),
+        None => Ok(rng.borrow_mut().random()),
         Some(seed) => seed.as_int().map(|s| s as u64)
             .map_err(|t| error(ctx, format!("{}: 'seed' should be a whole number, got {}", caller, t))),
     }
@@ -195,30 +198,30 @@ fn thickening(ctx: &NativeCallContext, caller: &str, options: &Map) -> RhaiResul
 }
 
 /// `art::bramble(base, length[, #{ angle, flower_size, seed, origin, thickness, reach }])`.
-fn bramble(ctx: &NativeCallContext, base: Vec2, length: &Dynamic, options: &Map) -> RhaiResult<Map> {
+fn bramble(ctx: &NativeCallContext, rng: &SharedRng, base: Vec2, length: &Dynamic, options: &Map) -> RhaiResult<Map> {
     const CALLER: &str = "art::bramble";
     check_keys(CALLER, options, &["angle", "flower_size", "seed", "origin", "thickness", "reach"]).map_err(|err| error(ctx, err.to_string()))?;
     let length = number_arg(ctx, CALLER, "length", length)?;
     let angle = number_option(ctx, CALLER, options, "angle", -std::f32::consts::FRAC_PI_2)?;
     let flower_size = number_option(ctx, CALLER, options, "flower_size", length / 5.0)?;
-    let bramble = art::bramble(base.into(), angle, length, flower_size, seed(ctx, CALLER, options)?, thickening(ctx, CALLER, options)?)
+    let bramble = art::bramble(base.into(), angle, length, flower_size, seed(ctx, rng, CALLER, options)?, thickening(ctx, CALLER, options)?)
         .map_err(|err| error(ctx, format!("{}: {}", CALLER, err)))?;
     Ok(parts(bramble))
 }
 
 /// `art::bramble_along(path, flower_size[, #{ seed, origin, thickness, reach }])`.
-fn bramble_along(ctx: &NativeCallContext, path: &Path, flower_size: &Dynamic, options: &Map) -> RhaiResult<Map> {
+fn bramble_along(ctx: &NativeCallContext, rng: &SharedRng, path: &Path, flower_size: &Dynamic, options: &Map) -> RhaiResult<Map> {
     const CALLER: &str = "art::bramble_along";
     check_keys(CALLER, options, &["seed", "origin", "thickness", "reach"]).map_err(|err| error(ctx, err.to_string()))?;
     let flower_size = number_arg(ctx, CALLER, "flower_size", flower_size)?;
-    let bramble = art::bramble_along(&path.borrow(), flower_size, seed(ctx, CALLER, options)?, thickening(ctx, CALLER, options)?)
+    let bramble = art::bramble_along(&path.borrow(), flower_size, seed(ctx, rng, CALLER, options)?, thickening(ctx, CALLER, options)?)
         .map_err(|err| error(ctx, format!("{}: {}", CALLER, err)))?;
     Ok(parts(bramble))
 }
 
 /// `art::snake(head_center, tail_end, length[, #{ head_angle, max_width, seed }])`:
 /// `#{ outline, spine }`.
-fn snake(ctx: &NativeCallContext, head: Vec2, tail: Vec2, length: &Dynamic, options: &Map) -> RhaiResult<Map> {
+fn snake(ctx: &NativeCallContext, rng: &SharedRng, head: Vec2, tail: Vec2, length: &Dynamic, options: &Map) -> RhaiResult<Map> {
     const CALLER: &str = "art::snake";
     check_keys(CALLER, options, &["head_angle", "max_width", "seed"]).map_err(|err| error(ctx, err.to_string()))?;
     let length = number_arg(ctx, CALLER, "length", length)?;
@@ -226,7 +229,7 @@ fn snake(ctx: &NativeCallContext, head: Vec2, tail: Vec2, length: &Dynamic, opti
     let away = (h - t).y.atan2((h - t).x);
     let head_angle = number_option(ctx, CALLER, options, "head_angle", away)?;
     let max_width = number_option(ctx, CALLER, options, "max_width", length / 12.0)?;
-    let seed = seed(ctx, CALLER, options)?;
+    let seed = seed(ctx, rng, CALLER, options)?;
     let fail = |err: String| error(ctx, format!("{}: {}", CALLER, err));
     let outline = art::snake_path(h, head_angle, t, length, max_width, seed).map_err(fail)?;
     let spine = art::snake_spine(h, head_angle, t, length, max_width, seed).map_err(fail)?;
@@ -249,13 +252,13 @@ const EYE_KEYS: [&str; 7] = ["gaze_angle", "messiness", "seed", "angle", "gaze",
 
 /// `art::eye(center, length[, #{ gaze_angle, messiness, seed, angle, gaze, openness, flat }])`:
 /// #{ lines, accent, wash, rim, iris_radius }.
-fn eye(ctx: &NativeCallContext, center: Vec2, length: &Dynamic, options: &Map) -> RhaiResult<Map> {
+fn eye(ctx: &NativeCallContext, rng: &SharedRng, center: Vec2, length: &Dynamic, options: &Map) -> RhaiResult<Map> {
     const CALLER: &str = "art::eye";
     let fail = |err: Box<EvalAltResult>| error(ctx, err.to_string());
     check_keys(CALLER, options, &EYE_KEYS).map_err(fail)?;
     let gaze_angle = number_option(ctx, CALLER, options, "gaze_angle", 0.0)?;
     let messiness = number_option(ctx, CALLER, options, "messiness", 0.3)?;
-    let seed = seed(ctx, CALLER, options)?;
+    let seed = seed(ctx, rng, CALLER, options)?;
     let defaults = art::EyeShape::default();
     let option = |key: &str, default: f32| number(CALLER, options, key).map(|n| n.unwrap_or(default)).map_err(fail);
     let flat = match options.get("flat") {
@@ -300,7 +303,7 @@ fn count_option(ctx: &NativeCallContext, caller: &str, options: &Map, key: &str,
 
 /// `art::huffman_stars(symbols, output_base, center, width, height[, #{ smoothing, seed, variation, iterations, star_size, gap, round }])`:
 /// #{ stars, links, points, edges, nodes }.
-fn huffman_stars(ctx: &NativeCallContext, symbols: &Dynamic, output_base: i64, center: Vec2, width: &Dynamic, height: &Dynamic, options: &Map) -> RhaiResult<Map> {
+fn huffman_stars(ctx: &NativeCallContext, rng: &SharedRng, symbols: &Dynamic, output_base: i64, center: Vec2, width: &Dynamic, height: &Dynamic, options: &Map) -> RhaiResult<Map> {
     const CALLER: &str = "art::huffman_stars";
     let fail = |err: Box<EvalAltResult>| error(ctx, err.to_string());
     check_keys(CALLER, options, &HUFFMAN_STARS_KEYS).map_err(fail)?;
@@ -326,7 +329,7 @@ fn huffman_stars(ctx: &NativeCallContext, symbols: &Dynamic, output_base: i64, c
         iterations: count_option(ctx, CALLER, options, "iterations", 150)? as usize,
         star_size: optional("star_size")?,
         gap: optional("gap")?,
-        seed: seed(ctx, CALLER, options)?,
+        seed: seed(ctx, rng, CALLER, options)?,
     };
     let chart = art::huffman_stars(&data, input_base, output_base, &settings).map_err(|err| error(ctx, format!("{}: {}", CALLER, err)))?;
     let point = |p: parry2d::math::Vec2| Dynamic::from(Vec2::new(p.x as f64, p.y as f64));
@@ -426,54 +429,67 @@ pub(super) fn sketch_parts(sketch: crate::journal::kinds::Sketch) -> Map {
     parts
 }
 
-pub fn register(engine: &mut Engine) {
+pub fn register(engine: &mut Engine, rng: SharedRng) {
     let mut module = Module::new();
     module.set_native_fn("moon", |ctx: NativeCallContext, center: Vec2, radius: Dynamic, phase: Dynamic| -> RhaiResult<Map> {
         moon(&ctx, center, &radius, &phase)
     });
-    module.set_native_fn("snake", |ctx: NativeCallContext, head_center: Vec2, tail_end: Vec2, length: Dynamic| -> RhaiResult<Map> {
-        snake(&ctx, head_center, tail_end, &length, &Map::new())
+    let r = rng.clone();
+    module.set_native_fn("snake", move |ctx: NativeCallContext, head_center: Vec2, tail_end: Vec2, length: Dynamic| -> RhaiResult<Map> {
+        snake(&ctx, &r, head_center, tail_end, &length, &Map::new())
     });
-    module.set_native_fn("snake", |ctx: NativeCallContext, head_center: Vec2, tail_end: Vec2, length: Dynamic, options: Map| -> RhaiResult<Map> {
-        snake(&ctx, head_center, tail_end, &length, &options)
+    let r = rng.clone();
+    module.set_native_fn("snake", move |ctx: NativeCallContext, head_center: Vec2, tail_end: Vec2, length: Dynamic, options: Map| -> RhaiResult<Map> {
+        snake(&ctx, &r, head_center, tail_end, &length, &options)
     });
-    module.set_native_fn("bramble", |ctx: NativeCallContext, base: Vec2, length: Dynamic| -> RhaiResult<Map> {
-        bramble(&ctx, base, &length, &Map::new())
+    let r = rng.clone();
+    module.set_native_fn("bramble", move |ctx: NativeCallContext, base: Vec2, length: Dynamic| -> RhaiResult<Map> {
+        bramble(&ctx, &r, base, &length, &Map::new())
     });
-    module.set_native_fn("bramble", |ctx: NativeCallContext, base: Vec2, length: Dynamic, options: Map| -> RhaiResult<Map> {
-        bramble(&ctx, base, &length, &options)
+    let r = rng.clone();
+    module.set_native_fn("bramble", move |ctx: NativeCallContext, base: Vec2, length: Dynamic, options: Map| -> RhaiResult<Map> {
+        bramble(&ctx, &r, base, &length, &options)
     });
-    module.set_native_fn("bramble_along", |ctx: NativeCallContext, path: Path, flower_size: Dynamic| -> RhaiResult<Map> {
-        bramble_along(&ctx, &path, &flower_size, &Map::new())
+    let r = rng.clone();
+    module.set_native_fn("bramble_along", move |ctx: NativeCallContext, path: Path, flower_size: Dynamic| -> RhaiResult<Map> {
+        bramble_along(&ctx, &r, &path, &flower_size, &Map::new())
     });
-    module.set_native_fn("bramble_along", |ctx: NativeCallContext, path: Path, flower_size: Dynamic, options: Map| -> RhaiResult<Map> {
-        bramble_along(&ctx, &path, &flower_size, &options)
+    let r = rng.clone();
+    module.set_native_fn("bramble_along", move |ctx: NativeCallContext, path: Path, flower_size: Dynamic, options: Map| -> RhaiResult<Map> {
+        bramble_along(&ctx, &r, &path, &flower_size, &options)
     });
-    let snake_along = |ctx: &NativeCallContext, path: &Path, max_width: &Dynamic, options: &Map| -> RhaiResult<Path> {
+    let r = rng.clone();
+    let snake_along = move |ctx: &NativeCallContext, path: &Path, max_width: &Dynamic, options: &Map| -> RhaiResult<Path> {
+        let rng = &r;
         const CALLER: &str = "art::snake_along";
         check_keys(CALLER, options, &["seed"]).map_err(|err| error(ctx, err.to_string()))?;
         let max_width = number_arg(ctx, CALLER, "max_width", max_width)?;
-        art::snake_along(&path.borrow(), max_width, seed(ctx, CALLER, options)?)
+        art::snake_along(&path.borrow(), max_width, seed(ctx, rng, CALLER, options)?)
             .map(Path::new)
             .map_err(|err| error(ctx, format!("{}: {}", CALLER, err)))
     };
+    let along = snake_along.clone();
     module.set_native_fn("snake_along", move |ctx: NativeCallContext, path: Path, max_width: Dynamic| -> RhaiResult<Path> {
-        snake_along(&ctx, &path, &max_width, &Map::new())
+        along(&ctx, &path, &max_width, &Map::new())
     });
     module.set_native_fn("snake_along", move |ctx: NativeCallContext, path: Path, max_width: Dynamic, options: Map| -> RhaiResult<Path> {
         snake_along(&ctx, &path, &max_width, &options)
     });
-    module.set_native_fn("eye", |ctx: NativeCallContext, center: Vec2, length: Dynamic| -> RhaiResult<Map> {
-        eye(&ctx, center, &length, &Map::new())
+    let r = rng.clone();
+    module.set_native_fn("eye", move |ctx: NativeCallContext, center: Vec2, length: Dynamic| -> RhaiResult<Map> {
+        eye(&ctx, &r, center, &length, &Map::new())
     });
-    module.set_native_fn("eye", |ctx: NativeCallContext, center: Vec2, length: Dynamic, options: Map| -> RhaiResult<Map> {
-        eye(&ctx, center, &length, &options)
+    let r = rng.clone();
+    module.set_native_fn("eye", move |ctx: NativeCallContext, center: Vec2, length: Dynamic, options: Map| -> RhaiResult<Map> {
+        eye(&ctx, &r, center, &length, &options)
     });
-    module.set_native_fn("huffman_stars", |ctx: NativeCallContext, symbols: Dynamic, output_base: i64, center: Vec2, width: Dynamic, height: Dynamic| -> RhaiResult<Map> {
-        huffman_stars(&ctx, &symbols, output_base, center, &width, &height, &Map::new())
+    let r = rng.clone();
+    module.set_native_fn("huffman_stars", move |ctx: NativeCallContext, symbols: Dynamic, output_base: i64, center: Vec2, width: Dynamic, height: Dynamic| -> RhaiResult<Map> {
+        huffman_stars(&ctx, &r, &symbols, output_base, center, &width, &height, &Map::new())
     });
-    module.set_native_fn("huffman_stars", |ctx: NativeCallContext, symbols: Dynamic, output_base: i64, center: Vec2, width: Dynamic, height: Dynamic, options: Map| -> RhaiResult<Map> {
-        huffman_stars(&ctx, &symbols, output_base, center, &width, &height, &options)
+    let r = rng.clone();
+    module.set_native_fn("huffman_stars", move |ctx: NativeCallContext, symbols: Dynamic, output_base: i64, center: Vec2, width: Dynamic, height: Dynamic, options: Map| -> RhaiResult<Map> {
+        huffman_stars(&ctx, &r, &symbols, output_base, center, &width, &height, &options)
     });
     module.set_native_fn("constellations", |ctx: NativeCallContext, chart: Map, count: i64, center: Vec2, width: Dynamic, height: Dynamic| -> RhaiResult<rhai::Array> {
         constellations(&ctx, &chart, count, center, &width, &height, &Map::new())
@@ -512,7 +528,7 @@ mod tests {
             let spine = art::snake(vec2(0.0, 0.0), vec2(20.0, 300.0), 900.0, #{ head_angle: -PI() / 2.0, max_width: 30.0, seed: 7 }).spine;
             if spine.to_string() == snake.to_string() { throw "the spine should be another path"; }
             let c = new_canvas();
-            c.add(snake, new_style("#f2ead8", new_brush("Ink Pen", 0.3, 0.7, 1.0)));
+            c.add(snake, new_style(new_brush_style("#f2ead8", "Ink Pen", 1.0), new_handwriting_style()));
             // The tail's tip reaches the tail end (the outline's bounds include
             // the stroke's width).
             if c.bounds().max.y < 300.0 { throw "the tail should reach the tail end: " + c.bounds(); }
@@ -533,11 +549,11 @@ mod tests {
     fn bramble_gives_its_three_parts() {
         let script = r##"
             let plant = art::bramble(vec2(0.0, 0.0), 1000.0, #{ angle: -PI() / 2.0, flower_size: 150.0, seed: 5 });
-            let pen = new_brush("Ink Pen", 0.3, 0.7, 1.0);
+            let ink = |colour| new_style(new_brush_style(colour, "Ink Pen", 1.0), new_handwriting_style());
             let c = new_canvas();
-            c.add(plant.vines, new_style("#c8a27a", pen));
-            c.add(plant.leaves, new_style("#9fd17a", pen));
-            c.add(plant.flowers, new_style("#f2ead8", pen));
+            c.add(plant.vines, ink.call("#c8a27a"));
+            c.add(plant.leaves, ink.call("#9fd17a"));
+            c.add(plant.flowers, ink.call("#f2ead8"));
             if plant.keys().len() != 3 { throw "expected vines, leaves and flowers: " + plant.keys(); }
             let p = new_page();
             p.add(c);
@@ -554,11 +570,11 @@ mod tests {
         let script = r##"
             let path = new_maze(3, 2, #{ seed: 2 }).path().scale_by(70.0);
             let plant = art::bramble_along(path, 40.0, #{ seed: 1 });
-            let pen = new_brush("Ink Pen", 0.3, 0.7, 1.0);
+            let ink = |colour| new_style(new_brush_style(colour, "Ink Pen", 1.0), new_handwriting_style());
             let c = new_canvas();
-            c.add(plant.vines, new_style("#c8a27a", pen));
-            c.add(plant.leaves, new_style("#a8d68a", pen));
-            c.add(plant.flowers, new_style("#f2ead8", pen));
+            c.add(plant.vines, ink.call("#c8a27a"));
+            c.add(plant.leaves, ink.call("#a8d68a"));
+            c.add(plant.flowers, ink.call("#f2ead8"));
             // The vines span the maze: 2 nodes across, 140 apart.
             let b = c.bounds();
             if b.width < 140.0 { throw "the vines should cross the maze: " + b; }
@@ -599,7 +615,7 @@ mod tests {
         let script = r##"
             let path = new_maze(3, 2, #{ seed: 2 }).path().scale_by(70.0);
             let c = new_canvas();
-            c.add(art::snake_along(path, 30.0, #{ seed: 1 }), new_style("#f2ead8", new_brush("Ink Pen", 0.3, 0.7, 1.0)));
+            c.add(art::snake_along(path, 30.0, #{ seed: 1 }), new_style(new_brush_style("#f2ead8", "Ink Pen", 1.0), new_handwriting_style()));
             if c.bounds().width < 140.0 { throw "the serpent should cross the maze: " + c.bounds(); }
             let p = new_page();
             p.add(c);
@@ -626,7 +642,7 @@ mod tests {
             let tilted = art::eye(vec2(0.0, 0.0), 200.0, #{ gaze_angle: PI(), messiness: 0.0, seed: 1, angle: PI() / 2.0, gaze: 1.0, openness: 0.3 });
             if tilted.lines.bounds().height < 190.0 { throw "turned upright, the eye should be tall: " + tilted.lines.bounds(); }
             let flat = art::eye(vec2(0.0, 0.0), 200.0, #{ gaze_angle: 0.0, messiness: 0.5, seed: 1, flat: true });
-            let ink = new_style("#123", new_brush("Ink Pen", 0.2, 0.6, 1.2));
+            let ink = new_style(new_brush_style("#123", "Ink Pen", 1.2, #{ min_pressure: 0.2, max_pressure: 0.6 }), new_handwriting_style());
             let p = new_page();
             p.add(new_canvas().add(e, #{ lines: ink, accent: ink, wash: ink, rim: ink }).add(flat.lines, ink));
             journal_entry.add(p);
@@ -677,7 +693,7 @@ mod tests {
             // Without smoothing, only the six symbols used are stars, and
             // base 3 joins them under three more.
             let tight = art::huffman_stars(symbols(27, "SEE THE SEA"), 3, vec2(100, 100), 400, 400, #{ smoothing: 0, round: true, star_size: 10, gap: 0, variation: 0, iterations: 0 });
-            let b = new_canvas().add(tight.stars, new_style("black", new_brush("Ink Pen", 0.3, 0.7, 1.0))).bounds();
+            let b = new_canvas().add(tight.stars, new_style(new_brush_style("black", "Ink Pen", 1.0), new_handwriting_style())).bounds();
             [chart.nodes.len() == 53, chart.points.len() == 53, chart.edges.len() == 52, leaves.len() == 27,
              e.code.len() < z.code.len(), e.weight == 5 && z.weight == 1, chart.nodes[0].parent == () && chart.nodes[0].depth == 0,
              chart.nodes[0].weight == 38 && chart.nodes[0].text == (), chart.edges[0][0] == 0,

@@ -13,12 +13,12 @@
 //! fn page(n, info) {
 //!     row([
 //!         column([
-//!             if n == 0 { flow("title", #{ role: "heading", height: 90, fit: true }) } else { spacer() },
-//!             flow("body", #{ grow: 1 }),
-//!         ], #{ grow: 1 }),
-//!         band("divider", #{ width: 20 }),
-//!         flow("body", #{ grow: 1 }),
-//!     ], #{ padding: 80, gap: 60 })
+//!             if n == 0 { flow("title", #{ flex: #{ height: 90 }, role: "heading", paragraph: #{ fit: true } }) } else { spacer() },
+//!             flow("body", #{ flex: #{ grow: 1 } }),
+//!         ], #{ flex: #{ grow: 1 } }),
+//!         band("divider", #{ flex: #{ width: 20 } }),
+//!         flow("body", #{ flex: #{ grow: 1 } }),
+//!     ], #{ flex: #{ padding: 80, gap: 60 } })
 //! }
 //! ```
 //!
@@ -29,8 +29,8 @@
 //!     name: "lunar",                       // pages lunar_0, lunar_1, ...
 //!     flows: #{ title: "Lunar Influence", body: long_text },
 //!     roles: #{
-//!         body: #{ font: copper, style: ink, size: 22.0, align: "justify" },
-//!         heading: #{ font: copper_caps, style: red, size: 60.0, align: "center" },
+//!         body: #{ style: ink, type: new_type_style(copper, 22.0), paragraph: #{ align: "justify" } },
+//!         heading: #{ style: red, type: new_type_style(copper_caps, 60.0), paragraph: #{ align: "center" } },
 //!         divider: #{ style: red },
 //!     },
 //!     art: #{ divider: knot_path },
@@ -55,48 +55,45 @@
 //! - `band(name, style)`: art repeated along the box, an ornamental strip.
 //! - `rule(style)`: a line along the box. `spacer(style)`: nothing.
 //!
-//! **Style.** Sizes and positions are canvas units, or `"50%"` of the
-//! parent, or `"auto"`: `width`, `height`, `min_width`, `min_height`,
-//! `max_width`, `max_height`, `basis`, `top`, `left`, `right`, `bottom`;
-//! `margin` and `padding` take one value, `[vertical, horizontal]`,
-//! `[top, right, bottom, left]` or `#{ top, right, bottom, left }`. `grow`
-//! and `shrink` share out space (a box that grows with no size starts from
-//! nothing); `aspect` fixes width / height; `position: "absolute"` takes a
-//! box out of the flow, placed by `top`/`left`/... in its parent. On rows
-//! and columns: `gap` between children, `justify` ("start", "end",
-//! "center", "space_between", "space_around", "space_evenly"), `align`
-//! and `align_content` ("start", "end", "center", "stretch"), `wrap`.
-//! Any box can have a `border`: a role whose stroke outlines it.
+//! **Options.** Every box takes `#{ flex }`, its flex style (a
+//! `new_flex_style` or a map of its settings). Sizes and positions are
+//! canvas units, or `"50%"` of the parent, or `"auto"`: `width`, `height`,
+//! `min_width`, `min_height`, `max_width`, `max_height`, `basis`, `top`,
+//! `left`, `right`, `bottom`; `margin` and `padding` take one value,
+//! `[vertical, horizontal]`, `[top, right, bottom, left]` or
+//! `#{ top, right, bottom, left }`. `grow` and `shrink` share out space (a
+//! box that grows with no size starts from nothing); `aspect` fixes
+//! width / height; `position: "absolute"` takes a box out of the flow,
+//! placed by `top`/`left`/... in its parent. On rows and columns: `gap`
+//! between children, `justify` ("start", "end", "center", "space_between",
+//! "space_around", "space_evenly"), `align` and `align_content` ("start",
+//! "end", "center", "stretch"), `wrap`. Any box can have a `border`: a
+//! style that outlines it, or a role's name (layout files can't see the
+//! journal's styles).
 //!
 //! **Roles** are how a slot's text and strokes look, by name: a slot uses
 //! the role named after it (a flow's or art's name) unless it says `role`.
-//! `font`, `style` (a stroke style) and `size` (the symbol scale) set text;
-//! `line_height` (in sizes, default 1.25), `align` ("left", "center",
-//! "right", "justify"), `valign` ("top", "center", "bottom"), `indent` (a
-//! paragraph's first line, in sizes), `paragraph_gap` (in lines, default
-//! 0.5), `spacing` (between glyphs, in sizes), `jagged` (random line
-//! starts, in sizes), `line_jitter` (how much each line's distance from
-//! the last varies, at random, either way, in sizes), `clearance` (from what text wraps around, in units,
-//! default size / 4), `split_words` (break a word round what text wraps
-//! around rather than moving it past whole: `true`, or the fewest letters a
-//! piece may have; `true` is 2), `split_padding` (how much further the
-//! pieces keep from it, in sizes) and `fit` (shrink the text until all of
-//! it fits).
-//! Art, bands and rules only need a `style`. A slot can override any of
-//! these in its own style: `flow("body", #{ grow: 1, align: "center" })`.
+//! A role is `#{ style, type, paragraph, spans }` (see text_settings.rs and
+//! markdown.rs), each whole or a map of settings over the defaults: a style
+//! (default `default_style()`), a type with the glyphset and glyph scale
+//! text is set in, a paragraph (line height, alignment, indents, gaps,
+//! clearance, fitting, splitting words) and named spans. Art, bands and
+//! rules only need a style. A slot can override any of these with its own,
+//! a whole one or a map over its role's:
+//! `flow("body", #{ flex: #{ grow: 1 }, paragraph: #{ align: "center" } })`.
 //!
 //! Text wraps around boxes taken out of the flow (`position: "absolute"`):
-//! their `wrap` is "box" (the default), "hull" (the outline of what's
+//! their `text_wrap` is "box" (the default), "hull" (the outline of what's
 //! drawn) or "none". In text, `"\n"` breaks a line and a blank line starts
 //! a paragraph.
 //!
 //! A flow is a string, or `markdown(text)`: text styled as it's set, each
-//! stretch in its own colour, size, lean and passes, underlined or struck
-//! through (see markdown.rs). A role's `em` and `strong` say what its
-//! emphasis and strong text look like.
+//! stretch in its own style and type, underlined or struck through (see
+//! markdown.rs). A role's `spans` say what its emphasis, strong text and
+//! named spans look like.
 //!
 //! **Art** is a canvas (its strokes keep their styles), a path or glyph
-//! (drawn in the slot's role style), or a function given the box,
+//! (drawn in the slot's role's style), or a function given the box,
 //! `#{ x, y, width, height, center }`, that returns a canvas or path
 //! drawn as it is, for art made to measure.
 //!
@@ -115,21 +112,20 @@ use super::sources::Sources;
 use std::rc::Rc;
 use stretch::geometry::{Rect as SRect, Size};
 use stretch::number::Number;
-use stretch::style::{AlignContent, AlignItems, AlignSelf, Dimension, FlexDirection, FlexWrap, JustifyContent, PositionType, Style};
+use stretch::style::{AlignContent, AlignItems, AlignSelf, Dimension, FlexDirection, FlexWrap, JustifyContent, PositionType, Style as BoxStyle};
 
 use super::glyphs::Glyph;
-use super::markdown::{FlowText, SpanStyle, Styled};
-use super::options::{check_keys, number};
+use super::markdown::{FlowText, Spans, Styled};
+use super::options::{at_least_zero, check_keys, number, setting_number, Settings};
 use super::random::SharedRng;
-use super::text::word_split;
-use super::{check_finite, CanvasData, Canvas, Page, Path, Stroke, StrokeStyle};
+use super::text_settings::{Jitter, ParagraphStyle, TypeStyle};
+use super::{check_finite, CanvasData, Canvas, Page, Path, Stroke, Style};
 use crate::journal::avoid::AvoidanceTree;
 use crate::journal::canvas::Frame;
 use crate::journal::paths::StrokePath;
-use crate::journal::fonts::Font;
 use crate::journal::symbol::Symbol;
 use crate::journal::fonts::FontBook;
-use crate::journal::typeset::{fitting_size, set_text, Align, TextStyle};
+use crate::journal::typeset::{fitting_size, set_text, TextStyle};
 
 use super::RhaiResult;
 
@@ -182,14 +178,14 @@ impl Kind {
 #[derive(Clone)]
 pub struct Node {
     kind: Kind,
-    style: Style,
+    style: BoxStyle,
     gap: f32,
     /// The role a slot's text or strokes take.
     role: String,
-    /// Role settings this slot overrides.
-    overrides: Map,
-    /// The role that outlines it.
-    border: Option<String>,
+    /// What this slot changes of its role's.
+    overrides: Overrides,
+    /// What outlines it.
+    border: Option<Border>,
     wrap: Wrap,
     /// Whether its width and height were left to its content.
     auto_size: (bool, bool),
@@ -206,14 +202,175 @@ enum Wrap {
     None,
 }
 
-const BOX_KEYS: [&str; 20] = [
-    "width", "height", "min_width", "min_height", "max_width", "max_height", "grow", "shrink", "basis",
-    "margin", "padding", "align_self", "position", "top", "left", "right", "bottom", "aspect", "border", "wrap",
-];
-const CONTAINER_KEYS: [&str; 4] = ["gap", "justify", "align", "align_content"];
-/// Role settings, which roles and slots take: the text settings (see
-/// text_settings.rs), `role` for slots only.
-use super::text_settings::{Jitter, ROLE_KEYS};
+/// What outlines a box: a style, or a role's (for layout files, which
+/// can't see the journal's styles).
+#[derive(Clone)]
+enum Border {
+    Style(Style),
+    Role(String),
+}
+
+/// A box's flex style: its size and place, and how it lays out its
+/// children, kept as given (each checked) until a box is made with it.
+#[derive(Clone, Default)]
+pub struct FlexStyle(Map);
+
+/// A box's flex style, read.
+struct Flex {
+    style: BoxStyle,
+    gap: f32,
+    border: Option<Border>,
+    wrap: Option<Wrap>,
+    turn: Option<f32>,
+    basis_given: bool,
+}
+
+/// Keys only rows and columns take, and only slots.
+const CONTAINER_KEYS: [&str; 5] = ["gap", "justify", "align", "align_content", "wrap"];
+const SLOT_KEYS: [&str; 1] = ["text_wrap"];
+
+impl Flex {
+    fn new(row: bool) -> Flex {
+        Flex {
+            style: BoxStyle { flex_direction: if row { FlexDirection::Row } else { FlexDirection::Column }, ..BoxStyle::default() },
+            gap: 0.0,
+            border: None,
+            wrap: None,
+            turn: None,
+            basis_given: false,
+        }
+    }
+    /// Apply one setting.
+    fn set(&mut self, caller: &str, key: &str, value: &Dynamic) -> RhaiResult<()> {
+        let style = &mut self.style;
+        let dim = || dimension(caller, key, value);
+        match key {
+            "width" => style.size.width = dim()?,
+            "height" => style.size.height = dim()?,
+            "min_width" => style.min_size.width = dim()?,
+            "min_height" => style.min_size.height = dim()?,
+            "max_width" => style.max_size.width = dim()?,
+            "max_height" => style.max_size.height = dim()?,
+            "basis" => {
+                style.flex_basis = dim()?;
+                self.basis_given = true;
+            }
+            "top" => style.position.top = dim()?,
+            "left" => style.position.start = dim()?,
+            "right" => style.position.end = dim()?,
+            "bottom" => style.position.bottom = dim()?,
+            "margin" => style.margin = edges(caller, key, value)?,
+            "padding" => style.padding = edges(caller, key, value)?,
+            "grow" => style.flex_grow = at_least_zero(caller, key, value)? as f32,
+            "shrink" => style.flex_shrink = at_least_zero(caller, key, value)? as f32,
+            "aspect" => style.aspect_ratio = Number::Defined(at_least_zero(caller, key, value)? as f32),
+            "gap" => self.gap = at_least_zero(caller, key, value)? as f32,
+            "position" => style.position_type = choice(caller, key, value, &[("relative", PositionType::Relative), ("absolute", PositionType::Absolute)])?,
+            "align_self" => style.align_self = choice(caller, key, value, &[
+                ("auto", AlignSelf::Auto), ("start", AlignSelf::FlexStart), ("end", AlignSelf::FlexEnd),
+                ("center", AlignSelf::Center), ("stretch", AlignSelf::Stretch),
+            ])?,
+            "justify" => style.justify_content = choice(caller, key, value, &[
+                ("start", JustifyContent::FlexStart), ("end", JustifyContent::FlexEnd), ("center", JustifyContent::Center),
+                ("space_between", JustifyContent::SpaceBetween), ("space_around", JustifyContent::SpaceAround),
+                ("space_evenly", JustifyContent::SpaceEvenly),
+            ])?,
+            "align" => style.align_items = choice(caller, key, value, &[
+                ("start", AlignItems::FlexStart), ("end", AlignItems::FlexEnd), ("center", AlignItems::Center), ("stretch", AlignItems::Stretch),
+            ])?,
+            "align_content" => style.align_content = choice(caller, key, value, &[
+                ("start", AlignContent::FlexStart), ("end", AlignContent::FlexEnd), ("center", AlignContent::Center),
+                ("stretch", AlignContent::Stretch), ("space_between", AlignContent::SpaceBetween), ("space_around", AlignContent::SpaceAround),
+            ])?,
+            "wrap" => {
+                let wrap = value.as_bool().map_err(|_| format!("{}: 'wrap' should be true or false, got {}", caller, value))?;
+                style.flex_wrap = if wrap { FlexWrap::Wrap } else { FlexWrap::NoWrap };
+            }
+            "text_wrap" => self.wrap = Some(choice(caller, key, value, &[("box", Wrap::Box), ("hull", Wrap::Hull), ("none", Wrap::None)])?),
+            "border" => self.border = Some(match value.clone().into_string() {
+                Ok(role) => Border::Role(role),
+                Err(_) => Border::Style(Style::given(&format!("{} 'border'", caller), value, &Style::default_style())?),
+            }),
+            "turn" => self.turn = Some(setting_number(caller, key, value)? as f32),
+            _ => unreachable!("{} isn't a flex setting", key),
+        }
+        Ok(())
+    }
+}
+
+impl Settings for FlexStyle {
+    const NAME: &'static str = "flex_style";
+    const KEYS: &'static [&'static str] = &[
+        "width", "height", "min_width", "min_height", "max_width", "max_height", "grow", "shrink", "basis",
+        "margin", "padding", "align_self", "position", "top", "left", "right", "bottom", "aspect", "border", "text_wrap", "turn",
+        "gap", "justify", "align", "align_content", "wrap",
+    ];
+    fn get(&self, key: &str) -> Dynamic {
+        self.0.get(key).cloned().unwrap_or(Dynamic::UNIT)
+    }
+    fn set(&mut self, caller: &str, key: &str, value: &Dynamic) -> RhaiResult<()> {
+        Flex::new(false).set(caller, key, value)?;
+        self.0.insert(key.into(), value.clone());
+        Ok(())
+    }
+}
+
+/// What a slot changes of its role's: each a whole one, or a map of
+/// settings over the role's.
+#[derive(Clone, Default)]
+struct Overrides {
+    style: Option<Dynamic>,
+    type_: Option<Dynamic>,
+    paragraph: Option<Dynamic>,
+    spans: Option<Spans>,
+}
+
+impl Overrides {
+    fn is_empty(&self) -> bool {
+        self.style.is_none() && self.type_.is_none() && self.paragraph.is_none() && self.spans.is_none()
+    }
+}
+
+/// What a role is: `#{ style, type, paragraph, spans }`, each whole or a
+/// map of settings over the defaults.
+#[derive(Clone)]
+struct RoleSettings {
+    style: Style,
+    type_: TypeStyle,
+    paragraph: ParagraphStyle,
+    spans: Spans,
+}
+
+impl Default for RoleSettings {
+    fn default() -> Self {
+        RoleSettings { style: Style::default_style(), type_: TypeStyle::empty(), paragraph: ParagraphStyle::default(), spans: Spans::default() }
+    }
+}
+
+const ROLE_KEYS: [&str; 4] = ["style", "type", "paragraph", "spans"];
+
+impl RoleSettings {
+    fn read(caller: &str, value: &Dynamic) -> RhaiResult<RoleSettings> {
+        let map = value.clone().try_cast::<Map>().ok_or_else(|| format!("{}: a role should be #{{ style, type, paragraph, spans }}, got {}", caller, value.type_name()))?;
+        check_keys(caller, &map, &ROLE_KEYS)?;
+        let overrides = Overrides {
+            style: map.get("style").cloned(),
+            type_: map.get("type").cloned(),
+            paragraph: map.get("paragraph").cloned(),
+            spans: map.get("spans").map(|s| Spans::from_dynamic(caller, s)).transpose()?,
+        };
+        RoleSettings::default().with(caller, &overrides)
+    }
+    /// These settings with a slot's changes.
+    fn with(&self, caller: &str, changes: &Overrides) -> RhaiResult<RoleSettings> {
+        Ok(RoleSettings {
+            style: changes.style.as_ref().map_or(Ok(self.style.clone()), |s| Style::given(&format!("{} 'style'", caller), s, &self.style))?,
+            type_: changes.type_.as_ref().map_or(Ok(self.type_.clone()), |t| TypeStyle::given(&format!("{} 'type'", caller), t, &self.type_))?,
+            paragraph: changes.paragraph.as_ref().map_or(Ok(self.paragraph.clone()), |p| ParagraphStyle::given(&format!("{} 'paragraph'", caller), p, &self.paragraph))?,
+            spans: changes.spans.as_ref().map_or(self.spans.clone(), |s| self.spans.then(s)),
+        })
+    }
+}
 
 fn dimension(caller: &str, key: &str, value: &Dynamic) -> RhaiResult<Dimension> {
     if let Ok(n) = value.as_float() {
@@ -265,129 +422,46 @@ fn choice<T: Copy>(caller: &str, key: &str, value: &Dynamic, choices: &[(&str, T
     })
 }
 
-/// Check a role setting's value, as roles and slots give them.
-fn check_role_setting(caller: &str, key: &str, value: &Dynamic) -> RhaiResult<()> {
-    let positive = |what: &str| -> RhaiResult<()> {
-        match number(caller, &Map::from_iter([(key.into(), value.clone())]), key)? {
-            Some(n) if n > 0.0 && n.is_finite() => Ok(()),
-            _ => Err(format!("{}: '{}' must be {}, got {}", caller, key, what, value).into()),
-        }
-    };
-    match key {
-        "font" if !value.is::<Font>() => Err(format!("{}: 'font' should be a font, got {}", caller, value.type_name()).into()),
-        "style" if !value.is::<StrokeStyle>() => Err(format!("{}: 'style' should be a stroke style, got {}", caller, value.type_name()).into()),
-        "size" | "line_height" => positive("a positive number"),
-        "indent" | "paragraph_gap" | "spacing" | "clearance" | "jagged" | "line_jitter" => {
-            match number(caller, &Map::from_iter([(key.into(), value.clone())]), key)? {
-                Some(n) if n.is_finite() && (n >= 0.0 || key == "spacing") => Ok(()),
-                _ => Err(format!("{}: '{}' must be a number of at least 0, got {}", caller, key, value).into()),
-            }
-        }
-        "align" => choice(caller, key, value, &[("left", ()), ("center", ()), ("right", ()), ("justify", ())]),
-        "valign" => choice(caller, key, value, &[("top", ()), ("center", ()), ("bottom", ())]),
-        "fit" if !value.is_bool() => Err(format!("{}: 'fit' should be true or false, got {}", caller, value).into()),
-        // Checked with each other once a slot's settings are merged.
-        "split_words" | "split_padding" => word_split(caller, &Map::from_iter([(key.into(), value.clone()), ("split_words".into(), true.into())])).map(|_| ()),
-        "em" | "strong" => SpanStyle::from_map(&format!("{} '{}'", caller, key), value).map(|_| ()),
-        "role" => string(caller, key, value).map(|_| ()),
-        "position_jitter" | "rotation_jitter" | "scale_jitter" => Jitter::parse(caller, &Map::from_iter([(key.into(), value.clone())])).map(|_| ()),
-        _ => Ok(()),
-    }
-}
-
 impl Node {
     fn new(caller: &str, kind: Kind, options: Map, children: Array) -> RhaiResult<Node> {
         let container = kind.is_container();
-        let mut known: Vec<&str> = BOX_KEYS.to_vec();
-        if container {
-            known.extend(CONTAINER_KEYS);
-        } else {
-            known.extend(ROLE_KEYS);
-            if matches!(kind, Kind::Band(_)) {
-                known.push("turn");
-            }
-        }
-        check_keys(caller, &options, &known)?;
-        let mut style = Style {
-            flex_direction: if kind == Kind::Row { FlexDirection::Row } else { FlexDirection::Column },
-            ..Style::default()
+        let known: &[&str] = if container { &["flex"] } else { &["flex", "role", "style", "type", "paragraph", "spans"] };
+        check_keys(caller, &options, known)?;
+        let flex = match options.get("flex") {
+            None => FlexStyle::default(),
+            Some(flex) => FlexStyle::given(&format!("{} 'flex'", caller), flex, &FlexStyle::default())?,
         };
-        let mut overrides = Map::new();
-        let (mut role, mut border, mut wrap, mut gap, mut turn) = (kind.default_role().to_string(), None, None, 0.0, None);
-        let mut basis_given = false;
-        for (key, value) in &options {
+        let mut parts = Flex::new(kind == Kind::Row);
+        for (key, value) in &flex.0 {
             let key = key.as_str();
-            let dim = || dimension(caller, key, value);
-            let num = || -> RhaiResult<f32> {
-                number(caller, &options, key)?.filter(|n| n.is_finite())
-                    .ok_or_else(|| format!("{}: '{}' should be a number, got {}", caller, key, value).into())
-            };
-            match key {
-                "width" => style.size.width = dim()?,
-                "height" => style.size.height = dim()?,
-                "min_width" => style.min_size.width = dim()?,
-                "min_height" => style.min_size.height = dim()?,
-                "max_width" => style.max_size.width = dim()?,
-                "max_height" => style.max_size.height = dim()?,
-                "basis" => {
-                    style.flex_basis = dim()?;
-                    basis_given = true;
-                }
-                "top" => style.position.top = dim()?,
-                "left" => style.position.start = dim()?,
-                "right" => style.position.end = dim()?,
-                "bottom" => style.position.bottom = dim()?,
-                "margin" => style.margin = edges(caller, key, value)?,
-                "padding" => style.padding = edges(caller, key, value)?,
-                "grow" | "shrink" | "aspect" | "gap" => {
-                    let n = num()?;
-                    if n < 0.0 {
-                        return Err(format!("{}: '{}' can't be negative, got {}", caller, key, n).into());
-                    }
-                    match key {
-                        "grow" => style.flex_grow = n,
-                        "shrink" => style.flex_shrink = n,
-                        "aspect" => style.aspect_ratio = Number::Defined(n),
-                        _ => gap = n,
-                    }
-                }
-                "position" => style.position_type = choice(caller, key, value, &[("relative", PositionType::Relative), ("absolute", PositionType::Absolute)])?,
-                "align_self" => style.align_self = choice(caller, key, value, &[
-                    ("auto", AlignSelf::Auto), ("start", AlignSelf::FlexStart), ("end", AlignSelf::FlexEnd),
-                    ("center", AlignSelf::Center), ("stretch", AlignSelf::Stretch),
-                ])?,
-                "justify" => style.justify_content = choice(caller, key, value, &[
-                    ("start", JustifyContent::FlexStart), ("end", JustifyContent::FlexEnd), ("center", JustifyContent::Center),
-                    ("space_between", JustifyContent::SpaceBetween), ("space_around", JustifyContent::SpaceAround),
-                    ("space_evenly", JustifyContent::SpaceEvenly),
-                ])?,
-                "align" if container => style.align_items = choice(caller, key, value, &[
-                    ("start", AlignItems::FlexStart), ("end", AlignItems::FlexEnd), ("center", AlignItems::Center), ("stretch", AlignItems::Stretch),
-                ])?,
-                "align_content" => style.align_content = choice(caller, key, value, &[
-                    ("start", AlignContent::FlexStart), ("end", AlignContent::FlexEnd), ("center", AlignContent::Center),
-                    ("stretch", AlignContent::Stretch), ("space_between", AlignContent::SpaceBetween), ("space_around", AlignContent::SpaceAround),
-                ])?,
-                "wrap" if container => {
-                    style.flex_wrap = if value.as_bool().map_err(|_| format!("{}: 'wrap' should be true or false, got {}", caller, value))? {
-                        FlexWrap::Wrap
-                    } else {
-                        FlexWrap::NoWrap
-                    }
-                }
-                "wrap" => wrap = Some(choice(caller, key, value, &[("box", Wrap::Box), ("hull", Wrap::Hull), ("none", Wrap::None)])?),
-                "border" => border = Some(string(caller, key, value)?),
-                "turn" => turn = Some(num()?),
-                "role" => role = string(caller, key, value)?,
-                _ => {
-                    check_role_setting(caller, key, value)?;
-                    overrides.insert(key.into(), value.clone());
-                }
+            if !container && CONTAINER_KEYS.contains(&key) {
+                return Err(format!("{}: '{}' lays out children, so only rows and columns take it", caller, key).into());
             }
+            if container && SLOT_KEYS.contains(&key) {
+                return Err(format!("{}: '{}' is how text wraps round a slot, so rows and columns don't take it", caller, key).into());
+            }
+            if key == "turn" && !matches!(kind, Kind::Band(_)) {
+                return Err(format!("{}: only bands take 'turn'", caller).into());
+            }
+            parts.set(caller, key, value)?;
         }
+        let mut role = kind.default_role().to_string();
+        if let Some(r) = options.get("role") {
+            role = string(caller, "role", r)?;
+        }
+        let overrides = Overrides {
+            style: options.get("style").cloned(),
+            type_: options.get("type").cloned(),
+            paragraph: options.get("paragraph").cloned(),
+            spans: options.get("spans").map(|s| Spans::from_dynamic(caller, s)).transpose()?,
+        };
+        // Checked now, over the defaults; applied over the role's later.
+        RoleSettings::default().with(caller, &overrides)?;
+        let mut style = parts.style;
+        let sized = |key: &str| flex.0.contains_key(key);
         // A box that grows from no size of its own grows from nothing, as
         // CSS's `flex: 1` does, so growing boxes share space evenly.
-        if style.flex_grow > 0.0 && !basis_given && !options.contains_key("width") && !options.contains_key("height") {
+        if style.flex_grow > 0.0 && !parts.basis_given && !sized("width") && !sized("height") {
             style.flex_basis = Dimension::Points(0.0);
         }
         let children = children.into_iter().enumerate().map(|(i, child)| {
@@ -398,9 +472,9 @@ impl Node {
         }).collect::<RhaiResult<Vec<Node>>>()?;
         let absolute = style.position_type == PositionType::Absolute;
         Ok(Node {
-            auto_size: (!options.contains_key("width"), !options.contains_key("height")),
-            wrap: wrap.unwrap_or(if absolute { Wrap::Box } else { Wrap::None }),
-            kind, style, gap, role, overrides, border, turn, children,
+            auto_size: (!sized("width"), !sized("height")),
+            wrap: parts.wrap.unwrap_or(if absolute { Wrap::Box } else { Wrap::None }),
+            kind, style, gap: parts.gap, role, overrides, border: parts.border, turn: parts.turn, children,
         })
     }
 
@@ -469,18 +543,21 @@ fn load_layout(ctx: &NativeCallContext, layouts: &Sources, name: &str) -> RhaiRe
     Ok(Layout { name: name.to_string(), source: Source::File { ast: Rc::new(ast), file } })
 }
 
-/// How a slot's text and strokes look.
+/// How a slot's text and strokes look: its role's settings with its own
+/// changes, and how its text is set, if its type has a size.
 struct Role {
-    font: Option<Font>,
-    style: Option<StrokeStyle>,
+    settings: RoleSettings,
     text: Option<TextStyle>,
-    fit: bool,
-    valign: f32,
-    /// What emphasis and strong text in markdown look like.
-    em: SpanStyle,
-    strong: SpanStyle,
+}
+
+impl Role {
+    fn style(&self) -> &Style {
+        &self.settings.style
+    }
     /// How far set glyphs stray.
-    jitter: Jitter,
+    fn jitter(&self) -> Jitter {
+        Jitter::of(&self.settings.style)
+    }
 }
 
 /// A flow of text, as far as it's been set.
@@ -507,7 +584,7 @@ struct Content {
     height: f32,
     name: String,
     flows: Vec<(String, FlowState)>,
-    roles: Map,
+    roles: HashMap<String, RoleSettings>,
     art: Map,
     max_pages: usize,
 }
@@ -529,53 +606,33 @@ impl Content {
     /// overrides on top.
     fn role(&self, node: &Node, page: usize) -> RhaiResult<Role> {
         let caller = format!("typeset: page {}'s {}", page, node.kind.describe());
-        let mut settings = match self.roles.get(node.role.as_str()) {
-            Some(role) => role.clone().try_cast::<Map>()
-                .ok_or_else(|| format!("typeset: role '{}' should be a map of settings", node.role))?,
-            None => Map::new(),
-        };
-        if !self.roles.contains_key(node.role.as_str()) && node.overrides.is_empty() && needs_role(&node.kind) {
+        let role = self.roles.get(&node.role);
+        if role.is_none() && node.overrides.is_empty() && needs_role(&node.kind) {
             let mut names: Vec<&str> = self.roles.keys().map(|k| k.as_str()).collect();
             names.sort();
             return Err(format!("{} uses role '{}', which `roles` doesn't have; roles: {}", caller, node.role, names.join(", ")).into());
         }
-        for (key, value) in &node.overrides {
-            settings.insert(key.clone(), value.clone());
-        }
-        let font = settings.get("font").and_then(|f| f.clone().try_cast::<Font>());
-        let style = settings.get("style").and_then(|s| s.clone().try_cast::<StrokeStyle>());
-        let size = number(&caller, &settings, "size")?;
-        let text = match size {
-            None => None,
-            Some(size) => {
+        let settings = role.cloned().unwrap_or_default().with(&caller, &node.overrides)?;
+        let text = match settings.type_.has_size() {
+            false => None,
+            true => {
+                let size = settings.type_.size(&caller)?;
+                let paragraph = &settings.paragraph;
                 let mut text = TextStyle::new(size);
-                let get = |key: &str| number(&caller, &settings, key);
-                text.line_height = get("line_height")?.unwrap_or(text.line_height);
-                text.indent = get("indent")?.unwrap_or(0.0);
-                text.paragraph_gap = get("paragraph_gap")?.unwrap_or(text.paragraph_gap);
-                text.spacing = get("spacing")?.unwrap_or(0.0);
-                text.clearance = get("clearance")?.unwrap_or(text.clearance);
-                text.jagged = get("jagged")?.unwrap_or(0.0);
-                text.line_jitter = get("line_jitter")?.unwrap_or(0.0);
-                text.split = word_split(&caller, &settings)?;
-                if let Some(align) = settings.get("align") {
-                    text.align = Align::from_name(&align.to_string()).expect("checked when given");
-                }
+                text.line_height = paragraph.line_height();
+                text.indent = paragraph.indent();
+                text.paragraph_gap = paragraph.paragraph_gap();
+                text.spacing = settings.type_.tracking();
+                text.clearance = paragraph.clearance();
+                // Typesetting takes these in glyph scales.
+                text.jagged = paragraph.line_start_jitter() / size;
+                text.line_jitter = paragraph.line_gap_jitter() / size;
+                text.split = paragraph.word_split();
+                text.align = paragraph.align();
                 Some(text)
             }
         };
-        let valign = match settings.get("valign").map(|v| v.to_string()).as_deref() {
-            Some("center") => 0.5,
-            Some("bottom") => 1.0,
-            _ => 0.0,
-        };
-        let em = settings.get("em").map_or(Ok(SpanStyle::emphasis()), |em| SpanStyle::from_map(&format!("{} 'em'", caller), em))?;
-        let strong = match settings.get("strong") {
-            Some(strong) => SpanStyle::from_map(&format!("{} 'strong'", caller), strong)?,
-            None => SpanStyle::strong(size.unwrap_or(0.0)),
-        };
-        let jitter = Jitter::parse(&caller, &settings)?;
-        Ok(Role { font, style, text, fit: settings.get("fit").and_then(|f| f.as_bool().ok()).unwrap_or(false), valign, em, strong, jitter })
+        Ok(Role { settings, text })
     }
 }
 
@@ -607,14 +664,9 @@ fn parse_content(caller: &str, content: &Map, layout: &Layout, ctx: &NativeCallC
         let text = FlowText::from_dynamic(&format!("{}: flow '{}'", caller, name), text)?;
         flows.push((name, FlowState { chars: text.text().chars().collect(), text, cursor: 0, paragraph_start: true, styled: HashMap::new() }));
     }
-    let roles = map("roles")?;
-    for (name, role) in &roles {
-        let settings = role.clone().try_cast::<Map>().ok_or_else(|| format!("{}: role '{}' should be a map of settings", caller, name))?;
-        let role_caller = format!("{} role '{}'", caller, name);
-        check_keys(&role_caller, &settings, &ROLE_KEYS[..ROLE_KEYS.len() - 1])?;
-        for (key, value) in &settings {
-            check_role_setting(&role_caller, key, value)?;
-        }
+    let mut roles = HashMap::new();
+    for (name, role) in map("roles")? {
+        roles.insert(name.to_string(), RoleSettings::read(&format!("{} role '{}'", caller, name), &role)?);
     }
     let max_pages = match content.get("max_pages") {
         None => 200,
@@ -738,10 +790,10 @@ impl SlotText<'_> {
 fn slot_text<'a>(content: &'a mut Content, node: &Node, role: &Role, labels: &'a HashMap<usize, (Styled, Vec<char>)>, index: usize, symdict: &FontBook, rng: &SharedRng) -> RhaiResult<Option<SlotText<'a>>> {
     match &node.kind {
         Kind::Flow(name) | Kind::Initial(name) => {
-            let font = role.font.clone().ok_or_else(|| format!("typeset: {} needs a font in its role '{}'", node.kind.describe(), node.role))?;
+            let caller = format!("typeset: {} in role '{}'", node.kind.describe(), node.role);
             let flow = content.flow(name)?;
             if !flow.styled.contains_key(&node.role) {
-                let styled = Styled::new(&flow.text, &font, &role.em, &role.strong, symdict, &mut *rng.borrow_mut());
+                let styled = Styled::new(&caller, &flow.text, &role.settings.type_, &role.settings.spans, symdict, &mut *rng.borrow_mut())?;
                 flow.styled.insert(node.role.clone(), styled);
             }
             let start = flow.cursor;
@@ -762,11 +814,13 @@ fn fitted(path: &StrokePath, from: Aabb, rect: Aabb) -> StrokePath {
     path.clone().translated_by(-from.center()).scaled_by(scale).translated_by(rect.center())
 }
 
-/// Strokes of art: a canvas's own, or a path or glyph in `style`.
-fn art_strokes(caller: &str, art: &Dynamic, style: Option<&StrokeStyle>) -> RhaiResult<Vec<Stroke>> {
+/// Strokes of art: a canvas's own, or a path or glyph in `style`, gone
+/// over as its hand goes, from `rng`.
+fn art_strokes(caller: &str, art: &Dynamic, style: &Style, rng: &SharedRng) -> RhaiResult<Vec<Stroke>> {
     let styled = |path: StrokePath| -> RhaiResult<Vec<Stroke>> {
-        let style = style.ok_or_else(|| format!("{}: the art is a path, so its role needs a 'style'", caller))?;
-        Ok(vec![Stroke { path, style: style.clone(), seed: None }])
+        let mut canvas = CanvasData::default();
+        canvas.add_path(path, style, &mut *rng.borrow_mut());
+        Ok(canvas.strokes)
     };
     if let Some(canvas) = art.clone().try_cast::<Canvas>() {
         Ok(canvas.borrow().strokes.clone())
@@ -803,9 +857,10 @@ fn typeset_page(ctx: &NativeCallContext, root: &Node, n: usize, content: &mut Co
     let mut labels = HashMap::new();
     for (i, node) in nodes.iter().enumerate() {
         if let Kind::Label(text) = &node.kind {
-            let font = roles[i].as_ref().and_then(|r| r.font.clone())
-                .ok_or_else(|| format!("typeset: page {}'s {} needs a font in its role '{}'", n, node.kind.describe(), node.role))?;
-            labels.insert(i, (Styled::plain(font.build(text, symdict, &mut *rng.borrow_mut())), text.chars().collect::<Vec<char>>()));
+            let role = roles[i].as_ref().expect("labels have roles");
+            let caller = format!("typeset: page {}'s {} in role '{}'", n, node.kind.describe(), node.role);
+            let styled = Styled::new(&caller, &FlowText::Plain(text.clone()), &role.settings.type_, &role.settings.spans, symdict, &mut *rng.borrow_mut())?;
+            labels.insert(i, (styled, text.chars().collect::<Vec<char>>()));
         }
     }
     // Lay out; then size boxes left to their text by it, and again.
@@ -851,9 +906,9 @@ fn typeset_page(ctx: &NativeCallContext, root: &Node, n: usize, content: &mut Co
     let mut canvas = CanvasData::default();
     let mut avoid = AvoidanceTree::new();
     let mut moved = false;
-    let draw = |canvas: &mut CanvasData, path: StrokePath, style: &StrokeStyle| -> RhaiResult<()> {
+    let draw = |canvas: &mut CanvasData, path: StrokePath, style: &Style| -> RhaiResult<()> {
         check_finite("typeset", &path)?;
-        canvas.add_path(path, style.clone());
+        canvas.add_path(path, style, &mut *rng.borrow_mut());
         Ok(())
     };
     let keep_clear = |avoid: &mut AvoidanceTree, node: &Node, rect: Aabb, drawn: &[PVec]| match node.wrap {
@@ -866,15 +921,16 @@ fn typeset_page(ctx: &NativeCallContext, root: &Node, n: usize, content: &mut Co
         let Placed { outer, inner } = placed[i];
         let caller = format!("typeset: page {}'s {}", n, node.kind.describe());
         if let Some(border) = &node.border {
-            let style = content.roles.get(border.as_str()).and_then(|r| r.clone().try_cast::<Map>())
-                .and_then(|r| r.get("style").and_then(|s| s.clone().try_cast::<StrokeStyle>()))
-                .ok_or_else(|| format!("{}: its border's role '{}' needs a 'style'", caller, border))?;
-            draw(&mut canvas, StrokePath::rectangle(outer.center(), outer.extents().x, outer.extents().y), &style)?;
+            let style = match border {
+                Border::Style(style) => style,
+                Border::Role(name) => &content.roles.get(name).ok_or_else(|| format!("{}: its border's role '{}' isn't in `roles`", caller, name))?.style,
+            };
+            draw(&mut canvas, StrokePath::rectangle(outer.center(), outer.extents().x, outer.extents().y), style)?;
         }
         let role = roles[i].as_ref();
         match &node.kind {
             Kind::Rule => {
-                let style = role.and_then(|r| r.style.as_ref()).ok_or_else(|| format!("{}: its role '{}' needs a 'style'", caller, node.role))?;
+                let style = role.expect("rules have roles").style();
                 let (c, e) = (inner.center(), inner.extents());
                 let line = if e.x >= e.y {
                     StrokePath::line(PVec::new(inner.mins.x, c.y), PVec::new(inner.maxs.x, c.y))
@@ -890,14 +946,14 @@ fn typeset_page(ctx: &NativeCallContext, root: &Node, n: usize, content: &mut Co
                     names.sort();
                     format!("{}: there's no art named '{}'; art: {}", caller, name, names.join(", "))
                 })?;
-                let style = role.and_then(|r| r.style.as_ref());
+                let style = role.expect("art has a role").style();
                 let strokes = if let Some(f) = art.clone().try_cast::<FnPtr>() {
                     // Made to measure: drawn as it comes.
                     let made = f.call_within_context::<Dynamic>(ctx, (Dynamic::from_map(rect_map(inner)),))
                         .map_err(|e| format!("{}: {}", caller, e))?;
-                    art_strokes(&caller, &made, style)?
+                    art_strokes(&caller, &made, style, rng)?
                 } else {
-                    let strokes = art_strokes(&caller, &art, style)?;
+                    let strokes = art_strokes(&caller, &art, style, rng)?;
                     let from = bounds_of(&strokes);
                     if from.mins.x > from.maxs.x {
                         Vec::new()
@@ -909,13 +965,15 @@ fn typeset_page(ctx: &NativeCallContext, root: &Node, n: usize, content: &mut Co
                 };
                 let points: Vec<PVec> = strokes.iter().flat_map(|s| s.path.points_within()).collect();
                 keep_clear(&mut avoid, node, outer, &points);
+                // Gone over already, as they were drawn.
                 for stroke in strokes {
-                    draw(&mut canvas, stroke.path, &stroke.style)?;
+                    check_finite("typeset", &stroke.path)?;
+                    canvas.strokes.push(stroke);
                 }
             }
             Kind::Initial(_) | Kind::Label(_) => {
                 let role = role.expect("text slots have roles");
-                let style = role.style.clone().ok_or_else(|| format!("{}: its role '{}' needs a 'style'", caller, node.role))?;
+                let style = role.style().clone();
                 let text_style = role.text.clone();
                 let Some(text) = slot_text(content, node, role, &labels, i, symdict, rng)? else { continue };
                 let (set, consumed) = if let Kind::Initial(_) = node.kind {
@@ -928,13 +986,13 @@ fn typeset_page(ctx: &NativeCallContext, root: &Node, n: usize, content: &mut Co
                     let scale = (inner.extents().x * 2.0 / hull.extents().x).min(inner.extents().y * 2.0 / hull.extents().y);
                     glyph.scale_by(scale);
                     glyph.set_position(inner.center() - hull.center() * glyph.scale() / 2.0);
-                    draw(&mut canvas, glyph.placed_strokepath(), &text.styled.look(text.start + k).ink.on(&style))?;
+                    draw(&mut canvas, glyph.placed_strokepath(), &text.styled.look(text.start + k).ink.on(&caller, &style)?)?;
                     (vec![glyph], k + 1)
                 } else {
-                    let text_style = text_style.ok_or_else(|| format!("{}: its role '{}' needs a 'size'", caller, node.role))?;
+                    let text_style = text_style.ok_or_else(|| format!("{}: its role '{}' needs a type with a 'glyph_scale'", caller, node.role))?;
                     let mut setting = set_slot(inner, &text_style, role, text.glyphs(), text.chars, text.paragraph_start, &avoid, rng);
-                    role.jitter.apply(&mut setting.placed, text_style.size, &mut *rng.borrow_mut());
-                    text.styled.draw(&mut canvas, &setting, text.start, &style, &avoid, text_style.clearance)?;
+                    role.jitter().apply(&mut setting.placed, &mut *rng.borrow_mut());
+                    text.styled.draw(&mut canvas, &setting, text.start, &style, &avoid, text_style.clearance, &mut *rng.borrow_mut())?;
                     (setting.placed, setting.consumed)
                 };
                 let points: Vec<PVec> = set.iter().flat_map(|g| g.footprint()).collect();
@@ -954,15 +1012,15 @@ fn typeset_page(ctx: &NativeCallContext, root: &Node, n: usize, content: &mut Co
         let Kind::Flow(name) = &node.kind else { continue };
         let caller = format!("typeset: page {}'s {}", n, node.kind.describe());
         let role = roles[i].as_ref().expect("text slots have roles");
-        let style = role.style.clone().ok_or_else(|| format!("{}: its role '{}' needs a 'style'", caller, node.role))?;
-        let text_style = role.text.clone().ok_or_else(|| format!("{}: its role '{}' needs a 'size'", caller, node.role))?;
+        let style = role.style().clone();
+        let text_style = role.text.clone().ok_or_else(|| format!("{}: its role '{}' needs a type with a 'glyph_scale'", caller, node.role))?;
         let Some(text) = slot_text(content, node, role, &labels, i, symdict, rng)? else { continue };
         if text.glyphs().is_empty() {
             continue;
         }
         let mut setting = set_slot(placed[i].inner, &text_style, role, text.glyphs(), text.chars, text.paragraph_start, &avoid, rng);
-        role.jitter.apply(&mut setting.placed, text_style.size, &mut *rng.borrow_mut());
-        text.styled.draw(&mut canvas, &setting, text.start, &style, &avoid, text_style.clearance)?;
+        role.jitter().apply(&mut setting.placed, &mut *rng.borrow_mut());
+        text.styled.draw(&mut canvas, &setting, text.start, &style, &avoid, text_style.clearance, &mut *rng.borrow_mut())?;
         let flow = content.flow(name)?;
         flow.cursor += setting.consumed;
         flow.paragraph_start = setting.paragraph_start;
@@ -976,13 +1034,12 @@ fn typeset_page(ctx: &NativeCallContext, root: &Node, n: usize, content: &mut Co
 #[allow(clippy::too_many_arguments)]
 fn set_slot(rect: Aabb, style: &TextStyle, role: &Role, glyphs: &[Symbol], chars: &[char], paragraph_start: bool, avoid: &AvoidanceTree, rng: &SharedRng) -> crate::journal::typeset::Setting {
     let mut style = style.clone();
-    if role.fit
+    if role.settings.paragraph.fit()
         && let Some(size) = fitting_size(rect, &style, glyphs, chars, paragraph_start, Some(avoid)) {
-        style.clearance *= size / style.size;
         style.size = size;
     }
     let mut setting = set_text(rect, &style, glyphs, chars, paragraph_start, Some(avoid), &mut *rng.borrow_mut());
-    let slack = (rect.extents().y - setting.height).max(0.0) * role.valign;
+    let slack = (rect.extents().y - setting.height).max(0.0) * role.settings.paragraph.valign();
     if slack > 0.0 {
         for glyph in &mut setting.placed {
             glyph.translate_by(PVec::new(0.0, slack));
@@ -1056,6 +1113,10 @@ fn typeset(ctx: NativeCallContext, layout: &mut Layout, content: Map, symdict: &
 pub fn register(engine: &mut Engine, symdict: Rc<FontBook>, rng: SharedRng, layouts: Sources) {
     engine.register_type_with_name::<Node>("LayoutBox");
     engine.register_type_with_name::<Layout>("Layout");
+    engine.register_type_with_name::<FlexStyle>("FlexStyle");
+    super::options::register_settings::<FlexStyle>(engine);
+    engine.register_fn("new_flex_style", FlexStyle::default);
+    engine.register_fn("new_flex_style", |options: Map| FlexStyle::default().with("new_flex_style", &options));
     for (name, kind) in [("row", Kind::Row), ("column", Kind::Column)] {
         let k = kind.clone();
         engine.register_fn(name, move |children: Array| Node::new(name, k.clone(), Map::new(), children));
@@ -1095,31 +1156,30 @@ mod tests {
     }
 
     const SETUP: &str = r#"
-        let pen = new_brush("Ink Pen", 0.3, 0.7, 1.0);
-        let ink = new_style("black", pen);
-        let red = new_style("darkred", pen);
-        let font = font("loche_upper");
+        let ink = new_style(new_brush_style("black", "Ink Pen", 1.0), new_handwriting_style());
+        let red = new_style(new_brush_style("darkred", "Ink Pen", 1.0), new_handwriting_style());
+        let font = glyphset("loche_upper");
         let words = "the quick brown fox jumps over the lazy dog ";
         let roles = #{
-            body: #{ font: font, style: ink, size: 12.0 },
-            initial: #{ font: font, style: red },
-            heading: #{ font: font, style: red, size: 30.0, align: "center" },
+            body: #{ style: ink, type: new_type_style(font, 12.0) },
+            initial: #{ style: red, type: #{ glyphset: font } },
+            heading: #{ style: red, type: new_type_style(font, 30.0), paragraph: #{ align: "center" } },
             divider: #{ style: red },
             rule: #{ style: red },
         };
         fn two_columns(n, info) {
             column([
-                if n == 0 { flow("title", #{ role: "heading", height: 40, fit: true }) } else { spacer(#{ height: 40 }) },
+                if n == 0 { flow("title", #{ flex: #{ height: 40 }, role: "heading", paragraph: #{ fit: true } }) } else { spacer(#{ flex: #{ height: 40 } }) },
                 row([
                     column([
-                        if n == 0 { initial("body", #{ position: "absolute", top: 0, left: 0, width: 40, height: 40 }) } else { spacer() },
-                        flow("body", #{ grow: 1 }),
-                    ], #{ grow: 1 }),
-                    band("divider", #{ width: 6 }),
-                    flow("body", #{ grow: 1 }),
-                ], #{ grow: 1, gap: 10 }),
-                rule(#{ height: 4 }),
-            ], #{ padding: 20, gap: 10 })
+                        if n == 0 { initial("body", #{ flex: #{ position: "absolute", top: 0, left: 0, width: 40, height: 40 } }) } else { spacer() },
+                        flow("body", #{ flex: #{ grow: 1 } }),
+                    ], #{ flex: #{ grow: 1 } }),
+                    band("divider", #{ flex: #{ width: 6 } }),
+                    flow("body", #{ flex: #{ grow: 1 } }),
+                ], #{ flex: #{ grow: 1, gap: 10 } }),
+                rule(#{ flex: #{ height: 4 } }),
+            ], #{ flex: #{ padding: 20, gap: 10 } })
         }
         let book = new_layout("book", Fn("two_columns"));
     "#;
@@ -1131,7 +1191,7 @@ mod tests {
     /// Glyph strokes on each page, and where they are.
     fn glyph_centres(entry: &Entry, page: usize, color: &str) -> Vec<parry2d::math::Vec2> {
         entry.pages[page].canvases()[0].strokes.iter()
-            .filter(|s| s.style.color == crate::journal::canvas::StrokeColor::from(color))
+            .filter(|s| *s.style.color() == crate::journal::canvas::StrokeColor::from(color))
             .map(|s| {
                 let points = s.path.points_within();
                 points.iter().fold(parry2d::math::Vec2::ZERO, |a, p| a + *p) / points.len() as f32
@@ -1191,7 +1251,7 @@ mod tests {
         let entry = build(r#"
             let pages = layout("captioned_figure").typeset(#{
                 flows: #{ caption: "a circle" },
-                roles: #{ caption: #{ font: font, style: red, size: 40.0 }, figure: #{ style: ink } },
+                roles: #{ caption: #{ style: red, type: new_type_style(font, 40.0) }, figure: #{ style: ink } },
                 art: #{ figure: new_circle(vec2(0.0, 0.0), 1.0) },
             });
             if pages.len() != 1 { throw "one page"; }
@@ -1211,7 +1271,7 @@ mod tests {
     #[test]
     fn bands_repeat_their_art_along_the_box() {
         let entry = build(r#"
-            let strip = new_layout("strip", |n, info| column([band("dot", #{ height: 20 })], #{ padding: 10 }));
+            let strip = new_layout("strip", |n, info| column([band("dot", #{ flex: #{ height: 20 } })], #{ flex: #{ padding: 10 } }));
             journal_entry.add(strip.typeset(#{ width: 220, height: 40, roles: #{ dot: #{ style: ink } }, art: #{ dot: new_circle(vec2(0.0, 0.0), 5.0) } }));
         "#).expect("script should run");
         // 200 long, 20 across: ten circles 20 across.
@@ -1223,18 +1283,21 @@ mod tests {
         let typeset = |content: &str| format!("journal_entry.add(book.typeset(#{{ width: 400, height: 300, roles: roles, art: #{{ divider: new_circle(vec2(0.0, 0.0), 3.0) }}, {} }}));", content);
         for (script, want) in [
             ("let ok = 1;\nrow([], #{ colour: 1 });", "row: unknown option 'colour'"),
-            ("let ok = 1;\nflow(\"a\", #{ width: \"wide\" });", "'width' should be a number, \"N%\" or \"auto\""),
-            ("let ok = 1;\nflow(\"a\", #{ align: \"middle\" });", "unknown align 'middle'"),
-            ("let ok = 1;\ncolumn([], #{ justify: \"left\" });", "unknown justify 'left'"),
+            ("let ok = 1;\nflow(\"a\", #{ flex: #{ width: \"wide\" } });", "'width' should be a number, \"N%\" or \"auto\""),
+            ("let ok = 1;\nflow(\"a\", #{ paragraph: #{ align: \"middle\" } });", "unknown align 'middle'"),
+            ("let ok = 1;\ncolumn([], #{ flex: #{ justify: \"left\" } });", "unknown justify 'left'"),
             ("let ok = 1;\nrow([1]);", "child 0 is a i64"),
-            ("let ok = 1;\nflow(\"a\", #{ gap: 3 });", "unknown option 'gap'"),
+            ("let ok = 1;\nflow(\"a\", #{ flex: #{ gap: 3 } });", "'gap' lays out children, so only rows and columns take it"),
+            ("let ok = 1;\nrow([], #{ flex: #{ text_wrap: \"box\" } });", "rows and columns don't take it"),
+            ("let ok = 1;\nrow([], #{ role: \"body\" });", "row: unknown option 'role'; options: flex"),
             (&typeset("flows: #{ title: \"t\" }"), "sets a flow 'body', but there's no such flow"),
             (&typeset("flows: #{ title: \"t\", body: \"b\", extra: \"never placed\" }"), "page 1 sets none of what's left of flow(s) 'extra'"),
             (&typeset("flows: #{ title: \"t\", body: words + words + words + words + words + words + words + words + words + words + words + words + words + words + words + words + words + words + words + words + words + words + words + words }, max_pages: 1"), "still text left after 1 pages"),
             ("journal_entry.add(book.typeset(#{ width: 400, height: 300, roles: roles, flows: #{ title: \"t\", body: \"b\" } }));", "there's no art named 'divider'"),
             ("roles.remove(\"body\");\njournal_entry.add(book.typeset(#{ width: 400, height: 300, roles: roles, flows: #{ title: \"t\", body: \"b\" } }));", "uses role 'body', which `roles` doesn't have"),
             ("journal_entry.add(book.typeset(#{ roles: roles }));", "give the page's 'width'"),
-            ("roles.body.size = -1;\njournal_entry.add(book.typeset(#{ width: 400, height: 300, roles: roles }));", "'size' must be a positive number"),
+            ("roles.body.type = #{ glyph_scale: -1 };\njournal_entry.add(book.typeset(#{ width: 400, height: 300, roles: roles }));", "'glyph_scale' must be positive"),
+            ("roles.body.colour = 1;\njournal_entry.add(book.typeset(#{ width: 400, height: 300, roles: roles }));", "role 'body': unknown option 'colour'; options: style, type, paragraph, spans"),
             ("journal_entry.add(new_layout(\"bad\", |n, info| 3).typeset(#{ width: 10, height: 10 }));", "returned a i64, not a layout box"),
         ] {
             let err = build(script).expect_err(script);

@@ -1,10 +1,10 @@
 // Nivelia's hand, traced from her letter to Loche and the torn slip that
-// came with it: the nivelia font. Page "letter" sets the letter's own words
+// came with it: the nivelia glyphset. Page "letter" sets the letter's own words
 // as she wrote them (in her letter-swapping cipher) to compare against the
 // photograph; page "slip" sets the slip; page "alphabet" shows every glyph.
 // The letter has no f, m, t or y (the cipher swaps them out), so those, and
 // l and k, come from the slip. The only capitals she wrote are A, I, K, L, R,
-// X and Z; the font falls back to loche_upper for the others, its glyphs
+// X and Z; the glyphset falls back to loche_upper for the others, its glyphs
 // drawn to loche_upper's baseline and her ascenders as tall as its capitals.
 
 // Glyphs are 1.08 units to the x-height on a baseline at 0.81 (loche_upper's),
@@ -12,12 +12,15 @@
 // units.
 let size = 60.0;
 let xh = size * 1.08 / 2.0;
-let hand = #{ font: font("nivelia"), size: size, style: new_style("rgba(30, 26, 24, 0.92)", new_brush("Ink Pen", 0.6, 0.8, 2.0)) };
+let hand = #{
+	type: new_type_style(glyphset("nivelia"), size),
+	style: new_style(new_brush_style("rgba(30, 26, 24, 0.92)", "Ink Pen", 2.0, #{ min_pressure: 0.6, max_pressure: 0.8 }), new_handwriting_style()),
+};
 
 // One line of text from `at` on its baseline: glyphs are placed with their
 // origin on the line, the baseline 0.81 units below it.
 fn on_baseline(text, at, hand) {
-	write_line(text, at - vec2(0.0, hand.size * 0.81 / 2.0), hand)
+	write_line(text, at - vec2(0.0, hand.type.glyph_scale * 0.81 / 2.0), hand)
 }
 
 // The letter: [indent in x-heights, text]. Its baselines are about 3.8

@@ -30,8 +30,8 @@ fn inputs(o) {
 
 fn render(o, i) {
 \tlet c = new_canvas();
-\tlet style = new_style("#2b1d12", new_brush("Ink Pen", 0.3, 0.7, 1.6));
-\tc.add(write_line(\`\${i.text.len()} symbols\`, vec2(0, 0), #{ font: font("plain"), style: style, size: o.size }));
+\tlet style = new_style(new_brush_style("#2b1d12", "Ink Pen", 1.6), new_handwriting_style());
+\tc.add(write_line(\`\${i.text.len()} symbols\`, vec2(0, 0), #{ style: style, type: new_type_style(glyphset("plain"), o.size) }));
 \tc
 }
 

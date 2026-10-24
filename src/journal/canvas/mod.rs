@@ -92,6 +92,8 @@ const ALONG_PIECE_MIN: f32 = 1.5;
 
 #[derive(Clone, Debug)]
 pub struct StrokeStyle {
+    /// How wide the stroke is in SVG output (Darkly's marks are as wide as
+    /// its brush).
     pub width: f32,
     pub color: StrokeColor,
     /// Brush used when rendering with Darkly; `None` uses the renderer's

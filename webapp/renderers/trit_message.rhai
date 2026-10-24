@@ -15,13 +15,15 @@ fn inputs(o) {
 fn render(o, i) {
 	let ink = "#2b1d12";
 	let red = "#9b2318";
-	let pen = new_brush("Ink Pen", 0.3, 0.7, 1.6);
-	let fine = new_style(ink, new_brush("Ink Pen", 0.3, 0.7, 1.2));
+	let hand = new_handwriting_style();
+	let red_pen = new_style(new_brush_style(red, "Ink Pen", 1.6), hand);
+	let ink_pen = new_style(new_brush_style(ink, "Ink Pen", 1.6), hand);
+	let fine = new_style(new_brush_style(ink, "Ink Pen", 1.2), hand);
 	let marks = [];
 	for s in i.message { marks += trits(s, o.base).digits(); }
 	let c = new_canvas();
-	c.add(write_line(o.title, vec2(100, 100), #{ font: font("loche_upper"), style: new_style(red, pen), size: 44 }));
-	c.add(new_line(vec2(100, 132), vec2(o.width - 100, 132)), new_style(red, pen));
+	c.add(write_line(o.title, vec2(100, 100), #{ style: red_pen, type: new_type_style(glyphset("loche_upper"), 44) }));
+	c.add(new_line(vec2(100, 132), vec2(o.width - 100, 132)), red_pen);
 	let step = (o.width - 200) / o.per_row;
 	let row = 0;
 	while row * o.per_row < marks.len() {
@@ -29,7 +31,7 @@ fn render(o, i) {
 		let y = 230 + row * 90;
 		let line = new_line(vec2(100, y), vec2(100 + these.len() * step, y));
 		c.add(line, fine);
-		c.add(line.fit_text(balanced_ternary(these), #{ style: new_style(ink, pen), width: 30 }));
+		c.add(line.fit_text(balanced_ternary(these), #{ style: ink_pen, width: 30 }));
 		row += 1;
 	}
 	c

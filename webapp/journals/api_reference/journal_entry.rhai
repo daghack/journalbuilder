@@ -22,14 +22,14 @@ const H = 1600.0;
 const INK = "#2b1d12";
 const RED = "#9b2318";
 
-// Constant pressure, and text no smaller than 26, so the plain font's dots
-// (strokes about a unit long) show.
-const TEXT = new_style(INK, new_brush("Ink Pen", 0.4, 0.7, 1.5, #{ pressure_profile: "constant" }));
-const CAPTION = new_style(RED, new_brush("Ink Pen", 0.3, 0.7, 1.2));
-const HEADING = new_style(RED, new_brush("Calligraphy", 0.4, 0.8, 1.5, #{ pressure_profile: "constant" }), #{ width: 1.2 });
+// Constant pressure, and text no smaller than 26, so the plain glyphset's
+// dots (strokes about a unit long) show.
+const TEXT = new_style(new_brush_style(INK, "Ink Pen", 1.5, #{ min_pressure: 0.4, pressure_profile: "constant" }), new_handwriting_style());
+const CAPTION = new_style(new_brush_style(RED, "Ink Pen", 1.2), new_handwriting_style());
+const HEADING = new_style(new_brush_style(RED, "Calligraphy", 1.5, #{ min_pressure: 0.48, max_pressure: 0.96, pressure_profile: "constant" }), new_handwriting_style());
 
-const PLAIN = font("plain");
-const LOCHE = font("loche_upper");
+const PLAIN = glyphset("plain");
+const LOCHE = glyphset("loche_upper");
 
 // ---- entries ----
 
@@ -40,7 +40,7 @@ fn esc(s) {
 
 // A section's heading.
 fn heading(title) {
-	"[" + esc(title) + "]{size: 1.6, color: #9b2318, underline: {color: #9b2318}}\n\n"
+	"[" + esc(title) + "]{glyph_scale_factor: 1.6, color: #9b2318, underline: {style: {color: #9b2318}}}\n\n"
 }
 
 // A paragraph of prose.
@@ -90,45 +90,14 @@ fn listing(intro, items) {
 
 // ---- arguments many entries share ----
 
-fn style_arg() { arg("style", "How the strokes are drawn: their brush, width and colour.", "a style, from new_style.") }
-fn font_arg() { arg("font", "The font the text is set in.", "a font, from font or ternary_font.") }
+fn style_arg() { arg("style", "How the strokes are drawn: their brush style and handwriting.", "a style, from new_style or default_style.") }
 fn vec_arg(name, effect) { arg(name, effect, "a vec.") }
 fn offset_arg() { arg("offset", "How far to move, across and down.", "a vec.") }
 fn angle_arg(effect) { arg("angle", effect + " Positive turns clockwise, y being down.", "a number, in radians.") }
-fn seed_arg(what) { arg("seed", "Which " + what + " it draws: the same seed gives the same drawing, without touching the script's generator.", "a whole number.") }
 fn name_arg(what) { arg("text", "The " + what + "'s name in output files.", "a string of letters, digits, underscores, hyphens and dots, not starting with a dot, unique among its siblings. Reading it gives () until it's set.") }
-
-// Text settings: what text calls take, as roles do.
-fn font_set() { req("settings.font", "The font the text is set in.", "a font, from font or ternary_font.") }
-fn size_set() { req("settings.size", "The size glyphs are set at (the symbol scale), in canvas units.", "a positive number.") }
-fn style_set() { req("settings.style", "How the strokes are drawn: their brush, width and colour.", "a style, from new_style.") }
-fn spacing_opt() { opt("settings.spacing", "0", "Extra room between glyphs, as a fraction of the size; negative tightens.", "a number above -0.5.") }
 fn avoid_opt(what) { opt("settings.avoid", "nothing", "What glyphs keep clear of" + what + " (see Keeping Text Clear).", "an avoidance tree, a path, a canvas or a glyph, or an array of any of these.") }
-fn clearance_opt(needs) { opt("settings.clearance", "size / 8", "How far glyphs keep from what they avoid, in canvas units, on top of any clearance a tree was built with." + needs, "a number of at least 0.") }
-fn layout_opt(fallback, words) { opt("settings.layout", fallback, "How glyphs are placed.", "flat (glyph by glyph) or words (" + words + ").") }
-fn jagged_opt(fallback) { opt("settings.jagged", fallback, "How much further in each line starts, at most, at random, in sizes.", "a number.") }
-fn split_words_opt() { opt("settings.split_words", "false", "With layout: words, breaks words round what's avoided rather than moving them past it whole.", "true, false, or the fewest glyphs a piece may have (a whole number of at least 1; true is 2).") }
-fn split_padding_opt() { opt("settings.split_padding", "0", "How much further the pieces of split words keep from what's avoided, in sizes. Needs split_words.", "a number of at least 0.") }
-fn jitter_opts() {
-	[
-		opt("settings.position_jitter", "0", "How far each placed glyph strays, at most, either way, at random, in sizes.", "a number of at least 0, or [across, down]."),
-		opt("settings.rotation_jitter", "0", "How far each placed glyph turns, at most, either way.", "a number of at least 0, in radians."),
-		opt("settings.scale_jitter", "0", "How much each placed glyph's size changes, at most, either way, as a fraction.", "a number from 0 up to, not including, 1."),
-	]
-}
-fn path_text_opts() {
-	[
-		spacing_opt(),
-		avoid_opt(""),
-		clearance_opt(" Needs avoid."),
-		layout_opt("flat", "words aren't split between subpaths"),
-		split_words_opt(),
-		split_padding_opt(),
-		opt("settings.angle", "turned to the path", "Holds every glyph at this angle instead of turning it with the path; 0 is upright.", "a number, in radians."),
-	] + jitter_opts()
-}
 
-fn seed_opt(what) { opt("options.seed", "0", "Which " + what + " it draws: the same seed gives the same drawing, without touching the script's generator.", "a whole number.") }
+fn seed_opt(what) { opt("options.seed", "one from the generator", "Which " + what + " it draws: the same seed gives the same drawing, without touching the script's generator; left out, the journal's generator picks one.", "a whole number.") }
 fn thickening_opts(parts, reach) {
 	[
 		opt("options.origin", "none", "A growth origin: " + parts + " are thicker toward it, as old wood is. Thorns, stalks, leaves and flowers keep their size. Needed for thickness and reach.", "a vec."),
@@ -145,11 +114,11 @@ doc += heading("Reading This Reference");
 doc += para("A journal is a rhai script. It draws strokes onto canvases, puts canvases on pages, and adds the pages to journal_entry, which journalbuild renders: one image per canvas, or one per page on parchment, or a PDF. This book lists every function a script can call, by what it works on. Each entry gives a signature in red and then what it does.");
 doc += para("In signatures, receiver.method(arguments) is called on a value, as path.line_to(point); a bare name(arguments) is a global function. A name = value entry is a property: it can be read, and set unless the entry says it's read only.");
 doc += para("Under each entry, each argument has a line of its own: its name in italics, what it does, and the values it takes. An argument marked optional can be left out of the call, and is then its default; the others must be given. An argument written options is a map, #{ key: value, ... }, and its keys are listed as options.KEY: each optional, with its default, unless it's marked required. Unknown keys are errors. For a property, the line is the value it's set to. Words in the values, such as ramp or flat, are strings: write them in double quotes.");
-doc += para("Every call has one shape: what it needs, in order, then one map of everything optional, which can be left out: path.hatch(4, #{ angle: 0.3 }). A constructor's options also take any property its value can be set by, checked as setting it is: new_brush(name, min_pressure, max_pressure, size, #{ pressure_profile: constant }) is a brush with its pressure_profile set. Text calls take one map of text settings, with the keys layout roles take (font, size, style and the rest), so a role's settings can be passed straight in: role keys a call doesn't use are ignored. Canvases, pages, the entry, trees and lock chains all take what's put in them with add, which gives back what it was called on, so calls chain.");
+doc += para("Every call has one shape: what it needs, in order, then one map of everything optional, which can be left out: path.hatch(4, #{ angle: 0.3 }). A constructor's options also take any property its value can be set by, checked as setting it is: new_brush_style(colour, brush, brush_size, #{ pressure_profile: constant }) is a brush style with its pressure_profile set. Text calls take one settings map: a style, a type and a paragraph, as layout roles do, so a role can be passed straight in. Canvases, pages, the entry, trees and lock chains all take what's put in them with add, which gives back what it was called on, so calls chain.");
 doc += para("Units: coordinates are canvas units, one pixel at --scale 1, with y running down the page. Angles are radians; PI() is rhai's, and degrees(d) converts. Numbers can be whole or decimal anywhere a number is taken, and must be finite; a whole number is needed only where the values say so. Colours are CSS colours: a name, #rgb, #rrggbb, rgb(), rgba(), hsl() or hsla().");
-doc += para("Shared values: paths, glyphs, canvases and avoidance trees are shared. Assigning one, passing it or looping over it gives the same value, so changes through any copy reach it; copy() makes an independent one. Their transforms change the value and return it, so calls chain: p.move_to(a).line_to(b). Vecs, fonts, brushes, styles and pages are plain values: changing one changes that copy only.");
-doc += para("Randomness is seeded: random(), glyph variant picks, text layout, hatching, point distributions and random spanning trees all draw on one generator with a fixed seed, so a journal renders the same every run. The procedural art takes seeds of its own.");
-doc += para("Sections: the entry and its pages; canvases and strokes; vectors and angles; paths; brushes and styles; gradients; fonts and glyphs; text; keeping text clear; randomness and messages; generators; balanced ternary; procedural art; books; page layouts; marked-up text; locks; lock and layout files; building.");
+doc += para("Shared values: paths, glyphs, canvases and avoidance trees are shared. Assigning one, passing it or looping over it gives the same value, so changes through any copy reach it; copy() makes an independent one. Their transforms change the value and return it, so calls chain: p.move_to(a).line_to(b). Vecs, glyphsets, styles (of every kind) and pages are plain values: changing one changes that copy only.");
+doc += para("Randomness is seeded: random(), glyph variant picks, text layout, hatching, point distributions and random spanning trees all draw on one generator with a fixed seed, so a journal renders the same every run. So does the handwriting that strokes are added to canvases in, and the procedural art when it isn't given a seed of its own.");
+doc += para("Sections: the entry and its pages; canvases and strokes; vectors and angles; paths; styles; gradients; glyphsets and glyphs; text; keeping text clear; randomness and messages; generators; balanced ternary; procedural art; books; page layouts; marked-up text; locks; lock and layout files; building.");
 
 // ---- the entry and its pages ----
 
@@ -207,7 +176,7 @@ doc += api("canvas.add(path, style)", "Adds the path, drawn in the style.", [
 	style_arg(),
 ]);
 doc += api("canvas.add(glyph, style), canvas.add(glyphs, style)", "Adds a placed glyph's strokes, or each of an array of glyphs', drawn in the style.", [
-	arg("glyph, glyphs", "What to draw, where it's placed.", "a glyph, or an array of them (as font.glyphs or textbox.fill give); a blank one (a space) adds nothing."),
+	arg("glyph, glyphs", "What to draw, where it's placed.", "a glyph, or an array of them (as glyphset.glyphs or textbox.fill give); a blank one (a space) adds nothing."),
 	style_arg(),
 ]);
 doc += api("canvas.add(other), canvas.add(canvases)", "Adds every stroke on another canvas, or each of an array of canvases (as fill_with_text gives), in its own style.", [
@@ -407,66 +376,85 @@ doc += api("path.to_string(), path.to_debug()", "The path's commands as text, fo
 
 // ---- brushes and styles ----
 
-doc += heading("Brushes and Styles");
-doc += para("A brush is a Darkly brush with pressures and a size; a style is a brush with a width and a colour, and is what strokes are drawn in.");
+doc += heading("Styles");
+doc += para("A style is what strokes are drawn in: a brush style, the ink (a colour, a Darkly brush, how wide its marks are and how it presses), and a handwriting style, the hand (how it goes over its strokes, and sets glyphs and lines). A style's settings are its two parts', read and set on the style as one: style.color, style.passes. Styles and their parts are values: changing one changes that copy only. Every jitter is in canvas units (rotations in radians, scales a fraction), drawn from the journal's generator as strokes are added to a canvas.");
+doc += api("new_style(brush_style, handwriting_style)", "A style: the ink and the hand. Its properties are both parts', below.", [
+	arg("brush_style", "The ink; the style keeps a copy.", "a brush style, from new_brush_style."),
+	arg("handwriting_style", "The hand; the style keeps a copy.", "a handwriting style, from new_handwriting_style."),
+]);
+doc += api("default_style()", "The plainest style: black, in an Ink Pen 1.2 wide pressing from 0.3 to 0.7, by a steady hand. Text calls, roles and borders given a map of style settings take them over this.");
 doc += api("brush_names()", "The name of every Darkly brush, sorted.");
-doc += api("new_brush(name, min_pressure, max_pressure, size), new_brush(name, min_pressure, max_pressure, size, options)", "A brush. Pressure runs from min_pressure to max_pressure along each stroke, as its pressure_profile says. Options set its properties (below) as setting them does.", [
-	arg("name", "Which Darkly brush draws.", "one of brush_names()."),
-	arg("min_pressure", "The least pressure along a stroke.", "a number from 0 to 1, at most max_pressure."),
-	arg("max_pressure", "The most pressure along a stroke.", "a number from 0 to 1, at least min_pressure."),
-	arg("size", "How wide its marks are, in canvas units.", "a positive number."),
-	opt("options.pressure_profile", "ramp", "As brush.pressure_profile.", "as brush.pressure_profile."),
-	opt("options.pressure_variation", "0", "As brush.pressure_variation.", "as brush.pressure_variation."),
-	opt("options.variation_length", "12", "As brush.variation_length.", "as brush.variation_length."),
-	opt("options.pool", "0", "As brush.pool.", "as brush.pool."),
-	opt("options.pool_depth", "0.3", "As brush.pool_depth.", "as brush.pool_depth."),
+doc += api("new_brush_style(color, brush, brush_size), new_brush_style(color, brush, brush_size, options)", "A brush style. Pressure runs from min_pressure to max_pressure along each stroke, as its pressure_profile says. Options set its properties (below) as setting them does. In SVG output (--svg) a stroke is brush_size * max_pressure wide.", [
+	arg("color", "The ink.", "a CSS colour or a gradient."),
+	arg("brush", "Which Darkly brush draws.", "one of brush_names()."),
+	arg("brush_size", "How wide its marks are, in canvas units.", "a positive number."),
+	opt("options.min_pressure", "0.3", "As brush_style.min_pressure.", "as brush_style.min_pressure."),
+	opt("options.max_pressure", "0.7", "As brush_style.max_pressure.", "as brush_style.max_pressure."),
+	opt("options.pressure_profile", "ramp", "As brush_style.pressure_profile.", "as brush_style.pressure_profile."),
+	opt("options.pressure_wander", "0", "As brush_style.pressure_wander.", "as brush_style.pressure_wander."),
+	opt("options.pressure_wander_length", "12", "As brush_style.pressure_wander_length.", "as brush_style.pressure_wander_length."),
+	opt("options.pool", "0", "As brush_style.pool.", "as brush_style.pool."),
+	opt("options.pool_depth", "0.3", "As brush_style.pool_depth.", "as brush_style.pool_depth."),
 ]);
-doc += api("brush.name = name", "The Darkly brush's name.", [
-	arg("name", "Which Darkly brush draws.", "one of brush_names(); it isn't checked until the render."),
+doc += api("brush_style.color = color", "The ink.", [
+	arg("color", "The ink.", "a CSS colour or a gradient."),
 ]);
-doc += api("brush.min_pressure = number, brush.max_pressure = number", "The least and most pressure along a stroke.", [
-	arg("number", "The pressure.", "a number from 0 to 1, min_pressure at most max_pressure."),
+doc += api("brush_style.brush = name", "The Darkly brush.", [
+	arg("name", "Which brush draws.", "one of brush_names()."),
 ]);
-doc += api("brush.size = number", "How wide its marks are.", [
+doc += api("brush_style.brush_size = number", "How wide its marks are.", [
 	arg("number", "The width, in canvas units.", "a positive number."),
 ]);
-doc += api("brush.pressure_profile = name", "How pressure runs along each stroke.", [
+doc += api("brush_style.min_pressure = number, brush_style.max_pressure = number", "The least and most pressure along a stroke: heavier marks the harder it presses, how much depending on the brush.", [
+	arg("number", "The pressure.", "a number from 0 to 1, min_pressure at most max_pressure (checked once a constructor's options are all set)."),
+]);
+doc += api("brush_style.pressure_profile = name", "How pressure runs along each stroke.", [
 	arg("name", "The profile.", "ramp (min to max, the default), taper (min to max at the middle and back) or constant (max all along)."),
 ]);
-doc += api("brush.pressure_variation = number", "Pressure wanders along a stroke, so ramps and tapers look less mechanical.", [
+doc += api("brush_style.pressure_wander = number", "Pressure wanders along a stroke, so ramps and tapers look less mechanical.", [
 	arg("number", "How far it wanders either way, as a fraction of the pressure. Default 0.", "a number from 0 up to, not including, 1."),
 ]);
-doc += api("brush.variation_length = number", "How far apart the wandering pressure rises and falls.", [
+doc += api("brush_style.pressure_wander_length = number", "How far apart the wandering pressure rises and falls.", [
 	arg("number", "The distance, in canvas units. Default 12.", "a positive number."),
 ]);
-doc += api("brush.pool = number", "Ink pooling: strokes heavier at the very bottom of each path (each glyph, for text).", [
+doc += api("brush_style.pool = number", "Ink pooling: strokes heavier at the very bottom of each path (each glyph, for text).", [
 	arg("number", "How much heavier, as a fraction: 0.4 is 40% heavier. Default 0.", "a number of at least 0."),
 ]);
-doc += api("brush.pool_depth = number", "How far up the pooling rises.", [
+doc += api("brush_style.pool_depth = number", "How far up the pooling rises.", [
 	arg("number", "The height, as a fraction of the path's. Default 0.3.", "a number above 0 and at most 1."),
 ]);
-doc += api("new_style(color, brush), new_style(color, brush, options)", "A style: width 1, passes 1, jitter 0 and point_jitter 0 unless the options set them, as setting the properties below does.", [
-	arg("color", "The ink.", "a CSS colour or a gradient."),
-	arg("brush", "The brush; the style keeps a copy.", "a brush, from new_brush."),
-	opt("options.width", "1", "In Darkly renders, multiplies the brush's pressure, so past 1 / max_pressure a stroke gets no heavier (the render warns); in SVG, the stroke's width in canvas units.", "a number."),
-	opt("options.passes", "1", "As style.passes.", "as style.passes."),
-	opt("options.jitter", "0", "As style.jitter.", "as style.jitter."),
-	opt("options.point_jitter", "0", "As style.point_jitter.", "as style.point_jitter."),
+doc += api("new_handwriting_style(), new_handwriting_style(options)", "A handwriting style: one clean pass, nothing astray, unless the options set its properties (below), as setting them does.", [
+	opt("options.passes", "1", "As handwriting_style.passes.", "as handwriting_style.passes."),
+	opt("options.pass_end_jitter", "0", "As handwriting_style.pass_end_jitter.", "as handwriting_style.pass_end_jitter."),
+	opt("options.stroke_point_jitter", "0", "As handwriting_style.stroke_point_jitter.", "as handwriting_style.stroke_point_jitter."),
+	opt("options.glyph_position_jitter", "0", "As handwriting_style.glyph_position_jitter.", "as handwriting_style.glyph_position_jitter."),
+	opt("options.glyph_rotation_jitter", "0", "As handwriting_style.glyph_rotation_jitter.", "as handwriting_style.glyph_rotation_jitter."),
+	opt("options.glyph_scale_jitter", "0", "As handwriting_style.glyph_scale_jitter.", "as handwriting_style.glyph_scale_jitter."),
+	opt("options.baseline_wander", "0", "As handwriting_style.baseline_wander.", "as handwriting_style.baseline_wander."),
 ]);
-doc += api("style.width = number", "The style's width.", [
-	arg("number", "The width, as new_style takes it.", "a number."),
-]);
-doc += api("style.color = color", "The style's ink.", [
-	arg("color", "The ink.", "a CSS colour or a gradient."),
-]);
-doc += api("style.passes = number", "Draws each stroke in the style this many times over, as a hand going over its writing.", [
+doc += api("handwriting_style.passes = number", "Draws each stroke this many times over, as a hand going over its writing.", [
 	arg("number", "How many passes. Default 1.", "a whole number from 1 to 64."),
 ]);
-doc += api("style.jitter = number", "How far each pass's ends stray, seeded from each stroke's own points so it's the same every run. With one pass it just roughens a hand.", [
+doc += api("handwriting_style.pass_end_jitter = number", "How far each pass's ends stray, each its own way, so a pass shifts, turns and stretches. With one pass it just roughens a hand.", [
 	arg("number", "How far, in canvas units. Default 0.", "a number of at least 0."),
 ]);
-doc += api("style.point_jitter = number", "How far every point of every pass strays, control points included, each its own way, so curves change shape rather than just shifting. On top of jitter, and seeded alike.", [
+doc += api("handwriting_style.stroke_point_jitter = number", "How far every point of every pass strays, control points included, each its own way, so curves change shape rather than just shifting. On top of pass_end_jitter.", [
 	arg("number", "How far, in canvas units. Default 0.", "a number of at least 0."),
+]);
+doc += api("handwriting_style.glyph_position_jitter = number", "How far each glyph text calls place strays, at most, either way.", [
+	arg("number", "How far, in canvas units. Default 0.", "a number of at least 0, or [across, down]."),
+]);
+doc += api("handwriting_style.glyph_rotation_jitter = number", "How far each placed glyph turns, at most, either way.", [
+	arg("number", "How far, in radians. Default 0.", "a number of at least 0."),
+]);
+doc += api("handwriting_style.glyph_scale_jitter = number", "How much each placed glyph's size changes, at most, either way.", [
+	arg("number", "How much, as a fraction. Default 0.", "a number from 0 up to, not including, 1."),
+]);
+doc += api("handwriting_style.baseline_wander = number", "How far the lines write_line and write_block write along wander up and down from straight: smoothly, at random, starting where they're put and bending every few glyph scales. Glyphs follow them.", [
+	arg("number", "How far, at most, either way, in canvas units. Default 0.", "a number of at least 0."),
+]);
+doc += api("style.SETTING = value", "Any brush style or handwriting style setting, read and set on the style: style.color, style.brush_size, style.passes, style.glyph_rotation_jitter and the rest, each taking what it takes above.", [
+	arg("value", "The setting's value.", "as its part takes it."),
 ]);
 
 // ---- gradients ----
@@ -485,50 +473,50 @@ doc += api("new_gradient(colors, options)", "A gradient laid out another way: gi
 ]);
 doc += api("gradient.to_string(), gradient.to_debug()", "The gradient as text, for print and debug.");
 
-// ---- fonts and glyphs ----
+// ---- glyphsets and glyphs ----
 
-doc += heading("Fonts and Glyphs");
-doc += para("Fonts come from the files in fonts/, one per font (copper.json is the font copper), each with its glyphs and how text is set in it; sets of symbols are fonts too. A font is a value: changing one changes that copy. A character is looked for as it is in a font and its fallbacks, then in the other case, so a font of capitals sets lowercase text in them.");
-doc += api("font(name)", "A font, as the font file sets it.", [
-	arg("name", "Which font.", "one of font_names()."),
+doc += heading("Glyphsets and Glyphs");
+doc += para("Glyphsets come from the files in fonts/, one per glyphset (copper.json is the glyphset copper), each with its glyphs and how text is set in it by default; sets of symbols are glyphsets too. A glyphset is a value: changing one changes that copy. A character is looked for as it is in a glyphset and its fallbacks, then in the other case, so a glyphset of capitals sets lowercase text in them. A type style can override a glyphset's settings for the text it sets (see Text).");
+doc += api("glyphset(name)", "A glyphset, as its file sets it.", [
+	arg("name", "Which glyphset.", "one of glyphset_names()."),
 ]);
-doc += api("font(name, options)", "A font with settings changed, as setting the properties below does.", [
-	arg("name", "Which font.", "one of font_names()."),
-	opt("options.character_padding", "the font file's", "Room between glyphs' outlines, in font sizes.", "a number of at least 0."),
-	opt("options.space_width", "the font file's", "A space's width, in font sizes.", "a positive number."),
-	opt("options.skew", "the font file's", "Leans the glyphs into italics, tops forward.", "a number, in radians, between -PI() / 2 and PI() / 2."),
-	opt("options.fallback", "the font file's", "Where characters the font hasn't are looked for.", "a font, a font's name, or () for nowhere."),
+doc += api("glyphset(name, options)", "A glyphset with settings changed, as setting the properties below does.", [
+	arg("name", "Which glyphset.", "one of glyphset_names()."),
+	opt("options.glyph_outline_gap", "the file's", "Room between glyphs' outlines, in glyph scales.", "a number of at least 0."),
+	opt("options.space_width", "the file's", "A space's width, in glyph scales.", "a positive number."),
+	opt("options.skew", "the file's", "Leans the glyphs into italics, tops forward.", "a number, in radians, between -PI() / 2 and PI() / 2."),
+	opt("options.fallback", "the file's", "Where characters the glyphset hasn't are looked for.", "a glyphset, a glyphset's name, or () for nowhere."),
 ]);
-doc += api("font_names()", "Every font's name, sorted.");
-doc += api("ternary_font(name), ternary_font(name, options)", "A font whose letters are balanced-ternary digits: a to m are 1 to 13, n to z are -13 to -1.", [
-	arg("name", "The font whose glyphs draw the digits.", "one of font_names()."),
-	opt("options", "none", "The font's settings, as font(name, options) takes them.", "a map of character_padding, space_width, skew and fallback."),
+doc += api("glyphset_names()", "Every glyphset's name, sorted.");
+doc += api("ternary_glyphset(name), ternary_glyphset(name, options)", "A glyphset whose letters are balanced-ternary digits: a to m are 1 to 13, n to z are -13 to -1.", [
+	arg("name", "The glyphset whose glyphs draw the digits.", "one of glyphset_names()."),
+	opt("options", "none", "The glyphset's settings, as glyphset(name, options) takes them.", "a map of glyph_outline_gap, space_width, skew and fallback."),
 ]);
-doc += api("font.name", "Read only: the font's name.");
-doc += api("font.character_padding = number", "Text is set with each glyph as close to the last as their outlines allow, plus this.", [
-	arg("number", "The room between outlines, in font sizes.", "a number of at least 0."),
+doc += api("glyphset.name", "Read only: the glyphset's name.");
+doc += api("glyphset.glyph_outline_gap = number", "Text is set with each glyph as close to the last as their outlines allow, plus this.", [
+	arg("number", "The room between outlines, in glyph scales.", "a number of at least 0."),
 ]);
-doc += api("font.space_width = number", "A space's width.", [
-	arg("number", "The width, in font sizes.", "a positive number."),
+doc += api("glyphset.space_width = number", "A space's width.", [
+	arg("number", "The width, in glyph scales.", "a positive number."),
 ]);
-doc += api("font.skew = angle", "Leans the font's glyphs, and its fallbacks', into italics. Spacing isn't opened up.", [
+doc += api("glyphset.skew = angle", "Leans the glyphset's glyphs, and its fallbacks', into italics. Spacing isn't opened up.", [
 	arg("angle", "How far they lean, tops forward; negative leans them back.", "a number, in radians, between -PI() / 2 and PI() / 2."),
 ]);
-doc += api("font.fallback = font", "Where characters the font hasn't are looked for.", [
-	arg("font", "The fallback.", "a font, a font's name, or () for nowhere."),
+doc += api("glyphset.fallback = glyphset", "Where characters the glyphset hasn't are looked for.", [
+	arg("glyphset", "The fallback.", "a glyphset, a glyphset's name, or () for nowhere."),
 ]);
-doc += api("font.characters()", "The characters the font has glyphs for.");
-doc += api("font.glyphs(text)", "A text's glyphs, each at the origin with scale 1, variants picked from the seeded generator, looked for in the fallbacks too.", [
+doc += api("glyphset.characters()", "The characters the glyphset has glyphs for.");
+doc += api("glyphset.glyphs(text)", "A text's glyphs, each at the origin with scale 1, variants picked from the seeded generator, looked for in the fallbacks too.", [
 	arg("text", "The text to set.", "a string; characters with no glyph anywhere come out as X (see missing_glyphs)."),
 ]);
-doc += api("font.glyph(name), font.glyph(name, options)", "One glyph, its first variant, from the font's own glyphs (not its fallbacks), placed as the options say.", [
+doc += api("glyphset.glyph(name), glyphset.glyph(name, options)", "One glyph, its first variant, from the glyphset's own glyphs (not its fallbacks), placed as the options say.", [
 	arg("name", "Which glyph.", "a character or a glyph's name, as a string, a number (as ternary.glyph(-13)), or a balanced-ternary value (its number)."),
 	opt("options.position", "the origin", "As glyph.position.", "as glyph.position."),
 	opt("options.scale", "1", "As glyph.scale.", "as glyph.scale."),
 	opt("options.rotation", "0", "As glyph.rotation.", "as glyph.rotation."),
 	opt("options.skew", "0", "As glyph.skew.", "as glyph.skew."),
 ]);
-doc += api("font.variants(name)", "Every variant of one of the font's own glyphs.", [
+doc += api("glyphset.variants(name)", "Every variant of one of the glyphset's own glyphs.", [
 	arg("name", "Which glyph.", "a character or a glyph's name, as a string, or a number."),
 ]);
 doc += api("missing_glyphs()", "Characters drawn with the fallback X so far, for want of a glyph: #{ CHARACTER: #{ count, tried } }. journalbuild --strict-glyphs fails on them instead.");
@@ -567,103 +555,139 @@ doc += api("glyph.copy()", "An independent copy of the glyph.");
 // ---- text ----
 
 doc += heading("Text");
-doc += para("Text layouts place glyphs, scaling each by the size and turning it to its line on top of any scale and rotation it has. Every text call takes a map of text settings, written settings, whose keys are those layout roles take (see Role settings): a role's settings can be passed straight in, and role settings a call doesn't use are ignored. Other unknown keys are errors.");
-doc += api("new_textbox(settings)", "A box, or any closed shape, glyphs flow into, line by line, each glyph's own ink wholly inside the shape: lines run from where the first glyph fits to where the last does, so ink meets the shape's edges, and the first line starts as near its top as glyphs fit.", [
+doc += para("Text layouts place glyphs, scaling each by the glyph scale and turning it to its line on top of any scale and rotation it has. Every text call takes one settings map: a style (what the glyphs are drawn in, and the hand that sets them), a type (which glyphs, how big, shaped how) and a paragraph (how lines are built and set), each whole or a map of some of its settings, and the call's own options. A map of style settings is over default_style(); of type settings, over no glyphset and no glyph scale; of paragraph settings, over the defaults. A call uses the settings it needs and ignores the rest; unknown keys are errors.");
+doc += listing("Settings every text call takes:", [
+	opt("settings.style", "default_style()", "What the glyphs are drawn in; its hand's glyph jitters set each a little off true, and its baseline_wander bends write_line's and write_block's lines.", "a style, or a map of style settings."),
+	opt("settings.type", "none", "The glyphset and glyph scale, and how glyphs are shaped and spaced. Calls that set text from a string need its glyphset; all but fit_text need its glyph_scale.", "a type style, or a map of type settings."),
+	opt("settings.paragraph", "the defaults below", "How lines are built and set.", "a paragraph style, or a map of paragraph settings."),
+]);
+doc += api("new_type_style(glyphset, glyph_scale), new_type_style(glyphset, glyph_scale, options)", "A type style: the glyphs text is set in and their scale, shaped as the options say, as setting the properties below does. Settings left unset are the glyphset's.", [
+	arg("glyphset", "The glyphs text is set in.", "a glyphset, from glyphset or ternary_glyphset."),
+	arg("glyph_scale", "The size glyphs are set at, in canvas units.", "a positive number."),
+	opt("options.glyph_scale_factor", "1", "As type_style.glyph_scale_factor.", "as type_style.glyph_scale_factor."),
+	opt("options.glyph_outline_gap", "the glyphset's", "As type_style.glyph_outline_gap.", "as type_style.glyph_outline_gap."),
+	opt("options.glyph_tracking", "0", "As type_style.glyph_tracking.", "as type_style.glyph_tracking."),
+	opt("options.space_width", "the glyphset's", "As type_style.space_width.", "as type_style.space_width."),
+	opt("options.skew", "the glyphset's", "As type_style.skew.", "as type_style.skew."),
+	opt("options.italic", "the glyphset's", "As type_style.italic.", "as type_style.italic."),
+	opt("options.underline", "false", "As type_style.underline.", "as type_style.underline."),
+	opt("options.strike", "false", "As type_style.strike.", "as type_style.strike."),
+]);
+doc += api("type_style.glyphset = glyphset", "The glyphs text is set in.", [
+	arg("glyphset", "The glyphset.", "a glyphset."),
+]);
+doc += api("type_style.glyph_scale = number", "The size glyphs are set at.", [
+	arg("number", "The size, in canvas units.", "a positive number."),
+]);
+doc += api("type_style.glyph_scale_factor = number", "Multiplies the glyph scale. In a span, it multiplies the size of the text round it.", [
+	arg("number", "How many times bigger. Default 1.", "a positive number."),
+]);
+doc += api("type_style.glyph_outline_gap = number", "Room between glyphs' outlines, over the glyphset's; glyphs from its fallbacks take it too in spans.", [
+	arg("number", "The room, in glyph scales.", "a number of at least 0."),
+]);
+doc += api("type_style.glyph_tracking = number", "Extra room after each glyph; negative tightens.", [
+	arg("number", "The room, in glyph scales. Default 0.", "a number above -0.5."),
+]);
+doc += api("type_style.space_width = number", "A space's width, over the glyphset's.", [
+	arg("number", "The width, in glyph scales.", "a positive number."),
+]);
+doc += api("type_style.skew = angle, type_style.italic = on", "Leans the glyphs, over the glyphset's skew: italic true leans them 0.25 radians, false sets them upright.", [
+	arg("angle", "How far they lean, tops forward.", "a number, in radians, between -PI() / 2 and PI() / 2."),
+	arg("on", "Whether the text is italic.", "true or false."),
+]);
+doc += api("type_style.underline = lines, type_style.strike = lines", "Lines under the text, one below another, or through it, back and forth as one stroke, scribbling it out. Drawn where text is typeset (flows and labels, and spans in markdown); lines run across the spaces between words and break where the text does.", [
+	arg("lines", "Which lines.", "true for one, false for none, a number of lines from 1 to 20, or #{ count, spacing, style }: count lines (default 1), spacing glyph scales apart (default as the pen sets them), drawn in style, a style or a map of style settings over the text's (default the text's)."),
+]);
+doc += api("new_paragraph_style(), new_paragraph_style(options)", "A paragraph style: the defaults below unless the options set them, as setting the properties does.", [
+	opt("options.KEY", "as below", "Any of the properties below.", "as each takes."),
+]);
+doc += api("paragraph_style.line_height = number", "How far apart lines are, in glyph scales.", [
+	arg("number", "Default 1.25.", "a positive number."),
+]);
+doc += api("paragraph_style.paragraph_gap = number, paragraph_style.indent = number", "Extra room between paragraphs, in lines (default 0.5); and how much further in a paragraph's first line starts, in glyph scales (default 0). Typeset text.", [
+	arg("number", "The room.", "a number of at least 0."),
+]);
+doc += api("paragraph_style.align = name", "Where each line's glyphs go along it: from its start; moved along as far as they still fit, or half that; or spread so the last goes as far as it fits (at the blanks, with layout: words), all but the text's last line.", [
+	arg("name", "Default left.", "left, center, right or justify."),
+]);
+doc += api("paragraph_style.valign = name", "Where text sits down a text box or slot: from as high as its glyphs fit, or set again lower by half, or all, of the room left under its last line.", [
+	arg("name", "Default top.", "top, center or bottom."),
+]);
+doc += api("paragraph_style.fit = on", "Shrinks the text until all of it fits its slot. Typeset text.", [
+	arg("on", "Default false.", "true or false."),
+]);
+doc += api("paragraph_style.layout = name", "How glyphs are placed: glyph by glyph, or words kept whole, wrapping at spaces.", [
+	arg("name", "Default the call's: words for write_block, flat otherwise.", "flat or words."),
+]);
+doc += api("paragraph_style.angle = angle", "In a text box, which way its lines run (0, the default, left to right, each line below the last; other angles turn them, the next line always to their right-hand side). Along a path, holds every glyph at this angle instead of turning it with the path (0 is upright).", [
+	arg("angle", "Default none: 0 in a box, turned to the path along one.", "a number, in radians."),
+]);
+doc += api("paragraph_style.split_words = setting, paragraph_style.split_padding = number", "With layout: words, breaks words round what's avoided rather than moving them past it whole; and how much further the pieces keep from it.", [
+	arg("setting", "Default false.", "true, false, or the fewest glyphs a piece may have (a whole number of at least 1; true is 2)."),
+	arg("number", "The extra room, in glyph scales. Default 0. Needs split_words.", "a number of at least 0."),
+]);
+doc += api("paragraph_style.clearance = number", "How far glyphs keep from what they avoid, on top of any margin a tree was built with.", [
+	arg("number", "In canvas units. Default 3.", "a number of at least 0."),
+]);
+doc += api("paragraph_style.line_start_jitter = number, paragraph_style.line_gap_jitter = number", "How much further each line starts, at most, at random; and how much each line's distance from the last varies, at most, either way (write_block and typeset text).", [
+	arg("number", "In canvas units. Default 0.", "a number of at least 0."),
+]);
+doc += api("new_textbox(settings)", "A box, or any closed shape, glyphs flow into, line by line, each glyph's own ink wholly inside the shape: lines run from where the first glyph fits to where the last does, so ink meets the shape's edges, and the first line starts as near its top as glyphs fit. Takes the type's glyph_scale and glyph_tracking, the paragraph's layout (default flat), align, valign, angle, line_start_jitter, clearance and splitting, and the style's glyph jitters.", [
 	opt("settings.center", "none: give center, width and height, or shape", "The box's centre.", "a vec."),
 	opt("settings.width", "none: needed with center", "Its width.", "a positive number."),
 	opt("settings.height", "none: needed with center", "Its height.", "a positive number."),
 	opt("settings.shape", "none: give it, or center, width and height", "The shape to fill instead of a box. Each subpath is an outline, closed back to its start, filled where it winds round (so one drawn on past its start, as circles are, is still filled); a place inside an even number of outlines, as in one inside another, is outside. A rectangle at angle 0 fills just as a box does.", "a path with a subpath of at least three points."),
-	opt("settings.angle", "0", "Which way the lines run: 0 left to right, each below the last; other angles turn them, the next line always to their right-hand side. Glyphs turn with their lines.", "a finite number, in radians."),
-	size_set(),
-	layout_opt("flat", "wrapping at spaces"),
-	jagged_opt("0"),
 	avoid_opt(""),
-	clearance_opt(" Needs avoid."),
-	spacing_opt(),
-	opt("settings.align", "left", "Where each line's glyphs go along it. left: from its start. right and center: moved along as far as they still fit, or half that. justify: spread so the last goes as far as it fits (at the blanks, with layout: words), all but the text's last line. Jagged lines stay left.", "left, center, right or justify."),
-	opt("settings.valign", "top", "Where the text sits down the box. top: from as high as its glyphs fit. center and bottom: set again lower by half, or all, of the room left under its last line, or as far toward that as all the text still fits, if it fitted from the top.", "top, center or bottom."),
-	split_words_opt(),
-	split_padding_opt(),
-] + jitter_opts());
+]);
 doc += api("textbox.fill(glyphs)", "Places what fits: #{ placed, unplaced }, arrays of glyphs. Add the placed ones to a canvas with canvas.add(placed, style).", [
-	arg("glyphs", "The glyphs to place, in order.", "an array of glyphs, as font.glyphs gives."),
+	arg("glyphs", "The glyphs to place, in order.", "an array of glyphs, as glyphset.glyphs gives."),
 ]);
 doc += api("textbox.place_all(glyphs)", "Fills the box again and again until every glyph is placed: an array of arrays of placed glyphs, one per box. Fails if a glyph won't fit even an empty box.", [
 	arg("glyphs", "The glyphs to place, in order.", "an array of glyphs."),
 ]);
-doc += api("path.fill_with_text(text, settings)", "The text along the path, each glyph turned to it, over as many copies of the path as it takes: an array of canvases, one per copy. Fails if a glyph won't fit the path at all.", [
+doc += api("path.fill_with_text(text, settings)", "The text along the path, each glyph turned to it (or held at the paragraph's angle), over as many copies of the path as it takes: an array of canvases, one per copy. Takes the type's glyphset, glyph_scale and glyph_tracking, the paragraph's layout (default flat; words aren't split between subpaths), angle, clearance and splitting, and the style. Fails if a glyph won't fit the path at all.", [
 	arg("text", "The text to write.", "a string."),
-	font_set(),
-	size_set(),
-	style_set(),
-] + path_text_opts());
-doc += api("path.fit_text(text, settings)", "The text along the path at the largest size that fits all of it, as a canvas; a size setting is ignored.", [
+	avoid_opt(""),
+]);
+doc += api("path.fit_text(text, settings)", "The text along the path at the largest glyph scale that fits all of it, as a canvas; a glyph_scale is ignored. Otherwise as fill_with_text.", [
 	arg("text", "The text to write.", "a string."),
-	font_set(),
-	style_set(),
-] + path_text_opts());
-doc += api("write_line(text, at, settings)", "The text written from at to the right, on the line through at (wandering by path_jitter), as a canvas: glyphs' centres on it, as along any path.", [
+	avoid_opt(""),
+]);
+doc += api("write_line(text, at, settings)", "The text written from at to the right, on the line through at (wandering by the hand's baseline_wander), as a canvas: glyphs' centres on it, as along any path. Otherwise as fill_with_text.", [
 	arg("text", "The text to write.", "a string."),
 	vec_arg("at", "Where the line starts."),
-	font_set(),
-	size_set(),
-	style_set(),
-	opt("settings.path_jitter", "0", "How far, at most, either way, in sizes, the line wanders up and down from straight: smoothly, at random, so it starts where it is put and bends every few sizes. Glyphs follow it.", "a number of at least 0."),
-] + path_text_opts());
-doc += api("write_block(text, at, width, settings)", "The text wrapped into lines width long, the first from at (on its line, as write_line sets it) and each line_height sizes below the last (give or take line_jitter), each wandering by path_jitter, the left edges ragged by jagged. Gives #{ canvas, bottom }: the text, and where a line after it would go, for stacking blocks.", [
+	avoid_opt(""),
+]);
+doc += api("write_block(text, at, width, settings)", "The text wrapped into lines width long, the first from at (on its line, as write_line sets it) and each line_height glyph scales below the last (give or take line_gap_jitter), each wandering by the hand's baseline_wander, the left edges ragged by line_start_jitter, words kept whole unless the paragraph's layout is flat. Gives #{ canvas, bottom }: the text, and where a line after it would go, for stacking blocks.", [
 	arg("text", "The text to write.", "a string."),
 	vec_arg("at", "Where the first line starts."),
 	arg("width", "How long lines are.", "a positive number."),
-	font_set(),
-	size_set(),
-	style_set(),
-	opt("settings.line_height", "1.25", "How far apart lines are, in sizes.", "a positive number."),
-	opt("settings.line_jitter", "0", "How much each line's distance from the last varies, at most, either way, at random, in sizes.", "a number of at least 0."),
-	opt("settings.path_jitter", "0", "How far, at most, either way, in sizes, each line wanders up and down from straight: smoothly, at random, so it starts where it is put and bends every few sizes. Glyphs follow it.", "a number of at least 0."),
-	layout_opt("words", "wrapping at spaces"),
-	jagged_opt("0"),
-	spacing_opt(),
 	avoid_opt(""),
-	clearance_opt(" Needs avoid."),
-	split_words_opt(),
-	split_padding_opt(),
-] + jitter_opts());
-doc += api("canvas.scatter_notes(messages, width_range, height_range, settings)", "Scatters messages over the canvas in random boxes, clear of its strokes and of each other; gives a canvas of just the messages. Fails for an empty canvas.", [
+]);
+doc += api("canvas.scatter_notes(messages, width_range, height_range, settings)", "Scatters messages over the canvas in random boxes, clear of its strokes and of each other; gives a canvas of just the messages. Each note's glyphs turn and scale by the hand's glyph_rotation_jitter and glyph_scale_jitter before notes are placed, and stray by its glyph_position_jitter after. Fails for an empty canvas.", [
 	arg("messages", "The notes, a box each.", "an array of strings."),
 	arg("width_range", "Box widths to try, at random between the two.", "[least, most]: positive numbers, least at most most."),
 	arg("height_range", "Box heights to try.", "[least, most]: positive numbers, least at most most."),
-	font_set(),
-	size_set(),
-	style_set(),
-	opt("settings.rotation_jitter", "PI() / 16", "How far each glyph turns, at random, either way, before notes are placed.", "a number of at least 0, in radians."),
-	opt("settings.scale_jitter", "0.15", "How much each glyph's size varies, at random, either way, as a fraction, before notes are placed.", "a number from 0 up to, not including, 1."),
-	opt("settings.position_jitter", "0", "How far each placed glyph strays, at most, either way, in sizes.", "a number of at least 0, or [across, down]."),
-	jagged_opt("0.1"),
 	opt("settings.max_attempts", "100", "How many boxes are tried for each message before backing off.", "a whole number of at least 1."),
-	spacing_opt(),
 	avoid_opt(", besides the canvas and other notes"),
-	clearance_opt(" Kept from the canvas, avoid and other notes alike, so it needs no avoid."),
-	layout_opt("flat", "words whole, each note in one clear patch"),
-	split_words_opt(),
-	split_padding_opt(),
 ]);
 
 // ---- avoidance ----
 
 doc += heading("Keeping Text Clear");
-doc += para("avoid, in every text layout, is a tree, a path, a canvas or a glyph, or an array of any of these. Glyphs keep their whole outline (the hull of their strokes) at least clearance from all of it: by default an eighth of the size, on top of any clearance a tree was built with. Glyphs placed by one call keep clear of each other too.");
+doc += para("avoid, in every text layout, is a tree, a path, a canvas or a glyph, or an array of any of these. Glyphs keep their whole outline (the hull of their strokes) at least the paragraph's clearance from all of it (3 canvas units unless it says), on top of any margin a tree was built with. Glyphs placed by one call keep clear of each other too.");
 doc += api("new_avoidance_tree()", "An empty tree of what to keep clear of. Trees are shared: a text box made with one sees what's added to it later, so tree.add(placed) keeps later text off what's just been placed.");
 doc += api("tree.add(item), tree.add(item, options)", "Adds what to keep clear of, as it is now. Returns the tree.", [
-	arg("item", "What to keep clear of.", "a path (its lines), a canvas (its marks), a glyph (its outline, insides included), another tree (with its own clearances), or an array of any of these."),
-	opt("options.clearance", "0", "How far to keep from it, in canvas units, on top of the clearance text asks for.", "a number of at least 0."),
+	arg("item", "What to keep clear of.", "a path (its lines), a canvas (its marks), a glyph (its outline, insides included), another tree (with its own margins), or an array of any of these."),
+	opt("options.margin", "0", "How far to keep from it, in canvas units, on top of the clearance text asks for.", "a number of at least 0."),
 ]);
 doc += api("tree.add_hull(item), tree.add_hull(item, options)", "Keeps out of everything inside the item's outline, not just off its marks. Returns the tree.", [
 	arg("item", "What to take the outline of.", "a path, a canvas or a glyph, or an array of any of these; not a tree."),
-	opt("options.clearance", "0", "How far to keep from the outline, in canvas units.", "a number of at least 0."),
+	opt("options.margin", "0", "How far to keep from the outline, in canvas units.", "a number of at least 0."),
 ]);
 doc += api("tree.add_region(path), tree.add_region(path, options)", "Keeps out of a closed shape. Returns the tree.", [
 	arg("path", "The shape.", "a path."),
-	opt("options.clearance", "0", "How far to keep from it, in canvas units.", "a number of at least 0."),
+	opt("options.margin", "0", "How far to keep from it, in canvas units.", "a number of at least 0."),
 ]);
 doc += api("tree.blocks(point), tree.blocks(glyph)", "Whether something is too close to what's in the tree.", [
 	arg("point or glyph", "What to test.", "a vec, or a placed glyph (a blank one is never blocked)."),
@@ -718,7 +742,7 @@ doc += api("new_edges(points, pairs)", "A path of straight lines, one between th
 // ---- balanced ternary ----
 
 doc += heading("Balanced Ternary");
-doc += para("A balanced-ternary value is a number's digits, -1, 0 and 1, most significant first, each worth three times the next: 5 is +--, 9 - 3 - 1. It's a value: fonts draw it as a glyph and paths write it as marks.");
+doc += para("A balanced-ternary value is a number's digits, -1, 0 and 1, most significant first, each worth three times the next: 5 is +--, 9 - 3 - 1. It's a value: glyphsets draw it as a glyph and paths write it as marks.");
 doc += api("balanced_ternary(n), balanced_ternary(text), balanced_ternary(digits)", "A balanced-ternary value: from a whole number, in as few digits as it needs (0 is 0), or from its digits as given, leading 0s kept.", [
 	arg("n", "The number.", "a whole number."),
 	arg("text", "The digits as text: - for -1, 0, and + for 1.", "a non-empty string of -, 0 and +."),
@@ -730,15 +754,15 @@ doc += api("bt.digits(width)", "Its digits in chunks of width, an array of array
 	arg("width", "Digits to a chunk.", "a whole number of at least 1."),
 ]);
 doc += api("bt.to_string(), bt.to_debug(), a == b, a != b", "Its digits as text, such as +--, for print and debug; and whether two values have the same digits.");
-doc += api("path.fill_with_text(bt, settings)", "The digits written along the path from its start, as the balanced_ternary font writes them down its stems, size apart, over as many copies of the path as it takes: an array of canvases, one per copy. A 0 is a bar across the path, and a -1 or 1 a stroke that runs alongside the path for most of its slot, then bends sharply out to the left or right of a traveller going along the path (for a path running left to right across the page, 1 is down). The path must be one subpath, and isn't drawn.", [
+doc += api("path.fill_with_text(bt, settings)", "The digits written along the path from its start, as the balanced_ternary glyphset writes them down its stems, the type's glyph scale apart, over as many copies of the path as it takes: an array of canvases, one per copy. A 0 is a bar across the path, and a -1 or 1 a stroke that runs alongside the path for most of its slot, then bends sharply out to the left or right of a traveller going along the path (for a path running left to right across the page, 1 is down). The path must be one subpath, and isn't drawn.", [
 	arg("bt", "The digits.", "a balanced-ternary value."),
-	style_set(),
-	req("settings.size", "How far along the path each digit's slot runs.", "a positive number, no longer than the path."),
+	opt("settings.style", "default_style()", "What the marks are drawn in.", "a style, or a map of style settings."),
+	req("settings.type", "How far along the path each digit's slot runs: its glyph_scale.", "a type style or a map with a glyph_scale no longer than the path."),
 	opt("settings.width", "0.6 of the slot", "How far the marks reach out from the path.", "a positive number."),
 ]);
 doc += api("path.fit_text(bt, settings)", "The digits written along the whole path, each a share of its length, as a canvas; otherwise as above.", [
 	arg("bt", "The digits.", "a balanced-ternary value."),
-	style_set(),
+	opt("settings.style", "default_style()", "What the marks are drawn in.", "a style, or a map of style settings."),
 	opt("settings.width", "0.6 of the slot", "How far the marks reach out from the path.", "a positive number."),
 ]);
 
@@ -780,7 +804,7 @@ doc += api("art::eye(center, length), art::eye(center, length, options)", "An ey
 	seed_opt("eye"),
 	opt("options.angle", "0", "The eye's tilt; 0 keeps the corners level.", "a number, in radians."),
 	opt("options.openness", "0.32", "Its height over its length.", "a number above 0.05 and at most 1."),
-	opt("options.flat", "false", "Lids of straight lines from each corner to a point above and below the middle, as the symbols font's eye has, rather than arcs.", "true or false."),
+	opt("options.flat", "false", "Lids of straight lines from each corner to a point above and below the middle, as the symbols glyphset's eye has, rather than arcs.", "true or false."),
 ]);
 doc += api("art::moon(center, radius, phase)", "The moon in a phase, seen from the northern hemisphere. Gives #{ outline, terminator, lit, dark }: the disc's outline; the terminator, the half ellipse from the top of the disc to the bottom between light and dark (an empty path at new and full); and the lit and dark sides as closed shapes, to hatch or fill (the lit side empty at new, the dark side at full). It takes no seed: the same phase draws the same moon.", [
 	vec_arg("center", "Its centre."),
@@ -854,122 +878,97 @@ doc += api("new_layout(name, Fn(page_function))", "A layout from a function in t
 doc += api("layout.name", "Read only: the layout's name.");
 doc += api("layout.typeset(options)", "Typesets pages until every flow has run out, giving them as an array. Fails, naming the flows, if a page sets none of what's left, or if text is left after max_pages.", [
 	opt("options.flows", "none", "The text slots set, by flow name. A blank line starts a paragraph, and a line break breaks a line.", "a map of names to strings or markdown(text)."),
-	opt("options.roles", "none", "How each kind of text and stroke looks, by role name (see Role settings).", "a map of names to maps of role settings."),
+	opt("options.roles", "none", "How each kind of text and stroke looks, by role name (see Roles).", "a map of names to roles."),
 	opt("options.art", "none", "What figure and band slots draw, by name.", "a map of names to canvases (drawn in their own styles), paths or glyphs (drawn in the slot's role style), or functions given the box, #{ x, y, width, height, center }, and giving a canvas or path, drawn as it comes."),
 	opt("options.name", "the layout's name", "What the pages are named after: NAME_0, NAME_1, and on.", "a string of letters, digits, underscores, hyphens and dots, not starting with a dot."),
 	opt("options.width", "the layout file's page_size()", "The page width. Needed if the layout gives none.", "a positive number."),
 	opt("options.height", "the layout file's page_size()", "The page height. Needed if the layout gives none.", "a positive number."),
 	opt("options.max_pages", "200", "The most pages to set before failing.", "a whole number of at least 1."),
 ]);
-doc += para("Boxes. Every box takes a style map, which can be left out; its keys are the box styles below, and for slots (every box but rows and columns) role settings of the slot's own too.");
-doc += api("row(children), row(children, style)", "Lays out boxes across.", [
+doc += para("Boxes. Every box takes an options map, which can be left out: its flex style, flex, and for slots (every box but rows and columns) the role it takes and a style, type, paragraph or spans of its own, each whole or a map of settings over its role's.");
+doc += api("row(children), row(children, options)", "Lays out boxes across.", [
 	arg("children", "The boxes it lays out, left to right.", "an array of boxes: rows, columns, flows and the rest."),
-	opt("style", "none", "How the row is laid out, and where it sits (see Box styles).", "a map of box style keys, container keys among them."),
+	opt("options.flex", "none", "How the row is laid out, and where it sits (see Flex styles).", "a flex style, or a map of flex settings, container settings among them."),
 ]);
-doc += api("column(children), column(children, style)", "Lays out boxes down.", [
+doc += api("column(children), column(children, options)", "Lays out boxes down.", [
 	arg("children", "The boxes it lays out, top to bottom.", "an array of boxes."),
-	opt("style", "none", "How the column is laid out, and where it sits (see Box styles).", "a map of box style keys, container keys among them."),
+	opt("options.flex", "none", "How the column is laid out, and where it sits (see Flex styles).", "a flex style, or a map of flex settings."),
 ]);
-doc += api("flow(name), flow(name, style)", "A slot for text from a flow; what doesn't fit goes on in the next slot of the same name, then on the next page. Its role, unless style says one, is the flow's name.", [
+doc += api("flow(name), flow(name, options)", "A slot for text from a flow; what doesn't fit goes on in the next slot of the same name, then on the next page. Its role, unless options say one, is the flow's name.", [
 	arg("name", "Which flow it sets.", "a name in typeset's flows."),
-	opt("style", "none", "Its box style and role settings (see Box styles and Role settings).", "a map."),
+	opt("options", "none", "Its flex style and slot settings (see Flex styles and Slots).", "a map."),
 ]);
-doc += api("label(text), label(text, style)", "Fixed text, such as a page number, in the role label unless style says another.", [
+doc += api("label(text), label(text, options)", "Fixed text, such as a page number, in the role label unless options say another.", [
 	arg("text", "The text it sets.", "a string."),
-	opt("style", "none", "Its box style and role settings.", "a map."),
+	opt("options", "none", "Its flex style and slot settings.", "a map."),
 ]);
-doc += api("initial(name), initial(name, style)", "A drop cap: the next letter of a flow, filling its box, in the role initial unless style says another; that role needs font and style but no size. Placed absolutely in a column with the flow's slot, the text wraps round it.", [
+doc += api("initial(name), initial(name, options)", "A drop cap: the next letter of a flow, filling its box, in the role initial unless options say another; that role needs a glyphset but no glyph scale. Placed absolutely in a column with the flow's slot, the text wraps round it.", [
 	arg("name", "The flow whose next letter it draws.", "a name in typeset's flows."),
-	opt("style", "none", "Its box style and role settings.", "a map."),
+	opt("options", "none", "Its flex style and slot settings.", "a map."),
 ]);
-doc += api("figure(name), figure(name, style)", "Art, fitted into the box, keeping its proportions, centred. Its role, the art's name unless style says another, is needed only for a path or glyph, and then needs a style.", [
+doc += api("figure(name), figure(name, options)", "Art, fitted into the box, keeping its proportions, centred. A path or glyph is drawn in its role's style (the art's name unless options say another), or default_style() without one.", [
 	arg("name", "Which art it draws.", "a name in typeset's art."),
-	opt("style", "none", "Its box style and role settings.", "a map."),
+	opt("options", "none", "Its flex style and slot settings.", "a map."),
 ]);
-doc += api("band(name), band(name, style)", "Art repeated along the box as an ornamental strip, each copy scaled to the band's breadth and turned to run along it.", [
+doc += api("band(name), band(name, options)", "Art repeated along the box as an ornamental strip, each copy scaled to the band's breadth and turned to run along it (or by its flex style's turn).", [
 	arg("name", "Which art it repeats.", "a name in typeset's art."),
-	opt("style", "none", "Its box style and role settings, and turn.", "a map."),
-	opt("style.turn", "following the band", "Turns each copy this far instead: by default it's turned a quarter when the art runs the other way from the band.", "a number, in radians."),
+	opt("options", "none", "Its flex style and slot settings.", "a map."),
 ]);
-doc += api("rule(), rule(style)", "A line along the middle of the box, the long way, in the role rule unless style says another.", [
-	opt("style", "none", "Its box style and role settings.", "a map."),
+doc += api("rule(), rule(options)", "A line along the middle of the box, the long way, in the role rule's style unless options say another role.", [
+	opt("options", "none", "Its flex style and slot settings.", "a map."),
 ]);
-doc += api("spacer(), spacer(style)", "Nothing: room.", [
-	opt("style", "none", "Its box style.", "a map."),
+doc += api("spacer(), spacer(options)", "Nothing: room.", [
+	opt("options.flex", "none", "Its flex style.", "a flex style, or a map of flex settings."),
 ]);
 doc += para("A page function gets n (from 0) and info: #{ flows, art, width, height }, flows saying how many characters of each are left and art which art was given, so a layout can change as the text runs out.");
-doc += listing("Box styles: the keys of any box's style. Lengths are canvas units, a percentage of the parent as N%, or auto.", [
-	opt("width, height", "auto", "The box's size; left out, a flow or label is sized to its text.", "a length."),
-	opt("min_width, min_height, max_width, max_height", "none", "Limits on its size.", "a length."),
-	opt("grow", "0", "How much of its parent's spare room it takes, shared out among its siblings by this; a box that grows with no size of its own grows from nothing.", "a number of at least 0."),
-	opt("shrink", "1", "How much it gives up when its parent is too small, shared out likewise.", "a number of at least 0."),
-	opt("basis", "auto", "Its size along its parent before growing and shrinking.", "a length."),
-	opt("margin", "0", "Room outside it.", "one length, [vertical, horizontal], [top, horizontal, bottom], [top, right, bottom, left] or #{ top, right, bottom, left }."),
-	opt("padding", "0", "Room inside it, round its children or what it draws.", "as margin."),
-	opt("position", "relative", "Whether it's in its parent's flow.", "relative, or absolute: out of the flow, placed by top, left, right and bottom, with text in its parent wrapping round it."),
-	opt("top, left, right, bottom", "none", "Where an absolute box sits, from its parent's edges.", "a length."),
-	opt("aspect", "none", "Its width over its height.", "a number of at least 0."),
-	opt("align_self", "auto", "Where it sits across its parent, over the parent's align.", "auto, start, end, center or stretch."),
-	opt("border", "none", "A role whose style outlines the box.", "a role's name, in typeset's roles."),
+doc += api("new_flex_style(), new_flex_style(options)", "A flex style: how a box is sized and placed, and lays out its children. Its settings are the options below, each also a property, flex.KEY = value, checked as the option is. Lengths are canvas units, a percentage of the parent as N%, or auto.", [
+	opt("options.width, options.height", "auto", "The box's size; left out, a flow or label is sized to its text.", "a length."),
+	opt("options.min_width, options.min_height, options.max_width, options.max_height", "none", "Limits on its size.", "a length."),
+	opt("options.grow", "0", "How much of its parent's spare room it takes, shared out among its siblings by this; a box that grows with no size of its own grows from nothing.", "a number of at least 0."),
+	opt("options.shrink", "1", "How much it gives up when its parent is too small, shared out likewise.", "a number of at least 0."),
+	opt("options.basis", "auto", "Its size along its parent before growing and shrinking.", "a length."),
+	opt("options.margin", "0", "Room outside it.", "one length, [vertical, horizontal], [top, horizontal, bottom], [top, right, bottom, left] or #{ top, right, bottom, left }."),
+	opt("options.padding", "0", "Room inside it, round its children or what it draws.", "as margin."),
+	opt("options.position", "relative", "Whether it's in its parent's flow.", "relative, or absolute: out of the flow, placed by top, left, right and bottom, with text in its parent wrapping round it."),
+	opt("options.top, options.left, options.right, options.bottom", "none", "Where an absolute box sits, from its parent's edges.", "a length."),
+	opt("options.aspect", "none", "Its width over its height.", "a number of at least 0."),
+	opt("options.align_self", "auto", "Where it sits across its parent, over the parent's align.", "auto, start, end, center or stretch."),
+	opt("options.border", "none", "What outlines the box.", "a style, a map of style settings over default_style(), or a role's name (for layout files, which can't see the journal's styles): that role's style."),
+	opt("options.gap", "0", "Rows and columns only: room between children.", "a number of at least 0."),
+	opt("options.justify", "start", "Rows and columns only: where children sit along it.", "start, end, center, space_between, space_around or space_evenly."),
+	opt("options.align", "stretch", "Rows and columns only: where children sit across it.", "start, end, center or stretch."),
+	opt("options.align_content", "stretch", "Rows and columns only: how lines of wrapped children share room across it.", "start, end, center, stretch, space_between or space_around."),
+	opt("options.wrap", "false", "Rows and columns only: whether children wrap onto more lines.", "true or false."),
+	opt("options.text_wrap", "box when absolute, none otherwise", "Slots only: what text wrapping round it keeps clear of.", "box (its box), hull (the outline of what it draws) or none."),
+	opt("options.turn", "following the band", "Bands only: turns each copy this far instead; by default it's turned a quarter when the art runs the other way from the band.", "a number, in radians."),
 ]);
-doc += listing("On rows and columns, also:", [
-	opt("gap", "0", "Room between children.", "a number of at least 0."),
-	opt("justify", "start", "Where children sit along it.", "start, end, center, space_between, space_around or space_evenly."),
-	opt("align", "stretch", "Where children sit across it.", "start, end, center or stretch."),
-	opt("align_content", "stretch", "How lines of wrapped children share room across it.", "start, end, center, stretch, space_between or space_around."),
-	opt("wrap", "false", "Whether children wrap onto more lines.", "true or false."),
+doc += api("flex_style.width, .height, .min_width, .min_height, .max_width, .max_height, .grow, .shrink, .basis, .margin, .padding, .position, .top, .left, .right, .bottom, .aspect, .align_self, .border, .gap, .justify, .align, .align_content, .wrap, .text_wrap, .turn = value", "A flex style's settings as properties: each as new_flex_style takes it.", [
+	arg("value", "The setting's value.", "as the option takes it."),
 ]);
-doc += listing("On slots, also, besides any role setting, which overrides its role's:", [
+doc += listing("Slots: the keys of a slot's options, besides flex.", [
 	opt("role", "named after the slot", "The role it takes: by default its flow's or art's name, or label, initial or rule.", "a role's name, in typeset's roles."),
-	opt("wrap", "box when absolute, none otherwise", "What text wrapping round it keeps clear of.", "box (its box), hull (the outline of what it draws) or none."),
+	opt("style, type, paragraph", "the role's", "Its own, over its role's.", "a style, type style or paragraph style, or a map of their settings over the role's."),
+	opt("spans", "the role's", "Named spans of its own, over its role's (see Marked-Up Text).", "a map of names to spans."),
 ]);
-doc += listing("Role settings: the keys of each role in typeset's roles, and of slots' styles, and the text settings every text call takes (each takes the ones it uses and ignores the rest). Flows and labels need font, style and size; initials font and style; rules, borders, and art that's a path or glyph, only style.", [
-	opt("font", "none", "The font text is set in.", "a font."),
-	opt("style", "none", "The style text and strokes are drawn in.", "a style."),
-	opt("size", "none", "The symbol scale text is set at, in canvas units.", "a positive number."),
-	opt("line_height", "1.25", "How far apart lines are, in sizes.", "a positive number."),
-	opt("line_jitter", "0", "How much each line's distance from the last varies, at most, either way, at random, in sizes.", "a number of at least 0."),
-	opt("align", "left", "How lines sit across the slot.", "left, center, right or justify."),
-	opt("valign", "top", "Where the text sits down the slot.", "top, center or bottom."),
-	opt("indent", "0", "How much further in a paragraph's first line starts, in sizes.", "a number of at least 0."),
-	opt("paragraph_gap", "0.5", "Extra room between paragraphs, in lines.", "a number of at least 0."),
-	opt("spacing", "0", "Extra room between glyphs, in sizes; negative tightens.", "a number."),
-	opt("jagged", "0", "How much further in each line starts, at most, at random, in sizes.", "a number of at least 0."),
-	opt("clearance", "size / 4", "How far text keeps from what it wraps round, in canvas units.", "a number of at least 0."),
-	opt("split_words", "false", "Breaks words round what text wraps round rather than moving them past it whole.", "true, false, or the fewest letters a piece may have (a whole number of at least 1; true is 2)."),
-	opt("split_padding", "0", "How much further the pieces keep from it, in sizes. Needs split_words.", "a number of at least 0."),
-	opt("fit", "false", "Shrinks the text until all of it fits the slot.", "true or false."),
-	opt("position_jitter", "0", "How far each glyph strays, at most, either way, at random, in sizes.", "a number of at least 0, or [across, down]."),
-	opt("rotation_jitter", "0", "How far each glyph turns, at most, either way.", "a number of at least 0, in radians."),
-	opt("scale_jitter", "0", "How much each glyph's size changes, at most, either way, as a fraction.", "a number from 0 up to, not including, 1."),
-	opt("em", "#{ italic: true }", "How markdown's emphasis looks.", "a map of span settings (see Marked-Up Text)."),
-	opt("strong", "#{ passes: 2, jitter: size / 20 }", "How markdown's strong text looks: by default gone over twice, a little astray.", "a map of span settings."),
+doc += listing("Roles: the keys of each role in typeset's roles. Flows and labels need a type with a glyphset and glyph scale; initials a glyphset; rules, borders and art draw in the style.", [
+	opt("style", "default_style()", "What the role's text and strokes are drawn in, and the hand that sets its glyphs.", "a style, or a map of style settings over default_style()."),
+	opt("type", "none", "The role's glyphset, glyph scale and shaping (see Text).", "a type style, or a map of type settings."),
+	opt("paragraph", "the defaults", "How the role's lines are built and set (see Text): line_height, align, valign, indent, paragraph_gap, fit, clearance, line_start_jitter, line_gap_jitter, split_words and split_padding.", "a paragraph style, or a map of paragraph settings."),
+	opt("spans", "em and strong as Marked-Up Text says", "The role's named spans.", "a map of names to spans."),
 ]);
 
 // ---- markdown ----
 
 doc += heading("Marked-Up Text");
-doc += api("markdown(text)", "A flow whose text is styled as it's set. Spans nest, each changing what it's in.", [
-	arg("text", "The text, with its marks: *emphasis* or _emphasis_ looks as the role's em says; **strong** or __strong__ as its strong says; ~~text~~ is struck through; [text]{settings} is set with settings of its own, key: value pairs separated by commas, a key alone meaning true. A backslash writes a mark as it is.", "a string."),
+doc += api("markdown(text), markdown(text, options)", "A flow whose text is styled as it's set. Spans nest, each changing what it's in.", [
+	arg("text", "The text, with its marks: *emphasis* or _emphasis_ is the span em; **strong** or __strong__ the span strong; ~~text~~ is struck through; [text]{settings} is set with settings of its own: span names, and key: value pairs, separated by commas, a key alone meaning true. A word alone is a setting if it's one, and a span's name otherwise; the spans named are applied first, then the settings. A backslash writes a mark as it is.", "a string."),
+	opt("options.spans", "none", "Named spans of the text's own, over its role's.", "a map of names to spans."),
 ]);
-doc += listing("Span settings: the keys in a span's braces, and in a role's em and strong. Each is as the text round it unless given.", [
-	opt("color (or colour)", "the text's", "The ink.", "a CSS colour."),
-	opt("passes", "the text's", "How many times strokes are gone over.", "a whole number from 1 to 64."),
-	opt("jitter", "the text's", "How far each pass strays, in canvas units.", "a number of at least 0."),
-	opt("point_jitter", "the text's", "How far each point of each pass strays, control points included, in canvas units.", "a number of at least 0."),
-	opt("italic", "the text's", "True leans the text 0.25 radians; false sets it upright.", "true or false."),
-	opt("skew", "the text's", "Leans the text this far.", "a number, in radians."),
-	opt("size", "1", "Its size, times the size round it; lines grow to fit.", "a positive number."),
-	opt("character_padding", "the font's", "Room between glyphs' outlines, in sizes.", "a number of at least 0."),
-	opt("word_spacing", "the font's space_width", "A space's width, in sizes.", "a number of at least 0."),
-	opt("underline", "none", "Lines under it, one below another.", "true for one line, false for none (inside text that has them), a number of lines from 1 to 20, or settings in braces: the keys below."),
-	opt("strike (or strikethrough)", "none", "Lines through it, back and forth as one stroke, scribbling it out.", "as underline."),
+doc += listing("A span: a style and a type, each whole or a map of settings over the text it's in. em is by default #{ type: #{ italic: true } }, and strong #{ style: #{ passes: 2, pass_end_jitter: 1.3 } }: gone over twice, a little astray.", [
+	opt("style", "the text's", "What it's drawn in.", "a style, or a map of style settings."),
+	opt("type", "the text's", "How it's set: a glyph_scale_factor multiplies the size of the text round it, and underline and strike draw lines under and through it.", "a type style, or a map of type settings."),
 ]);
-doc += listing("Line settings, in underline and strike braces. Lines run across the spaces between words and break where the text does.", [
-	opt("count", "1", "How many lines.", "a whole number from 1 to 20."),
-	opt("spacing", "set by the pen", "How far apart the lines are, in sizes; how far they must be to show depends on the pen.", "a number of at least 0."),
-	opt("color (or colour), passes, jitter, point_jitter", "the text's", "What the lines are drawn in, as above.", "as above."),
-]);
+doc += para("Settings in a span's braces are a style's and a type's: color, passes, pass_end_jitter and the rest; italic, skew, glyph_scale_factor, glyph_outline_gap, space_width, underline and strike. Lines take true, false (none, inside text that has them), a number of lines, or {count, spacing, style}, the style in braces too.");
 
 // ---- locks ----
 
@@ -1210,7 +1209,7 @@ doc += api("journalbuild NAME [flags]", "Runs journals/NAME/journal_entry.rhai a
 	opt("--stitch N", "off", "Also lays every N pages side by side, in order, tops level, named for the pages they hold: page_0 to page_5 as darkly_page_0-5.png (the last may have fewer; a page left alone is not stitched). Pages are rendered one image each, as with --parchment, on parchment with it. Not with --pdf.", "a whole number of at least 1."),
 	opt("--journals-dir DIR", "the repository's journals/", "Where journals are.", "a directory."),
 	opt("--output-dir DIR", "NAME_output in the current directory", "Where renders go. The default directory is emptied first, except with --page; in a given directory, earlier .png, .svg and .pdf renders are cleared first, except with --page.", "a directory."),
-	opt("--fonts PATH", "the repository's fonts/", "The fonts: a directory with a NAME.json for each font, or one file with every font in it by name.", "a directory or a file."),
+	opt("--glyphsets PATH", "the repository's fonts/", "The glyphsets: a directory with a NAME.json for each glyphset, or one file with every glyphset in it by name.", "a directory or a file."),
 	opt("--locks-dir DIR", "the repository's locks/", "Where lock files are.", "a directory."),
 	opt("--layouts-dir DIR", "the repository's layouts/", "Where layout files are, for layout(name).", "a directory."),
 	opt("--renderers-dir DIR", "the repository's renderers/", "Where renderer files are, for lock.attach.", "a directory."),
@@ -1230,19 +1229,19 @@ fn reference_page(n, info) {
 	column([
 		if n == 0 {
 			column([
-				flow("title", #{ role: "heading", height: 130, fit: true }),
-				flow("subtitle", #{ align: "center" }),
-				rule(#{ height: 10, margin: [10, 250] }),
-			], #{ gap: 10 })
+				flow("title", #{ flex: #{ height: 130 }, role: "heading", paragraph: #{ fit: true } }),
+				flow("subtitle", #{ paragraph: #{ align: "center" } }),
+				rule(#{ flex: #{ height: 10, margin: [10, 250] } }),
+			], #{ flex: #{ gap: 10 } })
 		} else {
 			column([
-				label("api reference", #{ role: "head", height: 50 }),
-				rule(#{ height: 6 }),
-			], #{ gap: 6 })
+				label("api reference", #{ flex: #{ height: 50 }, role: "head" }),
+				rule(#{ flex: #{ height: 6 } }),
+			], #{ flex: #{ gap: 6 } })
 		},
-		flow("body", #{ grow: 1 }),
-		label(`${n + 1}`, #{ role: "folio", align: "center", height: 40 }),
-	], #{ padding: [80, 100, 60, 100], gap: 14 })
+		flow("body", #{ flex: #{ grow: 1 } }),
+		label(`${n + 1}`, #{ flex: #{ height: 40 }, role: "folio", paragraph: #{ align: "center" } }),
+	], #{ flex: #{ padding: [80, 100, 60, 100], gap: 14 } })
 }
 
 let pages = new_layout("reference", Fn("reference_page")).typeset(#{
@@ -1254,12 +1253,12 @@ let pages = new_layout("reference", Fn("reference_page")).typeset(#{
 		body: markdown(doc),
 	},
 	roles: #{
-		heading: #{ font: LOCHE, style: HEADING, size: 90, align: "center", valign: "center" },
-		subtitle: #{ font: PLAIN, style: TEXT, size: 30 },
-		head: #{ font: LOCHE, style: HEADING, size: 40 },
-		body: #{ font: PLAIN, style: TEXT, size: 26, line_height: 1.3, paragraph_gap: 0.6, spacing: 0.04 },
+		heading: #{ style: HEADING, type: new_type_style(LOCHE, 90), paragraph: #{ align: "center", valign: "center" } },
+		subtitle: #{ style: TEXT, type: new_type_style(PLAIN, 30) },
+		head: #{ style: HEADING, type: new_type_style(LOCHE, 40) },
+		body: #{ style: TEXT, type: new_type_style(PLAIN, 26, #{ glyph_tracking: 0.04 }), paragraph: #{ line_height: 1.3, paragraph_gap: 0.6 } },
 		rule: #{ style: CAPTION },
-		folio: #{ font: PLAIN, style: TEXT, size: 26 },
+		folio: #{ style: TEXT, type: new_type_style(PLAIN, 26) },
 	},
 });
 journal_entry.add(pages);

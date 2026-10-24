@@ -1,321 +1,356 @@
-//! Brushes and stroke styles for rhai scripts.
+//! Styles for rhai scripts: what strokes are drawn in.
 //!
 //! ```rhai
-//! let pen = new_brush("Ink Pen", 0.4, 0.8, 2.0);    // name, min and max pressure, size
-//! pen.pressure_profile = "taper";                   // or "ramp" (the default) or "constant"
-//! // Or as the brush is made: options set any property, checked alike.
-//! let pen = new_brush("Ink Pen", 0.4, 0.8, 2.0, #{ pressure_profile: "taper", pool: 0.4 });
+//! // The ink: a colour (or gradient), a Darkly brush and how wide its marks are.
+//! let ink = new_brush_style("#253443", "Ink Pen", 1.2);
+//! let pen = new_brush_style("#253443", "Ink Pen", 1.2, #{
+//!     min_pressure: 0.4, max_pressure: 0.8,   // default 0.3 and 0.7
+//!     pressure_profile: "taper",              // or "ramp" (the default) or "constant"
+//!     pressure_wander: 0.2,                   // pressure wandering 20% either way (default 0)
+//!     pressure_wander_length: 8.0,            // rising and falling about every 8 units (default 12)
+//!     pool: 0.4,                              // ink pooling: 40% heavier at the bottom (default 0)
+//!     pool_depth: 0.25,                       // over the lowest quarter of each path (default 0.3)
+//! });
 //!
-//! // Ink pooling: strokes heavier toward the bottom of each path (each
-//! // glyph, for text), here 40% heavier at the very bottom, rising over the
-//! // lowest quarter of its height.
-//! pen.pool = 0.4;                // default 0
-//! pen.pool_depth = 0.25;         // default 0.3, a fraction of the height
+//! // The hand: how it goes over its strokes and sets glyphs and lines.
+//! let hand = new_handwriting_style(#{
+//!     passes: 2,                     // each stroke drawn twice (default 1)
+//!     pass_end_jitter: 1.0,          // each pass's ends astray by up to 1 unit
+//!     stroke_point_jitter: 0.5,      // every point of every pass astray by up to 0.5
+//!     glyph_position_jitter: 1.0,    // each glyph moved up to 1 unit (or [across, down])
+//!     glyph_rotation_jitter: 0.05,   // and turned up to 0.05 radians
+//!     glyph_scale_jitter: 0.1,       // and scaled up to 10%, either way
+//!     baseline_wander: 3.0,          // write_line's and write_block's lines wander up to 3 units
+//! });
 //!
-//! // Pressure wandering along each stroke, up to 20% either way, rising
-//! // and falling about every 8 canvas units: organic ramps and tapers.
-//! pen.pressure_variation = 0.2;  // default 0
-//! pen.variation_length = 8.0;    // default 12
-//!
-//! let ink = new_style("#253443", pen);          // colour (or gradient), brush; width 1
-//! let heavy = new_style("#253443", pen, #{ width: 1.5, passes: 2 });
-//!
-//! // Strokes gone over again and again, as a hand going over its writing:
-//! // each stroke drawn in `passes` passes, each pass's ends straying by up
-//! // to `jitter` canvas units. With one pass, jitter just roughens a hand.
-//! ink.passes = 6;      // default 1
-//! ink.jitter = 4.0;    // default 0
-//!
-//! // Every point of every pass, control points included, moved on its own
-//! // by up to `point_jitter` canvas units, so curves change shape too.
-//! ink.point_jitter = 1.5;    // default 0
+//! let style = new_style(pen, hand);  // both parts, their settings flattened:
+//! style.color = "#9b2318";
+//! style.passes = 3;
+//! let plain = default_style();       // Ink Pen, black, 1.2 wide
 //! ```
 //!
-//! Passes are drawn when a canvas is rendered (or measured, or avoided), so
-//! anything drawn in the style, text included, is gone over. Their jitter
-//! is seeded from each stroke's own points, so it's the same every run.
+//! Every jitter is in canvas units (rotation in radians, scale a fraction),
+//! drawn from the journal's generator when strokes are added to a canvas.
+//! In SVG output a stroke is `brush_size * max_pressure` wide.
 
-use rand::rngs::StdRng;
-use rand::SeedableRng;
-use rhai::{CustomType, Dynamic, Engine, EvalAltResult, ImmutableString, Map, NativeCallContext, TypeBuilder};
+use rand::RngCore;
+use rhai::{Dynamic, Engine, Map};
+use std::sync::OnceLock;
 
 use super::gradient;
-use super::options::{apply_props, float};
+use super::options::{above_zero, at_least_zero, one_of, register_settings, setting_number, Settings};
 use super::RhaiResult;
 use crate::journal::canvas::{Brush, PressureProfile, StrokeColor};
 use crate::journal::canvas::StrokeStyle as JournalStrokeStyle;
 use crate::journal::paths::StrokePath;
 
-#[derive(Debug, Default, Clone, CustomType)]
-#[rhai_type(extra = Self::build_extra)]
-pub struct BrushSettings {
-    /// The Darkly brush's name (`brush.name`).
-    pub(super) name: ImmutableString,
-    #[rhai_type(skip)]
-    pub(super) min_pressure: f64,
-    #[rhai_type(skip)]
-    pub(super) max_pressure: f64,
-    #[rhai_type(skip)]
-    pub(super) size: f64,
-    #[rhai_type(skip)]
-    pub(super) pressure_profile: PressureProfile,
-    #[rhai_type(skip)]
-    pub(super) pool: f64,
-    #[rhai_type(skip)]
-    pub(super) pool_depth: f64,
-    #[rhai_type(skip)]
-    pub(super) pressure_variation: f64,
-    #[rhai_type(skip)]
-    pub(super) variation_length: f64,
-}
-
-impl BrushSettings {
-    /// `new_brush` is registered in `JournalEngine::new`, which checks the
-    /// name against Darkly's brush library.
-    pub fn new_brush(brush_style: &str, min_pressure: f64, max_pressure: f64, size: f64) -> Self {
-        Self {
-            name: brush_style.into(),
-            min_pressure,
-            max_pressure,
-            size,
-            pressure_profile: PressureProfile::default(),
-            pool: 0.0,
-            pool_depth: 0.3,
-            pressure_variation: 0.0,
-            variation_length: 12.0,
-        }
-    }
-    fn get_pressure_profile(&mut self) -> String {
-        self.pressure_profile.name().to_string()
-    }
-    /// `brush.pressure_profile = "taper"`: "ramp" (min to max, the default),
-    /// "taper" (min to max at the middle and back) or "constant" (max).
-    fn set_pressure_profile(&mut self, name: String) -> Result<(), Box<EvalAltResult>> {
-        self.pressure_profile = PressureProfile::from_name(&name).ok_or_else(|| -> Box<EvalAltResult> {
-            format!("brush.pressure_profile: unknown profile '{}'; expected one of {}", name, PressureProfile::NAMES.join(", ")).into()
-        })?;
-        Ok(())
-    }
-    /// The checks `new_brush` makes, `caller` failing them.
-    fn check(&self, caller: &str) -> RhaiResult<()> {
-        let (min, max) = (self.min_pressure, self.max_pressure);
-        // Darkly pressure runs from 0 to 1 (see also the width warning in
-        // darkly.rs).
-        if !(0.0..=1.0).contains(&min) || !(0.0..=1.0).contains(&max) || min > max {
-            return Err(format!("{}: pressures must satisfy 0 <= min <= max <= 1, got min {} and max {}", caller, min, max).into());
-        }
-        if !(self.size > 0.0) {
-            return Err(format!("{}: size must be positive, got {}", caller, self.size).into());
-        }
-        if !(self.pool >= 0.0 && self.pool.is_finite()) {
-            return Err(format!("{}: pool can't be negative, got {}", caller, self.pool).into());
-        }
-        if !(self.pool_depth > 0.0 && self.pool_depth <= 1.0) {
-            return Err(format!("{}: pool_depth is a fraction of the height, above 0 and at most 1, got {}", caller, self.pool_depth).into());
-        }
-        if !(0.0..1.0).contains(&self.pressure_variation) {
-            return Err(format!("{}: pressure_variation is a fraction either way, from 0 up to (not including) 1, got {}", caller, self.pressure_variation).into());
-        }
-        if !(self.variation_length > 0.0 && self.variation_length.is_finite()) {
-            return Err(format!("{}: variation_length must be positive, got {}", caller, self.variation_length).into());
-        }
-        Ok(())
-    }
-    fn build_extra(builder: &mut TypeBuilder<Self>) {
-        // Numbers may be whole or decimal; changed values are checked as
-        // new_brush checks them.
-        fn number_property(builder: &mut TypeBuilder<BrushSettings>, name: &'static str, field: fn(&mut BrushSettings) -> &mut f64) {
-            builder.with_get_set(name,
-                move |b: &mut BrushSettings| Dynamic::from(*field(b)),
-                move |b: &mut BrushSettings, value: Dynamic| -> RhaiResult<()> {
-                    let caller = format!("brush.{}", name);
-                    let mut changed = b.clone();
-                    *field(&mut changed) = float(&caller, name, &value)?;
-                    changed.check(&caller)?;
-                    *b = changed;
-                    Ok(())
-                });
-        }
-        number_property(builder, "min_pressure", |b| &mut b.min_pressure);
-        number_property(builder, "max_pressure", |b| &mut b.max_pressure);
-        number_property(builder, "size", |b| &mut b.size);
-        number_property(builder, "pool", |b| &mut b.pool);
-        number_property(builder, "pool_depth", |b| &mut b.pool_depth);
-        number_property(builder, "pressure_variation", |b| &mut b.pressure_variation);
-        number_property(builder, "variation_length", |b| &mut b.variation_length);
-        builder.with_get_set("pressure_profile", Self::get_pressure_profile, Self::set_pressure_profile);
-    }
-}
-
-impl From<BrushSettings> for Brush {
-    fn from(bs: BrushSettings) -> Brush {
-        Brush {
-            name: bs.name.to_string(),
-            size: bs.size as f32,
-            min_pressure: bs.min_pressure as f32,
-            max_pressure: bs.max_pressure as f32,
-            pressure_profile: bs.pressure_profile,
-            pool: bs.pool as f32,
-            pool_depth: bs.pool_depth as f32,
-            pressure_variation: bs.pressure_variation as f32,
-            variation_length: bs.variation_length as f32,
-        }
-    }
-}
-
-#[derive(Debug, Clone, CustomType)]
-#[rhai_type(extra = Self::build_extra)]
-pub struct StrokeStyle {
-    #[rhai_type(skip)]
-    pub(super) width: f64,
-    /// A CSS colour, or a gradient.
-    #[rhai_type(skip)]
-    pub(super) color: StrokeColor,
-    #[rhai_type(skip)]
-    pub(super) brush: BrushSettings,
-    /// How many times each stroke is drawn.
-    #[rhai_type(skip)]
-    pub(super) passes: i64,
-    /// How far each pass's ends stray, in canvas units.
-    #[rhai_type(skip)]
-    pub(super) jitter: f64,
-    /// How far each point of each pass, control points included, strays.
-    #[rhai_type(skip)]
-    pub(super) point_jitter: f64,
-}
-
 /// The most passes a style draws its strokes in.
 pub(super) const MAX_PASSES: i64 = 64;
 
-impl From<StrokeStyle> for JournalStrokeStyle {
-    fn from(val: StrokeStyle) -> Self {
-        JournalStrokeStyle {
-            width: val.width as f32,
-            color: val.color,
-            brush: Some(val.brush.into()),
-        }
+/// Darkly's brushes, by name, sorted.
+fn brush_names() -> &'static [String] {
+    static NAMES: OnceLock<Vec<String>> = OnceLock::new();
+    NAMES.get_or_init(|| {
+        let mut names: Vec<String> = ::darkly::brush::builtin_brushes::all().into_iter().map(|b| b.metadata.name).collect();
+        names.sort();
+        names
+    })
+}
+
+/// The ink: a colour or gradient, a Darkly brush, and how it presses.
+#[derive(Debug, Clone)]
+pub struct BrushStyle {
+    color: StrokeColor,
+    brush: String,
+    brush_size: f64,
+    min_pressure: f64,
+    max_pressure: f64,
+    pressure_profile: PressureProfile,
+    pressure_wander: f64,
+    pressure_wander_length: f64,
+    pool: f64,
+    pool_depth: f64,
+}
+
+impl BrushStyle {
+    fn new(caller: &str, color: &Dynamic, brush: &Dynamic, brush_size: &Dynamic) -> RhaiResult<BrushStyle> {
+        let mut style = BrushStyle {
+            color: StrokeColor::Solid("black".into()),
+            brush: "Ink Pen".into(),
+            brush_size: 1.2,
+            min_pressure: 0.3,
+            max_pressure: 0.7,
+            pressure_profile: PressureProfile::default(),
+            pressure_wander: 0.0,
+            pressure_wander_length: 12.0,
+            pool: 0.0,
+            pool_depth: 0.3,
+        };
+        style.set(caller, "color", color)?;
+        style.set(caller, "brush", brush)?;
+        style.set(caller, "brush_size", brush_size)?;
+        Ok(style)
     }
 }
 
-impl StrokeStyle {
-    /// `new_style(color, brush[, #{ width, passes, jitter, point_jitter }])`.
-    ///
-    /// `width` (1 unless given) means different things in the two outputs:
-    /// - Darkly (the default render): it multiplies the brush's pressure,
-    ///   so pressure runs from `width * min_pressure` to
-    ///   `width * max_pressure`. The brush's `size` sets how wide its marks
-    ///   are; pressure makes them heavier (how much depends on the brush).
-    ///   Darkly caps pressure at 1, so past `width = 1 / max_pressure` a
-    ///   wider stroke looks no heavier, and the render warns.
-    /// - SVG (`--svg`): it's the stroke's width in canvas units.
-    ///
-    /// `color` is a CSS colour string, or a gradient (see gradient.rs).
-    pub fn new(color: Dynamic, brush: BrushSettings) -> Result<Self, Box<EvalAltResult>> {
-        Ok(Self {
-            width: 1.0,
-            color: gradient::colour_or_gradient("new_style", color)?,
-            brush,
-            passes: 1,
-            jitter: 0.0,
-            point_jitter: 0.0,
-        })
-    }
-    /// A path as this style draws it: each subpath gone over `passes`
-    /// times, each pass astray by up to `jitter` (see
-    /// `StrokePath::retraced`) and each of its points by up to
-    /// `point_jitter` (see `StrokePath::point_jittered`), seeded from
-    /// the path's own points.
-    pub fn retrace(&self, path: StrokePath) -> StrokePath {
-        if self.passes == 1 && self.jitter == 0.0 && self.point_jitter == 0.0 {
-            return path;
-        }
-        let mut rng = StdRng::seed_from_u64(path.points_hash());
-        let retraced = path.retraced(self.passes as usize, self.jitter as f32, &mut rng);
-        if self.point_jitter == 0.0 {
-            return retraced;
-        }
-        retraced.point_jittered(self.point_jitter as f32, &mut rng)
-    }
-    /// `style.color`: the colour string, or the gradient.
-    fn get_color(&mut self) -> Dynamic {
-        match &self.color {
-            StrokeColor::Solid(color) => color.into(),
-            StrokeColor::Gradient(g) => Dynamic::from(g.clone()),
+impl Settings for BrushStyle {
+    const NAME: &'static str = "brush_style";
+    const KEYS: &'static [&'static str] = &[
+        "color", "brush", "brush_size", "min_pressure", "max_pressure", "pressure_profile", "pressure_wander", "pressure_wander_length", "pool", "pool_depth",
+    ];
+    fn get(&self, key: &str) -> Dynamic {
+        match key {
+            "color" => match &self.color {
+                StrokeColor::Solid(color) => color.into(),
+                StrokeColor::Gradient(g) => Dynamic::from(g.clone()),
+            },
+            "brush" => self.brush.clone().into(),
+            "brush_size" => self.brush_size.into(),
+            "min_pressure" => self.min_pressure.into(),
+            "max_pressure" => self.max_pressure.into(),
+            "pressure_profile" => self.pressure_profile.name().into(),
+            "pressure_wander" => self.pressure_wander.into(),
+            "pressure_wander_length" => self.pressure_wander_length.into(),
+            "pool" => self.pool.into(),
+            "pool_depth" => self.pool_depth.into(),
+            _ => Dynamic::UNIT,
         }
     }
-    fn set_color(&mut self, color: Dynamic) -> Result<(), Box<EvalAltResult>> {
-        self.color = gradient::colour_or_gradient("style.color", color)?;
+    fn set(&mut self, caller: &str, key: &str, value: &Dynamic) -> RhaiResult<()> {
+        match key {
+            "color" => self.color = gradient::colour_or_gradient(caller, value.clone())?,
+            "brush" => self.brush = one_of(caller, key, value, &brush_names().iter().map(String::as_str).collect::<Vec<_>>())?,
+            "brush_size" => self.brush_size = above_zero(caller, key, value)?,
+            "min_pressure" | "max_pressure" => {
+                let pressure = setting_number(caller, key, value)?;
+                // Darkly pressure runs from 0 to 1.
+                if !(0.0..=1.0).contains(&pressure) {
+                    return Err(format!("{}: '{}' must be from 0 to 1, got {}", caller, key, pressure).into());
+                }
+                if key == "min_pressure" { self.min_pressure = pressure } else { self.max_pressure = pressure }
+            }
+            "pressure_profile" => {
+                let name = one_of(caller, key, value, &PressureProfile::NAMES)?;
+                self.pressure_profile = PressureProfile::from_name(&name).expect("a profile's name");
+            }
+            "pressure_wander" => {
+                let wander = at_least_zero(caller, key, value)?;
+                if wander >= 1.0 {
+                    return Err(format!("{}: 'pressure_wander' is a fraction either way, below 1, got {}", caller, wander).into());
+                }
+                self.pressure_wander = wander;
+            }
+            "pressure_wander_length" => self.pressure_wander_length = above_zero(caller, key, value)?,
+            "pool" => self.pool = at_least_zero(caller, key, value)?,
+            "pool_depth" => {
+                let depth = above_zero(caller, key, value)?;
+                if depth > 1.0 {
+                    return Err(format!("{}: 'pool_depth' is a fraction of the height, at most 1, got {}", caller, depth).into());
+                }
+                self.pool_depth = depth;
+            }
+            _ => unreachable!("{} isn't a brush setting", key),
+        }
         Ok(())
     }
-    fn build_extra(builder: &mut TypeBuilder<Self>) {
-        builder
-            .with_fn("new_style", Self::new)
-            .with_fn("new_style", |ctx: NativeCallContext, color: Dynamic, brush: BrushSettings, options: Map| -> RhaiResult<Self> {
-                apply_props(&ctx, "new_style", Self::new(color, brush)?, options, &["width", "passes", "jitter", "point_jitter"])
-            })
-            .with_get_set("width", |s: &mut Self| Dynamic::from(s.width), |s: &mut Self, width: Dynamic| -> RhaiResult<()> {
-                s.width = float("style.width", "the width", &width)?;
-                Ok(())
-            })
-            .with_get_set("color", Self::get_color, Self::set_color)
-            .with_get_set("passes", |s: &mut Self| Dynamic::from(s.passes), |s: &mut Self, passes: Dynamic| -> RhaiResult<()> {
-                let passes = passes.as_int().map_err(|t| -> Box<EvalAltResult> { format!("style.passes: should be a whole number, got {}", t).into() })?;
+    fn check(&self, caller: &str) -> RhaiResult<()> {
+        if self.min_pressure > self.max_pressure {
+            return Err(format!("{}: 'min_pressure' ({}) can't be above 'max_pressure' ({})", caller, self.min_pressure, self.max_pressure).into());
+        }
+        Ok(())
+    }
+}
+
+/// The hand: how it goes over its strokes, and sets glyphs and lines.
+#[derive(Debug, Clone, Default)]
+pub struct HandwritingStyle {
+    passes: i64,
+    pass_end_jitter: f64,
+    stroke_point_jitter: f64,
+    /// Across and down.
+    glyph_position_jitter: (f64, f64),
+    glyph_rotation_jitter: f64,
+    glyph_scale_jitter: f64,
+    baseline_wander: f64,
+}
+
+impl HandwritingStyle {
+    pub(super) fn new() -> HandwritingStyle {
+        HandwritingStyle { passes: 1, ..HandwritingStyle::default() }
+    }
+    /// How far each placed glyph strays, across and down, at most.
+    pub(super) fn glyph_position_jitter(&self) -> (f64, f64) {
+        self.glyph_position_jitter
+    }
+    pub(super) fn glyph_rotation_jitter(&self) -> f64 {
+        self.glyph_rotation_jitter
+    }
+    pub(super) fn glyph_scale_jitter(&self) -> f64 {
+        self.glyph_scale_jitter
+    }
+    /// How far written lines wander from straight, at most.
+    pub(super) fn baseline_wander(&self) -> f32 {
+        self.baseline_wander as f32
+    }
+}
+
+impl Settings for HandwritingStyle {
+    const NAME: &'static str = "handwriting_style";
+    const KEYS: &'static [&'static str] = &[
+        "passes", "pass_end_jitter", "stroke_point_jitter", "glyph_position_jitter", "glyph_rotation_jitter", "glyph_scale_jitter", "baseline_wander",
+    ];
+    fn get(&self, key: &str) -> Dynamic {
+        match key {
+            "passes" => self.passes.into(),
+            "pass_end_jitter" => self.pass_end_jitter.into(),
+            "stroke_point_jitter" => self.stroke_point_jitter.into(),
+            "glyph_position_jitter" => match self.glyph_position_jitter {
+                (x, y) if x == y => x.into(),
+                (x, y) => Dynamic::from_array(vec![x.into(), y.into()]),
+            },
+            "glyph_rotation_jitter" => self.glyph_rotation_jitter.into(),
+            "glyph_scale_jitter" => self.glyph_scale_jitter.into(),
+            "baseline_wander" => self.baseline_wander.into(),
+            _ => Dynamic::UNIT,
+        }
+    }
+    fn set(&mut self, caller: &str, key: &str, value: &Dynamic) -> RhaiResult<()> {
+        match key {
+            "passes" => {
+                let passes = value.as_int().map_err(|t| format!("{}: 'passes' should be a whole number, got {}", caller, t))?;
                 if !(1..=MAX_PASSES).contains(&passes) {
-                    return Err(format!("style.passes: should be from 1 to {}, got {}", MAX_PASSES, passes).into());
+                    return Err(format!("{}: 'passes' should be from 1 to {}, got {}", caller, MAX_PASSES, passes).into());
                 }
-                s.passes = passes;
-                Ok(())
-            })
-            .with_get_set("jitter", |s: &mut Self| Dynamic::from(s.jitter), |s: &mut Self, jitter: Dynamic| -> RhaiResult<()> {
-                let jitter = float("style.jitter", "the jitter", &jitter)?;
-                if jitter < 0.0 {
-                    return Err(format!("style.jitter: can't be negative, got {}", jitter).into());
+                self.passes = passes;
+            }
+            "pass_end_jitter" => self.pass_end_jitter = at_least_zero(caller, key, value)?,
+            "stroke_point_jitter" => self.stroke_point_jitter = at_least_zero(caller, key, value)?,
+            "glyph_position_jitter" => {
+                self.glyph_position_jitter = match value.clone().into_array() {
+                    Ok(pair) => match pair.as_slice() {
+                        [x, y] => (at_least_zero(caller, key, x)?, at_least_zero(caller, key, y)?),
+                        _ => return Err(format!("{}: 'glyph_position_jitter' should be a number or [across, down]", caller).into()),
+                    },
+                    Err(_) => {
+                        let n = at_least_zero(caller, key, value)?;
+                        (n, n)
+                    }
                 }
-                s.jitter = jitter;
-                Ok(())
-            })
-            .with_get_set("point_jitter", |s: &mut Self| Dynamic::from(s.point_jitter), |s: &mut Self, jitter: Dynamic| -> RhaiResult<()> {
-                let jitter = float("style.point_jitter", "the jitter", &jitter)?;
-                if jitter < 0.0 {
-                    return Err(format!("style.point_jitter: can't be negative, got {}", jitter).into());
+            }
+            "glyph_rotation_jitter" => self.glyph_rotation_jitter = at_least_zero(caller, key, value)?,
+            "glyph_scale_jitter" => {
+                let scale = at_least_zero(caller, key, value)?;
+                if scale >= 1.0 {
+                    return Err(format!("{}: 'glyph_scale_jitter' is a fraction either way, below 1, got {}", caller, scale).into());
                 }
-                s.point_jitter = jitter;
-                Ok(())
-            })
-        ;
+                self.glyph_scale_jitter = scale;
+            }
+            "baseline_wander" => self.baseline_wander = at_least_zero(caller, key, value)?,
+            _ => unreachable!("{} isn't a handwriting setting", key),
+        }
+        Ok(())
+    }
+}
+
+/// What strokes are drawn in: the ink and the hand, their settings
+/// flattened into one.
+#[derive(Debug, Clone)]
+pub struct Style {
+    brush: BrushStyle,
+    handwriting: HandwritingStyle,
+}
+
+impl Style {
+    /// Black, in an Ink Pen 1.2 wide, by a steady hand.
+    pub fn default_style() -> Style {
+        let brush = BrushStyle::new("default_style", &"black".into(), &"Ink Pen".into(), &Dynamic::from(1.2)).expect("the default brush");
+        Style { brush, handwriting: HandwritingStyle::new() }
+    }
+    /// How wide its brush's marks are.
+    pub(super) fn brush_size(&self) -> f32 {
+        self.brush.brush_size as f32
+    }
+    pub(super) fn handwriting(&self) -> &HandwritingStyle {
+        &self.handwriting
+    }
+    #[cfg(test)]
+    pub(super) fn color(&self) -> &StrokeColor {
+        &self.brush.color
+    }
+    /// A path as this style draws it: each subpath gone over `passes`
+    /// times, each pass astray by up to `pass_end_jitter` (see
+    /// `StrokePath::retraced`) and each of its points by up to
+    /// `stroke_point_jitter` (see `StrokePath::point_jittered`), drawn
+    /// from `rng`.
+    pub fn retrace(&self, path: StrokePath, rng: &mut dyn RngCore) -> StrokePath {
+        let hand = &self.handwriting;
+        if hand.passes == 1 && hand.pass_end_jitter == 0.0 && hand.stroke_point_jitter == 0.0 {
+            return path;
+        }
+        let retraced = path.retraced(hand.passes as usize, hand.pass_end_jitter as f32, rng);
+        if hand.stroke_point_jitter == 0.0 {
+            return retraced;
+        }
+        retraced.point_jittered(hand.stroke_point_jitter as f32, rng)
+    }
+}
+
+impl Settings for Style {
+    const NAME: &'static str = "style";
+    const KEYS: &'static [&'static str] = &[
+        "color", "brush", "brush_size", "min_pressure", "max_pressure", "pressure_profile", "pressure_wander", "pressure_wander_length", "pool", "pool_depth",
+        "passes", "pass_end_jitter", "stroke_point_jitter", "glyph_position_jitter", "glyph_rotation_jitter", "glyph_scale_jitter", "baseline_wander",
+    ];
+    fn get(&self, key: &str) -> Dynamic {
+        if BrushStyle::KEYS.contains(&key) { self.brush.get(key) } else { self.handwriting.get(key) }
+    }
+    fn set(&mut self, caller: &str, key: &str, value: &Dynamic) -> RhaiResult<()> {
+        if BrushStyle::KEYS.contains(&key) { self.brush.set(caller, key, value) } else { self.handwriting.set(caller, key, value) }
+    }
+    fn check(&self, caller: &str) -> RhaiResult<()> {
+        self.brush.check(caller)
+    }
+}
+
+impl From<&Style> for JournalStrokeStyle {
+    fn from(style: &Style) -> Self {
+        let b = &style.brush;
+        JournalStrokeStyle {
+            width: (b.brush_size * b.max_pressure) as f32,
+            color: b.color.clone(),
+            brush: Some(Brush {
+                name: b.brush.clone(),
+                size: b.brush_size as f32,
+                min_pressure: b.min_pressure as f32,
+                max_pressure: b.max_pressure as f32,
+                pressure_profile: b.pressure_profile,
+                pool: b.pool as f32,
+                pool_depth: b.pool_depth as f32,
+                pressure_variation: b.pressure_wander as f32,
+                variation_length: b.pressure_wander_length as f32,
+            }),
+        }
     }
 }
 
 pub(super) fn register(engine: &mut Engine) {
-    // Validate brush names when the script runs, rather than failing
-    // mid-render when Darkly can't find the brush.
-    let brush_names: Vec<String> = ::darkly::brush::builtin_brushes::all()
-        .into_iter()
-        .map(|brush| brush.metadata.name)
-        .collect();
-    // The names new_brush takes, sorted.
-    let listed: rhai::Array = {
-        let mut names = brush_names.clone();
-        names.sort();
-        names.into_iter().map(Dynamic::from).collect()
-    };
-    engine.register_fn("brush_names", move || listed.clone());
-    let new_brush = move |name: &str, min_pressure: Dynamic, max_pressure: Dynamic, size: Dynamic| -> RhaiResult<BrushSettings> {
-        const CALLER: &str = "new_brush";
-        if !brush_names.iter().any(|known| known == name) {
-            return Err(format!("{}: unknown brush '{}'; available: {}", CALLER, name, brush_names.join(", ")).into());
-        }
-        let brush = BrushSettings::new_brush(name, float(CALLER, "min_pressure", &min_pressure)?, float(CALLER, "max_pressure", &max_pressure)?, float(CALLER, "size", &size)?);
-        brush.check(CALLER)?;
-        Ok(brush)
-    };
-    let brush = new_brush.clone();
-    engine.register_fn("new_brush", brush);
-    engine.register_fn("new_brush", move |ctx: NativeCallContext, name: &str, min_pressure: Dynamic, max_pressure: Dynamic, size: Dynamic, options: Map| -> RhaiResult<BrushSettings> {
-        let brush = new_brush(name, min_pressure, max_pressure, size)?;
-        apply_props(&ctx, "new_brush", brush, options, &["pressure_profile", "pressure_variation", "variation_length", "pool", "pool_depth"])
+    engine.register_fn("brush_names", || -> rhai::Array { brush_names().iter().cloned().map(Dynamic::from).collect() });
+
+    engine.register_type_with_name::<BrushStyle>("BrushStyle");
+    register_settings::<BrushStyle>(engine);
+    let new_brush_style = |color: Dynamic, brush: Dynamic, brush_size: Dynamic| BrushStyle::new("new_brush_style", &color, &brush, &brush_size);
+    engine.register_fn("new_brush_style", new_brush_style);
+    engine.register_fn("new_brush_style", move |color: Dynamic, brush: Dynamic, brush_size: Dynamic, options: Map| {
+        new_brush_style(color, brush, brush_size)?.with("new_brush_style", &options)
     });
-    engine
-        .build_type::<BrushSettings>()
-        .build_type::<StrokeStyle>();
+
+    engine.register_type_with_name::<HandwritingStyle>("HandwritingStyle");
+    register_settings::<HandwritingStyle>(engine);
+    engine.register_fn("new_handwriting_style", HandwritingStyle::new);
+    engine.register_fn("new_handwriting_style", |options: Map| HandwritingStyle::new().with("new_handwriting_style", &options));
+
+    engine.register_type_with_name::<Style>("Style");
+    register_settings::<Style>(engine);
+    engine.register_fn("new_style", |brush: BrushStyle, handwriting: HandwritingStyle| Style { brush, handwriting });
+    engine.register_fn("default_style", Style::default_style);
 }

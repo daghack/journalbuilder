@@ -7,14 +7,14 @@
 //!
 //! ```rhai
 //! // Text along a path, each glyph turned to it, or held upright (or at
-//! // any angle, in radians) and set along it. Text calls take text
-//! // settings, the keys layout roles take (see text_settings.rs).
-//! let hand = #{ font: font, size: 20.0, style: style };
-//! let words = arc.fill_with_text("lorem ipsum", hand);    // a canvas per copy of the path
-//! let upright = arc.fill_with_text("lorem ipsum", hand + #{ angle: 0.0 });
-//! let fitted = arc.fit_text("lorem", hand + #{ angle: 0.2 });   // size ignored
-//! let line = write_line("lorem", vec2(0, 0), hand);       // from a point, to the right
-//! let wavy = write_line("lorem", vec2(0, 0), hand + #{ path_jitter: 0.2 });   // the line wanders, in sizes
+//! // the paragraph's angle, in radians) and set along it. Text calls take
+//! // a style, a type and a paragraph (see text_settings.rs).
+//! let text = #{ style: ink, type: new_type_style(glyphset("plain"), 20.0) };
+//! let words = arc.fill_with_text("lorem ipsum", text);    // a canvas per copy of the path
+//! let upright = arc.fill_with_text("lorem ipsum", text + #{ paragraph: #{ angle: 0.0 } });
+//! let fitted = arc.fit_text("lorem", text);               // glyph_scale ignored
+//! let line = write_line("lorem", vec2(0, 0), text);       // from a point, to the right
+//! let wavy = write_line("lorem", vec2(0, 0), text + #{ style: #{ baseline_wander: 4.0 } });   // the line wanders
 //!
 //! // Shapes, and points spaced round them.
 //! new_polygon(c, 50.0, 5, #{ step: 2 });                  // a star in one line
@@ -60,8 +60,8 @@
 //! let marks = stem.fit_text(balanced_ternary(42), #{ style: ink });   // spread over the path
 //! let copies = stem.fill_with_text(balanced_ternary("+-0+"), #{
 //!     style: ink,
-//!     size: 12.0,                   // from one digit to the next
-//!     width: 5.0,                   // how far marks reach out (default 0.6 of the size)
+//!     type: #{ glyph_scale: 12.0 }, // from one digit to the next
+//!     width: 5.0,                   // how far marks reach out (default 0.6 of the glyph scale)
 //! });                               // a canvas per copy of the path
 //! ```
 //!
@@ -74,10 +74,9 @@ use super::RhaiResult;
 use std::rc::Rc;
 
 use super::options::{as_number, check_keys, float, number, positive};
-use super::text::{line_mode, spacing};
 use super::canvas::bounds_map;
 use super::random::SharedRng;
-use super::{avoid, random, Canvas, CanvasData, Path, StrokeStyle, Vec2};
+use super::{avoid, random, Canvas, CanvasData, Path, Style, Vec2};
 use crate::journal::clip::{clip, Keep};
 use crate::journal::hatch::{FillRule, HatchOptions};
 use crate::journal::canvas::textbox::TextBoxLineMode;
@@ -86,7 +85,7 @@ use crate::journal::symbol::{place_along_path, place_words_along_path, Symbol, S
 use crate::journal::fonts::FontBook;
 use crate::journal::ternary::{ternary_along, TernaryOptions};
 use super::generate::BalancedTernary;
-use super::text_settings::{self, Jitter, Wander, JITTER_KEYS};
+use super::text_settings::{Jitter, TextSettings, Wander};
 use parry2d::math::Vec2 as PVec;
 use rhai::{Array, INT};
 
@@ -96,15 +95,6 @@ pub(super) type TextSource = (Rc<FontBook>, random::SharedRng);
 
 /// The `angle` option: glyphs held at this angle (radians, 0 upright)
 /// along the path, rather than turned to follow it.
-fn text_angle(caller: &str, options: &Map) -> RhaiResult<Option<f32>> {
-    match number(caller, options, "angle")? {
-        Some(a) if !a.is_finite() => Err(format!("{}: 'angle' must be a finite number of radians, got {}", caller, a).into()),
-        angle => Ok(angle),
-    }
-}
-
-/// Text along a path: glyph by glyph, or keeping words together on a
-/// subpath ("words" layout).
 fn place_text(symbols: Vec<Symbol>, path: &StrokePath, args: &SymbolPlacementArgs, mode: &TextBoxLineMode) -> (Vec<Symbol>, Vec<Symbol>) {
     match mode {
         TextBoxLineMode::Flat => place_along_path(symbols, path, args),
@@ -113,63 +103,59 @@ fn place_text(symbols: Vec<Symbol>, path: &StrokePath, args: &SymbolPlacementArg
 }
 
 /// What text along a path takes, besides font, size and style.
-const PATH_TEXT_KEYS: [&str; 10] = ["font", "size", "style", "spacing", "avoid", "clearance", "layout", "split_words", "split_padding", "angle"];
+/// What the path text calls take, besides a style, a type and a paragraph.
+const PATH_TEXT_KEYS: [&str; 1] = ["avoid"];
 
-/// Text along a path, as `fill_with_text`, `fit_text` and `write_line` set
-/// it: its glyphs, how they're placed, and their jitter.
 struct PathText {
     symbols: Vec<Symbol>,
-    style: StrokeStyle,
+    style: Style,
     mode: TextBoxLineMode,
     avoid: avoid::AvoidOption,
     spacing: f32,
     angle: Option<f32>,
     jitter: Jitter,
+    /// The glyph scale, if the type gives one.
+    size: Option<f32>,
 }
 
 impl PathText {
     fn parse(caller: &str, msg: &str, settings: Map, (symdict, rng): &TextSource) -> RhaiResult<PathText> {
-        let mut keys = PATH_TEXT_KEYS.to_vec();
-        keys.extend(JITTER_KEYS);
-        let settings = text_settings::settings(caller, settings, &keys)?;
-        let font = text_settings::font(caller, &settings)?;
+        let text = TextSettings::read(caller, settings, &PATH_TEXT_KEYS)?;
+        let font = text.type_.glyphset(caller)?;
         Ok(PathText {
             symbols: font.build(msg, symdict, &mut *rng.borrow_mut()),
-            style: text_settings::style(caller, &settings)?,
-            mode: line_mode(caller, &settings)?,
-            avoid: avoid::AvoidOption::parse(caller, &settings, false)?,
-            spacing: spacing(caller, &settings)?,
-            angle: text_angle(caller, &settings)?,
-            jitter: Jitter::parse(caller, &settings)?,
+            mode: text.paragraph.line_mode(caller, false)?,
+            avoid: avoid::AvoidOption::parse(caller, &text.options, text.paragraph.clearance())?,
+            spacing: text.type_.tracking(),
+            angle: text.paragraph.angle(),
+            jitter: text.jitter(),
+            size: if text.type_.has_size() { Some(text.type_.size(caller)?) } else { None },
+            style: text.style,
         })
     }
-    /// Placed glyphs, jittered, drawn on a canvas.
-    fn draw(&self, mut placed: Vec<Symbol>, size: f32, rng: &SharedRng) -> Canvas {
-        self.jitter.apply(&mut placed, size, &mut *rng.borrow_mut());
+    /// The glyph scale `caller` sets text at.
+    fn size(&self, caller: &str) -> RhaiResult<f32> {
+        self.size.ok_or_else(|| format!("{}: the type has no 'glyph_scale', the size glyphs are set at", caller).into())
+    }
+    fn draw(&self, mut placed: Vec<Symbol>, rng: &SharedRng) -> Canvas {
+        let mut rng = rng.borrow_mut();
+        self.jitter.apply(&mut placed, &mut *rng);
         let mut canvas = CanvasData::default();
         for symbol in placed {
-            canvas.add_path(symbol.placed_strokepath(), self.style.clone());
+            canvas.add_path(symbol.placed_strokepath(), &self.style, &mut *rng);
         }
         Canvas::new(canvas)
     }
 }
 
-/// `path.fill_with_text(text, settings)`: the text along as many copies of
-/// the path as it takes, one canvas per copy. Glyphs sit as close as their
-/// outlines and padding allow (see `symbol::Outline`), plus `spacing` (a
-/// fraction of the size), and keep clear of `avoid` (see avoid.rs). With
-/// `layout: "words"`, words aren't split between subpaths, nor around
-/// what's avoided unless `split_words` lets them be (see
-/// `text::word_split`). With `angle`, glyphs keep to that angle rather
-/// than turning with the path.
 fn fill_with_text(path: &mut Path, msg: &str, settings: Map, text: &TextSource) -> RhaiResult<Vec<Dynamic>> {
     const CALLER: &str = "fill_with_text";
-    let fontsize = text_settings::size(CALLER, &settings)?;
     let mut set = PathText::parse(CALLER, msg, settings, text)?;
+    let fontsize = set.size(CALLER)?;
     let tree = set.avoid.tree.as_ref().map(|a| a.borrow());
     let args = SymbolPlacementArgs {
         avoid: tree.as_deref(),
-        padding: set.avoid.padding(fontsize),
+        padding: set.avoid.padding(),
         spacing: set.spacing,
         angle: set.angle,
         ..SymbolPlacementArgs::new(fontsize)
@@ -182,29 +168,26 @@ fn fill_with_text(path: &mut Path, msg: &str, settings: Map, text: &TextSource) 
     while !symbols.is_empty() {
         let (placed, unplaced) = place_text(std::mem::take(&mut symbols), &path, &args, &set.mode);
         if placed.is_empty() {
-            // Another copy of the path wouldn't fit it either.
             return Err(format!(
-                "{}: glyph {} of {} doesn't fit on the path at size {}; use a longer path or a smaller size{}",
+                "{}: glyph {} of {} doesn't fit on the path at glyph scale {}; use a longer path or a smaller scale{}",
                 CALLER, total - unplaced.len() + 1, total, fontsize,
                 if set.avoid.tree.is_some() { ", or avoid less" } else { "" },
             ).into());
         }
-        all_canvases.push(Dynamic::from(set.draw(placed, fontsize, &text.1)));
+        all_canvases.push(Dynamic::from(set.draw(placed, &text.1)));
         symbols = unplaced;
     }
     Ok(all_canvases)
 }
 
-/// `path.fit_text(text, settings)`: the text along the path at the
-/// largest size that fits it (a `size` setting is ignored).
-fn fit_text(path: &mut Path, msg: &str, mut settings: Map, text: &TextSource) -> RhaiResult<Canvas> {
+fn fit_text(path: &mut Path, msg: &str, settings: Map, text: &TextSource) -> RhaiResult<Canvas> {
     const CALLER: &str = "fit_text";
-    settings.remove("size");
     let set = PathText::parse(CALLER, msg, settings, text)?;
     let path = &path.get();
     let tree = set.avoid.tree.as_ref().map(|a| a.borrow());
     let mut args = SymbolPlacementArgs {
         avoid: tree.as_deref(),
+        padding: set.avoid.padding(),
         spacing: set.spacing,
         angle: set.angle,
         ..SymbolPlacementArgs::new(20.0)
@@ -214,7 +197,6 @@ fn fit_text(path: &mut Path, msg: &str, mut settings: Map, text: &TextSource) ->
     while window_max - window_min > 0.005 {
         let current_scale = (window_max + window_min) / 2.0;
         args.symbol_scale = current_scale;
-        args.padding = set.avoid.padding(current_scale);
         let (_, unplaced) = place_text(set.symbols.clone(), path, &args, &set.mode);
         if !unplaced.is_empty() {
             window_max = current_scale;
@@ -223,39 +205,32 @@ fn fit_text(path: &mut Path, msg: &str, mut settings: Map, text: &TextSource) ->
         }
     }
     args.symbol_scale = window_min;
-    args.padding = set.avoid.padding(window_min);
     let (placed, unplaced) = place_text(set.symbols.clone(), path, &args, &set.mode);
     if !unplaced.is_empty() {
         return Err(format!(
-            "{}: the text doesn't fit on the path even at size {}: {} of {} glyphs left over",
+            "{}: the text doesn't fit on the path even at glyph scale {}: {} of {} glyphs left over",
             CALLER, window_min, unplaced.len(), placed.len() + unplaced.len(),
         ).into());
     }
-    Ok(set.draw(placed, window_min, &text.1))
+    Ok(set.draw(placed, &text.1))
 }
 
-/// `write_line(text, at, settings)`: the text from `at` to the right,
-/// glyphs centred on the line through it, as one canvas. With
-/// `path_jitter`, the line wanders up and down from straight by up to
-/// that many sizes, and the glyphs follow it.
-fn write_line(msg: &str, at: Vec2, mut settings: Map, text: &TextSource) -> RhaiResult<Canvas> {
+fn write_line(msg: &str, at: Vec2, settings: Map, text: &TextSource) -> RhaiResult<Canvas> {
     const CALLER: &str = "write_line";
-    let size = text_settings::size(CALLER, &settings)?;
-    let path_jitter = text_settings::path_jitter(CALLER, &settings)?;
-    settings.remove("path_jitter");
     let set = PathText::parse(CALLER, msg, settings, text)?;
+    let size = set.size(CALLER)?;
+    let wander = set.style.handwriting().baseline_wander();
     let start: PVec = at.into();
-    // Long enough for any text: each glyph takes at most a few sizes.
     let length = (set.symbols.len() as f32 + 1.0) * size * 4.0;
-    let line = if path_jitter > 0.0 {
-        Wander::new(path_jitter, size, length, &mut *text.1.borrow_mut()).path(start)
+    let line = if wander > 0.0 {
+        Wander::new(wander, size, length, &mut *text.1.borrow_mut()).path(start)
     } else {
         StrokePath::line(start, start + PVec::new(length, 0.0))
     };
     let tree = set.avoid.tree.as_ref().map(|a| a.borrow());
     let args = SymbolPlacementArgs {
         avoid: tree.as_deref(),
-        padding: set.avoid.padding(size),
+        padding: set.avoid.padding(),
         spacing: set.spacing,
         angle: set.angle,
         ..SymbolPlacementArgs::new(size)
@@ -265,33 +240,33 @@ fn write_line(msg: &str, at: Vec2, mut settings: Map, text: &TextSource) -> Rhai
         return Err(format!("{}: {} of {} glyphs didn't fit on the line{}", CALLER, unplaced.len(), placed.len() + unplaced.len(),
             if set.avoid.tree.is_some() { "; avoid less" } else { "" }).into());
     }
-    Ok(set.draw(placed, size, &text.1))
+    Ok(set.draw(placed, &text.1))
 }
 
-/// What balanced-ternary marks along a path take.
-const TERNARY_KEYS: [&str; 3] = ["style", "size", "width"];
+/// What balanced-ternary text takes, besides a style and a type.
+const TERNARY_KEYS: [&str; 1] = ["width"];
 
-/// The marks' style and width from `settings`.
-fn ternary_settings(caller: &str, settings: Map) -> RhaiResult<(StrokeStyle, Option<f32>, Map)> {
-    let settings = text_settings::settings(caller, settings, &TERNARY_KEYS)?;
-    let style = text_settings::style(caller, &settings)?;
-    let width = if settings.contains_key("width") { Some(positive(caller, &settings, "width")?) } else { None };
-    Ok((style, width, settings))
+/// A style, the glyph scale if the type gives one, and the marks' width.
+fn ternary_settings(caller: &str, settings: Map) -> RhaiResult<(Style, Option<f32>, Option<f32>)> {
+    let text = TextSettings::read(caller, settings, &TERNARY_KEYS)?;
+    let width = if text.options.contains_key("width") { Some(positive(caller, &text.options, "width")?) } else { None };
+    let size = if text.type_.has_size() { Some(text.type_.size(caller)?) } else { None };
+    Ok((text.style, size, width))
 }
 
-fn marks_canvas(marks: StrokePath, style: StrokeStyle) -> Canvas {
+fn marks_canvas(marks: StrokePath, style: &Style, rng: &SharedRng) -> Canvas {
     let mut canvas = CanvasData::default();
-    canvas.add_path(marks, style);
+    canvas.add_path(marks, style, &mut *rng.borrow_mut());
     Canvas::new(canvas)
 }
 
-/// `path.fill_with_text(bt, #{ style, size, width })`: balanced-ternary
-/// digits along the path, `size` apart, over as many copies of the path
-/// as it takes, one canvas per copy.
-fn fill_with_ternary(path: &mut Path, bt: &BalancedTernary, settings: Map) -> RhaiResult<Vec<Dynamic>> {
+/// `path.fill_with_text(bt, #{ style, type, width })`: balanced-ternary
+/// digits along the path, the glyph scale apart, over as many copies of
+/// the path as it takes, one canvas per copy.
+fn fill_with_ternary(path: &mut Path, bt: &BalancedTernary, settings: Map, rng: &SharedRng) -> RhaiResult<Vec<Dynamic>> {
     const CALLER: &str = "fill_with_text";
-    let (style, width, settings) = ternary_settings(CALLER, settings)?;
-    let size = text_settings::size(CALLER, &settings)?;
+    let (style, size, width) = ternary_settings(CALLER, settings)?;
+    let size = size.ok_or_else(|| format!("{}: the type has no 'glyph_scale', how far apart digits are", CALLER))?;
     let path = path.get();
     let length = path_length(CALLER, &path)?;
     let per_copy = (length / size * 1.0001).floor() as usize;
@@ -301,20 +276,19 @@ fn fill_with_ternary(path: &mut Path, bt: &BalancedTernary, settings: Map) -> Rh
     let options = TernaryOptions { spacing: Some(size), width };
     bt.digits().chunks(per_copy).map(|digits| {
         ternary_along(&path, digits, &options)
-            .map(|marks| Dynamic::from(marks_canvas(marks, style.clone())))
+            .map(|marks| Dynamic::from(marks_canvas(marks, &style, rng)))
             .map_err(|e| format!("{}: {}", CALLER, e).into())
     }).collect()
 }
 
 /// `path.fit_text(bt, #{ style, width })`: balanced-ternary digits
 /// spread evenly over the whole path, as a canvas.
-fn fit_ternary(path: &mut Path, bt: &BalancedTernary, mut settings: Map) -> RhaiResult<Canvas> {
+fn fit_ternary(path: &mut Path, bt: &BalancedTernary, settings: Map, rng: &SharedRng) -> RhaiResult<Canvas> {
     const CALLER: &str = "fit_text";
-    settings.remove("size");
-    let (style, width, _) = ternary_settings(CALLER, settings)?;
+    let (style, _, width) = ternary_settings(CALLER, settings)?;
     let options = TernaryOptions { spacing: None, width };
     ternary_along(&path.borrow(), bt.digits(), &options)
-        .map(|marks| marks_canvas(marks, style))
+        .map(|marks| marks_canvas(marks, &style, rng))
         .map_err(|e| format!("{}: {}", CALLER, e).into())
 }
 
@@ -584,6 +558,7 @@ pub(super) fn register(engine: &mut Engine, text: TextSource) {
         hatch(&path.borrow(), &hatch_options(spacing, options)?, &rng).map(Path::new)
     });
 
+    let (r1, r2) = (text.1.clone(), text.1.clone());
     let (t1, t2, t3) = (text.clone(), text.clone(), text);
     engine.register_type_with_name::<Path>("Path")
         // Every path function changes the path and returns that same
@@ -600,8 +575,8 @@ pub(super) fn register(engine: &mut Engine, text: TextSource) {
         })
         .register_fn("fill_with_text", move |path: &mut Path, text: &str, settings: Map| fill_with_text(path, text, settings, &t1))
         .register_fn("fit_text", move |path: &mut Path, text: &str, settings: Map| fit_text(path, text, settings, &t2))
-        .register_fn("fill_with_text", |path: &mut Path, bt: BalancedTernary, settings: Map| fill_with_ternary(path, &bt, settings))
-        .register_fn("fit_text", |path: &mut Path, bt: BalancedTernary, settings: Map| fit_ternary(path, &bt, settings))
+        .register_fn("fill_with_text", move |path: &mut Path, bt: BalancedTernary, settings: Map| fill_with_ternary(path, &bt, settings, &r1))
+        .register_fn("fit_text", move |path: &mut Path, bt: BalancedTernary, settings: Map| fit_ternary(path, &bt, settings, &r2))
         .register_fn("points_along", |path: &mut Path, count: INT| points_along(path, count, &Map::new()))
         .register_fn("points_along", |path: &mut Path, count: INT, options: Map| points_along(path, count, &options))
         .register_get("is_empty", |path: &mut Path| path.borrow().to_substrokes().is_empty())
@@ -777,7 +752,7 @@ mod tests {
     }
 
     fn eval<T: Clone + 'static>(script: &str) -> T {
-        let setup = r#"let style = new_style("black", new_brush("Ink Pen", 0.3, 0.7, 1.0));"#;
+        let setup = r#"let style = new_style(new_brush_style("black", "Ink Pen", 1.0), new_handwriting_style());"#;
         engine().engine.eval::<T>(&format!("{}\n{}", setup, script)).expect("script should evaluate")
     }
 
@@ -822,23 +797,22 @@ mod tests {
     #[test]
     fn ternary_marks_digits_along_a_path() {
         let ok: bool = eval(r#"
-            let ink = new_style("black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
+            let ink = new_style(new_brush_style("black", "Ink Pen", 1.0), new_handwriting_style());
             let stem = new_line(vec2(0, 0), vec2(0, 30));
             let hooks = stem.fit_text(balanced_ternary("+0-"), #{ style: ink });
-            let spaced = stem.fill_with_text(balanced_ternary("+0-+0-+"), #{ style: ink, size: 10, width: 4 });
+            let spaced = stem.fill_with_text(balanced_ternary("+0-+0-+"), #{ style: ink, type: #{ glyph_scale: 10 }, width: 4 });
             // Role settings it doesn't use are ignored.
-            let reused = stem.fit_text(balanced_ternary(5), #{ style: ink, size: 9, line_height: 2 });
+            let reused = stem.fit_text(balanced_ternary(5), #{ style: ink, type: #{ glyph_scale: 9 }, paragraph: #{ line_height: 2 } });
             hooks.bounds().height > 20.0 && spaced.len() == 3 && reused.bounds().height > 0.0 && stem.bounds().width == 0.0
         "#);
         assert!(ok);
         let e = engine();
-        let ink = r#"let ink = new_style("black", new_brush("Ink Pen", 0.3, 0.7, 1.0)); let stem = new_line(vec2(0, 0), vec2(0, 9));"#;
+        let ink = r#"let ink = new_style(new_brush_style("black", "Ink Pen", 1.0), new_handwriting_style()); let stem = new_line(vec2(0, 0), vec2(0, 9));"#;
         for (script, want) in [
             ("stem.fit_text(balanced_ternary(5), #{ style: ink, marks: \"thorns\" })", "unknown option 'marks'"),
-            ("stem.fill_with_text(balanced_ternary(5), #{ style: ink, size: 10 })", "a digit 10 long doesn't fit"),
+            ("stem.fill_with_text(balanced_ternary(5), #{ style: ink, type: #{ glyph_scale: 10 } })", "a digit 10 long doesn't fit"),
             ("stem.fit_text(balanced_ternary(5), #{ style: ink, width: 0 })", "'width' must be positive"),
-            ("stem.fit_text(balanced_ternary(5), #{ width: 2 })", "missing 'style'"),
-            ("stem.fill_with_text(balanced_ternary(5), #{ style: ink })", "missing 'size'"),
+            ("stem.fill_with_text(balanced_ternary(5), #{ style: ink })", "the type has no 'glyph_scale'"),
         ] {
             let script = format!("{}\n{}", ink, script);
             let script = script.as_str();

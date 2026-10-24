@@ -6,18 +6,18 @@
 
 // Glyphs are 0.8 units to the x-height and drawn at half their size, so at
 // size 80 the x-height is 32 canvas units. The book leaves about 0.3
-// x-heights between letters: 0.12 of the font size.
+// x-heights between letters: 0.12 of the glyph scale.
 let size = 80.0;
 let hand = #{
-	font: font("lang"), size: size,
-	style: new_style("rgba(25, 20, 15, 0.92)", new_brush("Calligraphy", 0.4, 0.7, 2.3, #{ pressure_profile: "constant" }), #{ width: 1.3 }),
+	type: new_type_style(glyphset("lang"), size),
+	style: new_style(new_brush_style("rgba(25, 20, 15, 0.92)", "Calligraphy", 2.3, #{ min_pressure: 0.52, max_pressure: 0.91, pressure_profile: "constant" }), new_handwriting_style()),
 };
 let leading = size * 0.4 * 2.4;   // the book's baselines are 2.4 x-heights apart
 
 // One line of text from `at` on its baseline: glyphs are placed on the line
 // through the middle of their x-height.
 fn on_baseline(text, at, hand) {
-	write_line(text, at - vec2(0.0, hand.size * 0.4 / 2.0), hand)
+	write_line(text, at - vec2(0.0, hand.type.glyph_scale * 0.4 / 2.0), hand)
 }
 
 let passage = [

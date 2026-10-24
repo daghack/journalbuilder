@@ -23,10 +23,10 @@ let shorts = [
 
 let box_size = 150.0;
 let size = 19.0;
-let font = font("loche_upper");
+let font = glyphset("loche_upper");
 let boxes = new_textbox(#{
 	center: vec2(0.0, 0.0), width: box_size, height: box_size,
-	size: size, layout: "words", jagged: 0.5,
+	type: #{ glyph_scale: size }, paragraph: #{ layout: "words", line_start_jitter: size * 0.5 },
 });
 let fateful = boxes.place_all(font.glyphs(fateful_pages));
 let spider = boxes.place_all(font.glyphs(spider_web));
@@ -38,9 +38,11 @@ let spacing = box_size + size;
 
 // Nib sizes are in canvas units, like everything else; 2.43 keeps the look
 // of the legacy render (which fit this page to 1080 px with a 1.75 nib).
-let brush = new_brush("Calligraphy", 0.15, 0.25, 2.43);
-let fateful_style = new_style("black", brush, #{ width: 2.0 });
-let spider_style = new_style("hsl(160, 50%, 40%, 0.8)", brush, #{ width: 2.0 });
+let brush = new_brush_style("black", "Calligraphy", 2.43, #{ min_pressure: 0.3, max_pressure: 0.5 });
+let steady = new_handwriting_style();
+let fateful_style = new_style(brush, steady);
+brush.color = "hsl(160, 50%, 40%, 0.8)";
+let spider_style = new_style(brush, steady);
 
 let canvas = new_canvas();
 let next_fateful = 0;
@@ -64,6 +66,11 @@ for cell in new_maze(nodes, nodes, #{ seed: 1043 }).cells() {
 	canvas.add(block.translate_by(vec2(cell.x * spacing, cell.y * spacing)), style);
 }
 
-canvas.add(canvas.scatter_notes(shorts, [200, 500], [300, 600], #{ font: font, style: new_style("hsl(200, 50%, 40%, 0.8)", brush, #{ width: 2.0 }), size: 23.0 }));
+// Notes set askew: each glyph turned and scaled a little before they're placed.
+brush.color = "hsl(200, 50%, 40%, 0.8)";
+let askew = new_handwriting_style(#{ glyph_rotation_jitter: PI() / 16.0, glyph_scale_jitter: 0.15 });
+canvas.add(canvas.scatter_notes(shorts, [200, 500], [300, 600], #{
+	style: new_style(brush, askew), type: new_type_style(font, 23.0), paragraph: #{ line_start_jitter: 2.3 },
+}));
 
 journal_entry.add(new_page(#{ name: "maze_textbox", svg_style: #{ noise_amplitude: 1.5 } }).add(canvas));

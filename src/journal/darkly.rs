@@ -401,7 +401,7 @@ struct Pen<'a> {
     loaded_size: Option<f32>,
     drawn: u32,
     warned_colors: HashSet<String>,
-    warned_saturation: HashSet<(u32, String, u32)>,
+    warned_saturation: HashSet<(String, u32)>,
 }
 
 impl Pen<'_> {
@@ -431,17 +431,13 @@ impl Pen<'_> {
         }
         let pressure_min = brush.min_pressure;
         let pressure_range = brush.max_pressure - brush.min_pressure;
-        // A style's width scales its brush's pressure here (in the plain
-        // output it's a geometric width). Darkly caps pressure at 1, so
-        // past that, wider strokes stop getting heavier. Pooling and
-        // variation can take them past it too.
-        let peak_pressure = style.width * brush.max_pressure * brush.heaviest();
-        if peak_pressure > 1.0 && self.warned_saturation.insert((style.width.to_bits(), brush.name.clone(), peak_pressure.to_bits())) {
+        // Darkly caps pressure at 1, so pooling and variation past it stop
+        // making strokes heavier.
+        let peak_pressure = brush.max_pressure * brush.heaviest();
+        if peak_pressure > 1.0 && self.warned_saturation.insert((brush.name.clone(), peak_pressure.to_bits())) {
             eprintln!(
-                "warning: width {} strokes with brush '{}' (pressure {}-{}{}) reach pressure {:.2}; Darkly caps pressure at 1, so their heaviest parts look the same",
-                style.width, brush.name, brush.min_pressure, brush.max_pressure,
-                if brush.heaviest() > 1.0 { format!(", pooled and varied up to {:.2}x", brush.heaviest()) } else { String::new() },
-                peak_pressure,
+                "warning: strokes with brush '{}' (pressure {}-{}, pooled and varied up to {:.2}x) reach pressure {:.2}; Darkly caps pressure at 1, so their heaviest parts look the same",
+                brush.name, brush.min_pressure, brush.max_pressure, brush.heaviest(), peak_pressure,
             );
         }
         let [cr, cg, cb, ca] = if white {
@@ -482,7 +478,7 @@ impl Pen<'_> {
                 distance += last.map_or(0.0, |l| l.distance(point));
                 last = Some(point);
                 let t_param = i as f32 / sample_count as f32;
-                let pressure = style.width * (brush.pressure_profile.at(t_param) * pressure_range + pressure_min)
+                let pressure = (brush.pressure_profile.at(t_param) * pressure_range + pressure_min)
                     * brush.pooling(point.y, top, bottom)
                     * variation.as_ref().map_or(1.0, |v| v.at(distance));
                 // Where it is in the whole page's render, less the offset:

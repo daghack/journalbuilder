@@ -23,18 +23,18 @@ const COLUMN = (W - 2.0 * LEFT - 3.0 * GUTTER) / 4.0;
 const INK = "#253443";
 
 // The hand: a fine pen, each stroke a little astray.
-const HAND = new_style(INK, new_brush("Ink Pen", 0.55, 0.9, 1.05, #{ pressure_profile: "constant" }), #{ jitter: 1.2 });
+const HAND = new_style(new_brush_style(INK, "Ink Pen", 1.05, #{ min_pressure: 0.55, max_pressure: 0.9, pressure_profile: "constant" }), new_handwriting_style(#{ pass_end_jitter: 1.2 }));
 // The cipher's glyphs, a touch heavier.
-const CIPHER = new_style(INK, new_brush("Ink Pen", 0.55, 0.9, 1.0, #{ pressure_profile: "constant" }), #{ jitter: 1.0 });
+const CIPHER = new_style(new_brush_style(INK, "Ink Pen", 1.0, #{ min_pressure: 0.55, max_pressure: 0.9, pressure_profile: "constant" }), new_handwriting_style(#{ pass_end_jitter: 1.0 }));
 // The manic hand: every stroke gone over seven times, each pass astray.
-let manic_pen = new_brush("Ink Pen", 0.5, 0.95, 1.1, #{ pressure_profile: "taper" });
-const MANIC = new_style(INK, manic_pen, #{ passes: 7, jitter: 9.0 });
+let manic_pen = new_brush_style(INK, "Ink Pen", 1.1, #{ min_pressure: 0.5, max_pressure: 0.95, pressure_profile: "taper" });
+const MANIC = new_style(manic_pen, new_handwriting_style(#{ passes: 7, pass_end_jitter: 9.0 }));
 // Larger letters gone over just twice.
-const FIRM = new_style(INK, manic_pen, #{ passes: 2, jitter: 3.0 });
+const FIRM = new_style(manic_pen, new_handwriting_style(#{ passes: 2, pass_end_jitter: 3.0 }));
 
-const CAPS = font("loche_upper", #{ character_padding: 0.1 });
-const LOWER = font("loche_lower", #{ character_padding: 0.38, space_width: 0.7 });
-const TERNARY = ternary_font("balanced_ternary", #{ character_padding: 0.32 });
+const CAPS = glyphset("loche_upper", #{ glyph_outline_gap: 0.1 });
+const LOWER = glyphset("loche_lower", #{ glyph_outline_gap: 0.38, space_width: 0.7 });
+const TERNARY = ternary_glyphset("balanced_ternary", #{ glyph_outline_gap: 0.32 });
 
 seed(1043);
 
@@ -65,28 +65,32 @@ for paragraph in letter {
 // ---- writing ----
 
 // Each column's text in lines a column wide from (x, y), left edges a
-// little ragged and every glyph set a little off true, as a hand sets it.
-// Each gives where the next text goes.
-const JOSTLED = #{ jagged: 0.3, position_jitter: [0.04, 0.06], rotation_jitter: 0.07, scale_jitter: 0.07 };
-fn lines(c, text, x, y, settings) {
-	let block = write_block(text, vec2(x, y), global::COLUMN, global::JOSTLED + settings);
+// little ragged and every glyph set a little off true, as a hand sets it,
+// by as much as suits the glyph scale. Each gives where the next text goes.
+fn lines(c, text, x, y, style, type, paragraph) {
+	let size = type.glyph_scale;
+	style.glyph_position_jitter = [size * 0.04, size * 0.06];
+	style.glyph_rotation_jitter = 0.07;
+	style.glyph_scale_jitter = 0.07;
+	paragraph.line_start_jitter = size * 0.3;
+	let block = write_block(text, vec2(x, y), global::COLUMN, #{ style: style, type: type, paragraph: paragraph });
 	c.add(block.canvas);
 	block.bottom
 }
 fn prose(c, text, x, y) {
-	lines(c, text, x, y + 16, #{ font: global::CAPS, size: 28, style: global::HAND, line_height: 37.0 / 28.0 }) + 22
+	lines(c, text, x, y + 16, global::HAND, new_type_style(global::CAPS, 28), #{ line_height: 37.0 / 28.0 }) + 22
 }
 fn lowered(c, text, x, y) {
-	lines(c, text, x, y + 22, #{ font: global::LOWER, size: 34, style: global::HAND, line_height: 44.0 / 34.0 }) + 18
+	lines(c, text, x, y + 22, global::HAND, new_type_style(global::LOWER, 34), #{ line_height: 44.0 / 34.0 }) + 18
 }
 fn manic(c, text, x, y) {
-	lines(c, text, x, y + 46, #{ font: global::CAPS, size: 82, style: global::MANIC, line_height: 78.0 / 82.0 }) + 14
+	lines(c, text, x, y + 46, global::MANIC, new_type_style(global::CAPS, 82), #{ line_height: 78.0 / 82.0 }) + 14
 }
 fn firm(c, text, x, y) {
-	lines(c, text, x, y + 34, #{ font: global::CAPS, size: 60, style: global::FIRM, line_height: 64.0 / 60.0 }) + 12
+	lines(c, text, x, y + 34, global::FIRM, new_type_style(global::CAPS, 60), #{ line_height: 64.0 / 60.0 }) + 12
 }
 fn ciphered(c, text, x, y) {
-	lines(c, text, x, y + 21, #{ font: global::TERNARY, size: 31, style: global::CIPHER, line_height: 42.0 / 31.0, layout: "flat" }) + 22
+	lines(c, text, x, y + 21, global::CIPHER, new_type_style(global::TERNARY, 31), #{ line_height: 42.0 / 31.0, layout: "flat" }) + 22
 }
 
 // ---- the eye ----
@@ -94,9 +98,9 @@ fn ciphered(c, text, x, y) {
 // An eye `width` across, centred on `centre`, its iris ringed with the
 // key: the glyph for each symbol of the ordering, clockwise from the top.
 fn eye(c, centre, width) {
-	let lids = new_style(global::INK, new_brush("Ink Pen", 0.55, 0.9, 1.3), #{ passes: 2, jitter: 2.5 });
-	let rings = new_style(global::INK, new_brush("Ink Pen", 0.55, 0.9, 1.4), #{ passes: 3, jitter: 4.0 });
-	let key = new_style(global::INK, new_brush("Ink Pen", 0.5, 0.9, 1.1), #{ passes: 4, jitter: 2.8 });
+	let lids = new_style(new_brush_style(global::INK, "Ink Pen", 1.3, #{ min_pressure: 0.55, max_pressure: 0.9 }), new_handwriting_style(#{ passes: 2, pass_end_jitter: 2.5 }));
+	let rings = new_style(new_brush_style(global::INK, "Ink Pen", 1.4, #{ min_pressure: 0.55, max_pressure: 0.9 }), new_handwriting_style(#{ passes: 3, pass_end_jitter: 4.0 }));
+	let key = new_style(new_brush_style(global::INK, "Ink Pen", 1.1, #{ min_pressure: 0.5, max_pressure: 0.9 }), new_handwriting_style(#{ passes: 4, pass_end_jitter: 2.8 }));
 
 	let outer = width * 0.215;
 	let inner = outer * 0.56;

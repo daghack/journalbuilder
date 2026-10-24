@@ -1,298 +1,199 @@
 //! Marked-up text for page layouts: `markdown(text)` makes a flow whose
-//! text is styled as it's set, each stretch in its own colour, size, lean
-//! and passes, underlined or struck through.
+//! text is styled as it's set, each stretch in its own style and type.
 //!
 //! ```rhai
 //! let body = markdown("Plain writing, *emphasis*, **strong**, ~~struck out~~, "
-//!     + "[written in blue]{color: blue}, [twice the size]{size: 2}, "
-//!     + "[scribbled out]{color: black, strike: {count: 3, color: hsla(0, 80%, 40%, 0.9)}}.");
+//!     + "[written in blue]{color: blue}, [twice the size]{glyph_scale_factor: 2}, "
+//!     + "[a warning]{warn}, [a blue warning]{warn, color: blue}, "
+//!     + "[scribbled out]{color: black, strike: {count: 3, style: {color: red}}}.",
+//!     #{ spans: #{ warn: #{ style: red_ink, type: #{ glyph_scale_factor: 1.2 } } } });
 //! layout("two_column_article").typeset(#{ flows: #{ body: body, ... }, ... });
 //! ```
 //!
-//! The markup (see `journal::markup`): `*text*` or `_text_` is emphasis,
-//! `**text**` or `__text__` strong, `~~text~~` struck through, and
-//! `[text]{settings}` text with settings of its own, `key: value` pairs
-//! separated by commas (a key on its own is `true`). Spans nest, each
-//! changing what it's in. Settings:
+//! The markup (see `journal::markup`): `*text*` or `_text_` is the span
+//! `em`, `**text**` or `__text__` the span `strong`, `~~text~~` struck
+//! through, and `[text]{settings}` text with settings of its own: span
+//! names, and `key: value` pairs, separated by commas (a key on its own is
+//! `true`). A word on its own is a setting if it's one, and a span's name
+//! otherwise; the spans named are applied first, then the settings. Spans
+//! nest, each changing what it's in.
 //!
-//! | key | | |
-//! |---|---|---|
-//! | `color` (`colour`) | a CSS colour | the ink |
-//! | `passes`, `jitter` | as a style's | strokes gone over: how many times, and how far astray (canvas units) |
-//! | `italic` | true or false | leant as italics (0.25 radians), or upright |
-//! | `skew` | radians | leant this far |
-//! | `size` | a number | times the size of the text around it |
-//! | `character_padding` | sizes | room between glyphs' outlines, in place of the font's |
-//! | `word_spacing` | sizes | a space's width, in place of the font's `space_width` |
-//! | `underline` | true, a count, or settings | lines under it |
-//! | `strike` (`strikethrough`) | true, a count, or settings | lines through it |
+//! Settings are a style's (`color`, `passes`, `pass_end_jitter`, ...) and
+//! a type's (`italic`, `skew`, `glyph_scale_factor`, `underline`, ...);
+//! `glyph_scale_factor` multiplies the size of the text round it. Lines
+//! under and through text take `true` (one line), a number of lines,
+//! `false` (none, inside text that has them), or `{count, spacing, style}`,
+//! drawn by default in the text's style. Lines under text go one below
+//! another; lines through it go back and forth through it as one stroke,
+//! as scribbling out. They run across the spaces between words, but break
+//! where the text does: at the end of a line, either side of what the text
+//! avoids, and wherever they'd come near it.
 //!
-//! Lines under and through text take `true` (one line), a number of lines,
-//! `false` (none, inside text that has them), or settings: `count`,
-//! `spacing` (how far apart they are, in sizes: how far they must be to
-//! show depends on the pen), and the `color`, `passes` and `jitter` they're
-//! drawn in (by default, the text's).
-//! Lines under text go one below another; lines through it go back and
-//! forth through it as one stroke, as scribbling out. They run across the
-//! spaces between words, but break where the text does: at the end of a
-//! line, either side of what the text avoids, and wherever they'd come
-//! near it.
-//!
-//! What emphasis and strong text look like is up to the role setting the
-//! text: its `em` and `strong` settings are maps of the settings above, by
-//! default `#{ italic: true }` and `#{ passes: 2, jitter: size / 20 }`
-//! (gone over twice, a little astray).
+//! Spans are named in a role's `spans` and in `markdown`'s, which win: each
+//! `#{ style, type }`, a whole style or type, or a map of some of their
+//! settings over the text's. `em` and `strong` are spans too, by default
+//! `#{ type: #{ italic: true } }` and
+//! `#{ style: #{ passes: 2, pass_end_jitter: 1.3 } }` (gone over twice, a
+//! little astray).
 
 use rhai::{Dynamic, Engine, EvalAltResult, Map};
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use super::canvas::CanvasData;
-use super::style::MAX_PASSES;
-use super::{check_finite, RhaiResult, StrokeStyle};
+use super::options::{check_keys, Settings};
+use super::text_settings::{RuleStyle, TypeStyle};
+use super::{check_finite, RhaiResult, Style};
 use crate::journal::avoid::AvoidanceTree;
-use crate::journal::canvas::{parse_color, StrokeColor};
-use crate::journal::fonts::{Font, FontBook};
+use crate::journal::fonts::FontBook;
 use crate::journal::markup::{Markup, SpanKind, Value};
 use crate::journal::symbol::Symbol;
 use crate::journal::typeset::{marked_runs, rule_path, Rule, Setting};
 
-/// How far `italic: true` leans text, in radians.
-const ITALIC_SKEW: f32 = 0.25;
-/// The most lines a span can be underlined or struck through with.
-const MAX_RULES: i64 = 20;
+/// How a span changes the text it covers: a style, a type, each whole or
+/// a map of some settings over the text's.
+#[derive(Clone, Debug, Default)]
+pub(super) struct SpanStyle {
+    style: Option<Dynamic>,
+    type_: Option<Dynamic>,
+}
 
-/// Text with markup, as `markdown(text)` makes it: the text without it, and
-/// its spans, their settings read.
+impl SpanStyle {
+    /// A span's definition, `#{ style, type }`, checked.
+    pub(super) fn from_dynamic(caller: &str, value: &Dynamic) -> RhaiResult<SpanStyle> {
+        let map = value.clone().try_cast::<Map>()
+            .ok_or_else(|| format!("{}: a span should be #{{ style, type }}, got {}", caller, value.type_name()))?;
+        check_keys(caller, &map, &["style", "type"])?;
+        let span = SpanStyle { style: map.get("style").cloned(), type_: map.get("type").cloned() };
+        span.check(caller)?;
+        Ok(span)
+    }
+    /// Check its settings, as they'd be applied to the defaults.
+    fn check(&self, caller: &str) -> RhaiResult<()> {
+        if let Some(style) = &self.style {
+            Style::given(&format!("{} style", caller), style, &Style::default_style())?;
+        }
+        if let Some(t) = &self.type_ {
+            TypeStyle::given(&format!("{} type", caller), t, &TypeStyle::empty())?;
+        }
+        Ok(())
+    }
+    /// Emphasis, unless a span says otherwise: italics.
+    fn emphasis() -> SpanStyle {
+        SpanStyle { style: None, type_: Some(Map::from_iter([("italic".into(), true.into())]).into()) }
+    }
+    /// Strong text, unless a span says otherwise: gone over twice, a
+    /// little astray.
+    fn strong() -> SpanStyle {
+        let style = Map::from_iter([("passes".into(), Dynamic::from(2_i64)), ("pass_end_jitter".into(), Dynamic::from(1.3))]);
+        SpanStyle { style: Some(style.into()), type_: None }
+    }
+    /// Struck through once, as `~~text~~` is.
+    fn struck() -> SpanStyle {
+        SpanStyle { style: None, type_: Some(Map::from_iter([("strike".into(), true.into())]).into()) }
+    }
+}
+
+/// Named spans, by name.
+#[derive(Clone, Debug, Default)]
+pub(super) struct Spans(BTreeMap<String, SpanStyle>);
+
+impl Spans {
+    /// A `spans` map, `#{ name: #{ style, type } }`, checked.
+    pub(super) fn from_dynamic(caller: &str, value: &Dynamic) -> RhaiResult<Spans> {
+        let map = value.clone().try_cast::<Map>()
+            .ok_or_else(|| format!("{}: 'spans' should be a map of named spans, got {}", caller, value.type_name()))?;
+        let mut spans = BTreeMap::new();
+        for (name, span) in map {
+            if Style::KEYS.contains(&name.as_str()) || TypeStyle::KEYS.contains(&name.as_str()) {
+                return Err(format!("{}: a span can't be named '{}', a setting's name", caller, name).into());
+            }
+            spans.insert(name.to_string(), SpanStyle::from_dynamic(&format!("{} span '{}'", caller, name), &span)?);
+        }
+        Ok(Spans(spans))
+    }
+    /// These spans with `other`'s on top.
+    pub(super) fn then(&self, other: &Spans) -> Spans {
+        let mut spans = self.0.clone();
+        spans.extend(other.0.clone());
+        Spans(spans)
+    }
+    fn get(&self, name: &str) -> Option<&SpanStyle> {
+        self.0.get(name)
+    }
+}
+
+/// A setting's value as rhai has it: whole numbers as integers.
+fn dynamic(value: &Value) -> Dynamic {
+    match value {
+        Value::Bool(b) => (*b).into(),
+        Value::Number(n) if n.fract() == 0.0 && n.abs() < 1e15 => (*n as i64).into(),
+        Value::Number(n) => (*n).into(),
+        Value::Text(t) => t.clone().into(),
+        Value::Map(entries) => Map::from_iter(entries.iter().map(|(k, v)| (k.into(), dynamic(v)))).into(),
+    }
+}
+
+/// A `[text]{...}` span's settings: the spans it names, and the settings
+/// it gives itself, as a span.
+#[derive(Clone, Debug, Default)]
+struct Inline {
+    names: Vec<String>,
+    own: SpanStyle,
+}
+
+impl Inline {
+    fn read(caller: &str, settings: &[(String, Value)]) -> RhaiResult<Inline> {
+        let (mut names, mut style, mut type_) = (Vec::new(), Map::new(), Map::new());
+        for (key, value) in settings {
+            if Style::KEYS.contains(&key.as_str()) {
+                style.insert(key.into(), dynamic(value));
+            } else if TypeStyle::KEYS.contains(&key.as_str()) {
+                type_.insert(key.into(), dynamic(value));
+            } else if *value == Value::Bool(true) {
+                names.push(key.clone());
+            } else {
+                return Err(format!("{}: unknown setting '{}'; settings are a style's or a type's, and a span's name stands alone", caller, key).into());
+            }
+        }
+        let own = SpanStyle {
+            style: (!style.is_empty()).then(|| style.into()),
+            type_: (!type_.is_empty()).then(|| type_.into()),
+        };
+        own.check(caller)?;
+        Ok(Inline { names, own })
+    }
+}
+
+/// Text with markup, as `markdown(text)` makes it: the text without it, its
+/// spans' settings read, and the spans it names.
 #[derive(Clone)]
 pub struct Markdown {
     markup: Rc<Markup>,
-    /// Each span's settings (emphasis and strong text take theirs from the
-    /// role setting them).
-    styles: Rc<Vec<Option<SpanStyle>>>,
+    /// Each `[text]{...}` span's settings; `None` for the others.
+    inline: Rc<Vec<Option<Inline>>>,
+    spans: Spans,
 }
 
 impl Markdown {
-    fn new(source: &str) -> RhaiResult<Markdown> {
+    fn new(source: &str, options: &Map) -> RhaiResult<Markdown> {
         const CALLER: &str = "markdown";
+        check_keys(CALLER, options, &["spans"])?;
+        let spans = options.get("spans").map_or(Ok(Spans::default()), |s| Spans::from_dynamic(CALLER, s))?;
         let markup = Markup::parse(source).map_err(|e| format!("{}: {}", CALLER, e))?;
         let chars: Vec<char> = markup.text.chars().collect();
-        let styles = markup.spans.iter().map(|span| {
+        let inline = markup.spans.iter().map(|span| {
             let caller = || format!("{}: [{}]", CALLER, chars[span.range.clone()].iter().collect::<String>());
             match &span.kind {
-                SpanKind::Settings(settings) => SpanStyle::read(&caller(), settings).map(Some),
-                SpanKind::Strike => Ok(Some(SpanStyle { strike: Some(Some(RuleStyle::lines(1))), ..SpanStyle::default() })),
-                SpanKind::Emphasis | SpanKind::Strong => Ok(None),
+                SpanKind::Settings(settings) => Inline::read(&caller(), settings).map(Some),
+                _ => Ok(None),
             }
         }).collect::<RhaiResult<Vec<_>>>()?;
-        Ok(Markdown { markup: Rc::new(markup), styles: Rc::new(styles) })
+        Ok(Markdown { markup: Rc::new(markup), inline: Rc::new(inline), spans })
     }
     /// The text, markup taken out.
     pub(super) fn text(&self) -> &str {
         &self.markup.text
-    }
-}
-
-/// What strokes are drawn in, over a role's style: what a span changes.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub(super) struct Ink {
-    color: Option<StrokeColor>,
-    passes: Option<i64>,
-    jitter: Option<f64>,
-    point_jitter: Option<f64>,
-}
-
-impl Ink {
-    /// `base` with this ink's changes.
-    pub(super) fn on(&self, base: &StrokeStyle) -> StrokeStyle {
-        let mut style = base.clone();
-        if let Some(color) = &self.color {
-            style.color = color.clone();
-        }
-        if let Some(passes) = self.passes {
-            style.passes = passes;
-        }
-        if let Some(jitter) = self.jitter {
-            style.jitter = jitter;
-        }
-        if let Some(jitter) = self.point_jitter {
-            style.point_jitter = jitter;
-        }
-        style
-    }
-    /// This ink with `other`'s changes on top.
-    fn then(&self, other: &Ink) -> Ink {
-        Ink {
-            color: other.color.clone().or_else(|| self.color.clone()),
-            passes: other.passes.or(self.passes),
-            jitter: other.jitter.or(self.jitter),
-            point_jitter: other.point_jitter.or(self.point_jitter),
-        }
-    }
-}
-
-/// Lines under or through a span, as its settings give them.
-#[derive(Clone, Debug, PartialEq)]
-struct RuleStyle {
-    count: u32,
-    /// How far apart, in sizes.
-    spacing: Option<f32>,
-    ink: Ink,
-}
-
-impl RuleStyle {
-    fn lines(count: u32) -> RuleStyle {
-        RuleStyle { count, spacing: None, ink: Ink::default() }
-    }
-}
-
-/// A span's settings, read.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub(super) struct SpanStyle {
-    ink: Ink,
-    italic: Option<bool>,
-    skew: Option<f32>,
-    /// Times the size around it.
-    size: Option<f32>,
-    character_padding: Option<f32>,
-    word_spacing: Option<f32>,
-    /// `Some(None)` takes lines away.
-    underline: Option<Option<RuleStyle>>,
-    strike: Option<Option<RuleStyle>>,
-}
-
-const SPAN_KEYS: [&str; 13] = [
-    "color", "colour", "passes", "jitter", "point_jitter", "italic", "skew", "size", "character_padding", "word_spacing", "underline", "strike", "strikethrough",
-];
-const RULE_KEYS: [&str; 7] = ["count", "spacing", "color", "colour", "passes", "jitter", "point_jitter"];
-
-fn number(caller: &str, key: &str, value: &Value) -> RhaiResult<f64> {
-    match value {
-        Value::Number(n) => Ok(*n),
-        other => Err(format!("{}: '{}' should be a number, got {}", caller, key, other.describe()).into()),
-    }
-}
-
-fn at_least(caller: &str, key: &str, value: &Value, min: f64) -> RhaiResult<f64> {
-    let n = number(caller, key, value)?;
-    if n < min {
-        return Err(format!("{}: '{}' must be at least {}, got {}", caller, key, min, n).into());
-    }
-    Ok(n)
-}
-
-fn whole(caller: &str, key: &str, value: &Value, max: i64) -> RhaiResult<i64> {
-    let n = number(caller, key, value)?;
-    if n.fract() != 0.0 || !(1.0..=max as f64).contains(&n) {
-        return Err(format!("{}: '{}' should be a whole number from 1 to {}, got {}", caller, key, max, n).into());
-    }
-    Ok(n as i64)
-}
-
-/// The ink settings among `settings`, `key` being one: whether it was.
-fn read_ink(caller: &str, ink: &mut Ink, key: &str, value: &Value) -> RhaiResult<bool> {
-    match key {
-        "color" | "colour" => {
-            let Value::Text(colour) = value else {
-                return Err(format!("{}: '{}' should be a CSS colour, got {}", caller, key, value.describe()).into());
-            };
-            parse_color(colour).map_err(|e| format!("{}: {}", caller, e))?;
-            ink.color = Some(StrokeColor::Solid(colour.clone()));
-        }
-        "passes" => ink.passes = Some(whole(caller, key, value, MAX_PASSES)?),
-        "jitter" => ink.jitter = Some(at_least(caller, key, value, 0.0)?),
-        "point_jitter" => ink.point_jitter = Some(at_least(caller, key, value, 0.0)?),
-        _ => return Ok(false),
-    }
-    Ok(true)
-}
-
-fn read_rule(caller: &str, key: &str, value: &Value) -> RhaiResult<Option<RuleStyle>> {
-    match value {
-        Value::Bool(on) => Ok(on.then_some(RuleStyle::lines(1))),
-        Value::Number(_) => Ok(Some(RuleStyle::lines(whole(caller, key, value, MAX_RULES)? as u32))),
-        Value::Map(settings) => {
-            let caller = format!("{} '{}'", caller, key);
-            let mut rule = RuleStyle::lines(1);
-            for (k, v) in settings {
-                if k == "count" {
-                    rule.count = whole(&caller, k, v, MAX_RULES)? as u32;
-                } else if k == "spacing" {
-                    rule.spacing = Some(at_least(&caller, k, v, 0.0)? as f32);
-                } else if !read_ink(&caller, &mut rule.ink, k, v)? {
-                    return Err(format!("{}: unknown setting '{}'; settings: {}", caller, k, RULE_KEYS.join(", ")).into());
-                }
-            }
-            Ok(Some(rule))
-        }
-        Value::Text(_) => Err(format!("{}: '{}' should be true, false, a number of lines, or settings in braces, got {}", caller, key, value.describe()).into()),
-    }
-}
-
-impl SpanStyle {
-    /// Read settings, as a span's braces or a role's `em` and `strong`
-    /// give them.
-    fn read(caller: &str, settings: &[(String, Value)]) -> RhaiResult<SpanStyle> {
-        let mut style = SpanStyle::default();
-        for (key, value) in settings {
-            if read_ink(caller, &mut style.ink, key, value)? {
-                continue;
-            }
-            let finite = |value: &Value| -> RhaiResult<f32> { Ok(number(caller, key, value)? as f32) };
-            match key.as_str() {
-                "italic" => match value {
-                    Value::Bool(b) => style.italic = Some(*b),
-                    other => return Err(format!("{}: 'italic' should be true or false, got {}", caller, other.describe()).into()),
-                },
-                "skew" => style.skew = Some(finite(value)?),
-                "size" => {
-                    let size = finite(value)?;
-                    if size <= 0.0 {
-                        return Err(format!("{}: 'size' must be positive, got {}", caller, size).into());
-                    }
-                    style.size = Some(size);
-                }
-                "character_padding" => style.character_padding = Some(at_least(caller, key, value, 0.0)? as f32),
-                "word_spacing" => style.word_spacing = Some(at_least(caller, key, value, 0.0)? as f32),
-                "underline" => style.underline = Some(read_rule(caller, key, value)?),
-                "strike" | "strikethrough" => style.strike = Some(read_rule(caller, key, value)?),
-                _ => return Err(format!("{}: unknown setting '{}'; settings: {}", caller, key, SPAN_KEYS.join(", ")).into()),
-            }
-        }
-        Ok(style)
-    }
-
-    /// Read a role's `em` or `strong`: a map of the same settings.
-    pub(super) fn from_map(caller: &str, value: &Dynamic) -> RhaiResult<SpanStyle> {
-        fn convert(caller: &str, value: &Dynamic) -> RhaiResult<Value> {
-            if let Ok(b) = value.as_bool() {
-                Ok(Value::Bool(b))
-            } else if let Ok(n) = value.as_float() {
-                Ok(Value::Number(n))
-            } else if let Ok(n) = value.as_int() {
-                Ok(Value::Number(n as f64))
-            } else if let Some(map) = value.clone().try_cast::<Map>() {
-                Ok(Value::Map(map.iter().map(|(k, v)| Ok((k.to_string(), convert(caller, v)?))).collect::<RhaiResult<_>>()?))
-            } else if let Ok(text) = value.clone().into_immutable_string() {
-                Ok(Value::Text(text.to_string()))
-            } else {
-                Err(format!("{}: settings should be numbers, true or false, strings or maps, got {}", caller, value.type_name()).into())
-            }
-        }
-        match convert(caller, value)? {
-            Value::Map(settings) => SpanStyle::read(caller, &settings),
-            _ => Err(format!("{}: should be a map of settings, as #{{ italic: true }}", caller).into()),
-        }
-    }
-
-    /// Emphasis, unless a role says otherwise: italics.
-    pub(super) fn emphasis() -> SpanStyle {
-        SpanStyle { italic: Some(true), ..SpanStyle::default() }
-    }
-
-    /// Strong text, unless a role says otherwise: gone over twice, astray
-    /// by a twentieth of the text's `size`.
-    pub(super) fn strong(size: f32) -> SpanStyle {
-        SpanStyle { ink: Ink { passes: Some(2), jitter: Some(size as f64 / 20.0), point_jitter: None, color: None }, ..SpanStyle::default() }
     }
 }
 
@@ -319,6 +220,27 @@ impl FlowText {
             FlowText::Plain(text) => text,
             FlowText::Marked(markdown) => markdown.text(),
         }
+    }
+}
+
+/// What strokes are drawn in, over a slot's style: the styles of the spans
+/// they're in, outermost first, each whole or settings over the last.
+#[derive(Clone, Debug, Default)]
+pub(super) struct Ink(Vec<Dynamic>);
+
+impl Ink {
+    /// `base` with this ink's changes.
+    pub(super) fn on(&self, caller: &str, base: &Style) -> RhaiResult<Style> {
+        let mut style = base.clone();
+        for change in &self.0 {
+            style = Style::given(caller, change, &style)?;
+        }
+        Ok(style)
+    }
+    fn then(&self, change: Option<&Dynamic>) -> Ink {
+        let mut ink = self.clone();
+        ink.0.extend(change.cloned());
+        ink
     }
 }
 
@@ -353,86 +275,107 @@ pub(super) struct Styled {
 /// spans it's in, in turn.
 #[derive(Clone)]
 struct State {
-    font: Font,
-    /// Times the role's size.
-    scale: f32,
+    type_: TypeStyle,
     /// Room between glyphs' outlines a span sets, which glyphs from the
-    /// font's fallbacks take too.
+    /// glyphset's fallbacks take too.
     padding: Option<f32>,
     look: Look,
 }
 
 impl State {
-    fn then(&self, style: &SpanStyle, rules: &mut Vec<RuleLook>) -> State {
-        let mut state = self.clone();
-        state.look.ink = state.look.ink.then(&style.ink);
-        if let Some(italic) = style.italic {
-            state.font.skew = match (italic, state.font.skew) {
-                (true, 0.0) => ITALIC_SKEW,
-                (true, skew) => skew,
-                (false, _) => 0.0,
-            };
-        }
-        if let Some(skew) = style.skew {
-            state.font.skew = skew;
-        }
-        if let Some(size) = style.size {
-            state.scale *= size;
-        }
-        if let Some(padding) = style.character_padding {
-            state.font.character_padding = padding;
-            state.padding = Some(padding);
-        }
-        if let Some(width) = style.word_spacing {
-            state.font.space_width = width;
-        }
-        // Lines take the ink of the text they're declared on, under their own.
-        let ink = state.look.ink.clone();
-        for (setting, slot, rule) in [(&style.underline, &mut state.look.underline, Rule::Under), (&style.strike, &mut state.look.strike, Rule::Through)] {
-            match setting {
-                None => {}
-                Some(None) => *slot = None,
-                Some(Some(r)) => {
-                    rules.push(RuleLook { rule, count: r.count, spacing: r.spacing, ink: ink.then(&r.ink) });
-                    *slot = Some(rules.len() - 1);
-                }
-            }
-        }
+    /// The text's state at its start, in its role's type.
+    fn base(type_: &TypeStyle, rules: &mut Vec<RuleLook>) -> State {
+        let mut state = State { type_: type_.clone(), padding: None, look: Look::default() };
+        state.rules(true, true, rules);
         state
+    }
+    /// Lines from the type, where `underline` and `strike` say they're set.
+    fn rules(&mut self, underline: bool, strike: bool, rules: &mut Vec<RuleLook>) {
+        let ink = self.look.ink.clone();
+        for (set, rule, slot, kind) in [(underline, self.type_.underline(), &mut self.look.underline, Rule::Under), (strike, self.type_.strike(), &mut self.look.strike, Rule::Through)] {
+            if !set {
+                continue;
+            }
+            *slot = rule.map(|r: &RuleStyle| {
+                rules.push(RuleLook { rule: kind, count: r.count, spacing: r.spacing, ink: ink.then(r.style.as_ref()) });
+                rules.len() - 1
+            });
+        }
+    }
+    fn then(&self, caller: &str, span: &SpanStyle, rules: &mut Vec<RuleLook>) -> RhaiResult<State> {
+        let mut state = self.clone();
+        state.look.ink = state.look.ink.then(span.style.as_ref());
+        if let Some(change) = &span.type_ {
+            state.type_ = TypeStyle::given(caller, change, &self.type_)?;
+            let map = change.clone().try_cast::<Map>();
+            let sets = |key: &str| map.as_ref().is_none_or(|m| m.contains_key(key));
+            // A factor multiplies the size round it.
+            if map.as_ref().is_some_and(|m| m.contains_key("glyph_scale_factor")) {
+                state.type_.set(caller, "glyph_scale_factor", &(self.type_.scale_factor() * state.type_.scale_factor()).into())?;
+            }
+            if sets("glyph_outline_gap") {
+                state.padding = state.type_.outline_gap().map(|gap| gap as f32);
+            }
+            state.rules(sets("underline"), sets("strike"), rules);
+        }
+        Ok(state)
     }
 }
 
 impl Styled {
-    /// Plain glyphs, each drawn in its slot's style.
-    pub(super) fn plain(glyphs: Vec<Symbol>) -> Styled {
-        Styled { look_of: vec![0; glyphs.len()], glyphs, looks: vec![Look::default()], rules: Vec::new() }
-    }
-
-    /// Text set in `font`, its spans styled as they say, emphasis and strong
-    /// text as `em` and `strong` say. Glyph variants are picked with `rng`,
-    /// as `Font::build` picks them.
-    pub(super) fn new(text: &FlowText, font: &Font, em: &SpanStyle, strong: &SpanStyle, symdict: &FontBook, rng: &mut dyn rand::RngCore) -> Styled {
-        let markdown = match text {
-            FlowText::Plain(text) => return Styled::plain(font.build(text, symdict, rng)),
-            FlowText::Marked(markdown) => markdown,
+    /// Text set in `type_`, its spans styled as they say, by the spans
+    /// `spans` names (the markdown's own on top). Glyph variants are picked
+    /// with `rng`, as glyphsets pick them.
+    pub(super) fn new(caller: &str, text: &FlowText, type_: &TypeStyle, spans: &Spans, symdict: &FontBook, rng: &mut dyn rand::RngCore) -> RhaiResult<Styled> {
+        // How big a run's glyphs are next to the text's: as their sizes
+        // are, or (for text with no size, a drop cap) their factors.
+        let scale_of = |run: &TypeStyle| -> RhaiResult<f32> {
+            match type_.has_size() && run.has_size() {
+                true => Ok(run.size(caller)? / type_.size(caller)?),
+                false => Ok((run.scale_factor() / type_.scale_factor()) as f32),
+            }
         };
+        let markdown = match text {
+            FlowText::Marked(markdown) => markdown,
+            FlowText::Plain(text) => {
+                let mut rules = Vec::new();
+                let base = State::base(type_, &mut rules);
+                let glyphs = base.type_.glyphset(caller)?.build(text, symdict, rng);
+                return Ok(Styled { look_of: vec![0; glyphs.len()], glyphs, looks: vec![base.look], rules });
+            }
+        };
+        let spans = spans.then(&markdown.spans);
+        let (em, strong, struck) = (SpanStyle::emphasis(), SpanStyle::strong(), SpanStyle::struck());
         let markup = &markdown.markup;
-        let base = State { font: font.clone(), scale: 1.0, padding: None, look: Look::default() };
+        let chars: Vec<char> = markup.text.chars().collect();
         let mut rules = Vec::new();
+        let base = State::base(type_, &mut rules);
         let mut states: Vec<State> = Vec::with_capacity(markup.spans.len());
-        for (span, style) in markup.spans.iter().zip(markdown.styles.iter()) {
+        for (span, inline) in markup.spans.iter().zip(markdown.inline.iter()) {
+            let caller = format!("{}: [{}]", caller, chars[span.range.clone()].iter().collect::<String>());
             let around = span.parent.map_or(&base, |p| &states[p]);
-            let style = match (&span.kind, style) {
-                (SpanKind::Emphasis, _) => em,
-                (SpanKind::Strong, _) => strong,
-                (_, Some(style)) => style,
-                (_, None) => unreachable!("settings and strikes are read when the markdown is made"),
+            let named = |name: &str| -> RhaiResult<&SpanStyle> {
+                spans.get(name).ok_or_else(|| {
+                    let names: Vec<&str> = spans.0.keys().map(String::as_str).collect();
+                    format!("{}: no span named '{}'; spans: {}", caller, name, names.join(", ")).into()
+                })
             };
-            let state = around.then(style, &mut rules);
+            let state = match (&span.kind, inline) {
+                (SpanKind::Emphasis, _) => around.then(&caller, spans.get("em").unwrap_or(&em), &mut rules)?,
+                (SpanKind::Strong, _) => around.then(&caller, spans.get("strong").unwrap_or(&strong), &mut rules)?,
+                (SpanKind::Strike, _) => around.then(&caller, &struck, &mut rules)?,
+                (SpanKind::Settings(_), Some(inline)) => {
+                    let mut state = around.clone();
+                    for name in &inline.names {
+                        state = state.then(&caller, named(name)?, &mut rules)?;
+                    }
+                    state.then(&caller, &inline.own, &mut rules)?
+                }
+                (SpanKind::Settings(_), None) => unreachable!("settings are read when the markdown is made"),
+            };
             states.push(state);
         }
         let owner = markup.innermost();
-        let chars: Vec<char> = markup.text.chars().collect();
         let (mut glyphs, mut look_of) = (Vec::with_capacity(chars.len()), Vec::with_capacity(chars.len()));
         let mut k = 0;
         while k < chars.len() {
@@ -441,8 +384,9 @@ impl Styled {
             let end = k + owner[k..].iter().take_while(|o| **o == span).count();
             let state = span.map_or(&base, |s| &states[s]);
             let run: String = chars[k..end].iter().collect();
-            for mut glyph in state.font.build(&run, symdict, rng) {
-                glyph.set_scale(state.scale);
+            let scale = scale_of(&state.type_)?;
+            for mut glyph in state.type_.glyphset(caller)?.build(&run, symdict, rng) {
+                glyph.set_scale(scale);
                 if let (Some(padding), false) = (state.padding, glyph.is_blank()) {
                     glyph = glyph.with_padding(padding);
                 }
@@ -452,7 +396,7 @@ impl Styled {
             k = end;
         }
         let looks = std::iter::once(base.look).chain(states.into_iter().map(|s| s.look)).collect();
-        Styled { glyphs, look_of, looks, rules }
+        Ok(Styled { glyphs, look_of, looks, rules })
     }
 
     /// Glyph `k`'s look.
@@ -462,15 +406,17 @@ impl Styled {
 
     /// Draw text set from glyph `start` on: each glyph in its look over
     /// `style`, then the lines under and through it, kept `clearance` clear
-    /// of `avoid`.
-    pub(super) fn draw(&self, canvas: &mut CanvasData, setting: &Setting, start: usize, style: &StrokeStyle, avoid: &AvoidanceTree, clearance: f32) -> RhaiResult<()> {
-        let mut add = |path, style: StrokeStyle| -> RhaiResult<()> {
-            check_finite("typeset", &path)?;
-            canvas.add_path(path, style);
+    /// of `avoid`, the hands' jitter drawn from `rng`.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn draw(&self, canvas: &mut CanvasData, setting: &Setting, start: usize, style: &Style, avoid: &AvoidanceTree, clearance: f32, rng: &mut dyn rand::RngCore) -> RhaiResult<()> {
+        const CALLER: &str = "typeset";
+        let mut add = |path, style: Style| -> RhaiResult<()> {
+            check_finite(CALLER, &path)?;
+            canvas.add_path(path, &style, rng);
             Ok(())
         };
         for (glyph, place) in setting.placed.iter().zip(&setting.places) {
-            add(glyph.placed_strokepath(), self.look(start + place.index).ink.on(style))?;
+            add(glyph.placed_strokepath(), self.look(start + place.index).ink.on(CALLER, style)?)?;
         }
         for rule in [Rule::Under, Rule::Through] {
             let mark = |k: usize| {
@@ -481,7 +427,7 @@ impl Styled {
                 let glyphs: Vec<&Symbol> = run.iter().map(|&p| &setting.placed[p]).collect();
                 let rule_look = &self.rules[r];
                 let path = rule_path(&glyphs, rule_look.rule, rule_look.count, rule_look.spacing, Some(avoid), clearance);
-                add(path, rule_look.ink.on(style))?;
+                add(path, rule_look.ink.on(CALLER, style)?)?;
             }
         }
         Ok(())
@@ -490,11 +436,13 @@ impl Styled {
 
 pub(super) fn register(engine: &mut Engine) {
     engine.register_type_with_name::<Markdown>("Markdown");
-    engine.register_fn("markdown", |text: &str| -> Result<Markdown, Box<EvalAltResult>> { Markdown::new(text) });
+    engine.register_fn("markdown", |text: &str| -> Result<Markdown, Box<EvalAltResult>> { Markdown::new(text, &Map::new()) });
+    engine.register_fn("markdown", |text: &str, options: Map| -> Result<Markdown, Box<EvalAltResult>> { Markdown::new(text, &options) });
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::options::Settings;
     use super::super::{Entry, JournalEngine};
     use crate::journal::canvas::StrokeColor;
     use crate::journal::fonts::FontBook;
@@ -505,17 +453,17 @@ mod tests {
         JournalEngine::new(Rc::new(FontBook::from_file(crate::journal::fonts::DEFAULT_FONTS).unwrap()))
     }
 
-    /// A one-column page set from `body`, with `roles` overriding the body
+    /// A one-column page set from `body`, with `role` added to the body
     /// role's settings.
     fn typeset(body: &str, role: &str, setup: &str) -> Result<Entry, String> {
         engine().build_entry_str(&format!(r#"
-            let ink = new_style("black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
+            let ink = new_style(new_brush_style("black", "Ink Pen", 1.0), new_handwriting_style());
             {}
-            let one = new_layout("one", |n, info| column([flow("body", #{{ grow: 1 }})], #{{ padding: 20 }}));
+            let one = new_layout("one", |n, info| column([flow("body", #{{ flex: #{{ grow: 1 }} }})], #{{ flex: #{{ padding: 20 }} }}));
             journal_entry.add(one.typeset(#{{
                 width: 600, height: 400,
                 flows: #{{ body: {} }},
-                roles: #{{ body: #{{ font: font("plain"), style: ink, size: 20 {} }} }},
+                roles: #{{ body: #{{ style: ink, type: new_type_style(glyphset("plain"), 20) {} }} }},
             }}));
         "#, setup, body, role))
     }
@@ -525,22 +473,30 @@ mod tests {
     }
 
     fn color(stroke: &crate::journal::rhaientries::Stroke) -> String {
-        match &stroke.style.color {
+        match stroke.style.color() {
             StrokeColor::Solid(c) => c.clone(),
             StrokeColor::Gradient(_) => "gradient".into(),
         }
     }
 
+    /// A stroke's style's setting, as a number.
+    fn setting(stroke: &crate::journal::rhaientries::Stroke, key: &str) -> f64 {
+        let value = stroke.style.get(key);
+        value.as_float().or_else(|_| value.as_int().map(|n| n as f64)).unwrap()
+    }
+
     #[test]
-    fn spans_set_colour_passes_and_size() {
-        let entry = typeset(r#"markdown("ab [cd]{color: red, passes: 3, jitter: 2, point_jitter: 1.5} [ef]{size: 2}")"#, "", "").unwrap();
+    fn spans_set_style_and_type() {
+        let entry = typeset(r#"markdown("ab [cd]{color: red, passes: 3, pass_end_jitter: 2, stroke_point_jitter: 1.5} [ef]{glyph_scale_factor: 2}")"#, "", "").unwrap();
         let s = strokes(&entry);
         // One stroke per glyph: a b c d e f.
         assert_eq!(s.len(), 6);
         let colours: Vec<String> = s.iter().map(|(_, st)| color(st)).collect();
         assert_eq!(colours, ["black", "black", "red", "red", "black", "black"]);
-        assert_eq!((s[2].1.style.passes, s[2].1.style.jitter, s[2].1.style.point_jitter, s[0].1.style.passes, s[0].1.style.point_jitter), (3, 2.0, 1.5, 1, 0.0));
+        let hand = |st: &crate::journal::rhaientries::Stroke| (setting(st, "passes"), setting(st, "pass_end_jitter"), setting(st, "stroke_point_jitter"));
+        assert_eq!((hand(&s[2].1), hand(&s[0].1)), ((3.0, 2.0, 1.5), (1.0, 0.0, 0.0)));
         let height = |points: &[Vec2]| points.iter().map(|p| p.y).fold(f32::MIN, f32::max) - points.iter().map(|p| p.y).fold(f32::MAX, f32::min);
+        // e's passes are one; c's three passes make its points three times as many.
         assert!(height(&s[4].0) > 1.8 * height(&s[0].0), "e is twice a's size: {} vs {}", height(&s[4].0), height(&s[0].0));
         // On one baseline: the big glyphs' bottoms are where the small ones' are.
         let bottom = |points: &[Vec2]| points.iter().map(|p| p.y).fold(f32::MIN, f32::max);
@@ -556,13 +512,30 @@ mod tests {
     }
 
     #[test]
-    fn emphasis_and_strong_follow_the_role() {
-        let skews = |role: &str| {
-            let entry = typeset(r#"markdown("a *b* **c**")"#, role, "").unwrap();
-            strokes(&entry).into_iter().map(|(_, s)| (s.style.passes, s.style.jitter)).collect::<Vec<_>>()
+    fn emphasis_and_strong_are_spans_the_role_and_the_text_can_name() {
+        let passes = |role: &str, text: &str| {
+            let entry = typeset(text, role, "").unwrap();
+            strokes(&entry).into_iter().map(|(_, s)| (setting(&s, "passes"), setting(&s, "pass_end_jitter"))).collect::<Vec<_>>()
         };
-        assert_eq!(skews(""), vec![(1, 0.0), (1, 0.0), (2, 1.0)]);
-        assert_eq!(skews(", strong: #{ passes: 4 }, em: #{ color: \"blue\" }"), vec![(1, 0.0), (1, 0.0), (4, 0.0)]);
+        let text = r#"markdown("a *b* **c**")"#;
+        assert_eq!(passes("", text), vec![(1.0, 0.0), (1.0, 0.0), (2.0, 1.3)]);
+        let role = r#", spans: #{ strong: #{ style: #{ passes: 4 } }, em: #{ style: #{ color: "blue" } } }"#;
+        assert_eq!(passes(role, text), vec![(1.0, 0.0), (1.0, 0.0), (4.0, 0.0)]);
+        // The text's own spans win over the role's.
+        let own = r#"markdown("a *b* **c**", #{ spans: #{ strong: #{ style: #{ passes: 6 } } } })"#;
+        assert_eq!(passes(role, own), vec![(1.0, 0.0), (1.0, 0.0), (6.0, 0.0)]);
+    }
+
+    #[test]
+    fn named_spans_go_first_then_inline_settings() {
+        let text = r#"markdown("a [b]{warn} [c]{warn, color: blue}", #{ spans: #{ warn: #{ style: #{ color: "red", passes: 2 } } } })"#;
+        let s = strokes(&typeset(text, "", "").unwrap());
+        let looks: Vec<(String, f64)> = s.iter().map(|(_, st)| (color(st), setting(st, "passes"))).collect();
+        assert_eq!(looks, vec![("black".into(), 1.0), ("red".into(), 2.0), ("blue".into(), 2.0)]);
+        let err = typeset(r#"markdown("[b]{shout}")"#, "", "").expect_err("no such span");
+        assert!(err.contains("no span named 'shout'"), "{}", err);
+        let err = engine().build_entry_str("let ok = 1;\nmarkdown(\"x\", #{ spans: #{ italic: #{ type: #{ skew: 0.1 } } } });").expect_err("a setting's name");
+        assert!(err.contains("a span can't be named 'italic'") && err.contains("line 2"), "{}", err);
     }
 
     #[test]
@@ -570,12 +543,12 @@ mod tests {
         // Three words underlined, the line too narrow for all three: one
         // run on each line, under the words, not past them.
         let entry = engine().build_entry_str(r#"
-            let ink = new_style("black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
-            let one = new_layout("one", |n, info| column([flow("body", #{ grow: 1 })], #{ padding: 20 }));
+            let ink = new_style(new_brush_style("black", "Ink Pen", 1.0), new_handwriting_style());
+            let one = new_layout("one", |n, info| column([flow("body", #{ flex: #{ grow: 1 } })], #{ flex: #{ padding: 20 } }));
             journal_entry.add(one.typeset(#{
                 width: 160, height: 400,
-                flows: #{ body: markdown("[lorem ipsum dolor]{underline: {color: red}} sit") },
-                roles: #{ body: #{ font: font("plain"), style: ink, size: 20 } },
+                flows: #{ body: markdown("[lorem ipsum dolor]{underline: {style: {color: red}}} sit") },
+                roles: #{ body: #{ style: ink, type: new_type_style(glyphset("plain"), 20) } },
             }));
         "#).unwrap();
         let s = strokes(&entry);
@@ -601,7 +574,7 @@ mod tests {
 
     #[test]
     fn strikes_scribble_back_and_forth() {
-        let entry = typeset(r#"markdown("[scribbled out]{strike: {count: 3, color: hsla(0, 80%, 40%, 0.9)}} and ~~once~~")"#, "", "").unwrap();
+        let entry = typeset(r#"markdown("[scribbled out]{strike: {count: 3, style: {color: hsla(0, 80%, 40%, 0.9)}}} and ~~once~~")"#, "", "").unwrap();
         let s = strokes(&entry);
         let red: Vec<&Vec<Vec2>> = s.iter().filter(|(_, st)| color(st).starts_with("hsla")).map(|(p, _)| p).collect();
         assert_eq!(red.len(), 1, "one stroke, back and forth");
@@ -619,23 +592,23 @@ mod tests {
         // A post through the line: the words split round it, and so does
         // their underline.
         let entry = engine().build_entry_str(r#"
-            let ink = new_style("black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
+            let ink = new_style(new_brush_style("black", "Ink Pen", 1.0), new_handwriting_style());
             let page = |n, info| column([
-                figure("post", #{ position: "absolute", top: 0, left: 150, width: 10, height: 300 }),
-                flow("body", #{ grow: 1, split_words: true }),
-            ], #{ padding: 20 });
+                figure("post", #{ flex: #{ position: "absolute", top: 0, left: 150, width: 10, height: 300 } }),
+                flow("body", #{ flex: #{ grow: 1 }, paragraph: #{ split_words: true } }),
+            ], #{ flex: #{ padding: 20 } });
             journal_entry.add(new_layout("posted", page).typeset(#{
                 width: 600, height: 300,
-                flows: #{ body: markdown("[abcdefghijklmnopqrstuvwxyz]{underline: {color: red}}") },
-                roles: #{ body: #{ font: font("plain"), style: ink, size: 20 }, post: #{ style: ink } },
+                flows: #{ body: markdown("[abcdefghijklmnopqrstuvwxyz]{underline: {style: {color: red}}}") },
+                roles: #{ body: #{ style: ink, type: new_type_style(glyphset("plain"), 20) }, post: #{ style: ink } },
                 art: #{ post: new_line(vec2(0, 0), vec2(0, 10)) },
             }));
         "#).unwrap();
         let s = strokes(&entry);
         let lines: Vec<&Vec<Vec2>> = s.iter().filter(|(_, st)| color(st) == "red").map(|(p, _)| p).collect();
         assert_eq!(lines.len(), 2, "{:?}", lines);
-        // The post's box is 150 to 160 across, kept 5 (a quarter size) clear.
-        assert!(lines[0][1].x < 145.0 && lines[1][0].x > 165.0, "either side of the post: {:?}", lines);
+        // The post's box is 150 to 160 across, kept 3 (the clearance) clear.
+        assert!(lines[0][1].x < 147.0 && lines[1][0].x > 163.0, "either side of the post: {:?}", lines);
     }
 
     #[test]
@@ -643,9 +616,9 @@ mod tests {
         for (text, want) in [
             ("[x]{colr: red}", "markdown: [x]: unknown setting 'colr'"),
             ("[x]{color: reddish}", "Invalid color 'reddish'"),
-            ("[x]{passes: 0}", "'passes' should be a whole number from 1 to 64"),
-            ("[x]{size: -1}", "'size' must be positive"),
-            ("[x]{underline: {count: 2, width: 3}}", "unknown setting 'width'"),
+            ("[x]{passes: 0}", "'passes' should be from 1 to 64"),
+            ("[x]{glyph_scale_factor: -1}", "'glyph_scale_factor' must be positive"),
+            ("[x]{underline: {count: 2, width: 3}}", "unknown option 'width'"),
             ("[x]{strike: lots}", "'strike' should be true, false, a number of lines"),
             ("[x]{color: }", "'color' has no value"),
         ] {
@@ -654,7 +627,7 @@ mod tests {
         }
         let err = typeset("3", "", "").expect_err("a number isn't text");
         assert!(err.contains("flow 'body' should be a string or markdown(...)"), "{}", err);
-        let err = typeset("\"x\"", ", em: #{ colour: 3 }", "").expect_err("bad em");
-        assert!(err.contains("'colour' should be a CSS colour"), "{}", err);
+        let err = typeset("\"x\"", ", spans: #{ em: #{ style: #{ color: 3 } } }", "").expect_err("bad em");
+        assert!(err.contains("'color'") || err.contains("colour"), "{}", err);
     }
 }

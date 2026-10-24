@@ -1,4 +1,4 @@
-// Default Font, Nivelia's font. Some jitter, both rotational and positional.
+// Nivelia's glyphset. Some jitter, both rotational and positional.
 // Slight ink pooling (0.4), a navy blue color, and a vertical gradiant to a darker blue.
 // The pen should be "Rough Ink", with a taper profile and lightly wandering pressure.
 const NAVY = "#2b4184";
@@ -11,10 +11,13 @@ const SIZE = 60.0;
 const WIDTH = 1700.0;
 
 let ink = new_gradient([NAVY, DARK_NAVY], #{ vertical: true });
-let pen = new_brush("Rough Ink", 0.3, 0.6, 2.0, #{ pressure_profile: "taper", pressure_variation: 0.15, pool: 0.4 });
+let pen = new_brush_style(ink, "Rough Ink", 2.0, #{ max_pressure: 0.6, pressure_profile: "taper", pressure_wander: 0.15, pool: 0.4 });
+let steady = new_handwriting_style();
+let paragraph = new_paragraph_style(#{ line_height: 2.0, line_start_jitter: SIZE * 0.5 });
 let hand = #{
-	font: font("nivelia"), size: SIZE, style: new_style(ink, pen),
-	line_height: 2.0, jagged: 0.5, rotation_jitter: 0.06, position_jitter: [0.04, 0.06],
+	style: new_style(pen, new_handwriting_style(#{ glyph_rotation_jitter: 0.06, glyph_position_jitter: [SIZE * 0.04, SIZE * 0.06] })),
+	type: new_type_style(glyphset("nivelia"), SIZE),
+	paragraph: paragraph,
 };
 
 seed(1043);
@@ -55,12 +58,15 @@ let result = lock.run(#{
 assert(lock.unlock(result).text("full.plain_text") == symbols(27, para_3, #{ lenient: true }).text(), "the ciphers should undo");
 
 // Set in lowercase, so the letters are Nivelia's own rather than her
-// font's capitals (loche_upper's). The ternary is set glyph by glyph.
+// glyphset's capitals (loche_upper's). The ternary is set glyph by glyph.
+let flat = paragraph;
+flat.layout = "flat";
+let ternary = hand + #{ type: new_type_style(ternary_glyphset("balanced_ternary"), SIZE, #{ glyph_outline_gap: 0.32 }), paragraph: flat };
 let blocks = [
 	[para_1, hand],
 	[result.text("weak.cipher_text").to_lower(), hand],
 	[result.text("full.cipher_text").to_lower(), hand],
-	[result.text("ternary.cipher_text").to_lower(), hand + #{ font: ternary_font("balanced_ternary", #{ character_padding: 0.32 }), layout: "flat" }],
+	[result.text("ternary.cipher_text").to_lower(), ternary],
 ];
 
 let canvas = new_canvas();
@@ -71,14 +77,14 @@ for block in blocks {
 	y = written.bottom + SIZE;
 }
 
-// The signature should be in "loche_upper" font instead, and drawn over several times with relatively high jitter and pooling brought down to 0.1. Beneath should be a single straight-edged eye, with a radial gradient with that light teal in the center and that same dark navy blue on the outside.
+// The signature should be in "loche_upper" instead, and drawn over several times with relatively high jitter and pooling brought down to 0.1. Beneath should be a single straight-edged eye, with a radial gradient with that light teal in the center and that same dark navy blue on the outside.
 let signature = "Loche";
 
 let signing_pen = pen;
 signing_pen.pool = 0.1;
 let signed = write_line(signature, vec2(0.0, y + SIZE), #{
-	font: font("loche_upper"), size: SIZE * 1.5,
-	style: new_style(ink, signing_pen, #{ passes: 4, jitter: 9.0 }),
+	style: new_style(signing_pen, new_handwriting_style(#{ passes: 4, pass_end_jitter: 9.0 })),
+	type: new_type_style(glyphset("loche_upper"), SIZE * 1.5),
 });
 let name = signed.bounds();
 signed.translate_by(vec2(WIDTH / 2.0 - name.center.x, 0.0));
@@ -88,11 +94,12 @@ let centre = vec2(WIDTH / 2.0, name.max.y + SIZE * 1.2);
 let eye = art::eye(centre, name.width, #{ flat: true });
 let r = eye.iris_radius;
 let wash_color = new_gradient([EYE_TEAL, EYE_DARK_NAVY], #{ center: centre, radius: name.width * 0.18 });
-let eye_brush = |brush, min, max, size| new_brush(brush, min, max, size, #{ pressure_profile: "taper" });
+let eye_brush = |brush, min, max, size| new_brush_style(wash_color, brush, size, #{ min_pressure: min, max_pressure: max, pressure_profile: "taper" });
 // The colour first, under the lines.
-canvas.add(eye.wash, new_style(wash_color, eye_brush.call("Smooth Watercolor", 0.2, 0.35, r * 0.3)));
-canvas.add(eye.rim, new_style(wash_color, eye_brush.call("Rough Watercolor", 0.6, 0.95, r * 0.12)));
-canvas.add(eye.accent, new_style(wash_color, eye_brush.call("Ink Pen", 0.2, 0.6, 1.2)));
-canvas.add(eye.lines, new_style(EYE_NAVY, pen));
+canvas.add(eye.wash, new_style(eye_brush.call("Smooth Watercolor", 0.2, 0.35, r * 0.3), steady));
+canvas.add(eye.rim, new_style(eye_brush.call("Rough Watercolor", 0.6, 0.95, r * 0.12), steady));
+canvas.add(eye.accent, new_style(eye_brush.call("Ink Pen", 0.2, 0.6, 1.2), steady));
+pen.color = EYE_NAVY;
+canvas.add(eye.lines, new_style(pen, steady));
 
 journal_entry.add(new_page(#{ name: "response" }).add(canvas));

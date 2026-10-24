@@ -25,11 +25,11 @@ fn render(o, i) {
 	let chart = i.chart;
 	let ink = "#2b1d12";
 	let red = "#9b2318";
-	let pen = new_brush("Ink Pen", 0.3, 0.7, 1.6);
-	let line_style = new_style(ink, pen);
-	let mark_style = new_style(red, pen);
-	let fine = new_style(ink, new_brush("Ink Pen", 0.3, 0.7, 1.2));
-	let fine_red = new_style(red, new_brush("Ink Pen", 0.3, 0.7, 1.2));
+	let hand = new_handwriting_style();
+	let line_style = new_style(new_brush_style(ink, "Ink Pen", 1.6), hand);
+	let mark_style = new_style(new_brush_style(red, "Ink Pen", 1.6), hand);
+	let fine = new_style(new_brush_style(ink, "Ink Pen", 1.2), hand);
+	let fine_red = new_style(new_brush_style(red, "Ink Pen", 1.2), hand);
 	let corner = vec2(o.sky_x, o.sky_y);
 	// A star is a letter's if it's no link's parent on any page.
 	let parents = #{};
@@ -39,7 +39,7 @@ fn render(o, i) {
 	let canvases = [];
 	for page in chart.pages {
 		let c = new_canvas();
-		c.add(write_line(page.name.to_upper(), vec2(100, 100), #{ font: font("loche_upper"), style: mark_style, size: 44 }));
+		c.add(write_line(page.name.to_upper(), vec2(100, 100), #{ style: mark_style, type: new_type_style(glyphset("loche_upper"), 44) }));
 		c.add(new_line(vec2(100, 132), vec2(o.width - 100, 132)), mark_style);
 		for link in page.links {
 			let from = page.stars[link[0]];
@@ -59,14 +59,14 @@ fn render(o, i) {
 			for g in index_glyphs(k, vec2(star.label[0], star.label[1]) + corner, o.digit) { c.add(g, fine); }
 		}
 		// The index: each star's number on this page, and its name.
-		c.add(write_line("INDEX", vec2(o.index_x, o.index_y), #{ font: font("loche_upper"), style: mark_style, size: 28 }));
+		c.add(write_line("INDEX", vec2(o.index_x, o.index_y), #{ style: mark_style, type: new_type_style(glyphset("loche_upper"), 28) }));
 		let rows = (page.stars.len() + 1) / 2;
 		for (star, k) in page.stars {
 			let cx = o.index_x + (k / rows) * 260;
 			let row_y = o.index_y + 52 + (k % rows) * 40;
 			for g in index_glyphs(k, vec2(cx + 16, row_y), o.digit * 0.9) { c.add(g, fine); }
 			let style = if star.name in parents { fine } else { fine_red };
-			c.add(write_line(star.name, vec2(cx + 54, row_y), #{ font: font("plain"), style: style, size: 22 }));
+			c.add(write_line(star.name, vec2(cx + 54, row_y), #{ style: style, type: new_type_style(glyphset("plain"), 22) }));
 		}
 		canvases.push(c);
 	}
@@ -157,7 +157,7 @@ fn index_glyphs(n, at, size) {
 	let out = [];
 	for (chunk, k) in chunks {
 		let x = (k - (chunks.len() - 1) / 2.0) * step;
-		out.push(font("balanced_ternary").glyph(balanced_ternary(chunk), #{ scale: size, position: at + vec2(x, 0) }));
+		out.push(glyphset("balanced_ternary").glyph(balanced_ternary(chunk), #{ scale: size, position: at + vec2(x, 0) }));
 	}
 	out
 }

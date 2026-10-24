@@ -15,7 +15,7 @@ const TEXT_KEY = 'journal-editor.preview-text';
 export function previewScript(font: string, ternary: boolean, text: string, size: number, seed: number): string {
   const lines = [
     `seed(${Math.round(seed)});`,
-    `let hand = #{ font: ${ternary ? 'ternary_font' : 'font'}(${rhaiString(font)}), size: ${rhaiFloat(size)}, style: new_style("#2b1d12", new_brush("Ink Pen", 0.4, 0.8, 2.2)) };`,
+    `let hand = #{ type: new_type_style(${ternary ? 'ternary_glyphset' : 'glyphset'}(${rhaiString(font)}), ${rhaiFloat(size)}), style: new_style(new_brush_style("#2b1d12", "Ink Pen", 2.2, #{ min_pressure: 0.4, max_pressure: 0.8 }), new_handwriting_style()) };`,
     'let page = new_page();',
   ];
   text.split('\n').forEach((line, i) => {

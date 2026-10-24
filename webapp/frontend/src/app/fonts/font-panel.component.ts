@@ -182,7 +182,7 @@ export class FontPanelComponent {
     const file = this.editor.file() ?? [];
     const builtin = this.builtinNames();
     for (const name of builtin) {
-      if (!file.some((font) => font.name === name)) notes.push(`There's no font '${name}' any more: scripts calling font("${name}") will fail.`);
+      if (!file.some((font) => font.name === name)) notes.push(`There's no font '${name}' any more: scripts calling glyphset("${name}") will fail.`);
     }
     const symbols = file.find((font) => font.name === FALLBACK_GLYPH.font);
     if (!symbols?.glyphs.some((glyph) => glyph.key === FALLBACK_GLYPH.key)) {

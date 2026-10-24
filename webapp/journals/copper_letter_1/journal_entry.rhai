@@ -12,10 +12,10 @@ let paragraphs = [
 	"You have seen, and as a result you have made my time in Cenotaph approach enjoyable. As my other games come to their end, I promise that my games with you will not. You will be able to keep up with them, I have no doubt—you've proven adequately up to the task so far. I even admired the variety you managed to make out of a single secret way, I almost missed one of the many before the possibility irritated at me enough to thoroughly review. Well done. Your most banal, Loche."
 ];
 
-let style = new_style("darkred", new_brush("Rough Ink", 0.25, 0.5, 1.0), #{ width: 1.5 });
-let copper = font("copper");
+let style = new_style(new_brush_style("darkred", "Rough Ink", 1.0, #{ min_pressure: 0.375, max_pressure: 0.75 }), new_handwriting_style());
+let copper = #{ glyphset: glyphset("copper") };
 
 for (paragraph, index) in paragraphs {
 	let maze_path = new_maze(10, 10, #{ seed: index }).path().scale_by(40.0);
-	journal_entry.add(new_page().add(maze_path.fit_text(paragraph, #{ font: copper, style: style })));
+	journal_entry.add(new_page().add(maze_path.fit_text(paragraph, #{ style: style, type: copper })));
 }

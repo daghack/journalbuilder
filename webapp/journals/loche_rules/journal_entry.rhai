@@ -21,35 +21,36 @@ const RED = "#9b2318";
 const GREEN = "#3d6b2a";
 const BARK = "#6b4423";
 
-const PEN = new_brush("Ink Pen", 0.4, 0.8, 1.6);
-const TEXT = new_style(INK, PEN);
-const RED_TEXT = new_style(RED, PEN);
-const CAPTION = new_style(RED, new_brush("Ink Pen", 0.3, 0.7, 1.2));
-const LINE = new_style(INK, new_brush("Ink Pen", 0.3, 0.7, 2.0));
-const HEADING = new_style(RED, new_brush("Calligraphy", 0.4, 0.8, 1.5, #{ pressure_profile: "constant" }), #{ width: 1.2 });
+const STEADY = new_handwriting_style();
+const TEXT = new_style(new_brush_style(INK, "Ink Pen", 1.6, #{ min_pressure: 0.4, max_pressure: 0.8 }), STEADY);
+const RED_TEXT = new_style(new_brush_style(RED, "Ink Pen", 1.6, #{ min_pressure: 0.4, max_pressure: 0.8 }), STEADY);
+const CAPTION = new_style(new_brush_style(RED, "Ink Pen", 1.2), STEADY);
+const LINE = new_style(new_brush_style(INK, "Ink Pen", 2.0), STEADY);
+const HEADING = new_style(new_brush_style(RED, "Calligraphy", 1.5, #{ min_pressure: 0.48, max_pressure: 0.96, pressure_profile: "constant" }), STEADY);
 // Loche's own hand, for the asides.
-const HAND = new_style(RED, new_brush("Calligraphy", 0.25, 0.6, 1.4));
+const HAND = new_style(new_brush_style(RED, "Calligraphy", 1.4, #{ min_pressure: 0.25, max_pressure: 0.6 }), STEADY);
 
-const PLAIN = font("plain");
-const LOCHE = font("loche_upper");
-const LOCHE_HAND = font("loche_lower");
+const PLAIN = glyphset("plain");
+const LOCHE = glyphset("loche_upper");
+const LOCHE_HAND = glyphset("loche_lower");
 
 // What each kind of text in an entry looks like.
+const SET = #{ align: "justify", line_height: 1.3 };
 const ROLES = #{
-	head: #{ font: LOCHE, style: HEADING, size: 48 },
+	head: #{ style: HEADING, type: new_type_style(LOCHE, 48) },
 	headrule: #{ style: CAPTION },
 	rule: #{ style: CAPTION },
-	title: #{ font: LOCHE, style: HEADING, size: 56 },
-	lore: #{ font: PLAIN, style: CAPTION, size: 27, line_height: 1.3 },
-	flavour: #{ font: PLAIN, style: TEXT, size: 25, align: "justify", line_height: 1.3 },
-	stats: #{ font: PLAIN, style: CAPTION, size: 27 },
-	sub: #{ font: LOCHE, style: HEADING, size: 38 },
-	body: #{ font: PLAIN, style: TEXT, size: 27, align: "justify", line_height: 1.3, paragraph_gap: 0.6 },
-	step: #{ font: PLAIN, style: TEXT, size: 25, align: "justify", line_height: 1.3 },
-	liturgy: #{ font: PLAIN, style: RED_TEXT, size: 25, align: "justify", line_height: 1.3 },
-	"call": #{ font: PLAIN, style: RED_TEXT, size: 27 },
-	note: #{ font: LOCHE_HAND, style: HAND, size: 38, line_height: 1.4, align: "right" },
-	folio: #{ font: PLAIN, style: CAPTION, size: 24 },
+	title: #{ style: HEADING, type: new_type_style(LOCHE, 56) },
+	lore: #{ style: CAPTION, type: new_type_style(PLAIN, 27), paragraph: #{ line_height: 1.3 } },
+	flavour: #{ style: TEXT, type: new_type_style(PLAIN, 25), paragraph: SET },
+	stats: #{ style: CAPTION, type: new_type_style(PLAIN, 27) },
+	sub: #{ style: HEADING, type: new_type_style(LOCHE, 38) },
+	body: #{ style: TEXT, type: new_type_style(PLAIN, 27), paragraph: SET + #{ paragraph_gap: 0.6 } },
+	step: #{ style: TEXT, type: new_type_style(PLAIN, 25), paragraph: SET },
+	liturgy: #{ style: RED_TEXT, type: new_type_style(PLAIN, 25), paragraph: SET },
+	"call": #{ style: RED_TEXT, type: new_type_style(PLAIN, 27) },
+	note: #{ style: HAND, type: new_type_style(LOCHE_HAND, 38), paragraph: #{ line_height: 1.4, align: "right" } },
+	folio: #{ style: CAPTION, type: new_type_style(PLAIN, 24) },
 	figure: #{ style: LINE },
 };
 
@@ -67,23 +68,23 @@ fn booklet_page(n, info) {
 		if role == "head" || role == "folio" { continue; }
 		let entry = key.sub_string(0, 1);
 		if last != "" && entry != last {
-			parts.push(rule(#{ height: 14, margin: [14, 300, 6, 300] }));
+			parts.push(rule(#{ flex: #{ height: 14, margin: [14, 300, 6, 300] } }));
 		}
 		last = entry;
-		let style = #{ role: role };
-		if role == "liturgy" { style.margin = [4, 50]; }
-		if role == "sub" { style.margin = [10, 0, 0, 0]; }
-		parts.push(flow(key, style));
+		let flex = #{};
+		if role == "liturgy" { flex.margin = [4, 50]; }
+		if role == "sub" { flex.margin = [10, 0, 0, 0]; }
+		parts.push(flow(key, #{ role: role, flex: flex }));
 	}
 	if info.art.contains("figure") {
-		parts.push(figure("figure", #{ grow: 1, margin: [20, 0, 0, 0] }));
+		parts.push(figure("figure", #{ flex: #{ grow: 1, margin: [20, 0, 0, 0] } }));
 	}
 	column([
-		flow("000_head", #{ role: "head", height: 70 }),
-		rule(#{ role: "headrule", height: 10 }),
-		column(parts, #{ grow: 1, gap: 8, padding: [30, 0, 0, 0] }),
-		flow("999_folio", #{ role: "folio", height: 30, align: "center" }),
-	], #{ padding: [55, 100, 50, 100], gap: 6 })
+		flow("000_head", #{ role: "head", flex: #{ height: 70 } }),
+		rule(#{ role: "headrule", flex: #{ height: 10 } }),
+		column(parts, #{ flex: #{ grow: 1, gap: 8, padding: [30, 0, 0, 0] } }),
+		flow("999_folio", #{ role: "folio", flex: #{ height: 30 }, paragraph: #{ align: "center" } }),
+	], #{ flex: #{ padding: [55, 100, 50, 100], gap: 6 } })
 }
 
 let book = new_book();
@@ -100,7 +101,7 @@ fn entries(section, list, art) {
 fn entries(section, list, art, scale) {
 	let roles = global::ROLES;
 	for name in roles.keys() {
-		if roles[name].contains("size") && name != "head" && name != "folio" { roles[name].size *= scale; }
+		if roles[name].contains("type") && name != "head" && name != "folio" { roles[name].type.glyph_scale *= scale; }
 	}
 	let flows = #{ "000_head": section, "999_folio": `${this.next}` };
 	for (parts, e) in list {
@@ -119,7 +120,7 @@ fn entries(section, list, art, scale) {
 // The eye of Saqir: an eye in a ring of short rays.
 fn eye_in(b) {
 	let r = b.height.min(b.width) * 0.4;
-	let c = new_canvas().add(font("symbols").glyph("basic_eye", #{ scale: r * 1.2, position: b.center }), global::HEADING);
+	let c = new_canvas().add(glyphset("symbols").glyph("basic_eye", #{ scale: r * 1.2, position: b.center }), global::HEADING);
 	for i in 0..16 {
 		let d = vec2(0, -1).rotated(i * PI() / 8.0);
 		c.add(new_line(b.center + d * (r * 1.05), b.center + d * (r * (if i % 2 == 0 { 1.35 } else { 1.2 }))), global::CAPTION);

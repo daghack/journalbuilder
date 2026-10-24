@@ -2,7 +2,7 @@
 // with one text's symbols (iris, in iris_base) as balanced-ternary glyphs,
 // clockwise from the top, and its pupil filled with another's (pupil, in
 // pupil_base), as close as they fit. Each symbol is shifted to sit round
-// 0, as a letter of the ternary font: in base 27, space is 0, A to M 1 to
+// 0, as a letter of the ternary glyphset: in base 27, space is 0, A to M 1 to
 // 13 and N to Z -13 to -1. Welcome Home's eye holds a substitution
 // cipher's ordering in its iris and the cipher text in its pupil.
 //
@@ -36,7 +36,7 @@ fn example() {
 	#{ iris: symbols(27, "MQ ZEHWBRKYDTXOAJGNLUFCVISP").symbols(), pupil: symbols(27, "WELCOME HOME").symbols() }
 }
 
-// Symbols in `base` as the ternary font's letters, each shifted to sit
+// Symbols in `base` as the ternary glyphset's letters, each shifted to sit
 // round 0: 0 a space, 1 to 13 A to M, -13 to -1 N to Z.
 fn letters(symbols, base) {
 	let text = "";
@@ -64,17 +64,17 @@ fn eye_shape(centre, length, width) {
 // The eye drawn: lids and rings gone over, and the ring of ternary glyphs,
 // clockwise from the top, each turned to the ring and a little off true.
 fn draw_eye(canvas, centre, shape, ink, key_text) {
-	let pen = new_brush("Rough Ink", 0.3, 0.6, 2.0, #{ pressure_profile: "taper", pressure_variation: 0.15, pool: 0.85, pool_depth: 0.6 });
+	let pen = new_brush_style(ink, "Rough Ink", 2.0, #{ max_pressure: 0.6, pressure_profile: "taper", pressure_wander: 0.15, pool: 0.85, pool_depth: 0.6 });
 	// The glyphs: the same pen unpooled, so their strokes taper away.
-	let key_pen = new_brush("Rough Ink", 0.3, 0.6, 2.0, #{ pressure_profile: "taper", pressure_variation: 0.15 });
-	let lids = new_style(ink, pen, #{ passes: 2, jitter: 2.5 });
-	let rings = new_style(ink, pen, #{ passes: 3, jitter: 4.0 });
-	let key = new_style(ink, key_pen, #{ passes: 3, jitter: 2.0 });
+	let key_pen = new_brush_style(ink, "Rough Ink", 2.0, #{ max_pressure: 0.6, pressure_profile: "taper", pressure_wander: 0.15 });
+	let lids = new_style(pen, new_handwriting_style(#{ passes: 2, pass_end_jitter: 2.5 }));
+	let rings = new_style(pen, new_handwriting_style(#{ passes: 3, pass_end_jitter: 4.0 }));
+	let key = new_style(key_pen, new_handwriting_style(#{ passes: 3, pass_end_jitter: 2.0 }));
 	canvas.add(shape.left, lids);
 	canvas.add(shape.right, lids);
 	canvas.add(new_circle(centre, shape.outer), rings);
 	canvas.add(new_circle(centre, shape.inner), rings);
-	let glyphs = ternary_font("balanced_ternary", #{ character_padding: 0.32 }).glyphs(key_text);
+	let glyphs = ternary_glyphset("balanced_ternary", #{ glyph_outline_gap: 0.32 }).glyphs(key_text);
 	let count = glyphs.len();
 	if count == 0 { return; }
 	for (at, i) in new_circle(centre, (shape.outer + shape.inner) / 2.0).points_along(count, #{ start: 0.75 }) {
@@ -91,23 +91,20 @@ fn draw_eye(canvas, centre, shape, ink, key_text) {
 // side: at the largest size, from 40 down, that holds all of it.
 fn fill_pupil(canvas, centre, shape, ink, text) {
 	if text == "" { return; }
-	let font = ternary_font("balanced_ternary", #{ character_padding: 0.08 });
+	let ternary = ternary_glyphset("balanced_ternary", #{ glyph_outline_gap: 0.08 });
 	// A finer nib for the small glyphs, pooled at their ends.
-	let pen = new_brush("Rough Ink", 0.3, 0.6, 1.2, #{ pressure_profile: "taper", pressure_variation: 0.15, pool: 0.85, pool_depth: 0.6 });
+	let pen = new_brush_style(ink, "Rough Ink", 1.2, #{ max_pressure: 0.6, pressure_profile: "taper", pressure_wander: 0.15, pool: 0.85, pool_depth: 0.6 });
 	let size = 40.0;
 	loop {
 		let pupil = new_textbox(#{
 			shape: new_circle(centre, shape.inner - 7.0),
-			size: size,
-			layout: "flat",
-			align: "justify",
-			valign: "center",
-			position_jitter: [0.03, 0.04],
-			rotation_jitter: 0.05,
+			type: #{ glyph_scale: size },
+			paragraph: #{ layout: "flat", align: "justify", valign: "center" },
+			style: #{ glyph_position_jitter: [0.03 * size, 0.04 * size], glyph_rotation_jitter: 0.05 },
 		});
-		let filled = pupil.fill(font.glyphs(text));
+		let filled = pupil.fill(ternary.glyphs(text));
 		if filled.unplaced.is_empty() {
-			canvas.add(filled.placed, new_style(ink, pen, #{ jitter: 0.8 }));
+			canvas.add(filled.placed, new_style(pen, new_handwriting_style(#{ pass_end_jitter: 0.8 })));
 			return;
 		}
 		size -= 0.5;

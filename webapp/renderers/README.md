@@ -42,7 +42,7 @@ Adding a renderer means adding a file; nothing needs recompiling.
 `o` is the options, its defaults with what `lock.attach` gave over them.
 `i` holds the values as lock files see them: symbols as arrays of whole
 numbers, a value kind's data as its map. A renderer runs in the journal's
-engine, so it can call everything a journal can: `new_canvas`, fonts,
+engine, so it can call everything a journal can: `new_canvas`, glyphsets,
 brushes, `art::`, and a value kind's functions (`maze.path()`,
 `maze.cells()`).
 
@@ -59,7 +59,7 @@ fn inputs(o) {
 
 fn render(o, i) {
 	let c = new_canvas();
-	c.add(i.maze.path().scale_by(o.cell), new_style(o.corridors, new_brush("Ink Pen", 0.3, 0.7, 1.6)));
+	c.add(i.maze.path().scale_by(o.cell), new_style(new_brush_style(o.corridors, "Ink Pen", 1.6), new_handwriting_style()));
 	// ... a glyph in each of i.maze.cells()
 	c
 }

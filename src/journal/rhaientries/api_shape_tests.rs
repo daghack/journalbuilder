@@ -1,6 +1,6 @@
 //! The API's shape (see CLAUDE.md): constructors take their values'
-//! properties as options, text calls take role settings, and the helpers
-//! journals share.
+//! properties as options, text calls take a style, a type and a paragraph,
+//! and the helpers journals share.
 
 use super::JournalEngine;
 use crate::journal::fonts::{FontBook, DEFAULT_FONTS};
@@ -19,9 +19,8 @@ fn fails(script: &str) -> String {
 }
 
 const SETUP: &str = r#"
-    let pen = new_brush("Ink Pen", 0.3, 0.7, 1.0);
-    let ink = new_style("black", pen);
-    let plain = font("plain");
+    let ink = new_style(new_brush_style("black", "Ink Pen", 1.0), new_handwriting_style());
+    let plain = glyphset("plain");
 "#;
 
 #[test]
@@ -31,10 +30,18 @@ fn constructors_take_every_settable_property() {
     for (made, set, props) in [
         ("new_page(#{OPTS})", "new_page()", r#"name: "p" | size: vec2(10, 20) | margin: 3.0 | svg_style: ()"#),
         ("new_canvas(#{OPTS})", "new_canvas()", r#"name: "c""#),
-        ("new_brush(\"Ink Pen\", 0.1, 0.9, 2.0, #{OPTS})", "new_brush(\"Ink Pen\", 0.1, 0.9, 2.0)", r#"pressure_profile: "taper" | pressure_variation: 0.2 | variation_length: 9.0 | pool: 0.4 | pool_depth: 0.5"#),
-        ("new_style(\"red\", pen, #{OPTS})", "new_style(\"red\", pen)", "width: 1.5 | passes: 3 | jitter: 2.0"),
-        ("font(\"plain\", #{OPTS})", "font(\"plain\")", "character_padding: 0.2 | space_width: 0.8 | skew: 0.1"),
-        ("ternary_font(\"balanced_ternary\", #{OPTS})", "ternary_font(\"balanced_ternary\")", "character_padding: 0.2 | space_width: 0.8 | skew: 0.1"),
+        ("new_brush_style(\"red\", \"Ink Pen\", 2.0, #{OPTS})", "new_brush_style(\"red\", \"Ink Pen\", 2.0)",
+            r#"color: "blue" | brush: "Calligraphy" | brush_size: 3.0 | min_pressure: 0.1 | max_pressure: 0.9 | pressure_profile: "taper" | pressure_wander: 0.2 | pressure_wander_length: 9.0 | pool: 0.4 | pool_depth: 0.5"#),
+        ("new_handwriting_style(#{OPTS})", "new_handwriting_style()",
+            "passes: 3 | pass_end_jitter: 2.0 | stroke_point_jitter: 1.0 | glyph_position_jitter: [1.0, 2.0] | glyph_rotation_jitter: 0.1 | glyph_scale_jitter: 0.2 | baseline_wander: 4.0"),
+        ("new_type_style(plain, 20.0, #{OPTS})", "new_type_style(plain, 20.0)",
+            "glyph_scale: 30.0 | glyph_scale_factor: 1.5 | glyph_outline_gap: 0.2 | glyph_tracking: 0.1 | space_width: 0.8 | skew: 0.1 | underline: 2 | strike: true"),
+        ("new_paragraph_style(#{OPTS})", "new_paragraph_style()",
+            r#"line_height: 1.4 | paragraph_gap: 1.0 | indent: 2.0 | align: "justify" | valign: "center" | fit: true | layout: "words" | angle: 0.2 | split_words: 3 | split_padding: 0.5 | clearance: 6.0 | line_gap_jitter: 2.0 | line_start_jitter: 4.0"#),
+        ("new_flex_style(#{OPTS})", "new_flex_style()",
+            r#"width: 100 | height: "50%" | grow: 1 | margin: [1, 2] | padding: 3 | position: "absolute" | top: 4 | gap: 5 | justify: "center" | wrap: true | text_wrap: "hull" | border: "frame""#),
+        ("glyphset(\"plain\", #{OPTS})", "glyphset(\"plain\")", "glyph_outline_gap: 0.2 | space_width: 0.8 | skew: 0.1"),
+        ("ternary_glyphset(\"balanced_ternary\", #{OPTS})", "ternary_glyphset(\"balanced_ternary\")", "glyph_outline_gap: 0.2 | space_width: 0.8 | skew: 0.1"),
         ("plain.glyph(\"a\", #{OPTS})", "plain.glyph(\"a\")", "position: vec2(3, 4) | scale: 20.0 | rotation: 0.5 | skew: 0.2"),
         ("new_book(#{OPTS})", "new_book()", "first: 3"),
     ] {
@@ -55,20 +62,26 @@ fn constructor_options_check_as_properties_do() {
     for (script, want) in [
         ("new_page(#{ nme: \"p\" })", "new_page: unknown option 'nme'; options: name, size, margin, svg_style"),
         ("new_page(#{ name: \"a b\" })", "new_page: page.name: invalid name 'a b'"),
-        ("new_brush(\"Ink Pen\", 0.3, 0.7, 1.0, #{ pool: -1 })", "new_brush: brush.pool: pool can't be negative"),
-        ("new_style(\"red\", new_brush(\"Ink Pen\", 0.3, 0.7, 1.0), #{ passes: 0 })", "passes: should be from 1 to 64"),
-        ("font(\"plain\").glyph(\"a\", #{ scale: \"big\" })", "glyph: glyph.scale"),
+        ("new_brush_style(\"red\", \"Ink Pen\", 1.0, #{ pool: -1 })", "new_brush_style: 'pool' can't be negative"),
+        ("new_handwriting_style(#{ passes: 0 })", "new_handwriting_style: 'passes' should be from 1 to 64"),
+        ("new_type_style(glyphset(\"plain\"), 10, #{ glyph_tracking: -1 })", "new_type_style: 'glyph_tracking' must be above -0.5"),
+        ("new_paragraph_style(#{ align: \"middle\" })", "new_paragraph_style: unknown align 'middle'"),
+        ("new_flex_style(#{ grow: -1 })", "new_flex_style: 'grow' can't be negative"),
+        ("glyphset(\"plain\").glyph(\"a\", #{ scale: \"big\" })", "glyph: glyph.scale"),
     ] {
         let err = fails(&format!("let ok = 1;\n{};", script));
         assert!(err.contains(want) && err.contains("line 2"), "{}: {}", want, err);
     }
+    // Properties check alike, against the style's name.
+    let err = fails("let s = default_style();\ns.pool = -1;");
+    assert!(err.contains("style: 'pool' can't be negative") && err.contains("line 2"), "{}", err);
 }
 
 #[test]
-fn text_calls_take_role_settings() {
+fn text_calls_take_a_style_a_type_and_a_paragraph() {
     assert!(eval_bool(&format!(r#"{}
-        // A role's settings, line_height and align included, go straight in.
-        let role = #{{ font: plain, size: 20.0, style: ink, line_height: 1.4, align: "justify" }};
+        // A role's settings go straight in.
+        let role = #{{ style: ink, type: new_type_style(plain, 20.0), paragraph: #{{ line_height: 1.4, align: "justify" }} }};
         let line = new_line(vec2(0, 0), vec2(2000, 0));
         let a = line.fill_with_text("lorem ipsum", role)[0];
         let b = write_line("lorem ipsum", vec2(0, 0), role);
@@ -76,14 +89,21 @@ fn text_calls_take_role_settings() {
         `${{a.bounds()}}` == `${{b.bounds()}}` && block.bottom > 3.0 * 1.4 * 20.0 - 0.01
     "#, SETUP)));
     for (script, want) in [
-        ("write_line(\"a\", vec2(0, 0), #{ font: plain, size: 10, style: ink, colour: 1 })", "write_line: unknown option 'colour'"),
-        ("write_line(\"a\", vec2(0, 0), #{ font: plain, style: ink })", "write_line: missing 'size'"),
-        ("new_line(vec2(0, 0), vec2(99, 0)).fill_with_text(\"a\", #{ size: 10, style: ink })", "fill_with_text: missing 'font'"),
-        ("write_line(\"a\", vec2(0, 0), #{ font: plain, size: 10, style: ink, scale_jitter: 1.5 })", "'scale_jitter' must be below 1"),
+        ("write_line(\"a\", vec2(0, 0), #{ type: new_type_style(plain, 10), colour: 1 })", "write_line: unknown option 'colour'"),
+        ("write_line(\"a\", vec2(0, 0), #{ style: ink, type: #{ glyphset: plain } })", "write_line: the type has no 'glyph_scale'"),
+        ("new_line(vec2(0, 0), vec2(99, 0)).fill_with_text(\"a\", #{ style: ink, type: #{ glyph_scale: 10 } })", "fill_with_text: the type has no 'glyphset'"),
+        ("write_line(\"a\", vec2(0, 0), #{ type: new_type_style(plain, 10), style: #{ glyph_scale_jitter: 1.5 } })", "'glyph_scale_jitter' is a fraction either way, below 1"),
+        ("write_line(\"a\", vec2(0, 0), #{ type: new_type_style(plain, 10), paragraph: 3 })", "should be a paragraph_style or a map of its settings"),
     ] {
         let err = fails(&format!("{}\n{};", SETUP, script));
         assert!(err.contains(want), "{}: {}", want, err);
     }
+    // A map of style settings is over the default style.
+    assert!(eval_bool(&format!(r#"{}
+        let a = write_line("lorem", vec2(0, 0), #{{ type: new_type_style(plain, 20.0) }});
+        let b = write_line("lorem", vec2(0, 0), #{{ type: new_type_style(plain, 20.0), style: #{{ color: "black" }} }});
+        `${{a.bounds()}}` == `${{b.bounds()}}`
+    "#, SETUP)));
 }
 
 #[test]
@@ -91,11 +111,11 @@ fn jitter_moves_glyphs_from_the_seeded_generator() {
     let xs = |jitter: &str, seed: i64| -> String {
         engine().engine.eval::<String>(&format!(r#"{}
             seed({});
-            let c = write_line("lorem ipsum", vec2(0, 0), #{{ font: plain, size: 20.0, style: ink{} }});
+            let c = write_line("lorem ipsum", vec2(0, 0), #{{ style: #{{ {} }}, type: new_type_style(plain, 20.0) }});
             `${{c.bounds()}}`
         "#, SETUP, seed, jitter)).unwrap()
     };
-    let jittered = ", position_jitter: [0.1, 0.2], rotation_jitter: 0.1, scale_jitter: 0.1";
+    let jittered = "glyph_position_jitter: [2.0, 4.0], glyph_rotation_jitter: 0.1, glyph_scale_jitter: 0.1";
     assert_eq!(xs("", 1), xs("", 2), "no jitter draws nothing from the generator");
     assert_ne!(xs("", 1), xs(jittered, 1));
     assert_eq!(xs(jittered, 1), xs(jittered, 1));
@@ -134,7 +154,7 @@ fn shapes_and_points_along() {
 fn books_number_name_and_list_pages() {
     assert!(eval_bool(r#"
         let book = new_book(#{ first: 3 });
-        let p = new_page().add(new_canvas().add(new_line(vec2(0, 0), vec2(1, 0)), new_style("black", new_brush("Ink Pen", 0.3, 0.7, 1.0))));
+        let p = new_page().add(new_canvas().add(new_line(vec2(0, 0), vec2(1, 0)), new_style(new_brush_style("black", "Ink Pen", 1.0), new_handwriting_style())));
         let first = book.next;
         book.add("pens", p);
         book.add("pens", p);
@@ -154,14 +174,14 @@ fn books_number_name_and_list_pages() {
 #[test]
 fn canvas_add_takes_parts_and_canvases() {
     assert!(eval_bool(r#"
-        let ink = new_style("black", new_brush("Ink Pen", 0.3, 0.7, 1.0));
+        let ink = new_style(new_brush_style("black", "Ink Pen", 1.0), new_handwriting_style());
         let moon = art::moon(vec2(0, 0), 10, 0.3);
         let all = new_canvas().add(moon, #{ outline: ink, terminator: ink });
         let one = new_canvas().add(moon.outline, ink).add(moon.terminator, ink);
         let parts = new_canvas().add([one, one.copy()]);
         `${all.bounds()}` == `${one.bounds()}` && `${parts.bounds()}` == `${one.bounds()}`
     "#));
-    let err = fails("let ink = new_style(\"black\", new_brush(\"Ink Pen\", 0.3, 0.7, 1.0));\nnew_canvas().add(art::moon(vec2(0, 0), 10, 0.3), #{ rim: ink });");
+    let err = fails("let ink = new_style(new_brush_style(\"black\", \"Ink Pen\", 1.0), new_handwriting_style());\nnew_canvas().add(art::moon(vec2(0, 0), 10, 0.3), #{ rim: ink });");
     assert!(err.contains("there's no part 'rim' to style"), "{}", err);
 }
 

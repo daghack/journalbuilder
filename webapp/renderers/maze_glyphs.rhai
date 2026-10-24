@@ -13,11 +13,11 @@ fn inputs(o) {
 
 fn render(o, i) {
 	let c = new_canvas();
-	let pen = new_brush("Ink Pen", 0.3, 0.7, 1.6);
-	c.add(i.maze.path().scale_by(o.cell), new_style(o.corridors, pen));
-	let ternary = font("balanced_ternary");
+	let hand = new_handwriting_style();
+	c.add(i.maze.path().scale_by(o.cell), new_style(new_brush_style(o.corridors, "Ink Pen", 1.6), hand));
+	let ternary = glyphset("balanced_ternary");
 	for cell in i.maze.cells() {
-		c.add(ternary.glyph(cell.symbol - 13, #{ scale: o.cell * 0.8, position: vec2(cell.x * o.cell, cell.y * o.cell) }), new_style(o.glyphs, new_brush("Ink Pen", 0.4, 0.8, 2.2)));
+		c.add(ternary.glyph(cell.symbol - 13, #{ scale: o.cell * 0.8, position: vec2(cell.x * o.cell, cell.y * o.cell) }), new_style(new_brush_style(o.glyphs, "Ink Pen", 2.2, #{ min_pressure: 0.4, max_pressure: 0.8 }), hand));
 	}
 	c
 }

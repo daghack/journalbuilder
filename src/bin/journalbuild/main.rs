@@ -43,7 +43,7 @@ const DEFAULT_SUPERSAMPLE: f32 = 1.2;
 const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--svg]
                     [--scale S] [--supersample K] [--strict-glyphs]
                     [--parchment] [--pdf] [--stitch N]
-                    [--journals-dir DIR] [--output-dir DIR] [--fonts PATH]
+                    [--journals-dir DIR] [--output-dir DIR] [--glyphsets PATH]
                     [--locks-dir DIR] [--layouts-dir DIR] [--renderers-dir DIR]
                     [--chains-dir DIR]
        journalbuild --check-locks [--locks-dir DIR] [--chains-dir DIR]
@@ -83,9 +83,9 @@ const USAGE: &str = "Usage: journalbuild <journal_name> [--page N[,N...]] [--svg
                       grows with K squared.
   --journals-dir DIR  Directory containing journals (default: the
                       repository's webapp/journals/).
-  --fonts PATH        Font files: a directory with a NAME.json for each font,
-                      or one file with every font (default: the
-                      repository's webapp/fonts/).
+  --glyphsets PATH    Glyphset files: a directory with a NAME.json for each
+                      glyphset, or one file with every glyphset (default:
+                      the repository's webapp/fonts/).
   --output-dir DIR    Where to write renders (default: NAME_output in the current
                       directory, emptied first unless --page). In a given
                       directory, earlier .png/.svg/.pdf renders are cleared
@@ -178,8 +178,8 @@ fn parse_args() -> Result<Args, String> {
             "--journals-dir" => {
                 journals_dir = args.next().ok_or("--journals-dir needs a directory")?;
             }
-            "--fonts" => {
-                font_file = args.next().ok_or("--fonts needs a path")?;
+            "--glyphsets" => {
+                font_file = args.next().ok_or("--glyphsets needs a path")?;
             }
             "--locks-dir" => {
                 locks_dir = args.next().ok_or("--locks-dir needs a directory")?;
@@ -248,7 +248,7 @@ fn main() {
 fn run(args: &Args) -> Result<(), String> {
     let started = std::time::Instant::now();
     let symd = fonts::FontBook::from_file(&args.font_file)
-        .map_err(|err| format!("couldn't load the font file {}: {}", args.font_file, err))?;
+        .map_err(|err| format!("couldn't load the glyphset files {}: {}", args.font_file, err))?;
     let symd = Rc::new(symd);
 
     let journal_name = &args.journal_name;

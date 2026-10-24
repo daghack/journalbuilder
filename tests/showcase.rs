@@ -2,7 +2,7 @@
 //! can draw with. These fail when something scripts can call, a font, a
 //! lock type, a renderer or a chain file isn't in it (see CLAUDE.md). Brushes and glyphs needn't be
 //! listed: the showcase draws every one of `brush_names()`, and every
-//! variant of every glyph of every font in `font_names()`.
+//! variant of every glyph of every font in `glyphset_names()`.
 
 use scribe::journal::rhaientries::JournalEngine;
 use scribe::journal::fonts::{FontBook, DEFAULT_FONTS};
@@ -111,5 +111,5 @@ fn every_renderer_is_in_the_showcase() {
 fn the_showcase_draws_every_brush_and_glyph() {
     let script = showcase();
     assert!(script.contains("brush_names()"), "the pens page should draw every brush from brush_names()");
-    assert!(script.contains("font_names()") && script.contains(".variants("), "the glyphs page should draw every variant of every font's glyphs, from font_names()");
+    assert!(script.contains("glyphset_names()") && script.contains(".variants("), "the glyphs page should draw every variant of every font's glyphs, from glyphset_names()");
 }

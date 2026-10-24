@@ -71,6 +71,91 @@ pub(super) fn apply_props<T: Clone + 'static>(ctx: &rhai::NativeCallContext, cal
     Ok(target.cast::<T>())
 }
 
+/// A style: settings scripts set by name, as properties
+/// (`style.passes = 2`), as a constructor's options, or as a map of some
+/// of them over another (a role's, a span's), each checked the same way.
+pub(super) trait Settings: Clone + 'static {
+    /// What scripts call it, in messages.
+    const NAME: &'static str;
+    /// Its settings' names.
+    const KEYS: &'static [&'static str];
+    fn get(&self, key: &str) -> Dynamic;
+    /// Set `key` (one of `KEYS`), checking it alone; `check` checks the
+    /// settings together.
+    fn set(&mut self, caller: &str, key: &str, value: &Dynamic) -> RhaiResult<()>;
+    fn check(&self, _caller: &str) -> RhaiResult<()> {
+        Ok(())
+    }
+    /// This with `map`'s settings, checked together once all are set.
+    fn with(&self, caller: &str, map: &Map) -> RhaiResult<Self> {
+        check_keys(caller, map, Self::KEYS)?;
+        let mut out = self.clone();
+        for (key, value) in map {
+            out.set(caller, key, value)?;
+        }
+        out.check(caller)?;
+        Ok(out)
+    }
+    /// A whole one as it is, or a map of settings over `base`.
+    fn given(caller: &str, value: &Dynamic, base: &Self) -> RhaiResult<Self> {
+        if let Some(whole) = value.clone().try_cast::<Self>() {
+            return Ok(whole);
+        }
+        match value.clone().try_cast::<Map>() {
+            Some(map) => base.with(caller, &map),
+            None => Err(format!("{}: should be a {} or a map of its settings, got {}", caller, Self::NAME, value.type_name()).into()),
+        }
+    }
+}
+
+/// Register each of `T`'s settings as a property; setting one checks the
+/// settings together, as constructors do.
+pub(super) fn register_settings<T: Settings>(engine: &mut rhai::Engine) {
+    for &key in T::KEYS {
+        engine.register_get(key, move |s: &mut T| s.get(key));
+        engine.register_set(key, move |s: &mut T, value: Dynamic| -> RhaiResult<()> {
+            let mut changed = s.clone();
+            changed.set(T::NAME, key, &value)?;
+            changed.check(T::NAME)?;
+            *s = changed;
+            Ok(())
+        });
+    }
+}
+
+/// A setting's number: finite, whole or decimal.
+pub(super) fn setting_number(caller: &str, key: &str, value: &Dynamic) -> RhaiResult<f64> {
+    float(caller, &format!("'{}'", key), value)
+}
+
+/// A setting's number of at least 0.
+pub(super) fn at_least_zero(caller: &str, key: &str, value: &Dynamic) -> RhaiResult<f64> {
+    let n = setting_number(caller, key, value)?;
+    if n < 0.0 {
+        return Err(format!("{}: '{}' can't be negative, got {}", caller, key, n).into());
+    }
+    Ok(n)
+}
+
+/// A setting's positive number.
+pub(super) fn above_zero(caller: &str, key: &str, value: &Dynamic) -> RhaiResult<f64> {
+    let n = setting_number(caller, key, value)?;
+    if n <= 0.0 {
+        return Err(format!("{}: '{}' must be positive, got {}", caller, key, n).into());
+    }
+    Ok(n)
+}
+
+/// A setting's string, one of `choices`.
+pub(super) fn one_of(caller: &str, key: &str, value: &Dynamic, choices: &[&str]) -> RhaiResult<String> {
+    let text = value.clone().into_string()
+        .map_err(|t| -> Box<EvalAltResult> { format!("{}: '{}' should be a string, got {}", caller, key, t).into() })?;
+    if !choices.contains(&text.as_str()) {
+        return Err(format!("{}: unknown {} '{}'; expected one of {}", caller, key, text, choices.join(", ")).into());
+    }
+    Ok(text)
+}
+
 /// The message of a runtime error, without rhai's position.
 pub(super) fn unwrap_runtime(err: &EvalAltResult) -> String {
     match err {

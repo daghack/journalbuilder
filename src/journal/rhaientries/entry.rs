@@ -195,7 +195,7 @@ impl Page {
     pub fn margin_for(&self, canvas: &CanvasData) -> f32 {
         match self.margin {
             Some(margin) => margin as f32,
-            None => canvas.strokes.iter().map(|s| s.style.brush.size as f32 / 2.0).fold(0.0, f32::max),
+            None => canvas.strokes.iter().map(|s| s.style.brush_size() / 2.0).fold(0.0, f32::max),
         }
     }
     fn get_margin(&mut self) -> Dynamic {

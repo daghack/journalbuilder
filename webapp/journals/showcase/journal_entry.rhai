@@ -1,12 +1,14 @@
 // The showcase: a sample book of everything journals can draw with, every
 // page the same size. After the title page and the contents:
 //
-//   pens      every Darkly brush; pressure profiles, widths, colours,
-//             gradients, strokes gone over in passes and reshaped,
-//             pooling ink and wandering pressure
-//   fonts     every font, its alphabet and a line, font settings,
-//             italics and spacing by outlines, and glyphs placed by hand
-//   glyphs    every variant of every glyph of every font
+//   pens      every Darkly brush; brush styles (pressure profiles and
+//             ranges, colours, gradients, pooling ink, wandering pressure),
+//             handwriting (strokes gone over in passes and reshaped), and
+//             styles made of the two
+//   glyphsets every glyphset, its alphabet and a line, glyphset settings,
+//             type styles (tracking, gaps, italics, scale), and glyphs
+//             placed by hand
+//   glyphs    every variant of every glyph of every glyphset
 //   art       shapes and paths (polygons, stars, ellipses, waves, points
 //             along a path), hatching, vectors, mazes, snakes, brambles,
 //             eyes, moons in every phase, paths cut by shapes, brambles
@@ -16,22 +18,24 @@
 //             along paths), angles in degrees
 //   text      text boxes, text kept clear of drawings, text along paths
 //             (turned to them or held at an angle), scattered notes,
-//             words split round drawings, shaped boxes, and writing by
-//             hand: lines, blocks and glyphs set a little off true
+//             words split round drawings, shaped boxes, paragraph styles,
+//             and writing by hand: lines, blocks and glyphs set a little
+//             off true
 //   locks     every lock type, Huffman codes between bases, a lock
 //             chain drawn as a maze, value kinds and their sketches, an
 //             art node: a lock keyed by a code drawn as a star chart, and
 //             renderers drawing a chain's values as canvases
 //   spread    one drawing across two pages: a page split into tiles
-//   layouts   pages typeset from layouts: an inline one, the layout files
-//             (the title page is one too), and marked-up text, markdown()
+//   layouts   pages typeset from layouts: an inline one, flex styles, the
+//             layout files (the title page is one too), and marked-up
+//             text, markdown(), with named spans
 //
 // Pages are bound with new_book: numbered, named and listed in the
 // contents.
 //
 // When journals gain a capability (a function, an art tool, a brush, a
-// font, a lock type), it gets a labelled example here: see CLAUDE.md.
-// tests/showcase.rs fails when a function scripts can call, or a font,
+// glyphset, a lock type), it gets a labelled example here: see CLAUDE.md.
+// tests/showcase.rs fails when a function scripts can call, or a glyphset,
 // isn't in this file. Render it on parchment to see it as a book:
 // journalbuild showcase --parchment (or --pdf).
 
@@ -53,33 +57,37 @@ const BLUE = "#1f4e7a";
 const GOLD = "#8a6212";
 const BARK = "#6b4423";
 
-const PEN = new_brush("Ink Pen", 0.4, 0.8, 1.6);
-const TEXT = new_style(INK, PEN);
-const CAPTION = new_style(RED, new_brush("Ink Pen", 0.3, 0.7, 1.2));
-const LINE = new_style(INK, new_brush("Ink Pen", 0.3, 0.7, 2.0));
-// Headings' calligraphy nib, with the constant pressure a broad nib wants.
-const HEADING = new_style(RED, new_brush("Calligraphy", 0.4, 0.8, 1.5, #{ pressure_profile: "constant" }), #{ width: 1.2 });
-// Font samples and glyphs: a fine pen, so the glyphs' shapes show.
-const SAMPLE = new_style(INK, new_brush("Ink Pen", 0.4, 0.8, 2.2));
-// A bramble's parts' styles, by part.
-const BRAMBLE = #{ vines: new_style(BARK, PEN), leaves: new_style(GREEN, PEN), flowers: LINE };
+// The book's pen, in `colour`, by a steady hand.
+fn pen(colour) {
+	new_style(new_brush_style(colour, "Ink Pen", 1.6, #{ min_pressure: 0.4, max_pressure: 0.8 }), new_handwriting_style())
+}
 
-// Text is in plain, a font made to read easily; headings are in loche.
-const PLAIN = font("plain");
-const LOCHE = font("loche_upper");
+const TEXT = pen(INK);
+const CAPTION = new_style(new_brush_style(RED, "Ink Pen", 1.2), new_handwriting_style());
+const LINE = new_style(new_brush_style(INK, "Ink Pen", 2.0), new_handwriting_style());
+// Headings' calligraphy nib, with the constant pressure a broad nib wants.
+const HEADING = new_style(new_brush_style(RED, "Calligraphy", 1.5, #{ min_pressure: 0.48, max_pressure: 0.96, pressure_profile: "constant" }), new_handwriting_style());
+// Glyphset samples and glyphs: a fine pen, so the glyphs' shapes show.
+const SAMPLE = new_style(new_brush_style(INK, "Ink Pen", 2.2, #{ min_pressure: 0.4, max_pressure: 0.8 }), new_handwriting_style());
+// A bramble's parts' styles, by part.
+const BRAMBLE = #{ vines: pen(BARK), leaves: pen(GREEN), flowers: LINE };
+
+// Text is in plain, a glyphset made to read easily; headings are in loche.
+const PLAIN = glyphset("plain");
+const LOCHE = glyphset("loche_upper");
 
 const LOREM = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum. ";
 
 // ---- writing ----
 
 // `text` written from (x, y) to the right, along a line through the middle
-// of its glyphs: write_line(text, at, settings), settings being a role's.
+// of its glyphs: write_line(text, at, #{ style, type, paragraph }).
 fn write(text, x, y, size) {
-	write_line(text, vec2(x, y), #{ font: global::PLAIN, style: global::TEXT, size: size })
+	write_line(text, vec2(x, y), #{ style: global::TEXT, type: new_type_style(global::PLAIN, size) })
 }
 
-fn write_in(text, x, y, size, style, font) {
-	write_line(text, vec2(x, y), #{ font: font, size: size, style: style })
+fn write_in(text, x, y, size, style, glyphs) {
+	write_line(text, vec2(x, y), #{ style: style, type: new_type_style(glyphs, size) })
 }
 
 // A label naming the calls an example shows.
@@ -103,13 +111,13 @@ fn wave(x0, x1, y, rise) {
 // the rim, its lids gone round in the colour, and its lines in ink.
 fn inked_eye(eye, colour, ink) {
 	let r = eye.iris_radius;
-	let brush = |name, min, max, size| new_brush(name, min, max, size, #{ pressure_profile: "taper" });
+	let wash = |brush, min, max, size| new_style(new_brush_style(colour, brush, size, #{ min_pressure: min, max_pressure: max, pressure_profile: "taper" }), new_handwriting_style());
 	// Part by part, so the colour goes under the lines (canvas.add(eye,
 	// styles) would draw them in name order).
 	new_canvas()
-		.add(eye.wash, new_style(colour, brush.call("Smooth Watercolor", 0.2, 0.35, r * 0.3)))
-		.add(eye.rim, new_style(colour, brush.call("Rough Watercolor", 0.6, 0.95, r * 0.12)))
-		.add(eye.accent, new_style(colour, brush.call("Ink Pen", 0.2, 0.6, 1.2)))
+		.add(eye.wash, wash.call("Smooth Watercolor", 0.2, 0.35, r * 0.3))
+		.add(eye.rim, wash.call("Rough Watercolor", 0.6, 0.95, r * 0.12))
+		.add(eye.accent, wash.call("Ink Pen", 0.2, 0.6, 1.2))
 		.add(eye.lines, ink)
 }
 
@@ -136,48 +144,54 @@ fn bind(section, canvas) {
 
 // ---- pens: every brush ----
 //
-// Each brush draws a wave, over bare paper and then over hatching, since
-// some (Blur, Smudge, Liquify, Clone) only move ink that's already there.
+// A style is what strokes are drawn in: a brush style (the ink: a colour,
+// a Darkly brush, how wide its marks are and how it presses) and a
+// handwriting style (the hand: how it goes over its strokes and sets
+// glyphs). Each brush draws a wave, over bare paper and then over
+// hatching, since some (Blur, Smudge, Liquify, Clone) only move ink that's
+// already there.
 
 let pens = sheet("pens");
 pens.name = "brushes";
-pens.add(caption("brush_names(), new_brush(name, min_pressure, max_pressure, size), brush.size", TOP));
+pens.add(caption("brush_names(), new_brush_style(colour, brush, brush_size), brush_style.brush_size", TOP));
 let y = TOP + 70;
 for name in brush_names() {
 	pens.add(write(name, LEFT, y, 24));
 	pens.add(new_rectangle(vec2(910, y), 380, 54).hatch(7.0, #{ angle: 0.8, roughness: 0.6 }), CAPTION);
-	let brush = new_brush(name, 0.3, 0.9, 6);
-	brush.size = 9;
-	pens.add(wave(380, RIGHT, y, 24), new_style(INK, brush));
+	let brush = new_brush_style(INK, name, 6, #{ max_pressure: 0.9 });
+	brush.brush_size = 9;
+	pens.add(wave(380, RIGHT, y, 24), new_style(brush, new_handwriting_style()));
 	y += 76;
 }
 book.bind("pens", pens);
 
-// Pressure runs along each stroke as its brush's profile says, between the
-// brush's min_pressure and max_pressure.
+// Pressure runs along each stroke as its brush's profile says, between its
+// min_pressure and max_pressure.
 let pens = sheet("pens");
 pens.add(subhead("pressure profiles", TOP));
-pens.add(caption("new_brush(..., #{ pressure_profile }): \"ramp\", \"taper\" or \"constant\"; brush.name", TOP + 50));
+pens.add(caption("new_brush_style(..., #{ pressure_profile }): \"ramp\", \"taper\" or \"constant\"; brush_style.brush", TOP + 50));
+let steady = new_handwriting_style();
 let y = TOP + 110;
 for profile in ["ramp", "taper", "constant"] {
-	let brush = new_brush("Ink Pen", 0.05, 1.0, 10, #{ pressure_profile: profile });
-	assert(brush.min_pressure == 0.05 && brush.max_pressure == 1.0 && brush.name == "Ink Pen", "unexpected brush " + brush);
+	let brush = new_brush_style(GOLD, "Ink Pen", 10, #{ min_pressure: 0.05, max_pressure: 1.0, pressure_profile: profile });
+	assert(brush.min_pressure == 0.05 && brush.max_pressure == 1.0 && brush.brush == "Ink Pen", "unexpected brush style");
 	pens.add(write(profile, LEFT, y, 24));
-	pens.add(new_line(vec2(380, y), vec2(RIGHT, y)), new_style(GOLD, brush));
+	pens.add(new_line(vec2(380, y), vec2(RIGHT, y)), new_style(brush, steady));
 	y += 60;
 }
 
-// A style's width scales its brush's pressure (in SVG output it's the
-// stroke's width).
+// How hard the brush presses: heavier marks the harder it presses (how
+// much depends on the brush). In SVG output a stroke is brush_size *
+// max_pressure wide.
 y += 30;
-pens.add(subhead("widths", y));
-pens.add(caption("new_style(colour, brush, #{ width }), style.width", y + 50));
+pens.add(subhead("pressure", y));
+pens.add(caption("new_brush_style(..., #{ min_pressure, max_pressure }), brush_style.max_pressure", y + 50));
 y += 110;
-for (width, i) in [0.3, 0.7, 1.2] {
-	let style = new_style(BLUE, new_brush("Charcoal", 0.3, 0.8, 8), #{ width: width });
-	assert(style.width == width, "width reads back");
+for (range, i) in [[0.1, 0.25], [0.25, 0.55], [0.4, 1.0]] {
+	let brush = new_brush_style(BLUE, "Charcoal", 8, #{ min_pressure: range[0], max_pressure: range[1] });
+	assert(brush.max_pressure == range[1], "max_pressure reads back");
 	pens.add(write(["light", "middling", "heavy"][i], LEFT, y, 24));
-	pens.add(wave(380, RIGHT, y, 14), style);
+	pens.add(wave(380, RIGHT, y, 14), new_style(brush, steady));
 	y += 60;
 }
 
@@ -189,10 +203,10 @@ y += 110;
 let colours = [["named", "darkgoldenrod"], ["hex", "#1f4e7a"], ["rgb", "rgb(155, 35, 24)"], ["hsl", "hsl(100, 50%, 28%)"], ["alpha", "rgba(43, 29, 18, 0.4)"]];
 for (colour, i) in colours {
 	let x = LEFT + i * 205;
-	let style = new_style(colour[1], new_brush("Rough Ink", 0.4, 0.8, 9));
-	assert(style.color == colour[1], "colour didn't stick");
+	let brush = new_brush_style(colour[1], "Rough Ink", 9, #{ min_pressure: 0.4, max_pressure: 0.8 });
+	assert(brush.color == colour[1], "colour didn't stick");
 	pens.add(write(colour[0], x, y, 22));
-	pens.add(wave(x, x + 170, y + 45, 14), style);
+	pens.add(wave(x, x + 170, y + 45, 14), new_style(brush, steady));
 }
 
 // Gradients, in place of a colour: along each stroke from start to end,
@@ -202,13 +216,15 @@ y += 150;
 pens.add(subhead("gradients", y));
 y += 70;
 pens.add(caption("new_gradient(colours): along each stroke", y));
-pens.add(wave(640, RIGHT, y, 22), new_style(new_gradient([RED, GOLD, BLUE]), new_brush("Rough Ink", 0.4, 0.8, 9)));
+let rough = new_brush_style(new_gradient([RED, GOLD, BLUE]), "Rough Ink", 9, #{ min_pressure: 0.4, max_pressure: 0.8 });
+pens.add(wave(640, RIGHT, y, 22), new_style(rough, steady));
 y += 75;
 pens.add(caption("#{ from, to }: across, colours placed", y));
-let across = new_gradient([GREEN, [0.7, GOLD], RED], #{ from: vec2(640, 0), to: vec2(RIGHT, 0) });
-pens.add(new_rectangle(vec2(870, y), 460, 50).hatch(8.0, #{ angle: 1.1 }), new_style(across, PEN));
+let across = pen(RED);
+across.color = new_gradient([GREEN, [0.7, GOLD], RED], #{ from: vec2(640, 0), to: vec2(RIGHT, 0) });
+pens.add(new_rectangle(vec2(870, y), 460, 50).hatch(8.0, #{ angle: 1.1 }), across);
 y += 75;
-let words = new_style(RED, PEN);
+let words = pen(RED);
 words.color = new_gradient([BLUE, INK, RED], #{ from: vec2(640, 0), to: vec2(RIGHT, 0) });
 pens.add(caption("style.color = a gradient", y));
 pens.add(write_in("Lorem ipsum dolor sit amet", 640, y, 28, words, PLAIN));
@@ -220,20 +236,22 @@ for i in 1..220 {
 	let a = i * 0.11;
 	spiral.line_to(vec2(870 + a * 4.0 * a.cos(), y + a * 4.0 * a.sin()));
 }
-pens.add(spiral, new_style(glow, new_brush("Ink Pen", 0.4, 0.8, 3)));
+pens.add(spiral, new_style(new_brush_style(glow, "Ink Pen", 3, #{ min_pressure: 0.4, max_pressure: 0.8 }), steady));
 book.bind("pens", pens);
 
-// Strokes gone over: a style draws each stroke in `passes` passes, each
-// pass's ends straying by up to `jitter` units. One pass with some jitter
-// roughens a hand; many make the manic, scored-over look of writing gone
-// over again and again. Text in the style is gone over too.
+// Strokes gone over: a hand draws each stroke in `passes` passes, each
+// pass's ends straying by up to `pass_end_jitter` units. One pass with
+// some jitter roughens a hand; many make the manic, scored-over look of
+// writing gone over again and again. Text in the style is gone over too.
 let pens = sheet("pens");
 pens.add(subhead("going over strokes", TOP));
-pens.add(caption("new_style(..., #{ passes: n, jitter: d }): each stroke drawn n times, its ends astray by up to d", TOP + 50));
+pens.add(caption("new_handwriting_style(#{ passes: n, pass_end_jitter: d }): each stroke drawn n times, its ends astray by up to d", TOP + 50));
+let fine = new_brush_style(INK, "Ink Pen", 0.8, #{ min_pressure: 0.5, max_pressure: 0.9 });
 let y = TOP + 130;
 for row in [[1, 0, "clean"], [1, 2.5, "a rough hand"], [3, 4, "gone over"], [7, 7, "and over"]] {
-	let style = new_style(INK, new_brush("Ink Pen", 0.5, 0.9, 0.8), #{ passes: row[0], jitter: row[1] });
-	assert(style.passes == row[0] && style.jitter == row[1], "passes and jitter read back");
+	let hand = new_handwriting_style(#{ passes: row[0], pass_end_jitter: row[1] });
+	assert(hand.passes == row[0] && hand.pass_end_jitter == row[1], "passes and pass_end_jitter read back");
+	let style = new_style(fine, hand);
 	pens.add(write(`${row[2]}: ${row[0]}, ${row[1]}`, LEFT, y, 24));
 	pens.add(wave(380, 760, y, 22), style);
 	pens.add(new_circle(vec2(850, y), 30), style);
@@ -241,49 +259,50 @@ for row in [[1, 0, "clean"], [1, 2.5, "a rough hand"], [3, 4, "gone over"], [7, 
 	y += 110;
 }
 y += 40;
-pens.add(caption("a manic hand: passes = 7, jitter = 9, in a tapering pen", y));
-let scored = new_brush("Ink Pen", 0.5, 0.95, 1.1, #{ pressure_profile: "taper" });
-let manic = new_style(INK, scored, #{ passes: 7, jitter: 9 });
+pens.add(caption("a manic hand: passes = 7, pass_end_jitter = 9, in a tapering pen", y));
+let scored = new_brush_style(INK, "Ink Pen", 1.1, #{ min_pressure: 0.5, max_pressure: 0.95, pressure_profile: "taper" });
+let manic = new_style(scored, new_handwriting_style(#{ passes: 7, pass_end_jitter: 9 }));
 pens.add(write_in("lorem ipsum", LEFT, y + 110, 96, manic, LOCHE));
 pens.add(write_in("dolor sit amet", LEFT, y + 210, 96, manic, LOCHE));
 y += 300;
-pens.add(caption("a heading gone over twice, passes = 2, jitter = 3, in red", y));
-let twice = new_style(RED, scored, #{ passes: 2, jitter: 3 });
+pens.add(caption("a heading gone over twice, passes = 2, pass_end_jitter = 3, in red: style.color = RED", y));
+let twice = new_style(scored, new_handwriting_style(#{ passes: 2, pass_end_jitter: 3 }));
+twice.color = RED;
 pens.add(write_in("consectetur adipiscing", LEFT, y + 80, 60, twice, LOCHE));
 y += 170;
-pens.add(caption("body text in a rough hand: style.passes = 1, style.jitter = 1.2", y));
+pens.add(caption("body text in a rough hand: style.passes = 1, style.pass_end_jitter = 1.2", y));
 let rough = TEXT;
 rough.passes = 1;
-rough.jitter = 1.2;
+rough.pass_end_jitter = 1.2;
 pens.add(write_in("Lorem ipsum dolor sit amet, consectetur adipiscing elit,", LEFT, y + 60, 30, rough, PLAIN));
 pens.add(write_in("sed do eiusmod tempor incididunt ut labore et dolore.", LEFT, y + 110, 30, rough, PLAIN));
 book.bind("pens", pens);
 
-// Strokes reshaped: point_jitter moves every point of every pass, control
-// points included, each its own way, so curves bend differently rather
-// than just shifting.
+// Strokes reshaped: stroke_point_jitter moves every point of every pass,
+// control points included, each its own way, so curves bend differently
+// rather than just shifting.
 let pens = sheet("pens");
 pens.add(subhead("reshaping strokes", TOP));
-pens.add(caption("new_style(..., #{ point_jitter: d }): every point of every pass, control points too, astray by up to d", TOP + 50));
+pens.add(caption("new_handwriting_style(#{ stroke_point_jitter: d }): every point of every pass, control points too, astray by up to d", TOP + 50));
 let y = TOP + 130;
 for d in [0, 1.5, 4, 8] {
-	let style = new_style(INK, new_brush("Ink Pen", 0.5, 0.9, 0.8), #{ point_jitter: d });
-	assert(style.point_jitter == d, "point_jitter reads back");
-	pens.add(write(`point_jitter ${d}`, LEFT, y, 24));
+	let style = new_style(fine, new_handwriting_style(#{ stroke_point_jitter: d }));
+	assert(style.stroke_point_jitter == d, "stroke_point_jitter reads back");
+	pens.add(write(`stroke_point_jitter ${d}`, LEFT, y, 24));
 	pens.add(wave(380, 760, y, 22), style);
 	pens.add(new_circle(vec2(850, y), 30), style);
 	pens.add(write_in("lorem", 920, y, 56, style, LOCHE));
 	y += 110;
 }
 y += 40;
-pens.add(caption("with passes: passes = 4, jitter = 3, point_jitter = 3, each pass bent its own way", y));
-let bent = new_style(INK, scored, #{ passes: 4, jitter: 3, point_jitter: 3 });
+pens.add(caption("with passes: passes = 4, pass_end_jitter = 3, stroke_point_jitter = 3, each pass bent its own way", y));
+let bent = new_style(scored, new_handwriting_style(#{ passes: 4, pass_end_jitter: 3, stroke_point_jitter: 3 }));
 pens.add(write_in("lorem ipsum", LEFT, y + 110, 96, bent, LOCHE));
 y += 200;
-pens.add(caption("body text with unsteady curves: style.point_jitter = 0.8, in red", y));
+pens.add(caption("body text with unsteady curves: style.stroke_point_jitter = 0.8, in red", y));
 let unsteady = TEXT;
 unsteady.color = RED;
-unsteady.point_jitter = 0.8;
+unsteady.stroke_point_jitter = 0.8;
 pens.add(write_in("Lorem ipsum dolor sit amet, consectetur adipiscing elit,", LEFT, y + 60, 30, unsteady, PLAIN));
 pens.add(write_in("sed do eiusmod tempor incididunt ut labore et dolore.", LEFT, y + 110, 30, unsteady, PLAIN));
 book.bind("pens", pens);
@@ -292,159 +311,198 @@ book.bind("pens", pens);
 // gradient down each glyph, and pressure wandering along each stroke.
 let pens = sheet("pens");
 pens.add(subhead("pooling ink", TOP));
-pens.add(caption("new_brush(..., #{ pool: p, pool_depth: d }): up to p heavier over the lowest d of each glyph", TOP + 50));
+pens.add(caption("new_brush_style(..., #{ pool: p, pool_depth: d }): up to p heavier over the lowest d of each glyph", TOP + 50));
 let y = TOP + 150;
 for row in [[0, 0.3], [0.6, 0.3], [1.2, 0.5]] {
-	let brush = new_brush("Ink Pen", 0.2, 0.45, 3.2, #{ pool: row[0], pool_depth: row[1] });
+	let brush = new_brush_style(INK, "Ink Pen", 3.2, #{ min_pressure: 0.2, max_pressure: 0.45, pool: row[0], pool_depth: row[1] });
 	assert(brush.pool == row[0] && brush.pool_depth == row[1], "pool and pool_depth read back");
 	pens.add(write(`pool ${row[0]}, depth ${row[1]}`, LEFT, y, 24));
-	pens.add(write_in("lorem ipsum", 400, y, 72, new_style(INK, brush), LOCHE));
+	pens.add(write_in("lorem ipsum", 400, y, 72, new_style(brush, steady), LOCHE));
 	y += 105;
 }
 pens.add(caption("new_gradient(colours, #{ vertical: true }): down each glyph, top to bottom", y));
 let darkening = new_gradient([RED, [0.6, RED], INK], #{ vertical: true });
-pens.add(write_in("dolor sit amet", LEFT, y + 90, 72, new_style(darkening, new_brush("Ink Pen", 0.3, 0.6, 3.2)), LOCHE));
+pens.add(write_in("dolor sit amet", LEFT, y + 90, 72, new_style(new_brush_style(darkening, "Ink Pen", 3.2, #{ max_pressure: 0.6 }), steady), LOCHE));
 y += 175;
 pens.add(caption("both: ink pooling dark at the bottom of plain text", y));
-// Properties set the same settings after: brush.pool, brush.pool_depth.
-let pooled = new_brush("Ink Pen", 0.3, 0.6, 1.6);
-pooled.pool = 0.5;
-pooled.pool_depth = 0.3;
-let pooled_ink = new_style(new_gradient([RED, [0.5, RED], INK], #{ vertical: true }), pooled);
+// Properties set the same settings after: style.pool, style.pool_depth.
+let pooled_ink = new_style(new_brush_style(new_gradient([RED, [0.5, RED], INK], #{ vertical: true }), "Ink Pen", 1.6, #{ max_pressure: 0.6 }), steady);
+pooled_ink.pool = 0.5;
+pooled_ink.pool_depth = 0.3;
 pens.add(write_in("Lorem ipsum dolor sit amet, consectetur adipiscing elit,", LEFT, y + 60, 30, pooled_ink, PLAIN));
 pens.add(write_in("sed do eiusmod tempor incididunt ut labore et dolore.", LEFT, y + 110, 30, pooled_ink, PLAIN));
 
 y += 190;
 pens.add(subhead("wandering pressure", y));
-pens.add(caption("brush.pressure_variation = v, brush.variation_length = l: up to v either way, every l or so", y + 50));
+pens.add(caption("brush_style.pressure_wander = v, .pressure_wander_length = l: up to v either way, every l or so", y + 50));
 y += 130;
 for profile in ["ramp", "taper", "constant"] {
 	pens.add(write(profile, LEFT, y, 24));
-	for (variation, i) in [0, 0.35] {
-		let brush = new_brush("Ink Pen", 0.05, 0.7, 10);
+	for (wander, i) in [0, 0.35] {
+		let brush = new_brush_style(GOLD, "Ink Pen", 10, #{ min_pressure: 0.05 });
 		brush.pressure_profile = profile;
-		brush.pressure_variation = variation;
-		brush.variation_length = 70;
-		assert(brush.pressure_variation == variation && brush.variation_length == 70, "variation reads back");
-		pens.add(new_line(vec2(330 + i * 400, y), vec2(690 + i * 400, y)), new_style(GOLD, brush));
+		brush.pressure_wander = wander;
+		brush.pressure_wander_length = 70;
+		assert(brush.pressure_wander == wander && brush.pressure_wander_length == 70, "wander reads back");
+		pens.add(new_line(vec2(330 + i * 400, y), vec2(690 + i * 400, y)), new_style(brush, steady));
 	}
 	y += 55;
 }
-pens.add(caption("a hand that wanders: new_brush(..., #{ pressure_variation: 0.35, variation_length: 10 }), tapering", y));
-let wandering = new_brush("Ink Pen", 0.3, 0.7, 1.8, #{ pressure_profile: "taper", pressure_variation: 0.35, variation_length: 10 });
-pens.add(write_in("lorem ipsum dolor", LEFT, y + 80, 72, new_style(INK, wandering), LOCHE));
+pens.add(caption("a hand that wanders: new_brush_style(..., #{ pressure_wander: 0.35, pressure_wander_length: 10 }), tapering", y));
+let wandering = new_brush_style(INK, "Ink Pen", 1.8, #{ pressure_profile: "taper", pressure_wander: 0.35, pressure_wander_length: 10 });
+pens.add(write_in("lorem ipsum dolor", LEFT, y + 80, 72, new_style(wandering, steady), LOCHE));
 book.bind("pens", pens);
 
-// ---- fonts ----
+// A style is a brush style and a handwriting style, their settings read
+// and set on the style as one; default_style() is the book's plainest.
+let pens = sheet("pens");
+pens.add(subhead("styles", TOP));
+pens.add(caption("new_style(brush_style, handwriting_style): the ink and the hand", TOP + 50));
+let ink = new_brush_style(BLUE, "Rough Ink", 1.8, #{ max_pressure: 0.6, pressure_profile: "taper" });
+let hand = new_handwriting_style(#{ passes: 2, pass_end_jitter: 2 });
+let style = new_style(ink, hand);
+assert(style.brush == "Rough Ink" && style.passes == 2, "a style's settings are its parts'");
+pens.add(write_in("lorem ipsum dolor sit amet", LEFT, TOP + 140, 60, style, LOCHE));
+pens.add(caption("default_style(): an Ink Pen, black, 1.2 wide; style.brush_size = 2.4, style.color = RED", TOP + 230));
+let plain_style = default_style();
+pens.add(write_in("lorem ipsum dolor sit amet", LEFT, TOP + 300, 60, plain_style, LOCHE));
+plain_style.brush_size = 2.4;
+plain_style.color = RED;
+pens.add(write_in("lorem ipsum dolor sit amet", LEFT, TOP + 390, 60, plain_style, LOCHE));
+book.bind("pens", pens);
+
+// ---- glyphsets ----
 //
-// Fonts come from fonts/ (a file for each font), each with its glyphs, the padding
-// between them, the width of a space, and a font to fall back to.
+// Glyphsets come from fonts/ (a file for each), each with its glyphs, the
+// gap between them, the width of a space, and a glyphset to fall back to.
 
 let alphabet = "abcdefghijklmnopqrstuvwxyz";
 let lorem = "lorem ipsum dolor sit amet, consectetur";
 let samples = [
-	#{ label: "font(\"plain\"): made to read easily", font: PLAIN, lines: [alphabet.to_upper(), alphabet, "0123456789 . , ; : ! ? ' \" - — _ ~ ( ) [ ] { } / \\ # + = * < > % &", "Lorem ipsum dolor sit amet, consectetur."] },
-	#{ label: "font(\"copper\"): falling back to loche_upper for what it lacks", font: font("copper"), lines: [alphabet.to_upper(), alphabet, "Lorem Ipsum Dolor Sit Amet", "variants at random: aaaa eeee ssss"] },
-	#{ label: "font(\"loche_upper\"): capitals, lowercase text set in them", font: LOCHE, lines: [alphabet, lorem + ".", "punctuation . , ; : ' \" ? - —"] },
-	#{ label: "font(\"loche_lower\"): falling back to loche_upper for capitals and stops", font: font("loche_lower"), lines: [alphabet, "Lorem ipsum dolor sit amet, consectetur."] },
-	#{ label: "font(\"nivelia\"): traced from her letter, falling back to loche_upper for the capitals she never wrote", font: font("nivelia"), size: 46, lines: [alphabet, alphabet.to_upper(), "Lorem ipsum dolor sit amet, consectetur.", "A iq ixoias rx jrg, ibs A srb'z Kibz zr nc."] },
-	#{ label: "font(\"lang\")", font: font("lang"), lines: [alphabet.to_upper(), alphabet, "Lorem ipsum dolor sit amet."] },
-	#{ label: "font(\"eldritch\")", font: font("eldritch"), lines: [alphabet, "lorem ipsum dolor sit amet"] },
-	#{ label: "font(\"sharp_lower\")", font: font("sharp_lower"), lines: [alphabet, "lorem ipsum dolor sit amet"] },
-	#{ label: "font(\"black_priests\"): thirteen symbols, a to m", font: font("black_priests"), lines: ["abcdefghijklm", "fadlem bicgke hajmdl"] },
-	#{ label: "ternary_font(\"balanced_ternary\", #{ character_padding: 0.2 }): letters to the ternary digits", font: ternary_font("balanced_ternary", #{ character_padding: 0.2 }), lines: ["abcdefghijklm", "nopqrstuvwxyz", "lorem ipsum dolor"] },
+	#{ label: "glyphset(\"plain\"): made to read easily", glyphs: PLAIN, lines: [alphabet.to_upper(), alphabet, "0123456789 . , ; : ! ? ' \" - — _ ~ ( ) [ ] { } / \\ # + = * < > % &", "Lorem ipsum dolor sit amet, consectetur."] },
+	#{ label: "glyphset(\"copper\"): falling back to loche_upper for what it lacks", glyphs: glyphset("copper"), lines: [alphabet.to_upper(), alphabet, "Lorem Ipsum Dolor Sit Amet", "variants at random: aaaa eeee ssss"] },
+	#{ label: "glyphset(\"loche_upper\"): capitals, lowercase text set in them", glyphs: LOCHE, lines: [alphabet, lorem + ".", "punctuation . , ; : ' \" ? - —"] },
+	#{ label: "glyphset(\"loche_lower\"): falling back to loche_upper for capitals and stops", glyphs: glyphset("loche_lower"), lines: [alphabet, "Lorem ipsum dolor sit amet, consectetur."] },
+	#{ label: "glyphset(\"nivelia\"): traced from her letter, falling back to loche_upper for the capitals she never wrote", glyphs: glyphset("nivelia"), size: 46, lines: [alphabet, alphabet.to_upper(), "Lorem ipsum dolor sit amet, consectetur.", "A iq ixoias rx jrg, ibs A srb'z Kibz zr nc."] },
+	#{ label: "glyphset(\"lang\")", glyphs: glyphset("lang"), lines: [alphabet.to_upper(), alphabet, "Lorem ipsum dolor sit amet."] },
+	#{ label: "glyphset(\"eldritch\")", glyphs: glyphset("eldritch"), lines: [alphabet, "lorem ipsum dolor sit amet"] },
+	#{ label: "glyphset(\"sharp_lower\")", glyphs: glyphset("sharp_lower"), lines: [alphabet, "lorem ipsum dolor sit amet"] },
+	#{ label: "glyphset(\"black_priests\"): thirteen symbols, a to m", glyphs: glyphset("black_priests"), lines: ["abcdefghijklm", "fadlem bicgke hajmdl"] },
+	#{ label: "ternary_glyphset(\"balanced_ternary\", #{ glyph_outline_gap: 0.2 }): letters to the ternary digits", glyphs: ternary_glyphset("balanced_ternary", #{ glyph_outline_gap: 0.2 }), lines: ["abcdefghijklm", "nopqrstuvwxyz", "lorem ipsum dolor"] },
 ];
-let fonts = sheet("fonts");
+let sets = sheet("glyphsets");
 let y = TOP;
 for f in samples {
-	// Fonts with a small x-height are written larger, so the pen doesn't
-	// fill them in.
+	// Glyphsets with a small x-height are written larger, so the pen
+	// doesn't fill them in.
 	let size = if "size" in f { f.size } else { 36 };
 	let leading = 54 * size / 36;
 	let height = 50 + f.lines.len() * leading + 30;
 	if y + height > BOTTOM {
-		book.bind("fonts", fonts);
-		fonts = sheet("fonts");
+		book.bind("glyphsets", sets);
+		sets = sheet("glyphsets");
 		y = TOP;
 	}
-	fonts.add(caption(f.label, y));
+	sets.add(caption(f.label, y));
 	y += 50 + (leading - 54) / 2;
 	for line in f.lines {
-		fonts.add(write_in(line, LEFT, y, size, SAMPLE, f.font));
+		sets.add(write_in(line, LEFT, y, size, SAMPLE, f.glyphs));
 		y += leading;
 	}
 	y += 30;
 }
 
-// A font's settings, from the font file unless changed: padding between
-// glyphs and the width of a space (both in font sizes), and the font to
-// fall back to. Changing a font changes that copy only.
+// A glyphset's settings, from its file unless changed: the gap between
+// glyphs' outlines and the width of a space (both in glyph scales), and
+// the glyphset to fall back to. Changing one changes that copy only.
 if y + 520 > BOTTOM {
-	book.bind("fonts", fonts);
-	fonts = sheet("fonts");
+	book.bind("glyphsets", sets);
+	sets = sheet("glyphsets");
 	y = TOP;
 }
-fonts.add(subhead("font settings", y));
+sets.add(subhead("glyphset settings", y));
 y += 60;
-let loose = font("loche_lower");
-loose.character_padding = 0.3;
+let loose = glyphset("loche_lower");
+loose.glyph_outline_gap = 0.3;
 loose.space_width = 1;
 let spaced = [
-	["font(\"loche_lower\", #{ character_padding: 0, space_width: 0.3 })", font("loche_lower", #{ character_padding: 0, space_width: 0.3 })],
-	[`font("loche_lower"): as the font file sets it, padding ${font("loche_lower").character_padding}`, font("loche_lower")],
-	["f.character_padding = 0.3; f.space_width = 1", loose],
+	["glyphset(\"loche_lower\", #{ glyph_outline_gap: 0, space_width: 0.3 })", glyphset("loche_lower", #{ glyph_outline_gap: 0, space_width: 0.3 })],
+	[`glyphset("loche_lower"): as its file sets it, gap ${glyphset("loche_lower").glyph_outline_gap}`, glyphset("loche_lower")],
+	["g.glyph_outline_gap = 0.3; g.space_width = 1", loose],
 ];
 for row in spaced {
-	fonts.add(caption(row[0], y));
-	fonts.add(write_in(lorem, LEFT, y + 46, 36, SAMPLE, row[1]));
+	sets.add(caption(row[0], y));
+	sets.add(write_in(lorem, LEFT, y + 46, 36, SAMPLE, row[1]));
 	y += 106;
 }
-let lettered = font("eldritch");
+let lettered = glyphset("eldritch");
 lettered.fallback = "copper";
-assert(lettered.fallback.name == "copper" && font("plain").fallback == () && font_names().contains("loche_lower"), "fallbacks and names");
-fonts.add(caption("f.fallback = \"copper\": eldritch, with capitals and stops from copper", y));
-fonts.add(write_in("Lorem ipsum. Dolor sit amet.", LEFT, y + 46, 36, SAMPLE, lettered));
+assert(lettered.fallback.name == "copper" && glyphset("plain").fallback == () && glyphset_names().contains("loche_lower"), "fallbacks and names");
+sets.add(caption("g.fallback = \"copper\": eldritch, with capitals and stops from copper", y));
+sets.add(write_in("Lorem ipsum. Dolor sit amet.", LEFT, y + 46, 36, SAMPLE, lettered));
 y += 130;
 
-// Italics: a font's skew leans every glyph it sets (its fallbacks' too),
-// tops forward, in radians. Text is set with each glyph as close to the
-// last as their outlines allow, plus the padding, so leaning text doesn't
+// Italics: a glyphset's skew leans every glyph it sets (its fallbacks'
+// too), tops forward, in radians. Text is set with each glyph as close to
+// the last as their outlines allow, plus the gap, so leaning text doesn't
 // open it up, and an A tucks under a V.
 if y + 560 > BOTTOM {
-	book.bind("fonts", fonts);
-	fonts = sheet("fonts");
+	book.bind("glyphsets", sets);
+	sets = sheet("glyphsets");
 	y = TOP;
 }
-fonts.add(subhead("italics", y));
+sets.add(subhead("italics", y));
 y += 60;
-let backslant = font("loche_lower");
+let backslant = glyphset("loche_lower");
 backslant.skew = -0.2;
-assert(backslant.skew == -0.2 && font("loche_lower").skew == 0, "a font's skew is its copy's");
+assert(backslant.skew == -0.2 && glyphset("loche_lower").skew == 0, "a glyphset's skew is its copy's");
 let leant = [
-	["font(\"plain\", #{ skew: 0.25 })", font("plain", #{ skew: 0.25 }), "Lorem ipsum dolor sit amet, consectetur."],
-	["font(\"copper\", #{ skew: 0.3 }): its fallback, loche_upper, leant too", font("copper", #{ skew: 0.3 }), "Lorem Ipsum. Dolor Sit Amet?"],
-	["f.skew = -0.2: leant back", backslant, lorem],
+	["glyphset(\"plain\", #{ skew: 0.25 })", glyphset("plain", #{ skew: 0.25 }), "Lorem ipsum dolor sit amet, consectetur."],
+	["glyphset(\"copper\", #{ skew: 0.3 }): its fallback, loche_upper, leant too", glyphset("copper", #{ skew: 0.3 }), "Lorem Ipsum. Dolor Sit Amet?"],
+	["g.skew = -0.2: leant back", backslant, lorem],
 ];
 for row in leant {
-	fonts.add(caption(row[0], y));
-	fonts.add(write_in(row[2], LEFT, y + 46, 36, SAMPLE, row[1]));
+	sets.add(caption(row[0], y));
+	sets.add(write_in(row[2], LEFT, y + 46, 36, SAMPLE, row[1]));
 	y += 106;
 }
-fonts.add(caption("set by outlines, upright and leant: glyphs tuck in as far as their hulls allow", y));
-for (f, i) in [PLAIN, font("plain", #{ skew: 0.25 })] {
-	fonts.add(write_in("AVATAR. To Tea, LT; Yo! don't", LEFT, y + 46 + i * 54, 36, SAMPLE, f));
+sets.add(caption("set by outlines, upright and leant: glyphs tuck in as far as their hulls allow", y));
+for (f, i) in [PLAIN, glyphset("plain", #{ skew: 0.25 })] {
+	sets.add(write_in("AVATAR. To Tea, LT; Yo! don't", LEFT, y + 46 + i * 54, 36, SAMPLE, f));
 }
 y += 170;
+book.bind("glyphsets", sets);
+
+// Type styles: which glyphs text is set in, at what glyph scale, and
+// shaped how, over the glyphset's own settings.
+let sets = sheet("glyphsets");
+sets.add(subhead("type styles", TOP));
+let y = TOP + 70;
+let types = [
+	["new_type_style(glyphset, glyph_scale)", new_type_style(PLAIN, 36)],
+	["#{ glyph_tracking: 0.3 }: extra room after each glyph, in glyph scales", new_type_style(PLAIN, 36, #{ glyph_tracking: 0.3 })],
+	["#{ glyph_outline_gap: 0.4 }: room between outlines, over the glyphset's", new_type_style(PLAIN, 36, #{ glyph_outline_gap: 0.4 })],
+	["#{ space_width: 1.2 }: wide spaces", new_type_style(PLAIN, 36, #{ space_width: 1.2 })],
+	["#{ italic: true }: leant as italics; or #{ skew: -0.2 }", new_type_style(PLAIN, 36, #{ italic: true })],
+	["#{ glyph_scale_factor: 1.5 }: times the glyph scale", new_type_style(PLAIN, 36, #{ glyph_scale_factor: 1.5 })],
+];
+for row in types {
+	sets.add(caption(row[0], y));
+	sets.add(write_line(lorem, vec2(LEFT, y + 50 * row[1].glyph_scale_factor), #{ style: SAMPLE, type: row[1] }));
+	y += 70 + 50 * row[1].glyph_scale_factor;
+}
+let set_after = new_type_style(LOCHE, 30);
+set_after.glyph_scale = 44;
+set_after.glyph_tracking = 0.1;
+assert(set_after.glyph_scale == 44 && set_after.glyphset.name == "loche_upper", "type settings read back");
+sets.add(caption("t.glyph_scale = 44, t.glyph_tracking = 0.1, t.glyphset = loche_upper", y));
+sets.add(write_line(lorem, vec2(LEFT, y + 60), #{ style: SAMPLE, type: set_after }));
+y += 140;
 
 // Glyphs one at a time: placed, scaled and turned by hand.
-if y + 330 > BOTTOM {
-	book.bind("fonts", fonts);
-	fonts = sheet("fonts");
-	y = TOP;
-}
-fonts.add(caption("glyphs placed by hand: glyphs(text), glyph(name), and their scale, position, rotation and skew", y));
+sets.add(caption("glyphs placed by hand: glyphs(text), glyph(name), and their scale, position, rotation and skew", y));
 y += 80;
-let word = font("copper").glyphs("turning");
+let word = glyphset("copper").glyphs("turning");
 for (g, i) in word {
 	if g.is_blank { continue; }
 	g.scale = 50;
@@ -453,38 +511,38 @@ for (g, i) in word {
 	g.skew = 0.3 - 0.1 * i;
 	g.translate_by(vec2(0, 8 * i)).scale_by(1 + 0.05 * i).rotate_by(0.05);
 }
-fonts.add(word, SAMPLE);
-let eye = font("symbols").glyph("basic_eye", #{ scale: 80, position: vec2(800, y) });
-fonts.add(eye, new_style(GOLD, PEN));
-fonts.add(eye.copy().path().translate_by(vec2(140, 0)), new_style(BLUE, PEN));
+sets.add(word, SAMPLE);
+let eye = glyphset("symbols").glyph("basic_eye", #{ scale: 80, position: vec2(800, y) });
+sets.add(eye, pen(GOLD));
+sets.add(eye.copy().path().translate_by(vec2(140, 0)), pen(BLUE));
 y += 120;
-fonts.add(caption("glyph(name, #{ position, scale, rotation, skew }); an array of glyphs moved, scaled and turned as one", y));
+sets.add(caption("glyph(name, #{ position, scale, rotation, skew }); an array of glyphs moved, scaled and turned as one", y));
 y += 80;
 let row = [];
 for n in -4..=4 {
-	row.push(font("balanced_ternary").glyph(n, #{ position: vec2(LEFT + 40 + (n + 4) * 50, y), scale: 40, rotation: n * 0.1 }));
+	row.push(glyphset("balanced_ternary").glyph(n, #{ position: vec2(LEFT + 40 + (n + 4) * 50, y), scale: 40, rotation: n * 0.1 }));
 }
-fonts.add(row, SAMPLE);
-let turned = font("copper").glyphs("lorem");
+sets.add(row, SAMPLE);
+let turned = glyphset("copper").glyphs("lorem");
 for (g, i) in turned { g.scale = 40; g.position = vec2(i * 34, 0); }
-fonts.add(turned.scale_by(1.2).rotate_around(vec2(0, 0), -0.15).translate_by(vec2(620, y)), SAMPLE);
-book.bind("fonts", fonts);
+sets.add(turned.scale_by(1.2).rotate_around(vec2(0, 0), -0.15).translate_by(vec2(620, y)), SAMPLE);
+book.bind("glyphsets", sets);
 
-// ---- glyphs: every glyph of every font ----
+// ---- glyphs: every glyph of every glyphset ----
 //
-// A row (or more) per font, every variant of every glyph.
+// A row (or more) per glyphset, every variant of every glyph.
 
 let catalogue = sheet("glyphs");
 let y = TOP;
-for name in font_names() {
+for name in glyphset_names() {
 	if name.starts_with("debug") { continue; }
-	let f = font(name);
+	let f = glyphset(name);
 	if y + 110 > BOTTOM {
 		book.bind("glyphs", catalogue);
 		catalogue = sheet("glyphs");
 		y = TOP;
 	}
-	catalogue.add(caption(`font("${name}")`, y));
+	catalogue.add(caption(`glyphset("${name}")`, y));
 	y += 60;
 	let column = 0;
 	for key in f.characters() {
@@ -526,13 +584,13 @@ art.add(
 		.cubic_to(vec2(760, y + 110), vec2(660, y + 130), vec2(620, y + 50))
 		.close()
 		.scale_by(1).translate_by(vec2(10, 0)),
-	new_style(BLUE, PEN));
+	pen(BLUE));
 
 // Hatching fills a closed path's inside with lines: hatch(spacing,
 // #{ angle, roughness }), here at a random slant.
 art.add(new_circle(vec2(880, y), 50), LINE);
 art.add(new_circle(vec2(880, y), 50).hatch(5, #{ angle: random_range(0.0, PI()), roughness: 1 }), CAPTION);
-art.add(new_rectangle(vec2(1020, y), 90, 90).hatch(6, #{ angle: random() * PI(), roughness: 0.5 }), new_style(GOLD, PEN));
+art.add(new_rectangle(vec2(1020, y), 90, 90).hatch(6, #{ angle: random() * PI(), roughness: 0.5 }), pen(GOLD));
 
 // Hatching with options. Each line is a stroke of its own, inside the
 // shape: a ring (two circles appended into one path) keeps its hole, and
@@ -557,13 +615,13 @@ for shape in [
 	[star, "evenodd", -0.4, 840],
 ] {
 	art.add(shape[0], LINE);
-	art.add(shape[0].hatch(8.0, #{ angle: shape[2], fill_rule: shape[1], inset: 2.0 }), new_style(GOLD, PEN));
+	art.add(shape[0].hatch(8.0, #{ angle: shape[2], fill_rule: shape[1], inset: 2.0 }), pen(GOLD));
 	art.add(write(shape[1], shape[3], y + 120, 20));
 }
 y += 200;
 let coiled = art::snake(vec2(180, y), vec2(560, y + 120), 700, #{ head_angle: 0, max_width: 50, seed: 5 }).outline;
 art.add(coiled, LINE);
-art.add(coiled.hatch(7.0, #{ angle: 1.2, bow: 2.5, inset: 2.0 }), new_style(GREEN, PEN));
+art.add(coiled.hatch(7.0, #{ angle: 1.2, bow: 2.5, inset: 2.0 }), pen(GREEN));
 
 // Vectors add, subtract and scale by numbers (whole or decimal), and
 // measure: a seven-pointed star from one spoke turned round its hub, and
@@ -578,7 +636,7 @@ let star = new_path().move_to(hub + spoke);
 for i in 1..=7 {
 	star.line_to(hub + spoke.rotated(i * 6 * PI() / 7));
 }
-art.add(star, new_style(GOLD, PEN));
+art.add(star, pen(GOLD));
 let tail = vec2(380, y + 60);
 let tip = vec2(700, y - 70);
 let along = (tip - tail).normalized();
@@ -589,7 +647,7 @@ art.add(arrow, LINE);
 art.add(new_circle((tail + tip) / 2, 6), CAPTION);
 assert((tip - tail).length() == tail.distance(tip) && along.dot(along) > 0.999 && along.angle() < 0.0 && -along != along, "vectors should measure");
 let box = arrow.bounds();
-art.add(new_rectangle(box.center, box.width + 20, box.height + 20), new_style(BLUE, PEN));
+art.add(new_rectangle(box.center, box.width + 20, box.height + 20), pen(BLUE));
 book.bind("art", art);
 
 let art = sheet("art");
@@ -601,9 +659,9 @@ art.add(maze.path().scale_by(30).translate_by(vec2(LEFT + 20, TOP + 50)), LINE);
 // Shapes from their own constructors, and points spaced along a path.
 art.add(write("new_polygon, new_star, new_ellipse, new_wave, new_polyline", 600, TOP + 40, 20));
 art.add(new_polygon(vec2(640, TOP + 110), 36, 6), LINE);
-art.add(new_star(vec2(730, TOP + 110), 40, 16, 5), new_style(GOLD, PEN));
+art.add(new_star(vec2(730, TOP + 110), 40, 16, 5), pen(GOLD));
 art.add(new_ellipse(vec2(830, TOP + 110), 45, 22, #{ angle: 0.4 }), LINE);
-art.add(new_wave(vec2(890, TOP + 110), vec2(1090, TOP + 110), #{ amplitude: 18, waves: 4 }), new_style(BLUE, PEN));
+art.add(new_wave(vec2(890, TOP + 110), vec2(1090, TOP + 110), #{ amplitude: 18, waves: 4 }), pen(BLUE));
 art.add(new_polyline([vec2(600, TOP + 210), vec2(650, TOP + 170), vec2(700, TOP + 210), vec2(750, TOP + 170)]), LINE);
 art.add(write("path.points_along(12)", 790, TOP + 190, 20));
 for at in new_circle(vec2(1060, TOP + 180), 30).points_along(12, #{ start: 0.75 }) {
@@ -617,7 +675,7 @@ art.add(art::snake(vec2(160, 590), vec2(180, 960), 480, #{ head_angle: -PI() / 2
 art.add(art::snake(vec2(400, 630), vec2(410, 690), 900, #{ head_angle: -PI() / 2.0, max_width: 36, seed: 7 }).outline, LINE);
 let snake = art::snake(vec2(700, 550), vec2(740, 960), 640, #{ head_angle: -PI() / 2.0, max_width: 48, seed: 2 });
 art.add(snake.outline, LINE);
-art.add(snake.spine.fill_with_text("lorem ipsum dolor sit amet", #{ font: PLAIN, size: 22, style: new_style(RED, PEN) }));
+art.add(snake.spine.fill_with_text("lorem ipsum dolor sit amet", #{ style: pen(RED), type: new_type_style(PLAIN, 22) }));
 
 // A bramble: canes, leaves and flowers, stroked separately, each part in
 // the style named for it.
@@ -628,7 +686,7 @@ let plant = art::bramble(vec2(600, 1450), 400, #{ flower_size: 80, seed: 4 });
 art.add(plant.vines, BRAMBLE.vines);
 art.add(plant.leaves, BRAMBLE.leaves);
 for (piece, i) in plant.flowers.subpaths() {
-	art.add(piece, new_style(if i % 2 == 0 { RED } else { BLUE }, PEN));
+	art.add(piece, pen(if i % 2 == 0 { RED } else { BLUE }));
 }
 art.add(write("plant.flowers.subpaths(), red and blue by turns", 380, 1500, 20));
 book.bind("art", art);
@@ -668,8 +726,8 @@ art.add(inked_eye(art::eye(vec2(LEFT + 105, TOP + 610), 200, #{ gaze_angle: 0.0,
 art.add(inked_eye(art::eye(vec2(LEFT + 370, TOP + 610), 200, #{ gaze_angle: PI(), messiness: 0.5, seed: 4, gaze: 1.0, openness: 0.22 }), BLUE, LINE));
 art.add(inked_eye(art::eye(vec2(LEFT + 635, TOP + 610), 200, #{ gaze_angle: PI() / 4.0, messiness: 0.4, seed: 6, flat: true, openness: 0.45 }), BLUE, LINE));
 let red_eye = art::eye(vec2(LEFT + 890, TOP + 610), 200, #{ gaze_angle: 0.3, messiness: 0.6, seed: 4, angle: 1.3, openness: 0.5 });
-art.add(red_eye.wash, new_style(RED, new_brush("Smooth Watercolor", 0.2, 0.35, red_eye.iris_radius * 0.3, #{ pressure_profile: "taper" })));
-art.add(red_eye.lines, new_style(INK, PEN));
+art.add(red_eye.wash, new_style(new_brush_style(RED, "Smooth Watercolor", red_eye.iris_radius * 0.3, #{ min_pressure: 0.2, max_pressure: 0.35, pressure_profile: "taper" }), new_handwriting_style()));
+art.add(red_eye.lines, pen(INK));
 art.add(write("angle -0.5, gaze 0", LEFT + 10, TOP + 790, 20));
 art.add(write("gaze 1, openness 0.22", LEFT + 265, TOP + 790, 20));
 art.add(write("flat, openness 0.45", LEFT + 530, TOP + 790, 20));
@@ -739,7 +797,7 @@ let waves = new_path();
 for i in 0..18 {
 	waves.append(wave(LEFT + 560, LEFT + 960, TOP + 80 + i * 22, 8));
 }
-art.add(waves.erase_outside(star, #{ fill_rule: "evenodd" }), new_style(BLUE, PEN));
+art.add(waves.erase_outside(star, #{ fill_rule: "evenodd" }), pen(BLUE));
 art.add(star, CAPTION);
 
 // Brambles grow thicker toward an origin, as old wood is: canes thickness
@@ -853,7 +911,7 @@ seed(8);
 for (kind, i) in ["uniform_random", "poisson_disk", "jittered_grid", "grid", "halton", "golden"] {
 	let x0 = LEFT + (i % 3) * 345;
 	let y0 = TOP + 60 + (i / 3) * 320;
-	gen.add(new_rectangle(vec2(x0 + 150, y0 + 115), 310, 240), new_style(RED, new_brush("Ink Pen", 0.2, 0.4, 1)));
+	gen.add(new_rectangle(vec2(x0 + 150, y0 + 115), 310, 240), new_style(new_brush_style(RED, "Ink Pen", 1, #{ min_pressure: 0.2, max_pressure: 0.4 }), new_handwriting_style()));
 	for p in distribute_points(kind, 120, [[x0 + 5, x0 + 295], [y0 + 5, y0 + 225]]) {
 		gen.add(new_circle(p, 3), LINE);
 	}
@@ -866,14 +924,14 @@ for (kind, i) in ["uniform_random", "poisson_disk", "jittered_grid", "grid", "ha
 let y = TOP + 720;
 gen.add(caption("vec3(x, y, z), vec4(x, y, z, w), vec3(v2, z), vec4(v3, w); .z, .w, xy(), xyz(), cross", y));
 for p in distribute_points("poisson_disk", 140, [[LEFT, LEFT + 460], [y + 50, y + 330], [0, 1]]) {
-	gen.add(new_circle(p.xy(), 2 + 6 * (1 - p.z)), if p.z < 0.5 { LINE } else { new_style(BLUE, PEN) });
+	gen.add(new_circle(p.xy(), 2 + 6 * (1 - p.z)), if p.z < 0.5 { LINE } else { pen(BLUE) });
 }
 let up = vec3(1, 0, 0).cross(vec3(0, 1, 0));
 let lifted = vec4(vec3(vec2(0.1, 0.2), up.z), 0.5);
 assert(up == vec3(0, 0, 1) && lifted.xyz().z == 1.0 && lifted.w == 0.5 && vec4(1, 2, 3, 4).length() == 30.0.sqrt(), "vec3 and vec4 should measure");
 for c in distribute_points("halton", 40, [[LEFT + 560, RIGHT - 20], [y + 50, y + 330], [0, 255], [0.3, 1]]) {
 	let colour = `rgba(${(c.z).to_int()}, 40, ${(255 - c.z).to_int()}, ${c.w})`;
-	gen.add(new_circle(c.xy(), 12), new_style(colour, PEN));
+	gen.add(new_circle(c.xy(), 12), pen(colour));
 }
 
 book.bind("generators", gen);
@@ -890,7 +948,7 @@ let middle = nearest(points, vec2(145, 110));
 for (algorithm, i) in ["prim", "kruskal", "maximum", "shortest_path", "breadth_first", "depth_first", "random"] {
 	let at = vec2(LEFT + (i % 3) * 345, TOP + 60 + (i / 3) * 300);
 	let edges = points.spanning_tree(#{ algorithm: algorithm, root: middle });
-	gen.add(new_edges(points, edges).translate_by(at), if algorithm == "maximum" { new_style(INK, new_brush("Ink Pen", 0.2, 0.4, 1), #{ width: 0.5 }) } else { LINE });
+	gen.add(new_edges(points, edges).translate_by(at), if algorithm == "maximum" { new_style(new_brush_style(INK, "Ink Pen", 1, #{ min_pressure: 0.1, max_pressure: 0.2 }), new_handwriting_style()) } else { LINE });
 	gen.add(new_circle(points[middle] + at, 6), CAPTION);
 	gen.add(write(algorithm, at.x, at.y + 250, 22));
 }
@@ -903,7 +961,7 @@ for (metric, i) in ["euclidean", "squared_euclidean", "manhattan", "chebyshev"] 
 	let at = vec2(LEFT + i * 255, y + 50);
 	let small = [];
 	for p in points { small.push(p * 0.8); }
-	gen.add(new_edges(small, small.spanning_tree(#{ algorithm: "shortest_path", metric: metric, root: middle, neighbours: 8 })).translate_by(at), new_style(BLUE, PEN));
+	gen.add(new_edges(small, small.spanning_tree(#{ algorithm: "shortest_path", metric: metric, root: middle, neighbours: 8 })).translate_by(at), pen(BLUE));
 	gen.add(write(metric, at.x, at.y + 205, 20));
 }
 book.bind("generators", gen);
@@ -915,8 +973,8 @@ book.bind("generators", gen);
 // padded in front. Three digits make a number from -13 to 13, drawn here
 // as its glyph in the balanced_ternary font, which was made for them.
 let gen = sheet("generators");
-let ternary = font("balanced_ternary");
-gen.add(caption("balanced_ternary(n), n from -13 to 13, drawn as font(\"balanced_ternary\").glyph(balanced_ternary(n))", TOP));
+let ternary = glyphset("balanced_ternary");
+gen.add(caption("balanced_ternary(n), n from -13 to 13, drawn as glyphset(\"balanced_ternary\").glyph(balanced_ternary(n))", TOP));
 for n in -13..=13 {
 	let x = LEFT + 18 + (n + 13) * 36.5;
 	let bt = balanced_ternary(n);
@@ -941,11 +999,11 @@ for i in 0..12 {
 }
 let hub = vec2(LEFT + 560, y + 160);
 for i in 0..24 {
-	gen.add(new_line(hub, hub + vec2(110, 0).rotated(i * radians(PI() / 12))), new_style(BLUE, PEN));
+	gen.add(new_line(hub, hub + vec2(110, 0).rotated(i * radians(PI() / 12))), pen(BLUE));
 }
 assert((degrees(180) - PI()).abs() < 1e-12, "degrees should be radians");
 
-// Balanced ternary along a path, as the font writes it down its stems:
+// Balanced ternary along a path, as the glyphset writes it down its stems:
 // a 0 a bar across, a -1 or +1 a stroke bending sharply off to the
 // traveller's left or right, marks evenly spaced by where they leave the
 // path. fit_text spreads the digits over the whole path; fill_with_text
@@ -964,45 +1022,51 @@ gen.add(path.fit_text(nine, #{ style: LINE, width: 32 }));
 // Digits spaced closer than the path's length needs, and over copies of
 // a path too short for them.
 let y = TOP + 1020;
-gen.add(caption("fit_text(balanced_ternary(\"+-0+-0+-0\")), and fill_with_text(bt, #{ style, size: 30, width: 14 }) round an arc", y));
+gen.add(caption("fit_text(balanced_ternary(\"+-0+-0+-0\")), and fill_with_text(bt, #{ style, type: #{ glyph_scale: 30 }, width: 14 }) round an arc", y));
 let path = wave(LEFT + 20, RIGHT - 380, y + 130, 60);
 gen.add(path, LINE);
 gen.add(path.fit_text(balanced_ternary("+-0+-0+-0"), #{ style: LINE }));
 let arc = new_arc(vec2(RIGHT - 160, y + 150), 110, 3.4, 6.0);
 gen.add(arc, LINE);
-gen.add(arc.fill_with_text(nine, #{ style: LINE, size: 30, width: 14 })[0]);
+gen.add(arc.fill_with_text(nine, #{ style: LINE, type: #{ glyph_scale: 30 }, width: 14 })[0]);
 book.bind("generators", gen);
 
 // ---- text ----
+//
+// Every text call takes a style (what it's drawn in, and the hand that
+// sets it), a type (glyphs, glyph scale, shape) and a paragraph (how
+// lines are built and set), each whole or a map of some settings, and
+// its own options. Jitters are in canvas units.
 
 let text = sheet("text");
 
 // A text box, flat (glyph by glyph) with jagged edges.
-text.add(caption("new_textbox: flat, with jagged edges", TOP));
-let flat = new_textbox(#{ center: vec2(340, TOP + 190), width: 460, height: 300, size: 22, jagged: 0.6 });
+text.add(caption("new_textbox: flat, #{ paragraph: #{ line_start_jitter } }: jagged edges", TOP));
+let flat = new_textbox(#{ center: vec2(340, TOP + 190), width: 460, height: 300, type: #{ glyph_scale: 22 }, paragraph: #{ line_start_jitter: 13 } });
 text.add(flat.fill(PLAIN.glyphs(LOREM)).placed, TEXT);
 
 // Words kept whole, spaced out, spread over as many boxes as it takes.
-text.add(caption("words, spacing, place_all", TOP).translate_by(vec2(540, 0)));
-let boxes = new_textbox(#{ center: vec2(0, 0), width: 210, height: 300, size: 20, layout: "words", spacing: 0.05 });
+text.add(caption("layout: \"words\", glyph_tracking, place_all", TOP).translate_by(vec2(540, 0)));
+let boxes = new_textbox(#{ center: vec2(0, 0), width: 210, height: 300, type: #{ glyph_scale: 20, glyph_tracking: 0.05 }, paragraph: #{ layout: "words" } });
 for (block, i) in boxes.place_all(PLAIN.glyphs(LOREM)) {
 	text.add(block.translate_by(vec2(760 + i * 230, TOP + 190)), TEXT);
 }
 
 // Text kept clear of a drawing: of its lines, or (add_hull) of everything
 // inside its outline.
-text.add(caption("avoid a drawing: its lines, or tree.add_hull(drawing, #{ clearance })", 600));
+text.add(caption("avoid a drawing: its lines, or tree.add_hull(drawing, #{ margin }); paragraph clearance", 600));
 let plant = art::bramble(vec2(330, 1060), 380, #{ angle: -PI() / 2.0, flower_size: 60, seed: 9 });
 let drawing = new_canvas().add(plant, BRAMBLE);
 let b = drawing.bounds();
-let lines_box = new_textbox(#{ center: b.center, width: 460, height: b.height + 40, size: 16, layout: "words", avoid: drawing, clearance: 3 });
+let words = new_paragraph_style(#{ layout: "words" });
+let lines_box = new_textbox(#{ center: b.center, width: 460, height: b.height + 40, type: #{ glyph_scale: 16 }, paragraph: words, avoid: drawing });
 text.add(drawing.copy());
 text.add(lines_box.fill(PLAIN.glyphs(LOREM + LOREM)).placed, TEXT);
-let hull_tree = new_avoidance_tree().add_hull(drawing, #{ clearance: 8 });
+let hull_tree = new_avoidance_tree().add_hull(drawing, #{ margin: 8 });
 assert(!hull_tree.is_empty && hull_tree.blocks(b.center), "the hull should cover the drawing's middle");
 let shifted = drawing.copy().translate_by(vec2(520, 0));
 text.add(shifted);
-let hull_box = new_textbox(#{ center: b.center + vec2(520, 0), width: 460, height: b.height + 40, size: 16, layout: "words", avoid: new_avoidance_tree().add_hull(shifted, #{ clearance: 8 }) });
+let hull_box = new_textbox(#{ center: b.center + vec2(520, 0), width: 460, height: b.height + 40, type: #{ glyph_scale: 16 }, paragraph: words, avoid: new_avoidance_tree().add_hull(shifted, #{ margin: 8 }) });
 text.add(hull_box.fill(PLAIN.glyphs(LOREM + LOREM)).placed, TEXT);
 book.bind("text", text);
 
@@ -1011,12 +1075,12 @@ let text = sheet("text");
 // arc, and along a spiral that keeps out of a ring and off a line, words
 // whole.
 text.add(caption("fill_with_text round a circle, as many times as it takes", TOP));
-let ring_text = new_circle(vec2(170, TOP + 130), 60).fill_with_text(LOREM, #{ font: PLAIN, size: 16, style: new_style(GOLD, PEN) });
+let ring_text = new_circle(vec2(170, TOP + 130), 60).fill_with_text(LOREM, #{ style: pen(GOLD), type: new_type_style(PLAIN, 16) });
 for (part, i) in ring_text {
 	text.add(part.translate_by(vec2((i % 6) * 150, (i / 6) * 150)));
 }
 text.add(caption("fit_text: as large as fits the arc", 560));
-text.add(new_arc(vec2(320, 760), 170, 3.4, 6.0).fit_text("lorem ipsum", #{ font: PLAIN, style: new_style(BLUE, PEN) }));
+text.add(new_arc(vec2(320, 760), 170, 3.4, 6.0).fit_text("lorem ipsum", #{ style: pen(BLUE), type: #{ glyphset: PLAIN } }));
 text.add(caption("along a spiral, avoiding a ring and a line", 560).translate_by(vec2(540, 0)));
 let centre = vec2(840, 780);
 let turns = [centre];
@@ -1027,19 +1091,26 @@ for i in 1..360 {
 let spiral = new_polyline(turns);
 let keep_out = new_avoidance_tree();
 keep_out.add_region(new_circle(centre + vec2(50, -40), 45));
-keep_out.add(new_line(centre + vec2(-120, -150), centre + vec2(140, 150)), #{ clearance: 4 });
+keep_out.add(new_line(centre + vec2(-120, -150), centre + vec2(140, 150)), #{ margin: 4 });
 text.add(new_circle(centre + vec2(50, -40), 45), CAPTION);
 text.add(new_line(centre + vec2(-120, -150), centre + vec2(140, 150)), CAPTION);
-text.add(spiral.fill_with_text(LOREM, #{ font: PLAIN, size: 14, style: new_style(GREEN, PEN), avoid: keep_out, layout: "words" })[0]);
+text.add(spiral.fill_with_text(LOREM, #{ style: pen(GREEN), type: new_type_style(PLAIN, 14), paragraph: words, avoid: keep_out })[0]);
 
 // Notes scattered over a drawing, clear of it, of a line across it and of
-// each other, words kept whole.
+// each other, words kept whole, each glyph turned and scaled a little by
+// the hand before the notes are placed.
 text.add(caption("scatter_notes(notes, width_range, height_range, settings), clear of a drawing, a line and each other", 1030));
 let board = new_canvas();
 board.add(new_rectangle(vec2(600, 1250), 1000, 360), CAPTION);
 board.add(art::snake(vec2(400, 1150), vec2(720, 1330), 900, #{ head_angle: 0, max_width: 40, seed: 3 }).outline, LINE);
 text.add(board);
-text.add(board.scatter_notes(["lorem ipsum", "dolor sit amet", "consectetur adipiscing", "sed do eiusmod", "tempor incididunt"], [240, 340], [25, 35], #{ font: PLAIN, style: new_style(GOLD, PEN), size: 20, clearance: 24, layout: "words", avoid: new_line(vec2(100, 1250), vec2(1100, 1250)) }));
+let askew = pen(GOLD);
+askew.glyph_rotation_jitter = PI() / 16.0;
+askew.glyph_scale_jitter = 0.15;
+text.add(board.scatter_notes(["lorem ipsum", "dolor sit amet", "consectetur adipiscing", "sed do eiusmod", "tempor incididunt"], [240, 340], [25, 35], #{
+	style: askew, type: new_type_style(PLAIN, 20), paragraph: #{ clearance: 24, layout: "words", line_start_jitter: 2 },
+	avoid: new_line(vec2(100, 1250), vec2(1100, 1250)), max_attempts: 100,
+}));
 book.bind("text", text);
 
 // Words round a drawing: whole, moved past it (the default), broken
@@ -1047,7 +1118,7 @@ book.bind("text", text);
 // further off. split_words: n is the shortest piece allowed.
 let text = sheet("text");
 text.add(subhead("splitting words", TOP));
-text.add(caption("layout: \"words\", avoid; then split_words: true; then split_padding: 0.6", TOP + 50));
+text.add(caption("paragraph #{ layout: \"words\" }, avoid; then split_words: true; then split_padding: 0.6", TOP + 50));
 fn seal(c) {
 	new_canvas()
 		.add(new_circle(c, 78), global::CAPTION)
@@ -1057,42 +1128,42 @@ for (options, i) in [#{}, #{ split_words: true }, #{ split_words: true, split_pa
 	let c = vec2(LEFT + 160 + i * 340, TOP + 330);
 	let drawing = seal(c + vec2(-50, -60));
 	text.add(drawing);
-	let box = #{ center: c, width: 320, height: 420, size: 17, layout: "words", avoid: drawing, clearance: 4 };
-	box += options;
+	let paragraph = #{ layout: "words", clearance: 4 } + options;
+	let box = #{ center: c, width: 320, height: 420, type: #{ glyph_scale: 17 }, paragraph: paragraph, avoid: drawing };
 	text.add(new_textbox(box).fill(PLAIN.glyphs(LOREM + LOREM)).placed, TEXT);
 }
 // Along a path too, and in layouts (a role's split_words and
 // split_padding: see the inline layout).
 let y = TOP + 680;
 text.add(caption("fill_with_text along a line past three circles: whole words, then split_words: 2", y));
-for (options, i) in [#{ layout: "words" }, #{ layout: "words", split_words: 2 }] {
+for (paragraph, i) in [#{ layout: "words" }, #{ layout: "words", split_words: 2 }] {
 	let line_y = y + 80 + i * 110;
 	let rings = new_avoidance_tree();
 	for k in 0..3 {
 		let at = vec2(LEFT + 210 + k * 300, line_y);
 		text.add(new_circle(at, 30), CAPTION);
-		rings.add_region(new_circle(at, 30), #{ clearance: 6 });
+		rings.add_region(new_circle(at, 30), #{ margin: 6 });
 	}
-	options.avoid = rings;
-	text.add(new_line(vec2(LEFT, line_y), vec2(RIGHT, line_y)).fill_with_text(LOREM, #{ font: PLAIN, size: 22, style: TEXT } + options)[0]);
+	text.add(new_line(vec2(LEFT, line_y), vec2(RIGHT, line_y)).fill_with_text(LOREM, #{ style: TEXT, type: new_type_style(PLAIN, 22), paragraph: paragraph, avoid: rings })[0]);
 }
 // Glyphs held at an angle, rather than turned to the path: set along it,
 // as close as their outlines at that angle allow.
 y += 340;
-text.add(caption("along a curve, turned to it; then #{ angle: 0 }, upright; then #{ angle: 0.3 }", y));
+text.add(caption("along a curve, turned to it; then paragraph #{ angle: 0 }, upright; then #{ angle: 0.3 }", y));
 for (angle, i) in [(), 0, 0.3] {
 	let x = LEFT + i * 340;
 	let path = new_path().move_to(vec2(x, y + 120)).cubic_to(vec2(x + 110, y + 40), vec2(x + 210, y + 200), vec2(x + 320, y + 120));
 	text.add(path, CAPTION);
-	let options = if angle == () { #{} } else { #{ angle: angle } };
-	text.add(path.fill_with_text("lorem ipsum dolor sit", #{ font: PLAIN, size: 28, style: TEXT } + options)[0]);
+	let paragraph = if angle == () { #{} } else { #{ angle: angle } };
+	text.add(path.fill_with_text("lorem ipsum dolor sit", #{ style: TEXT, type: new_type_style(PLAIN, 28), paragraph: paragraph })[0]);
 }
 book.bind("text", text);
 
 // Text boxes of any closed shape: #{ shape: path } in place of center,
 // width and height. Each subpath is an outline, closed back to its start,
-// and one inside another is a hole. #{ angle } turns the lines (radians;
-// lines follow on to their right). A rectangle at angle 0 is a plain box.
+// and one inside another is a hole. The paragraph's angle turns the lines
+// (radians; lines follow on to their right). A rectangle at angle 0 is a
+// plain box.
 let text = sheet("text");
 text.add(subhead("shaped text boxes", TOP));
 text.add(caption("new_textbox #{ shape }: a circle; a ring (a circle in a circle); a star, new_star(center, outer, inner, points)", TOP + 50));
@@ -1104,17 +1175,17 @@ let shapes = [
 ];
 for shape in shapes {
 	text.add(shape, CAPTION);
-	text.add(new_textbox(#{ shape: shape, size: 16 }).fill(PLAIN.glyphs(LOREM + LOREM)).placed, TEXT);
+	text.add(new_textbox(#{ shape: shape, type: #{ glyph_scale: 16 } }).fill(PLAIN.glyphs(LOREM + LOREM)).placed, TEXT);
 }
-text.add(caption("#{ angle }: 0.4 in a square; -PI() / 4 in a circle; PI() / 2, lines down the page", TOP + 470));
+text.add(caption("paragraph #{ angle }: 0.4 in a square; -PI() / 4 in a circle; PI() / 2, lines down the page", TOP + 470));
 let y = TOP + 680;
 for (options, i) in [
-	#{ shape: new_rectangle(vec2(LEFT + 150, y), 280, 280), angle: 0.4 },
-	#{ shape: new_circle(vec2(LEFT + 500, y), 150), angle: -PI() / 4.0, layout: "words" },
-	#{ shape: new_rectangle(vec2(LEFT + 850, y), 280, 280), angle: PI() / 2.0, jagged: 0.8 },
+	#{ shape: new_rectangle(vec2(LEFT + 150, y), 280, 280), paragraph: #{ angle: 0.4 } },
+	#{ shape: new_circle(vec2(LEFT + 500, y), 150), paragraph: #{ angle: -PI() / 4.0, layout: "words" } },
+	#{ shape: new_rectangle(vec2(LEFT + 850, y), 280, 280), paragraph: #{ angle: PI() / 2.0, line_start_jitter: 13 } },
 ] {
 	text.add(options.shape, CAPTION);
-	options.size = 16;
+	options.type = #{ glyph_scale: 16 };
 	text.add(new_textbox(options).fill(PLAIN.glyphs(LOREM + LOREM + LOREM)).placed, TEXT);
 }
 // An oval round a flat-lidded eye, words kept whole and clear of it.
@@ -1124,83 +1195,98 @@ let oval = new_ellipse(centre, 480, 170);
 let eye = inked_eye(art::eye(centre, 260, #{ gaze_angle: 0.0, messiness: 0.3, seed: 2, flat: true, openness: 0.4, gaze: 0.0 }), BLUE, LINE);
 text.add(eye);
 text.add(oval, CAPTION);
-text.add(new_textbox(#{ shape: oval, angle: 0.15, size: 18, layout: "words", avoid: eye, clearance: 10 }).fill(PLAIN.glyphs(LOREM + LOREM + LOREM)).placed, TEXT);
+text.add(new_textbox(#{ shape: oval, type: #{ glyph_scale: 18 }, paragraph: #{ angle: 0.15, layout: "words", clearance: 10 }, avoid: eye }).fill(PLAIN.glyphs(LOREM + LOREM + LOREM)).placed, TEXT);
 book.bind("text", text);
 
 // Lines aligned in a text box: set from their start, then moved along as
 // far as their glyphs' ink still fits the shape (all the way, or half way),
 // or spread to meet both ends, all but the text's last line.
 let text = sheet("text");
-text.add(subhead("aligned text boxes", TOP));
-text.add(caption("new_textbox #{ align }: left, center, right and justify, in circles", TOP + 50));
+text.add(subhead("paragraph styles", TOP));
+text.add(caption("new_paragraph_style(#{ align }): left, center, right and justify, in circles", TOP + 50));
 let y = TOP + 270;
 for (align, i) in ["left", "center", "right", "justify"] {
 	let at = vec2(LEFT + 125 + i * 255, y);
 	let circle = new_circle(at, 115);
+	let paragraph = new_paragraph_style(#{ layout: "words", align: align });
+	assert(paragraph.align == align && paragraph.layout == "words", "paragraph settings read back");
 	text.add(circle, CAPTION);
-	text.add(new_textbox(#{ shape: circle, size: 26, layout: "words", align: align }).fill(PLAIN.glyphs(LOREM)).placed, TEXT);
+	text.add(new_textbox(#{ shape: circle, type: #{ glyph_scale: 26 }, paragraph: paragraph }).fill(PLAIN.glyphs(LOREM)).placed, TEXT);
 	text.add(write_in(align, at.x - 40, y + 140, 22, CAPTION, PLAIN));
 }
 text.add(caption("justify, words kept whole, a ring; flat, a star: ink meets the edges", TOP + 520));
 let y = TOP + 760;
 let ring = new_circle(vec2(LEFT + 250, y), 200).append(new_circle(vec2(LEFT + 250, y), 80));
 text.add(ring, CAPTION);
-text.add(new_textbox(#{ shape: ring, size: 18, layout: "words", align: "justify" }).fill(PLAIN.glyphs(LOREM + LOREM)).placed, TEXT);
+text.add(new_textbox(#{ shape: ring, type: #{ glyph_scale: 18 }, paragraph: #{ layout: "words", align: "justify" } }).fill(PLAIN.glyphs(LOREM + LOREM)).placed, TEXT);
 let star = new_star(vec2(LEFT + 750, y), 210, 100, 6);
 text.add(star, CAPTION);
-text.add(new_textbox(#{ shape: star, size: 16, align: "justify" }).fill(PLAIN.glyphs(LOREM + LOREM)).placed, TEXT);
-text.add(caption("new_textbox #{ valign }: top, center and bottom, centred lines", TOP + 1000));
+text.add(new_textbox(#{ shape: star, type: #{ glyph_scale: 16 }, paragraph: #{ align: "justify" } }).fill(PLAIN.glyphs(LOREM + LOREM)).placed, TEXT);
+text.add(caption("#{ valign }: top, center and bottom, centred lines", TOP + 1000));
 let y = TOP + 1140;
 for (valign, i) in ["top", "center", "bottom"] {
 	let circle = new_circle(vec2(LEFT + 150 + i * 350, y), 110);
+	let centred = new_paragraph_style(#{ layout: "words", align: "center" });
+	centred.valign = valign;
 	text.add(circle, CAPTION);
-	text.add(new_textbox(#{ shape: circle, size: 26, layout: "words", align: "center", valign: valign }).fill(PLAIN.glyphs("Lorem ipsum dolor sit amet, consectetur adipiscing elit.")).placed, TEXT);
+	text.add(new_textbox(#{ shape: circle, type: #{ glyph_scale: 26 }, paragraph: centred }).fill(PLAIN.glyphs("Lorem ipsum dolor sit amet, consectetur adipiscing elit.")).placed, TEXT);
 }
 book.bind("text", text);
 
 // Text written as a hand writes it: a line from a point, and a block
 // wrapped to a width, line after line, giving where the next text goes.
-// Every text call takes a role's settings (layouts' role keys, so a role
-// can be passed straight in; keys a call doesn't use are ignored), and
-// every one, roles too, can set each glyph a little off true.
+// The style's hand sets each glyph a little off true, in every text call
+// and every role alike.
 let text = sheet("text");
 text.add(subhead("writing by hand", TOP));
-text.add(caption("write_line(text, at, #{ font, size, style })", TOP + 50));
-let BODY = #{ font: PLAIN, size: 26, style: TEXT, line_height: 1.4 };
+text.add(caption("write_line(text, at, #{ style, type, paragraph })", TOP + 50));
+let BODY = #{ style: TEXT, type: new_type_style(PLAIN, 26), paragraph: new_paragraph_style(#{ line_height: 1.4 }) };
 text.add(write_line("Lorem ipsum dolor sit amet, consectetur adipiscing elit.", vec2(LEFT, TOP + 110), BODY));
-text.add(caption("write_block(text, at, width, settings): #{ canvas, bottom }, with line_height, jagged and line_jitter (right)", TOP + 170));
-let block = write_block(LOREM, vec2(LEFT, TOP + 230), 460, BODY + #{ jagged: 0.4 });
+text.add(caption("write_block(text, at, width, settings): #{ canvas, bottom }; line_height, line_start_jitter, line_gap_jitter (right)", TOP + 170));
+let ragged = BODY;
+ragged.paragraph.line_start_jitter = 10;
+let block = write_block(LOREM, vec2(LEFT, TOP + 230), 460, ragged);
 text.add(block.canvas);
 text.add(new_line(vec2(LEFT, block.bottom), vec2(LEFT + 460, block.bottom)), CAPTION);
 text.add(write("bottom", LEFT + 470, block.bottom, 20));
-let narrow = write_block(LOREM, vec2(LEFT + 560, TOP + 230), 440, BODY + #{ font: LOCHE, size: 22, style: new_style(RED, PEN), layout: "flat", line_jitter: 0.25 });
+let narrow = write_block(LOREM, vec2(LEFT + 560, TOP + 230), 440, #{ style: pen(RED), type: new_type_style(LOCHE, 22), paragraph: #{ line_height: 1.4, layout: "flat", line_gap_jitter: 5.5 } });
 text.add(narrow.canvas);
 let y = block.bottom.max(narrow.bottom) + 60;
-text.add(caption("#{ position_jitter, rotation_jitter, scale_jitter }: each glyph a little off true", y));
+text.add(caption("the hand's #{ glyph_position_jitter, glyph_rotation_jitter, glyph_scale_jitter }: each glyph a little off true", y));
 y += 60;
-for (jitter, i) in [#{}, #{ position_jitter: 0.06, rotation_jitter: 0.08, scale_jitter: 0.08 }, #{ position_jitter: [0.02, 0.15], rotation_jitter: 0.25 }] {
-	text.add(write_line("lorem ipsum dolor sit amet", vec2(LEFT, y + i * 70), BODY + #{ font: LOCHE, size: 40 } + jitter));
+for (hand, i) in [#{}, #{ glyph_position_jitter: 2.4, glyph_rotation_jitter: 0.08, glyph_scale_jitter: 0.08 }, #{ glyph_position_jitter: [0.8, 6], glyph_rotation_jitter: 0.25 }] {
+	let style = new_style(new_brush_style(INK, "Ink Pen", 1.6, #{ min_pressure: 0.4, max_pressure: 0.8 }), new_handwriting_style(hand));
+	text.add(write_line("lorem ipsum dolor sit amet", vec2(LEFT, y + i * 70), #{ style: style, type: new_type_style(LOCHE, 40) }));
 }
 y += 230;
 text.add(caption("in a text box, along a path, and in scattered notes alike", y));
-let jostled = #{ position_jitter: 0.03, rotation_jitter: 0.06, scale_jitter: 0.05 };
-text.add(new_textbox(#{ center: vec2(LEFT + 230, y + 170), width: 460, height: 260, size: 22, layout: "words" } + jostled).fill(PLAIN.glyphs(LOREM)).placed, TEXT);
-text.add(new_arc(vec2(820, y + 300), 200, 3.6, 5.8).fit_text("lorem ipsum dolor", BODY + jostled));
+let jostled = TEXT;
+jostled.glyph_position_jitter = 0.7;
+jostled.glyph_rotation_jitter = 0.06;
+jostled.glyph_scale_jitter = 0.05;
+text.add(new_textbox(#{ center: vec2(LEFT + 230, y + 170), width: 460, height: 260, type: #{ glyph_scale: 22 }, paragraph: #{ layout: "words" }, style: jostled }).fill(PLAIN.glyphs(LOREM)).placed, TEXT);
+text.add(new_arc(vec2(820, y + 300), 200, 3.6, 5.8).fit_text("lorem ipsum dolor", BODY + #{ style: jostled }));
 book.bind("text", text);
 
 // Lines written by hand wander: write_line and write_block bend the line
-// they write along by up to path_jitter sizes.
+// they write along by up to the hand's baseline_wander.
 let text = sheet("text");
 text.add(subhead("wandering lines", TOP));
-text.add(caption("write_line(text, at, #{ path_jitter }): the line wanders from straight, 0, 0.15 and 0.3 sizes", TOP + 50));
-for (jitter, i) in [0.0, 0.15, 0.3] {
-	text.add(write_line("lorem ipsum dolor sit amet", vec2(LEFT, TOP + 120 + i * 70), BODY + #{ font: LOCHE, size: 40, path_jitter: jitter }));
+text.add(caption("the hand's #{ baseline_wander }: the line wanders from straight, by 0, 6 and 12", TOP + 50));
+for (wander, i) in [0.0, 6.0, 12.0] {
+	let style = TEXT;
+	style.baseline_wander = wander;
+	text.add(write_line("lorem ipsum dolor sit amet", vec2(LEFT, TOP + 120 + i * 70), #{ style: style, type: new_type_style(LOCHE, 40) }));
 }
 let y = TOP + 360;
-text.add(caption("write_block(text, at, width, #{ path_jitter }): each line its own way, 0.2 sizes; 0.25 and jagged (right)", y));
-let wandering = write_block(LOREM, vec2(LEFT, y + 60), 460, BODY + #{ path_jitter: 0.2 });
+text.add(caption("write_block: each line its own way, by 5; by 5.5 with line_start_jitter (right)", y));
+let wavy = TEXT;
+wavy.baseline_wander = 5;
+let wandering = write_block(LOREM, vec2(LEFT, y + 60), 460, BODY + #{ style: wavy });
 text.add(wandering.canvas);
-let loose = write_block(LOREM, vec2(LEFT + 560, y + 60), 440, BODY + #{ font: LOCHE, size: 22, style: new_style(RED, PEN), layout: "flat", path_jitter: 0.25, jagged: 0.4 });
+let loose_hand = pen(RED);
+loose_hand.baseline_wander = 5.5;
+let loose = write_block(LOREM, vec2(LEFT + 560, y + 60), 440, #{ style: loose_hand, type: new_type_style(LOCHE, 22), paragraph: #{ line_height: 1.4, layout: "flat", line_start_jitter: 9 } });
 text.add(loose.canvas);
 book.bind("text", text);
 
@@ -1243,7 +1329,7 @@ locks.add(caption("huffman (input_base 27, output_base 2, then 3): the letters c
 locks.add(caption(`${corpus} get the shortest codes.`, y + 34));
 locks.add(caption(`${plain}, letter by letter:`, y + 68));
 y += 134;
-let fine = new_style(INK, new_brush("Ink Pen", 0.3, 0.7, 1.2));
+let fine = new_style(new_brush_style(INK, "Ink Pen", 1.2), new_handwriting_style());
 for base in [2, 3] {
 	let huffman = new_lock("huffman").add("h", "huffman", #{ input_base: 27, output_base: base }).set_input("h.corpus", symbols(27, corpus));
 	let result = huffman.run(#{ "h.plain_text": symbols(27, plain) });
@@ -1281,8 +1367,8 @@ assert(fixed.run().text("s.cipher_text") == "FWFSZAMPDLAPQFOT", "a fixed chain r
 let cell_size = 70;
 let maze_canvas = new_canvas();
 let grid = result.get("maze.generated_maze").maze();
-maze_canvas.add(grid.path().scale_by(cell_size), new_style(RED, PEN));
-let ternary = font("balanced_ternary");
+maze_canvas.add(grid.path().scale_by(cell_size), pen(RED));
+let ternary = glyphset("balanced_ternary");
 for cell in grid.cells() {
 	maze_canvas.add(ternary.glyph(cell.symbol - 13, #{ scale: cell_size * 0.8, position: vec2(cell.x * cell_size, cell.y * cell_size) }), SAMPLE);
 }
@@ -1426,8 +1512,8 @@ spread.add(caption("new_page(#{ name, size, margin }).split(#{ columns: 2 }): on
 let path = new_path().move_to(vec2(250, 1300)).cubic_to(vec2(700, 200), vec2(1700, 1500), vec2(2150, 400));
 let serpent = art::snake(vec2(2150, 400), vec2(260, 1250), 3200, #{ head_angle: -0.8, max_width: 90, seed: 11 }).outline;
 spread.add(serpent, LINE);
-spread.add(serpent.hatch(9.0, #{ angle: 0.7, bow: 2.0, inset: 2.0 }), new_style(GREEN, PEN));
-spread.add(path.fill_with_text(LOREM, #{ font: PLAIN, size: 24, style: CAPTION, avoid: serpent, clearance: 10, layout: "words" })[0]);
+spread.add(serpent.hatch(9.0, #{ angle: 0.7, bow: 2.0, inset: 2.0 }), pen(GREEN));
+spread.add(path.fill_with_text(LOREM, #{ style: CAPTION, type: new_type_style(PLAIN, 24), paragraph: #{ clearance: 10, layout: "words" }, avoid: serpent })[0]);
 // Its two halves' folios.
 for half in [0, 1] {
 	spread.add(write_in(`${book.next + half}`, half * W + W / 2 - 8, H - 80, 24, CAPTION, PLAIN));
@@ -1446,34 +1532,42 @@ book.add("spread", tiles);
 // typeset fills. Here: a heading that shrinks to fit, a drop cap the text
 // wraps around, a body flowing down one column and on down the next (and
 // on to a second page), a band of ornaments between them, a figure fitted
-// to its box, a rule, a spacer and a page label. Words beside the drop cap
-// may break round it (split_words, split_padding). Layouts usually live in
-// layouts/ (see the files used below, and layouts/README.md).
+// to its box and outlined, a rule, a spacer and a page label. Words beside
+// the drop cap may break round it (split_words, split_padding). Every box
+// takes #{ flex }, its flex style; slots take a role, and a style, type,
+// paragraph or spans of their own over the role's, whole or as a map.
+// Layouts usually live in layouts/ (see the files used below, and
+// layouts/README.md).
 fn sample_page(n, info) {
+	let grow = new_flex_style(#{ grow: 1 });
 	column([
-		if n == 0 { flow("title", #{ role: "heading", height: 110, fit: true }) } else { spacer(#{ height: 110 }) },
-		rule(#{ height: 10, margin: [0, 250] }),
+		if n == 0 { flow("title", #{ role: "heading", flex: #{ height: 110 }, paragraph: #{ fit: true } }) } else { spacer(#{ flex: #{ height: 110 } }) },
+		rule(#{ flex: #{ height: 10, margin: [0, 250] } }),
 		row([
 			column([
-				if n == 0 { initial("body", #{ position: "absolute", top: 0, left: 0, width: 90, height: 90 }) } else { spacer() },
-				flow("body", #{ grow: 1, split_words: true, split_padding: 0.2 }),
-			], #{ grow: 1 }),
-			band("diamond", #{ width: 14 }),
+				if n == 0 { initial("body", #{ flex: #{ position: "absolute", top: 0, left: 0, width: 90, height: 90 } }) } else { spacer() },
+				flow("body", #{ flex: grow, paragraph: #{ split_words: true, split_padding: 0.2 } }),
+			], #{ flex: grow }),
+			band("diamond", #{ flex: #{ width: 14 } }),
 			column([
-				if n == 0 { figure("plant", #{ height: 360, border: "frame" }) } else { spacer() },
-				flow("body", #{ grow: 1 }),
-			], #{ grow: 1 }),
-		], #{ grow: 1, gap: 30 }),
+				if n == 0 { figure("plant", #{ flex: #{ height: 360, border: global::CAPTION } }) } else { spacer() },
+				flow("body", #{ flex: grow }),
+			], #{ flex: grow }),
+		], #{ flex: #{ grow: 1, gap: 30 } }),
 		// roman(n) for folios: i, ii, iii.
-		label(if n == 0 { "an inline layout" } else { `and on, page ${roman(n + 1)}` }, #{ role: "folio", align: "center", height: 30 }),
-	], #{ padding: [90, 100, 60, 100], gap: 16 })
+		label(if n == 0 { "an inline layout" } else { `and on, page ${roman(n + 1)}` }, #{ role: "folio", flex: #{ height: 30 }, paragraph: #{ align: "center" } }),
+	], #{ flex: #{ padding: [90, 100, 60, 100], gap: 16 } })
 }
+let flex = new_flex_style(#{ grow: 1, padding: 4 });
+flex.gap = 6;
+assert(flex.grow == 1 && flex.gap == 6, "flex settings read back");
 let diamond = new_path().move_to(vec2(0, -10)).line_to(vec2(6, 0)).line_to(vec2(0, 10)).line_to(vec2(-6, 0)).close();
 fn plant_in(b) {
 	let plant = art::bramble(vec2(b.center.x, b.y + b.height), b.height * 0.95, #{ angle: -PI() / 2.0, flower_size: b.height * 0.2, seed: 5 });
-	new_canvas().add(plant, #{ vines: new_style(global::BARK, global::PEN), leaves: new_style(global::GREEN, global::PEN), flowers: new_style(global::INK, global::PEN) })
+	new_canvas().add(plant, #{ vines: pen(global::BARK), leaves: pen(global::GREEN), flowers: pen(global::INK) })
 }
-let body_role = #{ font: PLAIN, style: TEXT, size: 22, align: "justify", indent: 1.5, line_height: 1.3 };
+let body_role = #{ style: TEXT, type: new_type_style(PLAIN, 22), paragraph: new_paragraph_style(#{ align: "justify", indent: 1.5, line_height: 1.3 }) };
+let heading_role = #{ style: HEADING, type: new_type_style(LOCHE, 80), paragraph: #{ align: "center", valign: "center" } };
 let story = LOREM + LOREM + LOREM + "\n\n" + LOREM + LOREM + LOREM + LOREM + LOREM + LOREM + LOREM + LOREM;
 let sample_layout = new_layout("sample", Fn("sample_page"));
 assert(sample_layout.name == "sample", "layouts have names");
@@ -1482,14 +1576,56 @@ for page in sample_layout.typeset(#{
 	flows: #{ title: "Lorem Ipsum", body: story },
 	roles: #{
 		body: body_role,
-		heading: #{ font: LOCHE, style: HEADING, size: 80, align: "center", valign: "center" },
-		initial: #{ font: LOCHE, style: HEADING },
-		folio: #{ font: PLAIN, style: CAPTION, size: 20 },
+		heading: heading_role,
+		initial: #{ style: HEADING, type: #{ glyphset: LOCHE } },
+		folio: #{ style: CAPTION, type: new_type_style(PLAIN, 20) },
 		rule: #{ style: CAPTION },
-		frame: #{ style: CAPTION },
 		diamond: #{ style: CAPTION },
 	},
 	art: #{ diamond: diamond, plant: Fn("plant_in") },
+}) {
+	book.add("layouts", page);
+}
+
+// Flex styles: how boxes size themselves and share room. Each figure is a
+// ring fitted to its box, outlined so the box shows.
+fn flex_page(n, info) {
+	// flex.border = a style outlines a box; maps and flex styles alike.
+	let boxed = |flex| {
+		flex.border = global::CAPTION;
+		figure("ring", #{ flex: flex })
+	};
+	let tile = new_flex_style(#{ width: 90, height: 60 });
+	tile.min_width = 60;
+	column([
+		flow("title", #{ role: "heading", flex: #{ height: 110 } }),
+		label("basis 300, shrink 2; basis 300, shrink 0, min_width 120; width 140, min_height 80, max_height 160; height 120, aspect 1.5, align_self center", #{ role: "caption" }),
+		row([
+			boxed.call(#{ basis: 300, shrink: 2 }),
+			boxed.call(#{ basis: 300, shrink: 0, min_width: 120 }),
+			boxed.call(#{ width: 140, min_height: 80, max_height: 160 }),
+			boxed.call(#{ height: 120, aspect: 1.5, align_self: "center" }),
+		], #{ flex: #{ height: 220, gap: 20 } }),
+		label("wrap: true, align_content: space_between: tiles wrapping onto lines spread down the row", #{ role: "caption" }),
+		row([boxed.call(tile), boxed.call(tile), boxed.call(tile), boxed.call(tile), boxed.call(tile), boxed.call(tile), boxed.call(tile), boxed.call(tile), boxed.call(tile), boxed.call(tile), boxed.call(tile), boxed.call(tile)],
+			#{ flex: #{ height: 240, gap: 20, wrap: true, align_content: "space_between" } }),
+		label("a band's turn: 0.5", #{ role: "caption" }),
+		band("wedge", #{ flex: #{ height: 40, turn: 0.5 } }),
+		label("paragraph_gap: 1.5 lines between paragraphs", #{ role: "caption" }),
+		flow("body", #{ flex: #{ grow: 1 }, paragraph: #{ paragraph_gap: 1.5 } }),
+	], #{ flex: #{ padding: [90, 100, 60, 100], gap: 20 } })
+}
+for page in new_layout("flex", Fn("flex_page")).typeset(#{
+	width: W, height: H, max_pages: 1,
+	flows: #{ title: "Flex Styles", body: LOREM + "\n\n" + LOREM },
+	roles: #{
+		heading: heading_role,
+		caption: #{ style: CAPTION, type: new_type_style(PLAIN, 22) },
+		body: body_role,
+		ring: #{ style: pen(BLUE) },
+		wedge: #{ style: pen(BLUE) },
+	},
+	art: #{ ring: new_circle(vec2(0, 0), 10), wedge: new_path().move_to(vec2(-10, 0)).line_to(vec2(10, -4)).line_to(vec2(10, 4)).close() },
 }) {
 	book.add("layouts", page);
 }
@@ -1501,10 +1637,10 @@ for page in layout("two_column_article").typeset(#{
 	flows: #{ title: "Dolor Sit Amet", body: LOREM + LOREM + LOREM + LOREM + LOREM + LOREM, caption: "consectetur adipiscing" },
 	roles: #{
 		body: body_role,
-		heading: #{ font: font("copper"), style: HEADING, size: 90 },
-		caption: #{ font: PLAIN, style: CAPTION, size: 22, align: "center" },
-		initial: #{ font: font("copper"), style: HEADING },
-		folio: #{ font: PLAIN, style: CAPTION, size: 22 },
+		heading: #{ style: HEADING, type: new_type_style(glyphset("copper"), 90) },
+		caption: #{ style: CAPTION, type: new_type_style(PLAIN, 22), paragraph: #{ align: "center" } },
+		initial: #{ style: HEADING, type: #{ glyphset: glyphset("copper") } },
+		folio: #{ style: CAPTION, type: new_type_style(PLAIN, 22) },
 		rule: #{ style: CAPTION },
 		divider: #{ style: CAPTION },
 	},
@@ -1517,22 +1653,23 @@ for page in layout("two_column_article").typeset(#{
 for page in layout("captioned_figure").typeset(#{
 	width: W, height: H,
 	flows: #{ caption: "sed do eiusmod tempor incididunt" },
-	roles: #{ caption: #{ font: PLAIN, style: CAPTION, size: 28 } },
+	roles: #{ caption: #{ style: CAPTION, type: new_type_style(PLAIN, 28) } },
 	art: #{ figure: Fn("plant_in") },
 }) {
 	book.add("layouts", page);
 }
 
 // Marked-up text: markdown(text) makes a flow that's styled as it's set.
-// *emphasis* and **strong** look as the role's em and strong say (by
-// default italic, and gone over twice); ~~text~~ is struck through; and
-// [text]{settings} sets its own colour, passes, jitter, point_jitter,
-// lean, size, character padding and word spacing, and lines under and through it.
-// Lines run across the spaces in what they mark, and break where the text
-// does: at the ends of lines, and either side of what it wraps round.
+// *emphasis* and **strong** are the spans em and strong (by default
+// italic, and gone over twice); ~~text~~ is struck through; and
+// [text]{settings} names spans and sets a style's and a type's settings
+// of its own, lines under and through it among them. Spans are named in
+// a role's spans and in markdown(text, #{ spans }), which win. Lines run
+// across the spaces in what they mark, and break where the text does: at
+// the ends of lines, and either side of what it wraps round.
 fn markdown_page(n, info) {
 	column([
-		flow("title", #{ role: "heading", height: 110 }),
+		flow("title", #{ role: "heading", flex: #{ height: 110 } }),
 		flow("marks_label", #{ role: "caption" }),
 		flow("marks"),
 		flow("spans_label", #{ role: "caption" }),
@@ -1541,16 +1678,25 @@ fn markdown_page(n, info) {
 		flow("rules"),
 		flow("roles_label", #{ role: "caption" }),
 		flow("roles", #{ role: "loud" }),
+		flow("names_label", #{ role: "caption" }),
+		flow("names"),
 		flow("wrap_label", #{ role: "caption" }),
 		column([
-			figure("seal", #{ position: "absolute", top: 10, left: 360, width: 280, height: 280, wrap: "hull" }),
-			flow("wrap", #{ grow: 1, split_words: true, split_padding: 0.3 }),
-		], #{ grow: 1 }),
-		label("markdown(text)", #{ role: "folio", align: "center", height: 30 }),
-	], #{ padding: [90, 100, 60, 100], gap: 12 })
+			figure("seal", #{ flex: #{ position: "absolute", top: 10, left: 360, width: 280, height: 280, text_wrap: "hull" } }),
+			flow("wrap", #{ flex: #{ grow: 1 }, paragraph: #{ split_words: true, split_padding: 0.3 } }),
+		], #{ flex: #{ grow: 1 } }),
+		label("markdown(text)", #{ role: "folio", flex: #{ height: 30 }, paragraph: #{ align: "center" } }),
+	], #{ flex: #{ padding: [90, 100, 60, 100], gap: 12 } })
 }
-let marked = #{ font: PLAIN, style: TEXT, size: 24, line_height: 1.45 };
-let loud = marked + #{ em: #{ color: RED }, strong: #{ underline: true, passes: 2, jitter: 1 }, rotation_jitter: 0.05 };
+let marked = #{ style: TEXT, type: new_type_style(PLAIN, 24), paragraph: #{ line_height: 1.45 } };
+let shaky = TEXT;
+shaky.glyph_rotation_jitter = 0.05;
+let loud = marked + #{
+	style: shaky,
+	spans: #{ em: #{ style: #{ color: RED } }, strong: #{ type: #{ underline: true }, style: #{ passes: 2, pass_end_jitter: 1 } } },
+};
+// Named spans: the role's, and the text's own over them.
+let named = marked + #{ spans: #{ warn: #{ style: pen(RED) }, aside: #{ type: #{ glyph_scale_factor: 0.8, italic: true } } } };
 for page in new_layout("marked", Fn("markdown_page")).typeset(#{
 	width: W, height: H,
 	flows: #{
@@ -1558,22 +1704,24 @@ for page in new_layout("marked", Fn("markdown_page")).typeset(#{
 		// escape_markdown(text): text set as it is, its marks escaped.
 		marks_label: markdown(escape_markdown("*emphasis* or _emphasis_, **strong**, ***both***, ~~struck through~~; escape_markdown(text) sets marks as they are")),
 		marks: markdown("Lorem ipsum *dolor sit amet*, consectetur _adipiscing_ elit, **sed do eiusmod** tempor ~~incididunt ut labore~~ et dolore magna aliqua. Ut enim ***ad minim*** veniam, quis nostrud exercitation."),
-		spans_label: "[text]{color, size, italic, skew, passes, jitter, point_jitter, character_padding, word_spacing}",
-		spans: markdown("Lorem ipsum [dolor sit]{color: #9b2318} amet, [consectetur]{size: 1.6} adipiscing [elit]{size: 0.7}, [sed do eiusmod]{italic} tempor [incididunt]{skew: -0.3} ut [labore et dolore]{passes: 4, jitter: 2.5} magna [aliqua]{point_jitter: 2}, [aliqua ut enim]{character_padding: 0.5} ad [minim veniam quis nostrud]{word_spacing: 1.4} exercitation, [ullamco [laboris]{size: 1.5} nisi]{color: #9b2318, italic}."),
-		rules_label: "underline: true, a count, or {count, spacing, color, passes, jitter, point_jitter}; strike (strikethrough) likewise",
-		rules: markdown("Lorem ipsum [dolor sit amet]{underline} consectetur [adipiscing elit]{underline: 2} sed do [eiusmod tempor incididunt ut labore et dolore magna aliqua, ut enim ad minim veniam]{underline: {color: #9b2318}} quis nostrud ~~exercitation~~ ullamco [laboris nisi ut aliquip]{strike: {count: 3, color: #9b2318}} ex ea [commodo consequat]{color: #9b2318, strike: {count: 4, spacing: 0.2, color: #2b1d12, jitter: 1.5}}."),
-		roles_label: "a role's em and strong: em: #{ color }, strong: #{ underline: true, passes: 2, jitter: 1 }; rotation_jitter: 0.05",
+		spans_label: "[text]{color, glyph_scale_factor, italic, skew, passes, pass_end_jitter, stroke_point_jitter, glyph_outline_gap, space_width}",
+		spans: markdown("Lorem ipsum [dolor sit]{color: #9b2318} amet, [consectetur]{glyph_scale_factor: 1.6} adipiscing [elit]{glyph_scale_factor: 0.7}, [sed do eiusmod]{italic} tempor [incididunt]{skew: -0.3} ut [labore et dolore]{passes: 4, pass_end_jitter: 2.5} magna [aliqua]{stroke_point_jitter: 2}, [aliqua ut enim]{glyph_outline_gap: 0.5} ad [minim veniam quis nostrud]{space_width: 1.4} exercitation, [ullamco [laboris]{glyph_scale_factor: 1.5} nisi]{color: #9b2318, italic}."),
+		rules_label: "underline: true, a count, or {count, spacing, style}; strike likewise",
+		rules: markdown("Lorem ipsum [dolor sit amet]{underline} consectetur [adipiscing elit]{underline: 2} sed do [eiusmod tempor incididunt ut labore et dolore magna aliqua, ut enim ad minim veniam]{underline: {style: {color: #9b2318}}} quis nostrud ~~exercitation~~ ullamco [laboris nisi ut aliquip]{strike: {count: 3, style: {color: #9b2318}}} ex ea [commodo consequat]{color: #9b2318, strike: {count: 4, spacing: 0.2, style: {color: #2b1d12, pass_end_jitter: 1.5}}}."),
+		roles_label: "a role's spans: em: #{ style: #{ color } }, strong: #{ type: #{ underline: true }, style: #{ passes: 2, pass_end_jitter: 1 } }",
 		roles: markdown("Lorem ipsum *dolor sit* amet, **consectetur adipiscing** elit, sed *do eiusmod* tempor **incididunt** ut labore."),
+		names_label: "named spans: [text]{warn}, [text]{warn, color: ...}; the role's warn and aside, and markdown(text, #{ spans }) over them",
+		names: markdown("Lorem ipsum [dolor sit amet]{warn}, consectetur [adipiscing elit]{aside}, sed do [eiusmod tempor]{warn, color: #1f4e7a} incididunt ut [labore et dolore]{loud} magna aliqua.", #{ spans: #{ loud: #{ type: #{ glyph_scale_factor: 1.3 }, style: #{ passes: 2, pass_end_jitter: 1.5 } } } }),
 		wrap_label: "wrapped round a figure with split_words: marked words, and their lines, break either side",
-		wrap: markdown("[Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt]{underline} ut labore et dolore magna aliqua. Ut enim ad minim veniam, [quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat]{strike: {count: 2, color: #9b2318}}. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. [Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum]{underline: {count: 2, color: #9b2318}}."),
+		wrap: markdown("[Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt]{underline} ut labore et dolore magna aliqua. Ut enim ad minim veniam, [quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat]{strike: {count: 2, style: {color: #9b2318}}}. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. [Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum]{underline: {count: 2, style: {color: #9b2318}}}."),
 	},
 	roles: #{
-		heading: #{ font: LOCHE, style: HEADING, size: 80, align: "center", valign: "center" },
-		caption: #{ font: PLAIN, style: CAPTION, size: 20 },
-		marks: marked, spans: marked, rules: marked, loud: loud,
-		wrap: marked + #{ align: "justify" },
+		heading: heading_role,
+		caption: #{ style: CAPTION, type: new_type_style(PLAIN, 20) },
+		marks: marked, spans: marked, rules: marked, loud: loud, names: named,
+		wrap: marked + #{ paragraph: #{ line_height: 1.45, align: "justify" } },
 		seal: #{ style: CAPTION },
-		folio: #{ font: PLAIN, style: CAPTION, size: 20 },
+		folio: #{ style: CAPTION, type: new_type_style(PLAIN, 20) },
 	},
 	art: #{ seal: seal(vec2(0, 0)) },
 }) {
@@ -1588,9 +1736,9 @@ let title = layout("bordered_title").typeset(#{
 	width: W, height: H,
 	flows: #{ title: "The Showcase", subtitle: "a sample book of everything there is to draw with", credits: "set with a layout file:\nlayouts/bordered_title.rhai" },
 	roles: #{
-		title: #{ font: font("copper"), style: HEADING, size: 150, line_height: 1.0 },
-		subtitle: #{ font: PLAIN, style: TEXT, size: 34 },
-		credits: #{ font: PLAIN, style: TEXT, size: 26 },
+		title: #{ style: HEADING, type: new_type_style(glyphset("copper"), 150), paragraph: #{ line_height: 1.0 } },
+		subtitle: #{ style: TEXT, type: new_type_style(PLAIN, 34) },
+		credits: #{ style: TEXT, type: new_type_style(PLAIN, 26) },
 		frame: #{ style: CAPTION },
 		border: #{ style: LINE },
 	},
@@ -1603,7 +1751,7 @@ let contents = sheet("contents");
 let y = TOP + 40;
 for entry in book.contents {
 	contents.add(write_in(entry[0], LEFT + 60, y, 40, HEADING, LOCHE));
-	contents.add(new_line(vec2(420, y + 12), vec2(980, y + 12)), new_style(RED, new_brush("Ink Pen", 0.2, 0.4, 1)));
+	contents.add(new_line(vec2(420, y + 12), vec2(980, y + 12)), new_style(new_brush_style(RED, "Ink Pen", 1, #{ min_pressure: 0.2, max_pressure: 0.4 }), new_handwriting_style()));
 	contents.add(write(`${entry[1]}`, 1010, y, 30));
 	y += 110;
 }

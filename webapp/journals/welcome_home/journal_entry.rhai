@@ -19,10 +19,11 @@ const NAVY = "#2b4184";
 const DARK_NAVY = "#0b1433";
 
 const FLOWER_SIZE = 52.0;
-const VINE_PEN = new_brush("Rough Ink", 0.3, 0.6, 2.0, #{ pressure_profile: "taper", pressure_variation: 0.15, pool: 0.5, pool_depth: 0.4 });
-const LEAF_PEN = new_brush("Rough Ink", 0.3, 0.6, 2.0, #{ pressure_profile: "taper", pressure_variation: 0.15, pool: 0.9, pool_depth: 0.5 });
-const VINE_INK = new_style(new_gradient(["#0b0b0b", "#3f7d47"]), VINE_PEN);
-const LEAF_INK = new_style("#0b0b0b", LEAF_PEN);
+const VINE_PEN = new_brush_style(new_gradient(["#0b0b0b", "#3f7d47"]), "Rough Ink", 2.0, #{ max_pressure: 0.6, pressure_profile: "taper", pressure_wander: 0.15, pool: 0.5, pool_depth: 0.4 });
+const LEAF_PEN = new_brush_style("#0b0b0b", "Rough Ink", 2.0, #{ max_pressure: 0.6, pressure_profile: "taper", pressure_wander: 0.15, pool: 0.9, pool_depth: 0.5 });
+const STEADY = new_handwriting_style();
+const VINE_INK = new_style(VINE_PEN, STEADY);
+const LEAF_INK = new_style(LEAF_PEN, STEADY);
 const FLOWER_BLUE = "#2f6dff";
 const FLOWER_CENTRE = "#000000";
 
@@ -70,7 +71,9 @@ fn draw_bramble(canvas, plant) {
 	for f in flowers {
 		let b = f.path.bounds();
 		let ink = new_gradient([global::FLOWER_CENTRE, global::DARK_NAVY, global::FLOWER_BLUE], #{ center: b.center, radius: b.width.max(b.height).max(1.0) * 0.55 });
-		canvas.add(f.path, new_style(ink, global::VINE_PEN));
+		let pen = global::VINE_PEN;
+		pen.color = ink;
+		canvas.add(f.path, new_style(pen, global::STEADY));
 	}
 }
 

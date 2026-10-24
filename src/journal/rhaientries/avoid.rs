@@ -2,30 +2,29 @@
 //!
 //! ```rhai
 //! let avoid = new_avoidance_tree();
-//! avoid.add(border, #{ clearance: 8 });   // keep 8 units from a path's lines
-//! avoid.add(drawing, #{ clearance: 4 });  // from a canvas's marks (their edges, not their middles)
-//! avoid.add(glyphs, #{ clearance: 2 });   // from glyphs' outlines, insides included
+//! avoid.add(border, #{ margin: 8 });    // keep 8 units from a path's lines
+//! avoid.add(drawing, #{ margin: 4 });   // from a canvas's marks (their edges, not their middles)
+//! avoid.add(glyphs, #{ margin: 2 });    // from glyphs' outlines, insides included
 //! avoid.add_region(new_circle(vec2(0.0, 0.0), 80.0));   // out of a closed shape
-//! avoid.add_hull(drawing, #{ clearance: 10.0 });   // out of everything inside a drawing's outline
+//! avoid.add_hull(drawing, #{ margin: 10.0 });   // out of everything inside a drawing's outline
 //! avoid.add(other_tree);            // everything another tree avoids
-//! avoid.add([border, drawing], #{ clearance: 3 });   // arrays of any of these
+//! avoid.add([border, drawing], #{ margin: 3 });   // arrays of any of these
 //! avoid.blocks(vec2(10.0, 0.0)); // whether a point is too close to something
 //! avoid.blocks(glyph);              // whether a placed glyph is
 //! ```
 //!
-//! Every text layout function takes `avoid` and `clearance` options:
+//! Every text layout function takes an `avoid` option, and keeps the
+//! paragraph's `clearance` from it:
 //!
 //! ```rhai
-//! new_textbox(#{ center: c, width: 400, height: 300, size: 20.0, avoid: avoid });
-//! path.fill_with_text(msg, #{ font: font, size: 20.0, style: style, avoid: drawing, clearance: 6.0 });
-//! path.fit_text(msg, #{ font: font, style: style, avoid: [drawing, border] });
-//! canvas.scatter_notes(msgs, [200, 400], [100, 200], #{ font: font, style: style, size: 20.0, avoid: avoid });
+//! new_textbox(#{ center: c, width: 400, height: 300, type: #{ glyph_scale: 20 }, avoid: avoid });
+//! path.fill_with_text(msg, #{ type: body, avoid: drawing, paragraph: #{ clearance: 6.0 } });
 //! ```
 //!
 //! `avoid` is a tree, or a path, canvas or glyph, or an array of any of
 //! these. Glyphs keep their whole outline (the hull of their strokes) at
-//! least `clearance` from all of it: by default an eighth of the symbol
-//! scale, added to any clearance a tree was built with. Glyphs placed by one
+//! least `clearance` from all of it (3 canvas units unless the paragraph
+//! says), on top of any margin a tree was built with. Glyphs placed by one
 //! call keep clear of each other too, so text on a path that loops back
 //! doesn't land on itself.
 //!
@@ -34,10 +33,9 @@
 //! off what's just been placed. Canvases, paths and glyphs are taken as
 //! they are when passed.
 
-use rhai::{Array, Dynamic, Engine, EvalAltResult, Map};
+use rhai::{Array, Dynamic, Engine, Map};
 
 use super::glyphs::Glyph;
-use super::options::number;
 use super::{Canvas, Path, Shared, Vec2};
 use crate::journal::avoid::AvoidanceTree;
 use crate::journal::canvas::Canvas as JournalCanvas;
@@ -48,9 +46,6 @@ use super::RhaiResult;
 
 /// An avoidance tree as scripts see it (see `Shared`).
 pub type Avoid = Shared<AvoidanceTree>;
-
-/// The default clearance, as a fraction of the symbol scale.
-pub const DEFAULT_CLEARANCE: f32 = 0.125;
 
 /// A tree of what `item` covers, items `clearance` away. Trees given keep
 /// their own clearances.
@@ -123,42 +118,23 @@ fn add_hull(a: &mut Avoid, item: Dynamic, clearance: f32) -> RhaiResult<Avoid> {
     Ok(a.update(|tree| tree.add_hull(&points, clearance + reach)))
 }
 
-/// `#{ clearance }`, as tree.add, add_hull and add_region take it: 0 by
-/// default.
-fn clearance_option(caller: &str, options: &Map) -> RhaiResult<f32> {
-    super::options::check_keys(caller, options, &["clearance"])?;
-    options.get("clearance").map_or(Ok(0.0), |c| clearance_arg(caller, c.clone()))
+/// `#{ margin }`, as tree.add, add_hull and add_region take it: how far
+/// to keep from the item, 0 by default.
+fn margin_option(caller: &str, options: &Map) -> RhaiResult<f32> {
+    super::options::check_keys(caller, options, &["margin"])?;
+    options.get("margin").map_or(Ok(0.0), |m| Ok(super::options::at_least_zero(caller, "margin", m)? as f32))
 }
 
-fn clearance_arg(caller: &str, clearance: Dynamic) -> RhaiResult<f32> {
-    let value = clearance.as_float().map(|f| f as f32).or_else(|_| clearance.as_int().map(|i| i as f32))
-        .map_err(|t| -> Box<EvalAltResult> { format!("{}: clearance should be a number, got {}", caller, t).into() })?;
-    if !(value >= 0.0) || !value.is_finite() {
-        return Err(format!("{}: clearance must be a finite number of at least 0, got {}", caller, value).into());
-    }
-    Ok(value)
-}
-
-/// The `avoid` and `clearance` options: what to keep clear of, and how far
-/// to keep from it beyond its own clearances (by default
-/// `DEFAULT_CLEARANCE` of the symbol scale, so `None` until the scale is
-/// known).
+/// The `avoid` option, what to keep clear of, and how far to keep from it
+/// beyond its own margins: the paragraph's `clearance`.
 pub struct AvoidOption {
     pub tree: Option<Avoid>,
-    pub clearance: Option<f32>,
+    clearance: f32,
 }
 
 impl AvoidOption {
-    /// `clearance` alone is an error unless `alone_ok`: for callers that
-    /// avoid something anyway.
-    pub fn parse(caller: &str, options: &Map, alone_ok: bool) -> RhaiResult<Self> {
-        let clearance = match number(caller, options, "clearance")? {
-            Some(c) if c >= 0.0 && c.is_finite() => Some(c),
-            Some(c) => return Err(format!("{}: 'clearance' must be a finite number of at least 0, got {}", caller, c).into()),
-            None => None,
-        };
+    pub fn parse(caller: &str, options: &Map, clearance: f32) -> RhaiResult<Self> {
         let tree = match options.get("avoid") {
-            None if clearance.is_some() && !alone_ok => return Err(format!("{}: 'clearance' needs 'avoid'", caller).into()),
             None => None,
             // A tree alone is used as it is, so later changes reach it.
             Some(item) => match item.clone().try_cast::<Avoid>() {
@@ -169,9 +145,9 @@ impl AvoidOption {
         Ok(AvoidOption { tree, clearance })
     }
 
-    /// How far glyphs at `size` keep from what they avoid.
-    pub fn padding(&self, symbol_scale: f32) -> f32 {
-        self.clearance.unwrap_or(symbol_scale * DEFAULT_CLEARANCE)
+    /// How far glyphs keep from what they avoid.
+    pub fn padding(&self) -> f32 {
+        self.clearance
     }
 }
 
@@ -186,7 +162,7 @@ pub fn register(engine: &mut Engine) {
             Ok(a.update(|tree| tree.merge(&more)))
         })
         .register_fn("add", |a: &mut Avoid, item: Dynamic, options: Map| -> RhaiResult<Avoid> {
-            let more = tree_of("add", item, clearance_option("add", &options)?)?;
+            let more = tree_of("add", item, margin_option("add", &options)?)?;
             Ok(a.update(|tree| tree.merge(&more)))
         })
         .register_fn("add_region", |a: &mut Avoid, path: Path| -> Avoid {
@@ -194,13 +170,13 @@ pub fn register(engine: &mut Engine) {
             a.update(|tree| tree.add_region(&path, 0.0))
         })
         .register_fn("add_region", |a: &mut Avoid, path: Path, options: Map| -> RhaiResult<Avoid> {
-            let clearance = clearance_option("add_region", &options)?;
+            let clearance = margin_option("add_region", &options)?;
             let path = path.get();
             Ok(a.update(|tree| tree.add_region(&path, clearance)))
         })
         .register_fn("add_hull", |a: &mut Avoid, item: Dynamic| add_hull(a, item, 0.0))
         .register_fn("add_hull", |a: &mut Avoid, item: Dynamic, options: Map| -> RhaiResult<Avoid> {
-            add_hull(a, item, clearance_option("add_hull", &options)?)
+            add_hull(a, item, margin_option("add_hull", &options)?)
         })
         .register_fn("blocks", |a: &mut Avoid, point: Vec2| a.borrow().blocks_point(point.into()))
         .register_fn("blocks", |a: &mut Avoid, glyph: Glyph| {
@@ -231,13 +207,13 @@ mod tests {
     #[test]
     fn trees_block_near_what_was_added() {
         let ok: bool = eval(r#"
-            let style = new_style("black", new_brush("Ink Pen", 0.3, 0.7, 2.0));
+            let style = new_style(new_brush_style("black", "Ink Pen", 2.0), new_handwriting_style());
             let c = new_canvas();
             c.add(new_line(vec2(0.0, 100.0), vec2(100.0, 100.0)), style);
             let avoid = new_avoidance_tree();
             if !avoid.is_empty { throw "should start empty"; }
-            avoid.add(new_line(vec2(0.0, 0.0), vec2(100.0, 0.0)), #{ clearance: 5 })
-                .add(c, #{ clearance: 3.0 })
+            avoid.add(new_line(vec2(0.0, 0.0), vec2(100.0, 0.0)), #{ margin: 5 })
+                .add(c, #{ margin: 3.0 })
                 .add_region(new_circle(vec2(500.0, 0.0), 50.0));
             // The canvas's brush reaches 1 either side of its line.
             [avoid.blocks(vec2(50.0, 4.0)), !avoid.blocks(vec2(50.0, 6.0)),
@@ -253,10 +229,10 @@ mod tests {
         let ok: bool = eval(r#"
             let a = new_avoidance_tree();
             let b = a;
-            let g = font("symbols").glyph("basic_eye").scale_by(20.0);
+            let g = glyphset("symbols").glyph("basic_eye").scale_by(20.0);
             b.add([g, new_line(vec2(100.0, 0.0), vec2(200.0, 0.0))]);
             let c = a.copy();
-            c.add(new_line(vec2(0.0, 500.0), vec2(10.0, 500.0)), #{ clearance: 1.0 });
+            c.add(new_line(vec2(0.0, 500.0), vec2(10.0, 500.0)), #{ margin: 1.0 });
             a.add(a);   // adding itself doesn't hang or fail
             [a.blocks(vec2(0.0, 0.0)), a.blocks(g), a.blocks(vec2(150.0, 0.0)),
              !a.blocks(vec2(5.0, 500.0)), c.blocks(vec2(5.0, 500.0))].all(|b| b)
@@ -267,13 +243,13 @@ mod tests {
     #[test]
     fn hulls_cover_the_gaps_inside_a_drawing() {
         let ok: bool = eval(r#"
-            let style = new_style("black", new_brush("Ink Pen", 0.3, 0.7, 2.0));
+            let style = new_style(new_brush_style("black", "Ink Pen", 2.0), new_handwriting_style());
             let c = new_canvas();
             c.add(new_line(vec2(0.0, 0.0), vec2(100.0, 0.0)), style);
             c.add(new_line(vec2(0.0, 100.0), vec2(100.0, 100.0)), style);
             let lines = new_avoidance_tree().add(c);
-            let hull = new_avoidance_tree().add_hull(c, #{ clearance: 5.0 });
-            // Brush reach (1) plus the clearance.
+            let hull = new_avoidance_tree().add_hull(c, #{ margin: 5.0 });
+            // Brush reach (1) plus the margin.
             [!lines.blocks(vec2(50.0, 50.0)), hull.blocks(vec2(50.0, 50.0)),
              hull.blocks(vec2(50.0, -5.5)), !hull.blocks(vec2(50.0, -6.5))].all(|b| b)
         "#);
@@ -282,13 +258,13 @@ mod tests {
     }
 
     #[test]
-    fn bad_items_and_clearances_fail_at_their_line() {
+    fn bad_items_and_margins_fail_at_their_line() {
         for (script, want) in [
             ("let a = new_avoidance_tree();\na.add(3);", "add: can't avoid a i64"),
-            ("let a = new_avoidance_tree();\na.add(new_line(vec2(0.0, 0.0), vec2(1.0, 0.0)), #{ clearance: -1.0 });", "clearance must be a finite number of at least 0"),
-            ("let a = new_avoidance_tree();\na.add(new_line(vec2(0.0, 0.0), vec2(1.0, 0.0)), #{ clearance: \"far\" });", "clearance should be a number"),
-            ("let ok = 1;\nnew_textbox(#{ center: vec2(0.0, 0.0), width: 10, height: 10, size: 2, avoid: [1] });", "new_textbox 'avoid': can't avoid a i64"),
-            ("let ok = 1;\nnew_textbox(#{ center: vec2(0.0, 0.0), width: 10, height: 10, size: 2, clearance: 3 });", "'clearance' needs 'avoid'"),
+            ("let a = new_avoidance_tree();\na.add(new_line(vec2(0.0, 0.0), vec2(1.0, 0.0)), #{ margin: -1.0 });", "add: 'margin' can't be negative"),
+            ("let a = new_avoidance_tree();\na.add(new_line(vec2(0.0, 0.0), vec2(1.0, 0.0)), #{ margin: \"far\" });", "add: 'margin' should be a number"),
+            ("let a = new_avoidance_tree();\na.add(new_line(vec2(0.0, 0.0), vec2(1.0, 0.0)), #{ clearance: 1 });", "add: unknown option 'clearance'; options: margin"),
+            ("let ok = 1;\nnew_textbox(#{ center: vec2(0.0, 0.0), width: 10, height: 10, type: #{ glyph_scale: 2 }, avoid: [1] });", "new_textbox 'avoid': can't avoid a i64"),
         ] {
             let err = fails(script);
             assert!(err.contains(want) && err.contains("line 2"), "{}: {}", want, err);

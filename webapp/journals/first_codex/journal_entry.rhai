@@ -11,14 +11,14 @@ let fill_radius = size * 0.75;
 
 // Nib sizes are in canvas units, like everything else; 2.15 keeps the look
 // of the legacy render (which fit this page to 1080 px with a 1.75 nib).
-let brush = new_brush("Calligraphy", 0.15, 0.25, 2.15);
+let steady = new_handwriting_style();
 
 // Five faint passes trace each ring.
-let guide = new_style("hsla(150, 30%, 50%, 0.1)", brush, #{ width: 2.5, passes: 5 });
-let ink = new_style("rgba(0, 0, 0, 0.7)", brush, #{ width: 2.5 });
-let wash = new_style("hsla(150, 30%, 70%, 0.3)", brush, #{ width: 2.0 });
+let guide = new_style(new_brush_style("hsla(150, 30%, 50%, 0.1)", "Calligraphy", 2.15, #{ min_pressure: 0.375, max_pressure: 0.625 }), new_handwriting_style(#{ passes: 5 }));
+let ink = new_style(new_brush_style("rgba(0, 0, 0, 0.7)", "Calligraphy", 2.15, #{ min_pressure: 0.375, max_pressure: 0.625 }), steady);
+let wash = new_style(new_brush_style("hsla(150, 30%, 70%, 0.3)", "Calligraphy", 2.15, #{ min_pressure: 0.3, max_pressure: 0.5 }), steady);
 
-let font = ternary_font("balanced_ternary");
+let font = ternary_glyphset("balanced_ternary");
 let codex = new_canvas();
 
 for (ring_size, ring) in ring_sizes {

@@ -3,24 +3,26 @@ const DARK_NAVY = "#0b1433";
 
 const SIZE = 60.0;
 const TEXT_INK = new_gradient([NAVY, DARK_NAVY], #{ vertical: true });
-const TEXT_PEN = new_brush("Rough Ink", 0.3, 0.6, 2.0, #{ pressure_profile: "taper", pressure_variation: 0.15, pool: 0.5, pool_depth:0.4 });
-let ink = TEXT_INK;
-let pen = TEXT_PEN;
+const TEXT_PEN = new_brush_style(TEXT_INK, "Rough Ink", 2.0, #{ max_pressure: 0.6, pressure_profile: "taper", pressure_wander: 0.15, pool: 0.5, pool_depth: 0.4 });
+const STEADY = new_handwriting_style();
+
+// `pen` in `colour`, by a steady hand.
+fn inked(colour, pen) {
+	pen.color = colour;
+	new_style(pen, global::STEADY)
+}
+
 // Words set a little closer than copper's own spacing.
-let copper = font("copper");
+let copper = glyphset("copper");
 copper.space_width = 0.38;
 let hand = #{
-	font: copper,
-	size: SIZE,
-	style: new_style(ink, pen),
+	// Each glyph a little off true, each line wandering.
+	style: new_style(TEXT_PEN, new_handwriting_style(#{
+		glyph_rotation_jitter: 0.06, glyph_position_jitter: [SIZE * 0.04, SIZE * 0.06], baseline_wander: SIZE * 0.12,
+	})),
 	// Letters a touch further apart than copper sets them.
-	spacing: 0.05,
-	line_height: 1.5,
-	jagged: 0.5,
-	rotation_jitter: 0.06,
-	position_jitter: [0.04, 0.06],
-	line_jitter: 0.15,
-	path_jitter: 0.12,
+	type: new_type_style(copper, SIZE, #{ glyph_tracking: 0.05 }),
+	paragraph: new_paragraph_style(#{ line_height: 1.5, line_start_jitter: SIZE * 0.5, line_gap_jitter: SIZE * 0.15 }),
 };
 
 // The layout for this should be fairly straightforward, as if they are being written in small pages. I want 13 straight-edged eyes with the navy blue/light teal colors as gradiants scattered throughout, with the text tightly wrapping around them (but not through them). Each should be gazing at a single point per page. I want the pen type of the color for eyes to utilize a mostly transparent color, but then have multiple jittered copies of the color part (each with slightly different coloring) interleaving to give some texture and depth to the color.
@@ -57,11 +59,11 @@ const COPY_ALPHA = 0.4;
 // black, gone over several times:
 // each pass its own copy of the lines, shifted, turned and scaled a little
 // about the eye's centre.
-const EYE_PEN = new_brush("Rough Ink", 0.3, 0.6, 2.0, #{ pressure_profile: "taper", pressure_variation: 0.15, pool: 0.85, pool_depth: 0.6 });
-const EYE_INK = new_style(new_gradient([NAVY, "#000000"], #{ vertical: true }), EYE_PEN, #{ point_jitter: 10.0 });
+const EYE_PEN = new_brush_style(new_gradient([NAVY, "#000000"], #{ vertical: true }), "Rough Ink", 2.0, #{ max_pressure: 0.6, pressure_profile: "taper", pressure_wander: 0.15, pool: 0.85, pool_depth: 0.6 });
+const EYE_INK = new_style(EYE_PEN, new_handwriting_style(#{ stroke_point_jitter: 10.0 }));
 // A second go over the colour, smearing it along the same lines, the
 // brush's width wandering as it goes.
-const SMEAR = new_brush("Liquify", 0.1, 1.0, 1.0, #{ pressure_profile: "taper", pressure_variation: 0.7 });
+const SMEAR = new_brush_style("black", "Liquify", 1.0, #{ min_pressure: 0.1, max_pressure: 1.0, pressure_profile: "taper", pressure_wander: 0.7 });
 const EYE_PASSES = 5;
 const EYE_SHIFT = 8.0;
 const EYE_TURN = 0.04;
@@ -120,22 +122,22 @@ fn draw_eye(center, length, look_at, seed) {
 	// sharing a gradient share a layer, and Liquify can only push what's on
 	// its own.
 	let wash_smear = global::SMEAR;
-	wash_smear.size = r * 0.25;
+	wash_smear.brush_size = r * 0.25;
 	let rim_smear = global::SMEAR;
-	rim_smear.size = r * 0.12;
+	rim_smear.brush_size = r * 0.12;
 	let canvas = new_canvas();
 	let base = colour.call(global::WASH_ALPHA);
-	canvas.add(wash, new_style(base, wash_brush));
-	canvas.add(eye.wash, new_style(base, wash_smear));
+	canvas.add(wash, inked(base, wash_brush));
+	canvas.add(eye.wash, inked(base, wash_smear));
 	for c in 0..global::COPIES {
 		let off = vec2(random_range(-1.0, 1.0), random_range(-1.0, 1.0)) * (r * 0.08);
 		let shade = colour.call(global::COPY_ALPHA);
-		canvas.add(wash.copy().translate_by(off), new_style(shade, wash_brush));
-		canvas.add(rim.copy().translate_by(off), new_style(shade, rim_brush));
-		canvas.add(eye.wash.copy().translate_by(off), new_style(shade, wash_smear));
-		canvas.add(eye.rim.copy().translate_by(off), new_style(shade, rim_smear));
+		canvas.add(wash.copy().translate_by(off), inked(shade, wash_brush));
+		canvas.add(rim.copy().translate_by(off), inked(shade, rim_brush));
+		canvas.add(eye.wash.copy().translate_by(off), inked(shade, wash_smear));
+		canvas.add(eye.rim.copy().translate_by(off), inked(shade, rim_smear));
 	}
-	canvas.add(eye.accent, new_style(colour.call(0.6), new_brush("Ink Pen", 0.2, 0.6, 1.2)));
+	canvas.add(eye.accent, new_style(new_brush_style(colour.call(0.6), "Ink Pen", 1.2, #{ min_pressure: 0.2, max_pressure: 0.6 }), global::STEADY));
 	for p in 0..global::EYE_PASSES {
 		let lines = eye.lines.copy();
 		lines.translate_by(-center).scale_by(1.0 + random_range(-global::EYE_SCALE, global::EYE_SCALE)).translate_by(center);
@@ -184,10 +186,10 @@ fn start_page(n) {
 // their edges, through dark navy to black at their centres.
 
 const FLOWER_SIZE = 52.0;
-const VINE_PEN = new_brush("Rough Ink", 0.3, 0.6, 2.0, #{ pressure_profile: "taper", pressure_variation: 0.15, pool: 0.5, pool_depth: 0.4 });
-const LEAF_PEN = new_brush("Rough Ink", 0.3, 0.6, 2.0, #{ pressure_profile: "taper", pressure_variation: 0.15, pool: 0.9, pool_depth: 0.5 });
-const VINE_INK = new_style(new_gradient(["#0b0b0b", "#3f7d47"]), VINE_PEN);
-const LEAF_INK = new_style("#0b0b0b", LEAF_PEN);
+const VINE_PEN = new_brush_style(new_gradient(["#0b0b0b", "#3f7d47"]), "Rough Ink", 2.0, #{ max_pressure: 0.6, pressure_profile: "taper", pressure_wander: 0.15, pool: 0.5, pool_depth: 0.4 });
+const LEAF_PEN = new_brush_style("#0b0b0b", "Rough Ink", 2.0, #{ max_pressure: 0.6, pressure_profile: "taper", pressure_wander: 0.15, pool: 0.9, pool_depth: 0.5 });
+const VINE_INK = new_style(VINE_PEN, STEADY);
+const LEAF_INK = new_style(LEAF_PEN, STEADY);
 const FLOWER_BLUE = "#2f6dff";
 const FLOWER_CENTRE = "#000000";
 
@@ -247,7 +249,7 @@ fn draw_bramble(canvas, plant) {
 	for f in flowers {
 		let b = f.path.bounds();
 		let ink = new_gradient([global::FLOWER_CENTRE, global::DARK_NAVY, global::FLOWER_BLUE], #{ center: b.center, radius: b.width.max(b.height).max(1.0) * 0.55 });
-		canvas.add(f.path, new_style(ink, global::VINE_PEN));
+		canvas.add(f.path, inked(ink, global::VINE_PEN));
 	}
 }
 
@@ -314,7 +316,9 @@ fn written(text, y, key, settings) {
 
 // Words break round the eyes (pieces of two letters at least), so the text
 // hugs them.
-let body = hand + #{ clearance: 10.0, split_words: true };
+let body = hand;
+body.paragraph.clearance = 10.0;
+body.paragraph.split_words = true;
 let last_line = H - MARGIN;
 let canvases = [];
 let n = 0;
@@ -326,7 +330,7 @@ for (paragraph, p) in paragraphs {
 	while from < words.len() {
 		let key = 1000 * n + 10 * p + from;
 		// The most words that fit above the bottom margin.
-		let fits = |to| written(words_from(words, from, to), y, key, body).bottom - SIZE * hand.line_height <= last_line;
+		let fits = |to| written(words_from(words, from, to), y, key, body).bottom - SIZE * hand.paragraph.line_height <= last_line;
 		let lo = from;
 		let hi = words.len();
 		if fits.call(hi) { lo = hi; } else {
