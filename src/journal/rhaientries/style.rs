@@ -10,6 +10,7 @@
 //!     pressure_wander_length: 8.0,            // rising and falling about every 8 units (default 12)
 //!     pool: 0.4,                              // ink pooling: 40% heavier at the bottom (default 0)
 //!     pool_depth: 0.25,                       // over the lowest quarter of each path (default 0.3)
+//!     color_jitter: 0.05,                     // each stroke's colour off by up to 0.05 (default 0)
 //! });
 //!
 //! // The hand: how it goes over its strokes and sets glyphs and lines.
@@ -30,7 +31,10 @@
 //! ```
 //!
 //! Every jitter is in canvas units (rotation in radians, scale a fraction),
-//! drawn from the journal's generator when strokes are added to a canvas.
+//! drawn from the journal's generator when strokes are added to a canvas;
+//! `color_jitter` is in OKLab: each stroke (each subpath, so each pass) has
+//! its lightness moved up to that far either way, its hue and chroma up to
+//! half as far (less in dark colours), and a gradient's colours with it.
 //! In SVG output a stroke is `brush_size * max_pressure` wide.
 
 use rand::RngCore;
@@ -40,7 +44,7 @@ use std::sync::OnceLock;
 use super::gradient;
 use super::options::{above_zero, at_least_zero, one_of, register_settings, setting_number, Settings};
 use super::RhaiResult;
-use crate::journal::canvas::{Brush, PressureProfile, StrokeColor};
+use crate::journal::canvas::{Brush, ColorJitter, PressureProfile, StrokeColor};
 use crate::journal::canvas::StrokeStyle as JournalStrokeStyle;
 use crate::journal::paths::StrokePath;
 
@@ -70,6 +74,7 @@ pub struct BrushStyle {
     pressure_wander_length: f64,
     pool: f64,
     pool_depth: f64,
+    color_jitter: f64,
 }
 
 impl BrushStyle {
@@ -85,6 +90,7 @@ impl BrushStyle {
             pressure_wander_length: 12.0,
             pool: 0.0,
             pool_depth: 0.3,
+            color_jitter: 0.0,
         };
         style.set(caller, "color", color)?;
         style.set(caller, "brush", brush)?;
@@ -96,7 +102,7 @@ impl BrushStyle {
 impl Settings for BrushStyle {
     const NAME: &'static str = "brush_style";
     const KEYS: &'static [&'static str] = &[
-        "color", "brush", "brush_size", "min_pressure", "max_pressure", "pressure_profile", "pressure_wander", "pressure_wander_length", "pool", "pool_depth",
+        "color", "brush", "brush_size", "min_pressure", "max_pressure", "pressure_profile", "pressure_wander", "pressure_wander_length", "pool", "pool_depth", "color_jitter",
     ];
     fn get(&self, key: &str) -> Dynamic {
         match key {
@@ -113,6 +119,7 @@ impl Settings for BrushStyle {
             "pressure_wander_length" => self.pressure_wander_length.into(),
             "pool" => self.pool.into(),
             "pool_depth" => self.pool_depth.into(),
+            "color_jitter" => self.color_jitter.into(),
             _ => Dynamic::UNIT,
         }
     }
@@ -148,6 +155,13 @@ impl Settings for BrushStyle {
                     return Err(format!("{}: 'pool_depth' is a fraction of the height, at most 1, got {}", caller, depth).into());
                 }
                 self.pool_depth = depth;
+            }
+            "color_jitter" => {
+                let jitter = at_least_zero(caller, key, value)?;
+                if jitter > 1.0 {
+                    return Err(format!("{}: 'color_jitter' is a lightness, at most 1, got {}", caller, jitter).into());
+                }
+                self.color_jitter = jitter;
             }
             _ => unreachable!("{} isn't a brush setting", key),
         }
@@ -273,6 +287,10 @@ impl Style {
     pub(super) fn handwriting(&self) -> &HandwritingStyle {
         &self.handwriting
     }
+    /// How far its strokes' colours stray (see `ColorJitter`).
+    pub(super) fn color_jitter(&self) -> f32 {
+        self.brush.color_jitter as f32
+    }
     #[cfg(test)]
     pub(super) fn color(&self) -> &StrokeColor {
         &self.brush.color
@@ -298,7 +316,7 @@ impl Style {
 impl Settings for Style {
     const NAME: &'static str = "style";
     const KEYS: &'static [&'static str] = &[
-        "color", "brush", "brush_size", "min_pressure", "max_pressure", "pressure_profile", "pressure_wander", "pressure_wander_length", "pool", "pool_depth",
+        "color", "brush", "brush_size", "min_pressure", "max_pressure", "pressure_profile", "pressure_wander", "pressure_wander_length", "pool", "pool_depth", "color_jitter",
         "passes", "pass_end_jitter", "stroke_point_jitter", "glyph_position_jitter", "glyph_rotation_jitter", "glyph_scale_jitter", "baseline_wander",
     ];
     fn get(&self, key: &str) -> Dynamic {
@@ -312,12 +330,25 @@ impl Settings for Style {
     }
 }
 
+impl Style {
+    /// The style as the renderers draw it, its strokes' colours jittered
+    /// from `color_seed` (drawn when it was added to a canvas).
+    pub(super) fn stroke_style(&self, color_seed: u64) -> JournalStrokeStyle {
+        let mut style = JournalStrokeStyle::from(self);
+        if self.brush.color_jitter > 0.0 {
+            style.color_jitter = Some(ColorJitter { amount: self.brush.color_jitter as f32, seed: color_seed });
+        }
+        style
+    }
+}
+
 impl From<&Style> for JournalStrokeStyle {
     fn from(style: &Style) -> Self {
         let b = &style.brush;
         JournalStrokeStyle {
             width: (b.brush_size * b.max_pressure) as f32,
             color: b.color.clone(),
+            color_jitter: None,
             brush: Some(Brush {
                 name: b.brush.clone(),
                 size: b.brush_size as f32,

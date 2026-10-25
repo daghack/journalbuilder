@@ -2,9 +2,9 @@
 // page the same size. After the title page and the contents:
 //
 //   pens      every Darkly brush; brush styles (pressure profiles and
-//             ranges, colours, gradients, pooling ink, wandering pressure),
-//             handwriting (strokes gone over in passes and reshaped), and
-//             styles made of the two
+//             ranges, colours, gradients, pooling ink, wandering pressure,
+//             colour jitter), handwriting (strokes gone over in passes and
+//             reshaped), and styles made of the two
 //   glyphsets every glyphset, its alphabet and a line, glyphset settings,
 //             type styles (tracking, gaps, italics, scale), and glyphs
 //             placed by hand
@@ -372,6 +372,35 @@ pens.add(write_in("lorem ipsum dolor sit amet", LEFT, TOP + 300, 60, plain_style
 plain_style.brush_size = 2.4;
 plain_style.color = RED;
 pens.add(write_in("lorem ipsum dolor sit amet", LEFT, TOP + 390, 60, plain_style, LOCHE));
+
+// Colour jitter: each stroke (each subpath, so each pass) a little off its
+// colour, lightness moved up to color_jitter either way in OKLab and hue
+// and chroma half as far (less in dark inks); a gradient's colours move
+// with its stroke.
+let y = TOP + 500;
+pens.add(subhead("colour jitter", y));
+pens.add(caption("new_brush_style(..., #{ color_jitter: j }): each stroke off its colour by up to j, in OKLab lightness", y + 50));
+y += 140;
+for j in [0, 0.04, 0.1] {
+	let brush = new_brush_style(RED, "Rough Ink", 7, #{ min_pressure: 0.4, max_pressure: 0.8, color_jitter: j });
+	assert(brush.color_jitter == j, "color_jitter reads back");
+	pens.add(write(`color_jitter ${j}`, LEFT, y, 24));
+	for k in 0..4 {
+		pens.add(wave(380 + k * 180, 520 + k * 180, y, 22), new_style(brush, steady));
+	}
+	y += 85;
+}
+pens.add(caption("with passes: style.passes = 4, style.pass_end_jitter = 4, style.color_jitter = 0.08: each pass its own shade", y));
+let shaded = new_style(new_brush_style(INK, "Ink Pen", 2.6, #{ min_pressure: 0.5, max_pressure: 0.95, pressure_profile: "taper" }), steady);
+shaded.passes = 4;
+shaded.pass_end_jitter = 4;
+shaded.color_jitter = 0.08;
+pens.add(write_in("lorem ipsum dolor", LEFT, y + 110, 96, shaded, LOCHE));
+y += 200;
+pens.add(caption("a gradient, new_gradient([RED, INK], #{ vertical: true }), with color_jitter = 0.1: each stroke its own shade of it", y));
+let jittered_ink = new_style(new_brush_style(new_gradient([RED, INK], #{ vertical: true }), "Ink Pen", 1.6, #{ max_pressure: 0.6, color_jitter: 0.1 }), steady);
+pens.add(write_in("Lorem ipsum dolor sit amet, consectetur adipiscing elit,", LEFT, y + 60, 30, jittered_ink, PLAIN));
+pens.add(write_in("sed do eiusmod tempor incididunt ut labore et dolore.", LEFT, y + 110, 30, jittered_ink, PLAIN));
 book.bind("pens", pens);
 
 // ---- glyphsets ----

@@ -395,6 +395,7 @@ doc += api("new_brush_style(color, brush, brush_size), new_brush_style(color, br
 	opt("options.pressure_wander_length", "12", "As brush_style.pressure_wander_length.", "as brush_style.pressure_wander_length."),
 	opt("options.pool", "0", "As brush_style.pool.", "as brush_style.pool."),
 	opt("options.pool_depth", "0.3", "As brush_style.pool_depth.", "as brush_style.pool_depth."),
+	opt("options.color_jitter", "0", "As brush_style.color_jitter.", "as brush_style.color_jitter."),
 ]);
 doc += api("brush_style.color = color", "The ink.", [
 	arg("color", "The ink.", "a CSS colour or a gradient."),
@@ -422,6 +423,9 @@ doc += api("brush_style.pool = number", "Ink pooling: strokes heavier at the ver
 ]);
 doc += api("brush_style.pool_depth = number", "How far up the pooling rises.", [
 	arg("number", "The height, as a fraction of the path's. Default 0.3.", "a number above 0 and at most 1."),
+]);
+doc += api("brush_style.color_jitter = number", "Each stroke a little off its colour, each its own way: every subpath, so every pass of a stroke gone over, too. Colours move in OKLab, so steps look alike whatever the colour: lightness up to number either way, hue and chroma (OKLab's a and b) up to half that times the colour's lightness, so dark inks keep their hue, alpha kept. A gradient's colours move with its stroke. Drawn from the journal's generator as strokes are added to a canvas.", [
+	arg("number", "How far lightness moves, OKLab lightness running from 0 (black) to 1 (white): 0.05 is a slight variation. Default 0.", "a number from 0 to 1."),
 ]);
 doc += api("new_handwriting_style(), new_handwriting_style(options)", "A handwriting style: one clean pass, nothing astray, unless the options set its properties (below), as setting them does.", [
 	opt("options.passes", "1", "As handwriting_style.passes.", "as handwriting_style.passes."),
@@ -1246,9 +1250,9 @@ doc += api("journalbuild NAME [flags]", "Runs a journal's entries, each on its o
 	opt("--supersample K", "1.2", "Renders Darkly output K times larger and filters it back down, smoothing thin, aliased strokes; render time grows with K squared.", "a number of at least 1; 1 turns it off."),
 	opt("--svg", "off", "Also renders each canvas as an SVG, PAGE_CANVAS.svg, and that SVG as a PNG.", "a flag."),
 	opt("--strict-glyphs", "off", "Fails before rendering if any character had no glyph, rather than drawing it as X and warning.", "a flag."),
-	opt("--parchment", "off", "Renders each page as one image, darkly_PAGE.png, its canvases layered on procedural parchment; light inks are drawn dark.", "a flag."),
-	opt("--pdf", "off", "Puts each entry's pages in one PDF, ENTRY.pdf, a page each at 150 canvas units to the inch, rather than writing images; on parchment with --parchment.", "a flag."),
-	opt("--stitch N", "off", "Also lays every N pages side by side, in order, tops level, named for the pages they hold: page_0 to page_5 as darkly_page_0-5.png (the last may have fewer; a page left alone is not stitched). Pages are rendered one image each, as with --parchment, on parchment with it. Not with --pdf.", "a whole number of at least 1."),
+	opt("--parchment", "off", "Renders each page as one image, darkly_PAGE.png, its canvases layered on procedural parchment; light inks are drawn dark, and ink soaks in a little unevenly, very slightly thinner in places.", "a flag."),
+	opt("--pdf", "off", "Puts each entry's pages in one PDF, ENTRY.pdf, a page each at 150 canvas units to the inch, rather than writing images; on parchment with --parchment; with --stitch N, N pages side by side to a PDF page.", "a flag."),
+	opt("--stitch N", "off", "Also lays every N pages side by side, in order, tops level, named for the pages they hold: page_0 to page_5 as darkly_page_0-5.png (the last may have fewer; a page left alone is not stitched). Pages are rendered one image each, as with --parchment, on parchment with it. With --pdf, the PDF's pages are the stitches instead, a page left alone at the end a page of its own.", "a whole number of at least 1."),
 	opt("--journals-dir DIR", "the repository's webapp/journals/", "Where journals are.", "a directory."),
 	opt("--library DIR", "the repository's webapp/library/", "The built-in library the journal's files stand in front of.", "a directory."),
 	opt("--output-dir DIR", "NAME_output in the current directory", "Where renders go, a directory for each entry. The default's entry directories are emptied first, except with --page; in a given directory, earlier .png, .svg and .pdf renders in an entry's directory are cleared first, except with --page.", "a directory."),

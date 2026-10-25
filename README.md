@@ -39,15 +39,18 @@ Useful flags (`journalbuild` with no arguments lists them all):
   Pages get a border of parchment round their strokes; typeset pages are
   a sheet the size of the page, and each tile of a split page a sheet of
   its own. Light inks are drawn as dark as they were light, hue kept, so
-  they show.
+  they show, and ink soaks in a little unevenly: very slightly thinner in
+  places, in blotches and grain across the sheet.
 - `--pdf`: put each entry's pages in one PDF, `{entry}.pdf`, instead of images:
   each page's canvases layered into one image (on parchment, with
-  `--parchment`), at 150 canvas units to the inch whatever the scale.
+  `--parchment`), at 150 canvas units to the inch whatever the scale. With
+  `--stitch N`, each PDF page is N pages side by side.
 - `--stitch N`: also lay every N pages side by side, tops level, named
   for the pages they hold: `page_0` to `page_5` as `darkly_page_0-5.png`
   (the last may have fewer; a page left alone isn't stitched). Pages are
   rendered one image each, as with `--parchment`, on parchment with it.
-  Not with `--pdf`.
+  With `--pdf`, the PDF's pages are the stitches instead (a page left
+  alone at the end is a page of its own).
 - `--journals-dir`, `--library`, `--output-dir`: read or write somewhere
   other than the repository's defaults. A journal can also be given as a
   path, `journalbuild path/to/journal`.
@@ -169,7 +172,11 @@ What to know:
   (default 12), so ramps and tapers look less mechanical. `pool: 0.4`
   pools ink toward the bottom of each path, each glyph for text: 40%
   heavier at the very bottom, rising over its lowest `pool_depth`
-  (default 0.3 of its height).
+  (default 0.3 of its height). `color_jitter: 0.05` draws each stroke (each
+  pass of it, too) a little off its colour: lightness moved up to 0.05
+  either way in OKLab, hue and chroma up to half that (less in dark
+  colours, so they keep their hue); gradients are moved
+  point by point. Default 0.
 - **Handwriting.** `new_handwriting_style(#{ passes: 7, pass_end_jitter: 9 })`
   draws each stroke seven times over, each pass's ends straying by up to 9
   units, so a straight stroke turns, stretches and shifts a little each

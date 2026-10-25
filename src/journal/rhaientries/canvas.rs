@@ -31,7 +31,11 @@ impl CanvasData {
     /// Add a path drawn in `style`, gone over as its handwriting says,
     /// its jitter drawn from `rng`.
     pub fn add_path(&mut self, path: StrokePath, style: &Style, rng: &mut dyn RngCore) {
-        self.strokes.push(Stroke { path: style.retrace(path, rng), style: style.clone(), seed: None });
+        let path = style.retrace(path, rng);
+        // Only a jittered colour draws its seed, so other strokes leave the
+        // generator as it was.
+        let color_seed = if style.color_jitter() > 0.0 { rng.next_u64() } else { 0 };
+        self.strokes.push(Stroke { path, style: style.clone(), seed: None, color_seed });
     }
     fn transform(&mut self, f: impl Fn(&mut StrokePath)) {
         for stroke in &mut self.strokes {
@@ -98,8 +102,8 @@ pub(super) fn register(engine: &mut Engine, rng: SharedRng) {
 impl From<CanvasData> for JournalCanvas {
     fn from(val: CanvasData) -> Self {
         let mut canvas = JournalCanvas::new();
-        for Stroke { path, style, seed } in val.strokes {
-            canvas.add_seeded_stroke(path, (&style).into(), seed);
+        for Stroke { path, style, seed, color_seed } in val.strokes {
+            canvas.add_seeded_stroke(path, style.stroke_style(color_seed), seed);
         }
         canvas.set_frame(val.frame);
         canvas
@@ -109,8 +113,8 @@ impl From<CanvasData> for JournalCanvas {
 impl From<&CanvasData> for JournalCanvas {
     fn from(val: &CanvasData) -> Self {
         let mut canvas = JournalCanvas::new();
-        for Stroke { path, style, seed } in val.strokes.iter() {
-            canvas.add_seeded_stroke(path.clone(), style.into(), *seed);
+        for Stroke { path, style, seed, color_seed } in val.strokes.iter() {
+            canvas.add_seeded_stroke(path.clone(), style.stroke_style(*color_seed), *seed);
         }
         canvas.set_frame(val.frame);
         canvas
@@ -132,6 +136,8 @@ pub struct Stroke {
     /// Its texture's seed, kept from the whole page in a tile (see
     /// `ColoredStroke::seed`).
     pub(super) seed: Option<u32>,
+    /// Where its colour jitter's drawn from, if its style has any.
+    pub(super) color_seed: u64,
 }
 
 /// `canvas.add(parts, styles)`: each path of `parts` (as `art::bramble` or

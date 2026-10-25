@@ -3,7 +3,8 @@ const DARK_NAVY = "#0b1433";
 
 const SIZE = 60.0;
 const TEXT_INK = new_gradient([NAVY, DARK_NAVY], #{ vertical: true });
-const TEXT_PEN = new_brush_style(TEXT_INK, "Rough Ink", 2.0, #{ max_pressure: 0.6, pressure_profile: "taper", pressure_wander: 0.15, pool: 0.5, pool_depth: 0.4 });
+// Each stroke a shade off the next, as ink goes on unevenly.
+const TEXT_PEN = new_brush_style(TEXT_INK, "Rough Ink", 2.0, #{ max_pressure: 0.6, pressure_profile: "taper", pressure_wander: 0.15, pool: 0.5, pool_depth: 0.4, color_jitter: 0.04 });
 const STEADY = new_handwriting_style();
 
 // `pen` in `colour`, by a steady hand.
@@ -49,9 +50,12 @@ const MARGIN = 110.0;
 const PARAGRAPH_GAP = SIZE * 0.6;
 // How many eyes each page has: 13 in all.
 const EYES_PER_PAGE = [3, 2, 2, 2, 2, 2];
-// The eyes' colour, washed on thin and gone over in jittered copies.
-const EYE_TEAL = [46, 232, 214];
-const EYE_NAVY = [43, 65, 132];
+// The eyes' colour, washed on thin and gone over in jittered copies, each
+// stroke of them its own shade (the text pen's colour jitter, a little
+// more).
+const EYE_TEAL = "46, 232, 214";
+const EYE_NAVY = "43, 65, 132";
+const EYE_JITTER = 0.06;
 const WASH_ALPHA = 0.3;
 const COPIES = 5;
 const COPY_ALPHA = 0.4;
@@ -59,7 +63,7 @@ const COPY_ALPHA = 0.4;
 // black, gone over several times:
 // each pass its own copy of the lines, shifted, turned and scaled a little
 // about the eye's centre.
-const EYE_PEN = new_brush_style(new_gradient([NAVY, "#000000"], #{ vertical: true }), "Rough Ink", 2.0, #{ max_pressure: 0.6, pressure_profile: "taper", pressure_wander: 0.15, pool: 0.85, pool_depth: 0.6 });
+const EYE_PEN = new_brush_style(new_gradient([NAVY, "#000000"], #{ vertical: true }), "Rough Ink", 2.0, #{ max_pressure: 0.6, pressure_profile: "taper", pressure_wander: 0.15, pool: 0.85, pool_depth: 0.6, color_jitter: 0.04 });
 const EYE_INK = new_style(EYE_PEN, new_handwriting_style(#{ stroke_point_jitter: 10.0 }));
 // A second go over the colour, smearing it along the same lines, the
 // brush's width wandering as it goes.
@@ -74,12 +78,6 @@ fn hashed(k) {
 	let x = (k * 7919 + 104729) % 1000003;
 	x = (x * x + 12345) % 1000003;
 	x / 1000003.0
-}
-
-// rgba() for a colour [r, g, b], each nudged by up to `spread` either way.
-fn tint(rgb, spread, alpha) {
-	let c = rgb.map(|v| (v + random_range(-spread, spread)).max(0.0).min(255.0).to_int());
-	`rgba(${c[0]}, ${c[1]}, ${c[2]}, ${alpha})`
 }
 
 // A path cut into strokes about `length` long, one after another along
@@ -111,16 +109,16 @@ fn draw_eye(center, length, look_at, seed) {
 	});
 	let r = eye.iris_radius;
 	let iris = eye.wash.bounds().center;
-	let colour = |alpha| new_gradient([tint(global::EYE_TEAL, 18, alpha), tint(global::EYE_NAVY, 18, alpha)], #{ center: iris, radius: r });
-	// The colour in the text's own pen.
+	let colour = |alpha| new_gradient([`rgba(${global::EYE_TEAL}, ${alpha})`, `rgba(${global::EYE_NAVY}, ${alpha})`], #{ center: iris, radius: r });
+	// The colour in the text's own pen, its strokes' shades further apart.
 	let wash_brush = global::TEXT_PEN;
-	let rim_brush = global::TEXT_PEN;
+	wash_brush.color_jitter = global::EYE_JITTER;
+	let rim_brush = wash_brush;
 	// In short strokes, so each pools at its end as the text's glyphs do.
 	let wash = short_strokes(eye.wash, 14.0);
 	let rim = short_strokes(eye.rim, 14.0);
-	// The smear goes over each shade in that shade's own gradient: strokes
-	// sharing a gradient share a layer, and Liquify can only push what's on
-	// its own.
+	// The smear goes over the colour in its gradient: strokes sharing a
+	// gradient share a layer, and Liquify can only push what's on its own.
 	let wash_smear = global::SMEAR;
 	wash_smear.brush_size = r * 0.25;
 	let rim_smear = global::SMEAR;
@@ -129,15 +127,15 @@ fn draw_eye(center, length, look_at, seed) {
 	let base = colour.call(global::WASH_ALPHA);
 	canvas.add(wash, inked(base, wash_brush));
 	canvas.add(eye.wash, inked(base, wash_smear));
+	let shade = colour.call(global::COPY_ALPHA);
 	for c in 0..global::COPIES {
 		let off = vec2(random_range(-1.0, 1.0), random_range(-1.0, 1.0)) * (r * 0.08);
-		let shade = colour.call(global::COPY_ALPHA);
 		canvas.add(wash.copy().translate_by(off), inked(shade, wash_brush));
 		canvas.add(rim.copy().translate_by(off), inked(shade, rim_brush));
 		canvas.add(eye.wash.copy().translate_by(off), inked(shade, wash_smear));
 		canvas.add(eye.rim.copy().translate_by(off), inked(shade, rim_smear));
 	}
-	canvas.add(eye.accent, new_style(new_brush_style(colour.call(0.6), "Ink Pen", 1.2, #{ min_pressure: 0.2, max_pressure: 0.6 }), global::STEADY));
+	canvas.add(eye.accent, new_style(new_brush_style(colour.call(0.6), "Ink Pen", 1.2, #{ min_pressure: 0.2, max_pressure: 0.6, color_jitter: global::EYE_JITTER }), global::STEADY));
 	for p in 0..global::EYE_PASSES {
 		let lines = eye.lines.copy();
 		lines.translate_by(-center).scale_by(1.0 + random_range(-global::EYE_SCALE, global::EYE_SCALE)).translate_by(center);
@@ -186,8 +184,8 @@ fn start_page(n) {
 // their edges, through dark navy to black at their centres.
 
 const FLOWER_SIZE = 52.0;
-const VINE_PEN = new_brush_style(new_gradient(["#0b0b0b", "#3f7d47"]), "Rough Ink", 2.0, #{ max_pressure: 0.6, pressure_profile: "taper", pressure_wander: 0.15, pool: 0.5, pool_depth: 0.4 });
-const LEAF_PEN = new_brush_style("#0b0b0b", "Rough Ink", 2.0, #{ max_pressure: 0.6, pressure_profile: "taper", pressure_wander: 0.15, pool: 0.9, pool_depth: 0.5 });
+const VINE_PEN = new_brush_style(new_gradient(["#0b0b0b", "#3f7d47"]), "Rough Ink", 2.0, #{ max_pressure: 0.6, pressure_profile: "taper", pressure_wander: 0.15, pool: 0.5, pool_depth: 0.4, color_jitter: 0.05 });
+const LEAF_PEN = new_brush_style("#0b0b0b", "Rough Ink", 2.0, #{ max_pressure: 0.6, pressure_profile: "taper", pressure_wander: 0.15, pool: 0.9, pool_depth: 0.5, color_jitter: 0.05 });
 const VINE_INK = new_style(VINE_PEN, STEADY);
 const LEAF_INK = new_style(LEAF_PEN, STEADY);
 const FLOWER_BLUE = "#2f6dff";

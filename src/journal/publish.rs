@@ -9,7 +9,6 @@ use super::parchment::{self, Sheet};
 use super::canvas::StrokeColor;
 use super::compose::{self, Placed};
 use super::darkly;
-#[cfg(not(target_arch = "wasm32"))]
 use super::pdf::PdfWriter;
 #[cfg(not(target_arch = "wasm32"))]
 use super::progress::Progress;
@@ -132,22 +131,59 @@ pub fn stitched(images: &[RgbaImage]) -> RgbaImage {
     out
 }
 
+/// Page images gathered into stitches of `n` (see `stitched`), for a PDF
+/// whose pages are stitches; with no `n`, each image alone.
+pub struct Stitcher {
+    n: usize,
+    held: Vec<RgbaImage>,
+}
+
+impl Stitcher {
+    pub fn new(n: Option<usize>) -> Self {
+        Stitcher { n: n.unwrap_or(1).max(1), held: Vec::new() }
+    }
+    /// Take the next image: a stitch, once it has `n`.
+    pub fn push(&mut self, image: RgbaImage) -> Option<RgbaImage> {
+        self.held.push(image);
+        (self.held.len() >= self.n).then(|| self.take())
+    }
+    /// What's left after the last image: a stitch of fewer, or an image
+    /// alone.
+    pub fn finish(mut self) -> Option<RgbaImage> {
+        (!self.held.is_empty()).then(|| self.take())
+    }
+    fn take(&mut self) -> RgbaImage {
+        let held = std::mem::take(&mut self.held);
+        if held.len() == 1 { held.into_iter().next().expect("one image") } else { stitched(&held) }
+    }
+}
+
+/// An image as a PDF page, as big as it is at `UNITS_PER_INCH` canvas units
+/// to the inch, whatever the render's scale.
+pub fn add_pdf_page<W: std::io::Write + std::io::Seek>(pdf: &mut PdfWriter<W>, image: &RgbaImage, scale: f32) -> std::io::Result<()> {
+    let points = 72.0 / UNITS_PER_INCH / scale;
+    pdf.add_page(image, image.width() as f32 * points, image.height() as f32 * points)
+}
+
 /// The pages' images (see `page_image`) as the pages of one PDF at `path`,
-/// titled `title`. A page's size is its size in canvas units at
+/// titled `title`, or with `stitch`, every `stitch` of them side by side as
+/// a page (see `Stitcher`). A page's size is its size in canvas units at
 /// `UNITS_PER_INCH`, whatever the scale.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn pdf(entry: &Entry, engine: &mut DarklyEngine, path: &str, title: &str, render: &Render, only: Option<&[usize]>) -> Result<(), String> {
+pub fn pdf(entry: &Entry, engine: &mut DarklyEngine, path: &str, title: &str, render: &Render, only: Option<&[usize]>, stitch: Option<usize>) -> Result<(), String> {
     let mut pdf = PdfWriter::create(path).map_err(|e| write_error(path, e))?;
-    let points = 72.0 / UNITS_PER_INCH / render.scale;
+    let mut stitcher = Stitcher::new(stitch);
     let mut progress = pages_progress(entry, "Rendering", only);
     for (i, page) in entry.selected_pages(only) {
         progress.start(&page.label(i));
         let image = page_image(page, &page.label(i), engine, render);
         progress.step();
-        if let Some(image) = image {
-            pdf.add_page(&image, image.width() as f32 * points, image.height() as f32 * points)
-                .map_err(|e| write_error(path, e))?;
+        if let Some(sheet) = image.and_then(|image| stitcher.push(image)) {
+            add_pdf_page(&mut pdf, &sheet, render.scale).map_err(|e| write_error(path, e))?;
         }
+    }
+    if let Some(sheet) = stitcher.finish() {
+        add_pdf_page(&mut pdf, &sheet, render.scale).map_err(|e| write_error(path, e))?;
     }
     if pdf.page_count() == 0 {
         return Err(format!("nothing to put in {}: every page is empty", path));
@@ -161,7 +197,8 @@ pub fn pdf(entry: &Entry, engine: &mut DarklyEngine, path: &str, title: &str, re
 /// typeset) gets a border of paper round its strokes; each tile of a split
 /// page is a sheet of its own, like a big drawing spread over several
 /// pages. On parchment, light inks are drawn dark so they show (see
-/// `StrokeColor::as_ink_on_paper`). `None` if nothing is drawn.
+/// `StrokeColor::as_ink_on_paper`), and ink soaks in a little unevenly
+/// (see `parchment::soak`). `None` if nothing is drawn.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn page_image(page: &Page, label: &str, engine: &mut DarklyEngine, render: &Render) -> Option<RgbaImage> {
     darkly::block_on(page_image_async(page, label, engine, render, &mut |_| {}))
@@ -205,6 +242,8 @@ pub async fn page_image_async(page: &Page, label: &str, engine: &mut DarklyEngin
         }
     };
     let sheet = Sheet { corner, size, scale, seed: stable_hash(label) };
+    let mut ink = ink;
+    parchment::soak(&mut ink, &sheet);
     let mut sheet = Placed { image: parchment::paint(&sheet), at: corner };
     compose::draw(&mut sheet, &ink, compose::ink_on_paper);
     Ok(Some(sheet.image))
@@ -330,6 +369,18 @@ mod tests {
         assert_eq!(stitch_label("becoming_us_page_0", "becoming_us_page_5"), "becoming_us_page_0-5");
         assert_eq!(stitch_label("page_8", "page_11"), "page_8-11");
         assert_eq!(stitch_label("03_pens_brushes", "05_pens_0"), "03_pens_brushes-05_pens_0");
+    }
+
+    #[test]
+    fn stitchers_gather_pages_and_keep_the_last_few() {
+        let page = |w: u32| RgbaImage::new(w, 4);
+        let mut three = Stitcher::new(Some(3));
+        let sheets: Vec<u32> = [1, 2, 3, 4, 5].into_iter().filter_map(|w| three.push(page(w))).map(|s| s.width()).collect();
+        assert_eq!(sheets, [6]);
+        assert_eq!(three.finish().map(|s| s.width()), Some(9), "the last two together");
+        let mut alone = Stitcher::new(None);
+        assert_eq!(alone.push(page(7)).map(|s| s.width()), Some(7));
+        assert!(alone.finish().is_none());
     }
 
     #[test]

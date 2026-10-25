@@ -6,9 +6,10 @@
 //! `--scale`. Each page is a sheet of its own, seeded from its name: the
 //! same every run, and different from page to page. A split page's tiles
 //! are sheets of their own too, like a big drawing spread over several
-//! pages.
+//! pages. Ink soaks into a sheet a little unevenly (`soak`).
 
 use image::{ImageBuffer, RgbaImage};
+use crate::journal::compose::Placed;
 use noise::{NoiseFn, Perlin};
 use rayon::prelude::*;
 
@@ -40,6 +41,30 @@ pub fn paint(sheet: &Sheet) -> RgbaImage {
         })
     }).collect();
     ImageBuffer::from_raw(width, height, pixels).expect("one pixel per position")
+}
+
+/// The most ink thins where the sheet takes it least, as a fraction.
+const INK_SOAK: f64 = 0.12;
+
+/// Ink, `ink`, as the sheet takes it: very slightly thinner in places, in
+/// blotches and grain of the sheet's own (its alpha scaled down by up to
+/// `INK_SOAK`), as ink soaks unevenly into paper. Read in canvas units, so
+/// it looks the same at any scale.
+pub fn soak(ink: &mut Placed, sheet: &Sheet) {
+    let texture = Texture::new(sheet);
+    let (x0, y0) = ink.at;
+    let width = ink.image.width() as usize;
+    ink.image.par_chunks_mut(width * 4).enumerate().for_each(|(row, pixels)| {
+        for (column, px) in pixels.chunks_mut(4).enumerate() {
+            if px[3] == 0 {
+                continue;
+            }
+            let x = (x0 + column as i64) as f64 + 0.5;
+            let y = (y0 + row as i64) as f64 + 0.5;
+            let thin = texture.thinning([x / texture.scale, y / texture.scale]);
+            px[3] = (px[3] as f64 * (1.0 - INK_SOAK * thin)).round() as u8;
+        }
+    });
 }
 
 type Rgb = [f64; 3];
@@ -93,7 +118,8 @@ const CLOUD: usize = 1;
 const GRAIN: usize = 2;
 const FIBRE: usize = 3;
 const EDGE: usize = 4;
-const LAYERS: usize = 5;
+const INK: usize = 5;
+const LAYERS: usize = 6;
 
 impl Texture {
     fn new(sheet: &Sheet) -> Self {
@@ -139,6 +165,17 @@ impl Texture {
         // Fades out as it gets too fine to see.
         let fade = (2.0 * self.scale).min(1.0);
         1.0 + fade * (0.03 * grain + 0.022 * fibre.max(-0.15))
+    }
+
+    /// How much less ink the sheet takes at `p`, from 0 to 1: broad patches,
+    /// blotches and grain.
+    fn thinning(&self, p: [f64; 2]) -> f64 {
+        let broad = self.fbm(INK, [p[0] + 311.0, p[1] - 97.0], 160.0, 2);
+        let blotch = self.fbm(INK, p, 40.0, 3);
+        let period = self.fine(3.0);
+        // Fades out as it gets too fine to see, as the paper's grain does.
+        let grain = (2.0 * self.scale).min(1.0) * self.layers[INK].get([p[0] / period + 53.0, p[1] / period - 29.0]) * 1.4;
+        (0.5 + 0.5 * (0.3 * broad + 0.45 * blotch + 0.25 * grain)).clamp(0.0, 1.0)
     }
 
     /// Specks of grit: how dark one is here, 0 for none.
@@ -203,5 +240,24 @@ mod tests {
         assert!(a.pixels().all(|p| p.0[3] == 255));
         assert_eq!(a, paint(&sheet));
         assert_ne!(a, paint(&Sheet { seed: 4, ..sheet }));
+    }
+
+    #[test]
+    fn ink_soaks_in_unevenly_and_only_thins() {
+        let sheet = Sheet { corner: (0, 0), size: (400, 300), scale: 1.0, seed: 9 };
+        let mut image = RgbaImage::from_pixel(300, 200, image::Rgba([20, 30, 90, 255]));
+        image.put_pixel(5, 5, image::Rgba([20, 30, 90, 0]));
+        let mut ink = Placed { image, at: (50, 40) };
+        soak(&mut ink, &sheet);
+        assert_eq!(ink.image.get_pixel(5, 5).0[3], 0, "nothing drawn stays nothing");
+        let alphas: Vec<u8> = ink.image.pixels().map(|p| p.0[3]).filter(|a| *a > 0).collect();
+        let (lo, hi) = (*alphas.iter().min().unwrap(), *alphas.iter().max().unwrap());
+        assert!(lo >= (255.0 * (1.0 - INK_SOAK)).floor() as u8, "only a little thinner: {}", lo);
+        assert!(hi - lo > 10, "uneven: {}..{}", lo, hi);
+        assert!(ink.image.pixels().all(|p| p.0[..3] == [20, 30, 90]), "the ink's colour is kept");
+        let mut again = Placed { image: RgbaImage::from_pixel(300, 200, image::Rgba([20, 30, 90, 255])), at: (50, 40) };
+        again.image.put_pixel(5, 5, image::Rgba([20, 30, 90, 0]));
+        soak(&mut again, &sheet);
+        assert_eq!(again.image, ink.image, "the same sheet soaks the same");
     }
 }

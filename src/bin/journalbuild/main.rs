@@ -67,18 +67,21 @@ const USAGE: &str = "Usage: journalbuild <journal> [--entry E[,E...]] [--page N[
                       mottled scroll browning toward its edges. Pages get
                       a border of parchment round their strokes; each tile
                       of a split page is a sheet of its own. Light inks are
-                      drawn dark, so they show.
+                      drawn dark, so they show, and ink soaks in a little
+                      unevenly: very slightly thinner in places.
   --pdf               Put each entry's pages in one PDF, {entry}.pdf, a page
                       per page, rather than writing images: each page's
                       canvases layered into one image (on parchment,
                       with --parchment), 150 canvas units to the inch.
+                      With --stitch N, N pages side by side to a PDF page.
   --stitch N          Also lay every N pages side by side, in order, tops
                       level, named for the pages they hold: page_0 to
                       page_5 as darkly_page_0-5.png (the last may have
                       fewer; a page left alone isn't stitched). Pages are rendered as one image
                       each, darkly_{page}.png, as with --parchment (which
                       it goes with, on parchment, or without, on nothing).
-                      Not with --pdf.
+                      With --pdf, the PDF's pages are the stitches instead
+                      (a page left alone at the end is a page of its own).
   --strict-glyphs     Fail before rendering if any character had no glyph
                       (by default they're drawn as X and listed as a warning).
   --scale S           Scale output images (default 1.0), brushes included.
@@ -207,9 +210,6 @@ fn parse_args() -> Result<Args, String> {
     if check_locks && (entries.is_some() || pages.is_some()) {
         return Err("--check-locks checks lock and chain files, so it takes no --entry or --page".to_string());
     }
-    if stitch.is_some() && pdf {
-        return Err("--stitch lays rendered pages side by side, so it can't go with --pdf".to_string());
-    }
     Ok(Args { strict_glyphs, check_locks, check_gpu, journal, journals_dir, library_dir, entries, pages, svg, scale, supersample, output_dir, parchment, pdf, stitch })
 }
 
@@ -331,7 +331,7 @@ fn build_entry(args: &Args, journal: &Journal, library: &Resources, entry_name: 
     if args.pdf {
         let path = format!("{}/{}.pdf", output_dir, entry_name);
         let title = format!("{}: {}", journal.manifest.title, entry_name);
-        publish::pdf(&entry, darkly_engine, &path, &title, &render, only)?;
+        publish::pdf(&entry, darkly_engine, &path, &title, &render, only, args.stitch)?;
         println!("Wrote {}", path);
     } else if render.parchment || args.stitch.is_some() {
         publish::page_images(&entry, darkly_engine, output_dir, &render, only, args.stitch)?;

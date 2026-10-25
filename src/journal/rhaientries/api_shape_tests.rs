@@ -107,6 +107,25 @@ fn text_calls_take_a_style_a_type_and_a_paragraph() {
 }
 
 #[test]
+fn color_jitter_draws_from_the_generator_only_when_on() {
+    let next = |jitter: f64| -> f64 {
+        engine().engine.eval::<f64>(&format!(r#"
+            seed(5);
+            let style = new_style(new_brush_style("navy", "Ink Pen", 1.2, #{{ color_jitter: {} }}), new_handwriting_style(#{{ passes: 3 }}));
+            new_canvas().add(new_line(vec2(0, 0), vec2(50, 0)), style);
+            random_range(0.0, 1.0)
+        "#, jitter)).unwrap()
+    };
+    let plain = engine().engine.eval::<f64>("seed(5); random_range(0.0, 1.0)").unwrap();
+    assert_eq!(next(0.0), next(0.0));
+    assert_ne!(next(0.0), next(0.1), "a jittered colour draws its seed");
+    assert_ne!(next(0.0), plain, "passes draw from the generator as before");
+    assert!(engine().engine.eval::<f64>(r#"new_brush_style("navy", "Ink Pen", 1.2, #{ color_jitter: 0.05 }).color_jitter"#).unwrap() == 0.05);
+    assert!(engine().engine.eval::<f64>(r#"let s = default_style(); s.color_jitter = 0.2; s.color_jitter"#).unwrap() == 0.2);
+    assert!(engine().engine.eval::<rhai::Dynamic>(r#"new_brush_style("navy", "Ink Pen", 1.2, #{ color_jitter: 1.5 })"#).is_err());
+}
+
+#[test]
 fn jitter_moves_glyphs_from_the_seeded_generator() {
     let xs = |jitter: &str, seed: i64| -> String {
         engine().engine.eval::<String>(&format!(r#"{}

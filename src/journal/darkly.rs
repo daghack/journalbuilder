@@ -10,6 +10,7 @@ use rayon::prelude::*;
 use crate::journal::paths::{CurveSample};
 use crate::journal::canvas::{Canvas, ColoredStroke, StrokeColor};
 use crate::journal::compose::{self, Placed};
+use crate::journal::canvas::color_jitter::{shifted, Shift};
 use crate::journal::gradient::{colorize, Along, GradientKind};
 use std::collections::HashSet;
 
@@ -355,20 +356,23 @@ async fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, page_origin: 
         let layer = pen.engine.add_raster_layer(None);
         let mut along = Vec::new();
         let mut reach: f32 = 0.0;
+        // A gradient across the canvas only needs its strokes' points to
+        // find their colours' jitter.
+        let jittered = pass.iter().any(|(stroke, _)| stroke.style.color_jitter.is_some());
         for &(stroke, seed) in pass {
             let samples = pen.draw(layer, stroke, seed, gradient.is_some()).await?;
             done += 1;
             progress(STROKES_SHARE * done as f32 / strokes.len() as f32);
-            if let Some(g) = gradient.filter(|g| g.per_stroke()) {
+            if let Some(g) = gradient.filter(|g| g.per_stroke() || jittered) {
                 let vertical = g.kind == GradientKind::Vertical;
-                along.extend(samples.into_iter().map(|(p, t, down)| (p, if vertical { down } else { t })));
+                along.extend(samples.into_iter().map(|(p, t, down, shift)| (p, if vertical { down } else { t }, shift)));
                 reach = reach.max(stroke.style.brush.as_ref().map_or(0.0, |b| b.size) * brush_scale);
             }
         }
         let mut image = export(pen.engine, layer).await?;
         if let Some(gradient) = gradient {
             let to_canvas = |x: f32, y: f32| page_origin + Vec2::new((x + offset.0) / ratio.x, (y + offset.1) / ratio.y);
-            let along = gradient.per_stroke().then(|| Along::new(along, reach));
+            let along = (gradient.per_stroke() || jittered).then(|| Along::new(along, reach));
             colorize(&mut image, gradient, to_canvas, along.as_ref());
         }
         let image = Placed { image, at: (0, 0) };
@@ -407,8 +411,10 @@ struct Pen<'a> {
 impl Pen<'_> {
     /// Draw a stroke on `layer`, in white if `white` (to be coloured
     /// after), returning its points in render pixels with how far along
-    /// its subpath each is and how far down the whole path, from 0 to 1.
-    async fn draw(&mut self, layer: LayerId, stroke: &ColoredStroke, seed: u32, white: bool) -> Result<Vec<(Vec2, f32, f32)>, String> {
+    /// its subpath each is and how far down the whole path, from 0 to 1,
+    /// and how its subpath's colour is jittered. Otherwise each subpath is
+    /// drawn in its own jittered colour.
+    async fn draw(&mut self, layer: LayerId, stroke: &ColoredStroke, seed: u32, white: bool) -> Result<Vec<(Vec2, f32, f32, Shift)>, String> {
         let ColoredStroke { path, style, .. } = stroke;
         let brush = style.brush.as_ref()
             .expect("Darkly strokes need a brush (rhai stroke styles always have one)");
@@ -440,7 +446,7 @@ impl Pen<'_> {
                 brush.name, brush.min_pressure, brush.max_pressure, brush.heaviest(), peak_pressure,
             );
         }
-        let [cr, cg, cb, ca] = if white {
+        let colour = if white {
             [1.0; 4]
         } else {
             style.rgba().unwrap_or_else(|err| {
@@ -468,6 +474,8 @@ impl Pen<'_> {
             self.engine.set_stroke_seed(Some(stroke_seed));
             self.drawn = self.drawn.wrapping_add(1);
             let variation = brush.variation(stroke_seed);
+            let shift = style.color_jitter.map_or([0.0; 3], |j| j.shift(i));
+            let [cr, cg, cb, ca] = if white { colour } else { shifted(colour, shift) };
             // One Darkly stroke per substroke. With no frame drawn between
             // its points, Darkly draws the whole stroke at once when it ends.
             self.engine.begin_stroke(layer).expect("begin_stroke failed");
@@ -487,7 +495,7 @@ impl Pen<'_> {
                 let x = (point.x - self.page_origin.x) * w_ratio - self.offset.0;
                 let y = (point.y - self.page_origin.y) * h_ratio - self.offset.1;
                 let down = if bottom > top { (point.y - top) / (bottom - top) } else { 0.5 };
-                points.push((Vec2::new(x, y), i as f32 / (sample_count - 1).max(1) as f32, down));
+                points.push((Vec2::new(x, y), i as f32 / (sample_count - 1).max(1) as f32, down, shift));
                 self.engine.stroke_to(StrokeOp::BrushStroke {
                     x,
                     y,

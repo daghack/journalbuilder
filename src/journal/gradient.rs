@@ -5,6 +5,8 @@ use parry2d::math::Vec2;
 use rayon::prelude::*;
 use std::collections::HashMap;
 
+use crate::journal::canvas::color_jitter::{shifted, Shift};
+
 /// A run of colours, and how it's laid over strokes.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Gradient {
@@ -72,20 +74,20 @@ impl Gradient {
 }
 
 /// Points along strokes, each with how far through the gradient it is (0
-/// to 1: along its stroke, or down it), for finding how far through any
-/// nearby pixel is.
+/// to 1: along its stroke, or down it) and how its stroke's colour is
+/// jittered, for finding both for any nearby pixel.
 pub struct Along {
     cell: f32,
-    cells: HashMap<(i32, i32), Vec<(Vec2, f32)>>,
+    cells: HashMap<(i32, i32), Vec<(Vec2, f32, Shift)>>,
 }
 
 impl Along {
     /// For points about `spacing` apart, on strokes about `reach` across.
-    pub fn new(points: Vec<(Vec2, f32)>, reach: f32) -> Self {
+    pub fn new(points: Vec<(Vec2, f32, Shift)>, reach: f32) -> Self {
         let cell = reach.max(4.0);
-        let mut cells: HashMap<(i32, i32), Vec<(Vec2, f32)>> = HashMap::new();
-        for (p, t) in points {
-            cells.entry(Self::key(p, cell)).or_default().push((p, t));
+        let mut cells: HashMap<(i32, i32), Vec<(Vec2, f32, Shift)>> = HashMap::new();
+        for (p, t, shift) in points {
+            cells.entry(Self::key(p, cell)).or_default().push((p, t, shift));
         }
         Along { cell, cells }
     }
@@ -94,15 +96,16 @@ impl Along {
         ((p.x / cell).floor() as i32, (p.y / cell).floor() as i32)
     }
 
-    /// How far along its stroke the nearest point to `p` is, or 0 if there
-    /// are none nearby (within a few cells).
-    pub fn t_near(&self, p: Vec2) -> f32 {
+    /// How far along its stroke the nearest point to `p` is, and its
+    /// stroke's jitter; 0 and none if there are none nearby (within a few
+    /// cells).
+    pub fn near(&self, p: Vec2) -> (f32, Shift) {
         let (cx, cy) = Self::key(p, self.cell);
-        let mut best: Option<(f32, f32)> = None;
+        let mut best: Option<(f32, f32, Shift)> = None;
         // Rings of cells outwards, until nothing in the next ring could be
         // nearer than what's been found.
         for ring in 0i32..6 {
-            if let Some((distance, _)) = best
+            if let Some((distance, _, _)) = best
                 && distance < (ring as f32 - 1.0) * self.cell {
                 break;
             }
@@ -111,16 +114,16 @@ impl Along {
                     if dx.abs() != ring && dy.abs() != ring {
                         continue;
                     }
-                    for &(q, t) in self.cells.get(&(cx + dx, cy + dy)).into_iter().flatten() {
+                    for &(q, t, shift) in self.cells.get(&(cx + dx, cy + dy)).into_iter().flatten() {
                         let d = q.distance(p);
-                        if best.is_none_or(|(bd, _)| d < bd) {
-                            best = Some((d, t));
+                        if best.is_none_or(|(bd, _, _)| d < bd) {
+                            best = Some((d, t, shift));
                         }
                     }
                 }
             }
         }
-        best.map_or(0.0, |(_, t)| t)
+        best.map_or((0.0, [0.0; 3]), |(_, t, shift)| (t, shift))
     }
 }
 
@@ -129,7 +132,8 @@ impl Along {
 /// brush's shading stays), with the gradient's alpha on top of its own.
 /// `to_canvas` turns a pixel's centre into canvas units, for gradients
 /// across the canvas; `along` gives how far through the gradient a pixel
-/// is, for gradients laid over each stroke.
+/// is, for gradients laid over each stroke, and how the nearest stroke's
+/// colour is jittered, for any gradient.
 pub fn colorize(image: &mut RgbaImage, gradient: &Gradient, to_canvas: impl Fn(f32, f32) -> Vec2 + Sync, along: Option<&Along>) {
     let width = image.width() as usize;
     image.par_chunks_mut(width * 4).enumerate().for_each(|(y, row)| {
@@ -139,10 +143,11 @@ pub fn colorize(image: &mut RgbaImage, gradient: &Gradient, to_canvas: impl Fn(f
                 continue;
             }
             let centre = (x as f32 + 0.5, y as f32 + 0.5);
-            let colour = match gradient.kind {
-                GradientKind::Along | GradientKind::Vertical => gradient.at(along.map_or(0.0, |a| a.t_near(Vec2::new(centre.0, centre.1)))),
+            let (t, shift) = along.map_or((0.0, [0.0; 3]), |a| a.near(Vec2::new(centre.0, centre.1)));
+            let colour = shifted(match gradient.kind {
+                GradientKind::Along | GradientKind::Vertical => gradient.at(t),
                 _ => gradient.at_point(to_canvas(centre.0, centre.1)).expect("a gradient across the canvas"),
-            };
+            }, shift);
             for (c, g) in px[..3].iter_mut().zip(colour) {
                 *c = (*c as f32 * g).round().clamp(0.0, 255.0) as u8;
             }
@@ -184,11 +189,12 @@ mod tests {
 
     #[test]
     fn along_finds_the_nearest_point() {
-        let points = (0..=100).map(|i| (Vec2::new(i as f32, 0.0), i as f32 / 100.0)).collect();
+        let points = (0..=100).map(|i| (Vec2::new(i as f32, 0.0), i as f32 / 100.0, [i as f32, 0.0, 0.0])).collect();
         let along = Along::new(points, 6.0);
-        assert!((along.t_near(Vec2::new(30.2, 3.0)) - 0.3).abs() < 1e-6);
-        assert!((along.t_near(Vec2::new(99.0, -2.0)) - 0.99).abs() < 1e-6);
-        assert_eq!(Along::new(Vec::new(), 6.0).t_near(Vec2::ZERO), 0.0);
+        assert!((along.near(Vec2::new(30.2, 3.0)).0 - 0.3).abs() < 1e-6);
+        assert_eq!(along.near(Vec2::new(30.2, 3.0)).1, [30.0, 0.0, 0.0], "the nearest point's jitter");
+        assert!((along.near(Vec2::new(99.0, -2.0)).0 - 0.99).abs() < 1e-6);
+        assert_eq!(Along::new(Vec::new(), 6.0).near(Vec2::ZERO), (0.0, [0.0; 3]));
     }
 
     #[test]

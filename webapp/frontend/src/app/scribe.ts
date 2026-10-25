@@ -35,6 +35,8 @@ export interface RenderOptions {
   scale: number;
   supersample?: number;
   parchment: boolean;
+  /** For PDFs, how many pages side by side to a PDF page; none for a page each. */
+  stitch?: number;
 }
 
 // ---- the eval worker ----

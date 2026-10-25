@@ -17,7 +17,7 @@ type Format = 'pdf' | 'png';
       @if (!running() && !done()) {
         <p class="note">
           {{ journal.pages().length }} page{{ journal.pages().length === 1 ? '' : 's' }}, rendered with Darkly
-          {{ format() === 'pdf' ? 'into one PDF' : 'as a zip of PNGs, one per page' }}.
+          {{ format() === 'pdf' ? 'into one PDF' : 'as a zip of PNGs, one per page' }}{{ stitchNote() }}.
         </p>
         <label>Export as
           <select (change)="format.set($any($event.target).value)">
@@ -33,12 +33,10 @@ type Format = 'pdf' | 'png';
         <label>Supersample
           <input type="number" min="1" step="0.1" [value]="supersample()" (change)="setSupersample($any($event.target))" />
         </label>
-        @if (format() === 'png') {
-          <label>Stitch every
-            <input type="number" min="1" step="1" placeholder="off" [value]="stitch() ?? ''" (change)="setStitch($any($event.target))" />
-            pages
-          </label>
-        }
+        <label>Stitch every
+          <input type="number" min="1" step="1" placeholder="off" [value]="stitch() ?? ''" (change)="setStitch($any($event.target))" />
+          pages
+        </label>
         <label><input type="checkbox" [checked]="parchment()" (change)="parchment.set($any($event.target).checked)" /> On parchment</label>
         <div class="actions">
           <button type="button" (click)="dialog.close()">Close</button>
@@ -89,6 +87,11 @@ export class ExportBarComponent {
   protected readonly progress = signal<RenderProgress | null>(null);
   protected readonly error = signal<string | null>(null);
 
+  protected readonly stitchNote = computed(() => {
+    const n = this.stitch();
+    if (n === null || n < 2) return '';
+    return this.format() === 'pdf' ? `, ${n} pages side by side to a PDF page` : `, and every ${n} side by side`;
+  });
   protected readonly canExport = computed(() => this.journal.pages().some((p) => p.view) && !this.journal.error());
   protected readonly overall = computed(() => {
     const p = this.progress();
@@ -129,7 +132,7 @@ export class ExportBarComponent {
     const progress = (p: RenderProgress) => this.progress.set(p);
     try {
       if (this.format() === 'pdf') {
-        const pdf = await this.render.exportPdf(source, name, options, progress);
+        const pdf = await this.render.exportPdf(source, name, { ...options, stitch: this.stitch() ?? undefined }, progress);
         this.files.download(pdf, `${name}.pdf`);
       } else {
         const pages = this.journal.pages().filter((p) => p.view);

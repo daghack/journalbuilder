@@ -20,7 +20,7 @@
 use scribe::journal::darkly;
 use scribe::journal::fonts::FontBook;
 use scribe::journal::pdf::PdfWriter;
-use scribe::journal::publish::{self, Render, UNITS_PER_INCH};
+use scribe::journal::publish::{self, Render};
 use scribe::journal::rhaientries::{Entry, JournalEngine, LockLibrary, Resources};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -591,16 +591,23 @@ struct RenderOptions {
     scale: f32,
     supersample: f32,
     parchment: bool,
+    /// For PDFs, how many pages side by side to a PDF page (as
+    /// `journalbuild --pdf --stitch`); none for a page each.
+    stitch: Option<usize>,
 }
 
 impl Default for RenderOptions {
     fn default() -> Self {
-        RenderOptions { scale: 1.0, supersample: 1.2, parchment: false }
+        RenderOptions { scale: 1.0, supersample: 1.2, parchment: false, stitch: None }
     }
 }
 
 impl RenderOptions {
     fn from_js(options: JsValue) -> Result<Render, JsError> {
+        Self::with_stitch(options).map(|(render, _)| render)
+    }
+    /// `from_js`, and how many pages to a stitch.
+    fn with_stitch(options: JsValue) -> Result<(Render, Option<usize>), JsError> {
         let options: RenderOptions = if options.is_undefined() || options.is_null() {
             RenderOptions::default()
         } else {
@@ -609,7 +616,10 @@ impl RenderOptions {
         if !(options.scale > 0.0 && options.scale <= 4.0) {
             return Err(JsError::new(&format!("scale must be more than 0 and at most 4, got {}", options.scale)));
         }
-        Ok(Render { scale: options.scale, supersample: options.supersample.max(1.0), parchment: options.parchment })
+        if options.stitch == Some(0) {
+            return Err(JsError::new("stitch must be at least 1"));
+        }
+        Ok((Render { scale: options.scale, supersample: options.supersample.max(1.0), parchment: options.parchment }, options.stitch))
     }
 }
 
@@ -684,28 +694,32 @@ impl Renderer {
         })
     }
 
-    /// Every page of the journal `source` makes, rendered with `options`,
-    /// in one PDF titled `title` (as `journalbuild --pdf` makes it), as its
+    /// Every page of the journal `source` makes, rendered with `options`
+    /// (`{ scale, supersample, parchment, stitch }`), in one PDF titled
+    /// `title` (as `journalbuild --pdf` makes it, with `--stitch`), as its
     /// bytes. `progress(page, pages, fraction)` is called as it goes.
     #[wasm_bindgen(js_name = exportPdf)]
     pub fn export_pdf(&self, source: String, title: String, options: JsValue, progress: js_sys::Function) -> js_sys::Promise {
         let state = self.state.clone();
-        let render = RenderOptions::from_js(options);
+        let render = RenderOptions::with_stitch(options);
         wasm_bindgen_futures::future_to_promise(async move {
-            let render = render?;
+            let (render, stitch) = render?;
             let mut state = state.try_borrow_mut().map_err(|_| busy())?;
             let entry = state.entry(&source)?;
             let failed = |e: std::io::Error| JsError::new(&format!("couldn't write the PDF: {}", e));
             let mut pdf = PdfWriter::new(std::io::Cursor::new(Vec::new())).map_err(failed)?;
-            let points = 72.0 / UNITS_PER_INCH / render.scale;
+            let mut stitcher = publish::Stitcher::new(stitch);
             let pages = entry.page_count() as f64;
             for (i, page) in entry.selected_pages(None) {
                 let mut page_progress = |done: f32| report(&progress, &[i as f64, pages, done as f64]);
                 let image = publish::page_image_async(page, &page.label(i), &mut state.engine, &render, &mut page_progress).await
                     .map_err(|e| JsError::new(&e))?;
-                if let Some(image) = image {
-                    pdf.add_page(&image, image.width() as f32 * points, image.height() as f32 * points).map_err(failed)?;
+                if let Some(sheet) = image.and_then(|image| stitcher.push(image)) {
+                    publish::add_pdf_page(&mut pdf, &sheet, render.scale).map_err(failed)?;
                 }
+            }
+            if let Some(sheet) = stitcher.finish() {
+                publish::add_pdf_page(&mut pdf, &sheet, render.scale).map_err(failed)?;
             }
             if pdf.page_count() == 0 {
                 return Err(JsError::new("nothing to put in the PDF: every page is empty").into());

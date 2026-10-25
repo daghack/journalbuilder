@@ -40,7 +40,8 @@ journal's other files changes.
 - **Export.** One Export button opens a dialog: export as PDF (as
   `journalbuild --pdf` makes it) or as a zip of PNGs, one per page, rendered
   with Darkly, with a progress bar. The dialog sets the scale, supersample,
-  parchment, and (for PNGs) `stitch`, as journalbuild's flags do. Cancel
+  parchment, and `stitch`, as journalbuild's flags do: PNGs get stitched
+  images besides the pages, and a PDF's pages are the stitches. Cancel
   stops it.
 
 Darkly previews and exports need WebGPU: a current Chrome, Edge or Safari.
