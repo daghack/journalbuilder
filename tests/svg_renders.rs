@@ -227,7 +227,6 @@ first_pages!(
     matter_of_pyrius,
     nivelia_letters,
     raven_constellations,
-    the_collector_pages,
     welcome_home,
 );
 
