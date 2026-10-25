@@ -352,6 +352,14 @@ impl JournalEngine {
         let illustration = self.illustrations.load(&self.engine, name)?;
         illustration.inputs(&self.engine, &illustration.options(&json_map(options, "options")?)?)
     }
+    /// Which of illustration `name`'s inputs, with `options` (a JSON
+    /// object) over its defaults, draw with its fallbacks when nothing's
+    /// wired to them.
+    pub fn illustration_fallbacks(&self, name: &str, options: &serde_json::Value) -> Result<Vec<String>, String> {
+        let illustration = self.illustrations.load(&self.engine, name)?;
+        let fallbacks = illustration.fallbacks(&self.engine, &illustration.options(&json_map(options, "options")?)?)?;
+        Ok(fallbacks.keys().map(|k| k.to_string()).collect())
+    }
     /// What illustration `name` draws, `options` (a JSON object) over its
     /// defaults, of `inputs` (JSON, name -> value as lock files see it), or
     /// of its own `example()` if `None`: an entry with a page for each
@@ -363,6 +371,7 @@ impl JournalEngine {
             Some(inputs) => self.with_sources(json_map(inputs, "inputs")?)?,
             None => illustration.example(&self.engine)?.ok_or_else(|| format!("illustration '{}' has no example() to draw", name))?,
         };
+        let inputs = illustration.with_fallbacks(&self.engine, &options, inputs)?;
         let mut entry = Entry::default();
         for canvas in illustration.render(&self.engine, &options, inputs)? {
             let mut page = Page::default();

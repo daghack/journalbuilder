@@ -1,4 +1,5 @@
 import { Component, computed, inject, signal } from '@angular/core';
+import { showEditorTab } from '../layout/pane-state';
 import { KINDS, VALID_NAME, entryPath, nameOf, pathOf, splitPath, type KindInfo } from '../journal/journal-files';
 import { template } from '../journal/templates';
 import { JournalStore } from '../services/journal-store.service';
@@ -57,7 +58,7 @@ const open = signal<Record<string, boolean>>(readOpen());
           <ul>
             @for (item of group.own; track item.path) {
               <li [class.selected]="shell.selected() === item.path" [class.unlisted]="item.unlisted">
-                <button type="button" class="file" (click)="shell.open(item.path)" [title]="item.path">
+                <button type="button" class="file" (click)="openFile(item.path)" [title]="item.path">
                   {{ item.label }}
                   @if (item.overrides) { <span class="override" title="Stands in for the library's file of the same name">⚠</span> }
                   @if (item.unlisted) { <span class="note" title="Not in journal.json's entries, so not built">unlisted</span> }
@@ -87,7 +88,7 @@ const open = signal<Record<string, boolean>>(readOpen());
               <ul class="library">
                 @for (item of group.library; track item.path) {
                   <li [class.selected]="shell.selected() === item.path">
-                    <button type="button" class="file" (click)="shell.open(item.path)" [title]="'The library\\'s ' + item.path">{{ item.label }}</button>
+                    <button type="button" class="file" (click)="openFile(item.path)" [title]="'The library\\'s ' + item.path">{{ item.label }}</button>
                   </li>
                 }
               </ul>
@@ -179,6 +180,12 @@ export class FileSidebarComponent {
   private say(message: string | null) {
     this.message.set(message);
     if (message) setTimeout(() => this.message() === message && this.message.set(null), 8_000);
+  }
+
+  /** Edit `path`, its editor's own left tab showing in place of the files. */
+  protected openFile(path: string) {
+    this.shell.open(path);
+    showEditorTab();
   }
 
   protected setTitle(title: string) {

@@ -267,7 +267,7 @@ export class LockEditorService {
       void this.tools.illustrationPorts(renderer.type, options).then(
         (answer) => {
           if (this.portKeys.get(renderer.id) !== key) return;
-          const ports = failed(answer) ? answer : { inputs: answer.inputs, outputs: [], options };
+          const ports = failed(answer) ? answer : { inputs: answer.inputs, outputs: [], options, fallbacks: answer.fallbacks };
           this.ports.update((p) => ({ ...p, [renderer.id]: ports }));
         },
         (err: Error) => {
@@ -497,7 +497,8 @@ export class LockEditorService {
 
   /**
    * The last run's values for renderer `renderer`'s inputs, or null if it
-   * can't draw yet. A source's value is written as `{ $source }`, for the
+   * can't draw yet. Inputs with fallbacks nothing's wired to are left out,
+   * for the illustration's own. A source's value is written as `{ $source }`, for the
    * engine to make (a style's bundle, say), so a chain of sources alone draws.
    */
   private rendererInputs(renderer: RendererNode, result: ChainRun | { error: string } | null, model: ChainModel, ports: PortsByNode): Record<string, unknown> | null {
@@ -507,6 +508,8 @@ export class LockEditorService {
     const inputs: Record<string, unknown> = {};
     for (const [name] of p.inputs) {
       const wire = model.renderWires.find((w) => w.to === `${renderer.id}.${name}`);
+      // Nothing wired: it draws with its own, if it has one.
+      if (!wire && p.fallbacks?.includes(name)) continue;
       if (!wire) return null;
       const source = model.sources.find((s) => `${s.id}.${chain.SOURCE_PORT}` === wire.from);
       if (source) {

@@ -469,11 +469,16 @@ pub fn illustration_types() -> String {
 }
 
 /// Illustration `type_name`'s inputs with `options` (JSON) over its
-/// defaults: `{ inputs }`, `[name, type]` pairs, or `{ error }`.
+/// defaults: `{ inputs, fallbacks }`, `[name, type]` pairs and the names of
+/// those that draw with the illustration's own when nothing's wired to
+/// them, or `{ error }`.
 #[wasm_bindgen(js_name = illustrationPorts)]
 pub fn illustration_ports(type_name: &str, options: &str) -> String {
     answer(parse_json(options, "options").and_then(|options| {
-        engine(&[]).illustration_inputs(type_name, &options).map(|inputs| json!({ "inputs": inputs }))
+        let engine = engine(&[]);
+        let inputs = engine.illustration_inputs(type_name, &options)?;
+        let fallbacks = engine.illustration_fallbacks(type_name, &options)?;
+        Ok(json!({ "inputs": inputs, "fallbacks": fallbacks }))
     }))
 }
 

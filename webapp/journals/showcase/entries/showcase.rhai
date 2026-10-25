@@ -1520,6 +1520,21 @@ let scripted = new_lock("scripted")
 	.connect("words.value", "note.text")
 	.connect("hand.value", "note.style");
 sourced.add(scripted.run().canvases("note")[0].translate_by(vec2(LEFT, TOP + 430)));
+// An illustration's styles and glyphsets are inputs too: wire a style or
+// glyphset source in, or leave them to its fallbacks(o). Here
+// trit_message's heading is in margin_note and the plain glyphset, its
+// marks as it draws them unwired.
+sourced.add(caption("an illustration's TextStyle and Glyphset inputs, wired from sources; unwired, its fallbacks(o)", TOP + 800));
+let restyled = new_lock("restyled")
+	.add("shift", "shift_cipher", #{ base: 3, shift: 1 })
+	.set_input("shift.plain_text", symbols(3, "CABBACCABBACABCA"))
+	.source("hand", "style", "margin_note", #{ options: #{ size: 26 } })
+	.source("letters", "glyphset", "plain")
+	.attach("message", "trit_message", #{ title: "Restyled", per_row: 24, width: 1000.0 })
+	.connect("shift.cipher_text", "message.message")
+	.connect("hand.value", "message.heading_style")
+	.connect("letters.value", "message.heading_glyphs");
+sourced.add(restyled.run().canvases("message")[0].translate_by(vec2(LEFT - 100, TOP + 780)));
 book.bind("locks", sourced);
 
 // ---- a spread: one drawing over two pages ----

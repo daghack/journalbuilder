@@ -573,9 +573,14 @@ impl LockResult {
         let loaded = self.illustration_library.load(ctx.engine(), &attachment.illustration).map_err(fail)?;
         let options = loaded.options(&attachment.options).map_err(fail)?;
         let mut inputs = Map::new();
+        let mut fallbacks = loaded.fallbacks(ctx.engine(), &options).map_err(fail)?;
         for (input, _) in loaded.inputs(ctx.engine(), &options).map_err(fail)? {
-            let port = attachment.wires.iter().find(|(name, _)| *name == input).map(|(_, port)| port)
-                .ok_or_else(|| fail(format!("illustration '{}' has nothing connected to its input '{}'", id, input)))?;
+            let Some(port) = attachment.wires.iter().find(|(name, _)| *name == input).map(|(_, port)| port) else {
+                let fallback = fallbacks.remove(input.as_str())
+                    .ok_or_else(|| fail(format!("illustration '{}' has nothing connected to its input '{}'", id, input)))?;
+                inputs.insert(input.into(), fallback);
+                continue;
+            };
             if let Some(source) = port.strip_suffix(".value").and_then(|id| self.sources.iter().find(|s| s.id == id)) {
                 inputs.insert(input.into(), source_value(ctx, &self.library, source).map_err(fail)?);
                 continue;

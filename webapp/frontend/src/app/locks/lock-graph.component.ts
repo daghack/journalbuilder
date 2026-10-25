@@ -15,13 +15,15 @@ interface Point {
 
 type Drag =
   | { kind: 'node'; id: string; from: Point; at: Point }
-  | { kind: 'wire'; port: string; side: 'out' | 'in'; to: Point }
+  /** A wire from `port`: dragged, or (`armed`, after a click on it) following the pointer until a second click. */
+  | { kind: 'wire'; port: string; side: 'out' | 'in'; to: Point; armed: boolean }
   | { kind: 'pan'; from: Point; pan: Point };
 
 /**
  * The middle: the chain's locks as boxes with their inputs on the left and
  * outputs on the right, wires between them. Drag a lock by its title; drag
- * from a port to another to wire them; drag the background to pan.
+ * from a port to another to wire them, or click one then the other (Escape
+ * lets go); drag the background to pan.
  */
 @Component({
   selector: 'app-lock-graph',
@@ -69,8 +71,8 @@ type Drag =
               <div class="row">
                 @if (row.input; as p) {
                   <span class="port in" [attr.data-port]="p.port" data-side="in" [class.dim]="dim(p.port, 'in', p.type)"
-                        (pointerdown)="downPort($event, p.port, 'in')" [title]="p.port + ': ' + p.type">
-                    <span class="dot" [class.open]="p.open" [class.fixed]="p.fixed"></span>{{ p.name }}
+                        (pointerdown)="downPort($event, p.port, 'in')" [title]="p.port + ': ' + p.type + (p.fallback ? ' (draws with its own unless something is wired to it)' : '')">
+                    <span class="dot" [class.open]="p.open" [class.fixed]="p.fixed" [class.fallback]="p.fallback"></span>{{ p.name }}
                   </span>
                 } @else { <span></span> }
                 @if (row.output; as p) {
@@ -99,7 +101,7 @@ type Drag =
     .spacer { flex: 1; }
     .status { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
     .status.bad { color: var(--danger); }
-    .area { position: relative; flex: 1; overflow: hidden; touch-action: none; cursor: grab;
+    .area { position: relative; flex: 1; overflow: hidden; touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none;
       background-image: radial-gradient(circle, rgb(255 255 255 / 0.18) 1px, transparent 1px); background-size: 24px 24px; }
     .world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
     .wires { position: absolute; left: 0; top: 0; overflow: visible; }
@@ -133,6 +135,7 @@ type Drag =
     .port.out .dot { margin-right: -6px; }
     .dot.open { background: var(--accent); }
     .dot.fixed { background: #c9a227; }
+    .dot.fallback { background: var(--surface); box-shadow: inset 0 0 0 2px var(--muted); }
     .tag { position: absolute; transform: translate(-100%, -50%); font: 11px var(--mono); color: #f2efe9; white-space: nowrap; pointer-events: none; }
     .tag.out { transform: translate(0, -50%); }
     .tag.fixed { color: #f2c94c; }
@@ -199,7 +202,8 @@ export class LockGraphComponent {
       const p = portsOf(ports, renderer.id);
       const rows = (p?.inputs ?? []).map(([name, type]) => {
         const port = `${renderer.id}.${name}`;
-        return { input: { port, name, type, open: !wiredIn.has(port), fixed: false }, output: null };
+        const fallback = !wiredIn.has(port) && !!p?.fallbacks?.includes(name);
+        return { input: { port, name, type, open: !wiredIn.has(port) && !fallback, fixed: false, fallback }, output: null };
       });
       const preview = previews[renderer.id];
       return {
@@ -212,7 +216,7 @@ export class LockGraphComponent {
       const p = portsOf(ports, node.id);
       const ins = (p?.inputs ?? []).map(([name, type]) => {
         const port = `${node.id}.${name}`;
-        return { port, name, type, open: !wiredIn.has(port) && !(port in model.fixed), fixed: port in model.fixed };
+        return { port, name, type, open: !wiredIn.has(port) && !(port in model.fixed), fixed: port in model.fixed, fallback: false };
       });
       const outs = (p?.outputs ?? []).map(([name, type]) => {
         const port = `${node.id}.${name}`;
@@ -284,6 +288,8 @@ export class LockGraphComponent {
 
   protected downBackground(event: PointerEvent) {
     if (event.target !== this.area().nativeElement && !(event.target as HTMLElement).classList.contains('world')) return;
+    event.preventDefault();
+    (this.area().nativeElement.parentElement as HTMLElement).focus({ preventScroll: true });
     this.editor.selected.set(null);
     this.editor.selectedWire.set(null);
     this.area().nativeElement.setPointerCapture(event.pointerId);
@@ -292,6 +298,7 @@ export class LockGraphComponent {
 
   protected downNode(event: PointerEvent, id: string) {
     event.stopPropagation();
+    event.preventDefault();
     (this.area().nativeElement.parentElement as HTMLElement).focus({ preventScroll: true });
     this.editor.selected.set(id);
     this.editor.selectedWire.set(null);
@@ -304,8 +311,14 @@ export class LockGraphComponent {
 
   protected downPort(event: PointerEvent, port: string, side: 'in' | 'out') {
     event.stopPropagation();
+    event.preventDefault();
+    (this.area().nativeElement.parentElement as HTMLElement).focus({ preventScroll: true });
+    const drag = this.drag();
+    // The second click of a click-to-wire: wire to this port.
+    if (drag?.kind === 'wire' && drag.armed && drag.side !== side) return this.finishWire(drag, port);
+    if (drag?.kind === 'wire' && drag.armed && drag.port === port) return this.drag.set(null);
     this.area().nativeElement.setPointerCapture(event.pointerId);
-    this.drag.set({ kind: 'wire', port, side, to: this.at(event) });
+    this.drag.set({ kind: 'wire', port, side, to: this.at(event), armed: false });
   }
 
   protected pickWire(event: PointerEvent, to: string) {
@@ -330,16 +343,22 @@ export class LockGraphComponent {
 
   protected up(event: PointerEvent) {
     const drag = this.drag();
+    if (drag?.kind === 'wire' && drag.armed) return;
     this.drag.set(null);
     if (drag?.kind !== 'wire') return;
     const target = document.elementFromPoint(event.clientX, event.clientY)?.closest('[data-port]') as HTMLElement | null;
     if (!target) return;
     const port = target.dataset['port']!;
-    const side = target.dataset['side'] as 'in' | 'out';
-    if (side === drag.side) return;
+    // Let go on the port it started from: a click, so the wire waits for the port it goes to.
+    if (port === drag.port) return this.drag.set({ ...drag, to: this.at(event), armed: true });
+    if (target.dataset['side'] !== drag.side) this.finishWire(drag, port);
+  }
+
+  /** Wire `drag`'s port to `port`, on the other side. */
+  private finishWire(drag: Extract<Drag, { kind: 'wire' }>, port: string) {
+    this.drag.set(null);
     const [from, to] = drag.side === 'out' ? [drag.port, port] : [port, drag.port];
-    const problem = this.editor.connect(from, to);
-    this.showError(problem);
+    this.showError(this.editor.connect(from, to));
   }
 
   private showError(problem: string | null) {
@@ -404,6 +423,7 @@ export class LockGraphComponent {
       event.preventDefault();
       this.deleteSelected();
     } else if (event.key === 'Escape') {
+      if (this.drag()?.kind === 'wire') return this.drag.set(null);
       this.editor.selected.set(null);
       this.editor.selectedWire.set(null);
     }

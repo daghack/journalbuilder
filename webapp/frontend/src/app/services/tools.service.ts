@@ -77,7 +77,7 @@ export class ToolsService {
   }
 
   /** Illustration `type`'s inputs with `options`. */
-  async illustrationPorts(type: string, options: Record<string, unknown>): Promise<Answer<{ inputs: [string, string][] }>> {
+  async illustrationPorts(type: string, options: Record<string, unknown>): Promise<Answer<{ inputs: [string, string][]; fallbacks: string[] }>> {
     return JSON.parse(await this.call<string>('illustrationPorts', type, JSON.stringify(options)));
   }
 

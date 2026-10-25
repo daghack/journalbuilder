@@ -1,5 +1,6 @@
 import { Component, Directive, computed, inject, input, signal, type OnInit } from '@angular/core';
 import { FileSidebarComponent } from '../shell/file-sidebar.component';
+import { filesShown, keep, stored } from './pane-state';
 
 type Splitter = 'left' | 'right';
 
@@ -12,26 +13,8 @@ export interface PaneTab {
 
 const FILES = 'files';
 
-function stored<T>(key: string, fallback: T): T {
-  try {
-    return JSON.parse(localStorage.getItem(`journal-editor.panes.${key}`) ?? 'null') ?? fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function keep(key: string, value: unknown) {
-  try {
-    localStorage.setItem(`journal-editor.panes.${key}`, JSON.stringify(value));
-  } catch {
-    // No storage: it just isn't kept.
-  }
-}
-
 /** The left pane's width, the same in every editor so it holds still as files open. */
 const leftWidth = signal<number>(stored('left', 240));
-/** Whether the left pane shows the journal's files, in every editor: picking a file keeps them showing. */
-const filesShown = signal<boolean>(stored('files', true));
 
 /**
  * Three columns with splitters between them. The left is tabbed: the

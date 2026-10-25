@@ -171,6 +171,8 @@ export interface LockPorts {
   inputs: [string, string][];
   outputs: [string, string][];
   options: Record<string, unknown>;
+  /** An illustration's inputs that draw with its own value when nothing's wired to them. */
+  fallbacks?: string[];
 }
 
 /** A value from a lock run. */

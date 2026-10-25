@@ -11,6 +11,9 @@
 //! - `inputs(o)`: `#{ NAME: type }`, the values it draws, typed as lock
 //!   files type theirs (`"StarChart"`, `"Base27Symbol"`, `"Any"`).
 //! - `render(o, i)`: a canvas, or an array of canvases (a page each, say).
+//! - `fallbacks(o)` (optional): `#{ NAME: value }`, what inputs nothing's
+//!   wired to draw with: the styles and glyphsets it draws in, say, so a
+//!   chain can wire its own in or leave them.
 //! - `example()` (optional): `#{ NAME: value }`, inputs to preview it with.
 //!
 //! Journals attach one to a lock chain, `lock.attach("pages", "star_pages",
@@ -98,6 +101,32 @@ impl IllustrationType {
             let t = t.into_string().map_err(|got| format!("illustration '{}': input '{}' should have a type name, got {}", self.name, name, got))?;
             Ok((name.to_string(), t))
         }).collect()
+    }
+
+    /// What its inputs nothing's wired to take, with `o`: `fallbacks(o)`,
+    /// or nothing if it doesn't define it.
+    pub fn fallbacks(&self, engine: &Engine, o: &Map) -> Result<Map, String> {
+        if !self.ast.iter_functions().any(|f| f.name == "fallbacks" && f.params.len() == 1) {
+            return Ok(Map::new());
+        }
+        let value = engine.call_fn::<Dynamic>(&mut Scope::new(), &self.ast, "fallbacks", (Dynamic::from_map(o.clone()),))
+            .map_err(|e| format!("illustration '{}' fallbacks(o): {}", self.name, e))?;
+        let type_name = value.type_name();
+        let map = value.try_cast::<Map>().ok_or_else(|| format!("illustration '{}': fallbacks(o) should return #{{ NAME: value }}, got {}", self.name, type_name))?;
+        let inputs = self.inputs(engine, o)?;
+        if let Some(name) = map.keys().find(|name| !inputs.iter().any(|(input, _)| input == name.as_str())) {
+            let names: Vec<&str> = inputs.iter().map(|(n, _)| n.as_str()).collect();
+            return Err(format!("illustration '{}': fallbacks(o) gives '{}', which isn't an input; inputs: {}", self.name, name, names.join(", ")));
+        }
+        Ok(map)
+    }
+
+    /// `inputs` with what's missing from them taken from `fallbacks(o)`.
+    pub fn with_fallbacks(&self, engine: &Engine, o: &Map, mut inputs: Map) -> Result<Map, String> {
+        for (name, value) in self.fallbacks(engine, o)? {
+            inputs.entry(name).or_insert(value);
+        }
+        Ok(inputs)
     }
 
     /// The canvases it draws `inputs` (name -> value) as, with `o`.
@@ -196,7 +225,7 @@ mod tests {
             (r#"lock.attach("d", "maze_glyphs", #{ size: 3 });"#, "attach: illustration 'maze_glyphs' has no option 'size'; its options: cell, corridors, glyphs"),
             (r#"lock.attach("d", "maze_glyphs", #{ cell: "big" });"#, "attach: illustration 'maze_glyphs': option 'cell' should be like its default, 70.0, got big"),
             (r#"lock.attach("maze", "maze_glyphs");"#, "attach: there's a lock, illustration or source named 'maze' already"),
-            (r#"lock.attach("d", "maze_glyphs").connect("maze.generated_maze", "d.grid");"#, "connect: illustration 'd' (maze_glyphs) has no input 'grid'; inputs: maze"),
+            (r#"lock.attach("d", "maze_glyphs").connect("maze.generated_maze", "d.grid");"#, "connect: illustration 'd' (maze_glyphs) has no input 'grid'; inputs: corridor_style, glyph_style, glyphs, maze"),
             (r#"lock.attach("d", "maze_glyphs").connect("maze.text_length", "d.maze");"#, "connect: can't connect maze.text_length (LockProcessInfo) to d.maze (Maze)"),
             (r#"lock.attach("d", "maze_glyphs").connect("maze.nope", "d.maze");"#, "connect: 'maze.nope' isn't a port of the chain"),
             (r#"lock.attach("d", "maze_glyphs").run(#{ "maze.maze_text": symbols(27, "HI"), "maze.random_seed": symbols(10, "1") }).canvases("d");"#, "canvases: illustration 'd' has nothing connected to its input 'maze'"),
@@ -205,6 +234,25 @@ mod tests {
             let err = engine().build_entry_str(&format!("{}\n{}", chain, line)).expect_err(line).to_string();
             assert!(err.contains(want), "{}\n  wanted: {}\n  got: {}", line, want, err);
         }
+    }
+
+    #[test]
+    fn unwired_inputs_take_fallbacks_and_wired_ones_override_them() {
+        let picky = "fn inputs(o) { #{ text: \"String\", hand: \"TextStyle\" } }\nfn fallbacks(o) { #{ hand: text_style(\"plain_hand\") } }\nfn render(o, i) { new_canvas().add(write_line(i.text, vec2(0, 30), i.hand)) }";
+        let script = r#"
+            let lock = new_lock("m").source("words", "content", "lorem").source("hand", "style", "plain_hand", #{ options: #{ size: 18 } })
+                .attach("plain", "picky").connect("words.value", "plain.text")
+                .attach("styled", "picky").connect("words.value", "styled.text").connect("hand.value", "styled.hand");
+            let result = lock.run();
+            journal_entry.add(new_page().add(result.canvases("plain")[0]).add(result.canvases("styled")[0]));
+        "#;
+        let entry = engine_with(&[], &[("picky", picky)]).build_entry_str(script);
+        assert!(entry.is_ok_and(|e| e.empty_canvases().is_empty()), "both draw");
+        let wrong = picky.replace("#{ hand:", "#{ pen:");
+        let err = engine_with(&[], &[("picky", &wrong)]).build_entry_str(script).expect_err("a fallback for no input").to_string();
+        assert!(err.contains("fallbacks(o) gives 'pen', which isn't an input; inputs: hand, text"), "{}", err);
+        let engine = engine_with(&[], &[("picky", picky)]);
+        assert_eq!(engine.illustration_fallbacks("picky", &serde_json::json!({})), Ok(vec!["hand".to_string()]));
     }
 
     const DRAWN_MAZE: &str = r#"
