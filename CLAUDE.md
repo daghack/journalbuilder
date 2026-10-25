@@ -2,7 +2,9 @@
 
 ## Journals and the library
 
-A journal is a directory in `webapp/journals/`: `journal.json` (title,
+A journal is a directory in `journals/`, or in `webapp/journals/` for the
+two built into the web editor (`showcase` and `api_reference`; nothing
+else goes there): `journal.json` (title,
 description, its entries in order), its entries in `entries/NAME.rhai`,
 and files of its own in `locks/`, `layouts/`, `illustrations/`,
 `chains/`, `styles/`, `lib/`, `glyphsets/` and `content/`. These stand in

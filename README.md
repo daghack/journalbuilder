@@ -74,7 +74,8 @@ cd webapp/frontend && npm install && npm start
 
 | path | what's there |
 |---|---|
-| `webapp/journals/<name>/` | one journal per directory: `journal.json` (its title and entries in order), `entries/<entry>.rhai`, and files of its own in front of the library's (below) |
+| `journals/<name>/` | one journal per directory: `journal.json` (its title and entries in order), `entries/<entry>.rhai`, and files of its own in front of the library's (below) |
+| `webapp/journals/` | the two journals built into the web editor, the showcase and the API reference; it imports the others from `journals/` |
 | `webapp/journals/showcase` | a page each of every brush, glyphset, glyph, art tool, text layout and lock type, with the calls that make them |
 | `webapp/journals/api_reference` | the API reference: an entry for every function scripts can call, with its arguments, options and defaults |
 | `webapp/library/` | the built-in library every journal stands in front of, a directory for each kind of file: |
@@ -97,7 +98,7 @@ cd webapp/frontend && npm install && npm start
 
 ## Writing a journal
 
-A journal is a directory, `webapp/journals/<name>/`, with a manifest,
+A journal is a directory, `journals/<name>/`, with a manifest,
 `journal.json`:
 
 ```json
@@ -315,7 +316,7 @@ detail: `style.rs` (brush, handwriting and stroke styles),
 `text_settings.rs` (type and paragraph styles), `path.rs` (paths,
 hatching, text along paths), `text.rs` (text boxes, scattered notes),
 `glyphs.rs` (glyphs and glyphsets), `avoid.rs`, `layout.rs` (page
-layouts), `markdown.rs` (marked-up text for layouts), `gradient.rs`, `random.rs`, `art.rs` and `locks/mod.rs`. The journals in `webapp/journals/` and
+layouts), `markdown.rs` (marked-up text for layouts), `gradient.rs`, `random.rs`, `art.rs` and `locks/mod.rs`. The journals in `journals/` and `webapp/journals/` and
 `tests/smoke_journals/smoke` use most of it.
 
 ## Using layouts

@@ -1,6 +1,8 @@
-// Copies every journal in webapp/journals (a journal.json, its entries and
-// its own files) to generated/journals/<name>.json, { manifest, files }, with
-// an index.json listing them, for the editor's Open menu. Also writes
+// Copies the journals built into the editor, from webapp/journals (a
+// journal.json, its entries and its own files), to
+// generated/journals/<name>.json, { manifest, files }, with an index.json
+// listing them, for the editor's Open menu. The rest of webapp/journals
+// isn't built in: the editor opens them from the folder. Also writes
 // generated/fixtures/, the repository files the unit tests check against
 // (the library's glyphsets/ as one fonts.json, a chain file), as modules
 // exporting their text.
@@ -12,6 +14,8 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const journals = join(here, '../../journals');
 const out = join(here, '../generated/journals');
+/** The journals the editor has built in. */
+const builtIn = ['showcase', 'api_reference'];
 
 /** Every file under `dir`, as paths from it. */
 function walk(dir, root = dir) {
@@ -25,11 +29,8 @@ rmSync(join(here, '../generated/examples'), { recursive: true, force: true });
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 const index = [];
-const names = readdirSync(journals, { withFileTypes: true })
-  .filter((dir) => dir.isDirectory() && existsSync(join(journals, dir.name, 'journal.json')))
-  .map((dir) => dir.name)
-  .sort();
-for (const name of names) {
+for (const name of builtIn) {
+  if (!existsSync(join(journals, name, 'journal.json'))) throw new Error(`webapp/journals/${name} isn't a journal: it has no journal.json`);
   const dir = join(journals, name);
   const manifest = JSON.parse(readFileSync(join(dir, 'journal.json'), 'utf8'));
   const files = {};
@@ -41,7 +42,7 @@ for (const name of names) {
   index.push({ name, title: manifest.title, description: manifest.description, entries: manifest.entries });
 }
 writeFileSync(join(out, 'index.json'), JSON.stringify(index, null, 2) + '\n');
-console.log(`journals: ${names.join(', ')}`);
+console.log(`journals: ${builtIn.join(', ')}`);
 
 const fixtures = join(here, '../generated/fixtures');
 mkdirSync(fixtures, { recursive: true });

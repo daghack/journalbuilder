@@ -7,8 +7,8 @@
 #   3. Renders the small fixture in tests/smoke_journals at full scale, one
 #      page of it supersampled, and all of it on parchment and as a PDF at
 #      reduced scale, and every page of webapp/journals/showcase at reduced scale.
-#   4. Renders page 0 of every entry of every journal in webapp/journals/ at
-#      reduced scale, Darkly output only.
+#   4. Renders page 0 of every entry of every other journal, in journals/
+#      and webapp/journals/, at reduced scale, Darkly output only.
 #      Steps 3 and 4 need a GPU and are skipped without one (journalbuild
 #      --check-gpu). Step 1 still checks what journals draw then: its
 #      tests/svg_renders.rs compares SVG renders, made on the CPU, with
@@ -17,7 +17,7 @@
 #      browser and, once its npm packages are installed and its wasm built
 #      (webapp/README.md), its unit tests pass and it builds.
 #
-# Renders go to a temporary directory, so webapp/journals/*/output is untouched.
+# Renders go to a temporary directory, so the journals' directories are untouched.
 # It is deleted afterwards unless something fails or --keep is passed.
 
 set -euo pipefail
@@ -72,7 +72,7 @@ else
 	FAILURES=$((FAILURES + 1))
 fi
 # Journals' own lock and chain files.
-for journal in webapp/journals/*/; do
+for journal in journals/*/ webapp/journals/*/; do
 	name=$(basename "$journal")
 	[[ -d "$journal/locks" || -d "$journal/chains" ]] || continue
 	if lock_output=$("$BIN" --check-locks "$name" 2>&1); then
@@ -140,7 +140,7 @@ render showcase showcase/darkly_01_title_0.png showcase/darkly_02_contents_0.png
 	showcase/darkly_38_locks_0.png showcase/darkly_39_locks_0.png showcase/darkly_40_spread_0.png showcase/darkly_41_spread_0.png showcase/darkly_42_layouts_0.png showcase/darkly_44_layouts_0.png showcase/darkly_48_files_0.png showcase/darkly_49_files_0.png \
 	-- showcase --strict-glyphs --scale 0.25
 
-for journal in webapp/journals/*/; do
+for journal in journals/*/ webapp/journals/*/; do
 	name=$(basename "$journal")
 	# Rendered whole above.
 	[[ "$name" == showcase ]] && continue

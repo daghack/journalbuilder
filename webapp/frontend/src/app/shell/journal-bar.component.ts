@@ -2,7 +2,7 @@ import { Component, inject, signal } from '@angular/core';
 import { JournalIoService } from '../services/journal-io.service';
 import { JournalStore } from '../services/journal-store.service';
 
-/** Across the top: the journal's name, and new, open, import and export. */
+/** Across the top: the journal's name, and new, open, import (a zip or a directory) and export. */
 @Component({
   selector: 'app-journal-bar',
   template: `
@@ -15,8 +15,8 @@ import { JournalStore } from '../services/journal-store.service';
     @if (message(); as m) { <span class="message" [class.error]="m.error">{{ m.text }}</span> }
     <button type="button" (click)="newJournal()" title="Start a new journal: one blank entry, and the library">New</button>
     <div class="menu">
-      <button type="button" aria-haspopup="true" title="Open one of the repository's journals">Open ▾</button>
-      <ul class="list" aria-label="The repository's journals">
+      <button type="button" aria-haspopup="true" title="Open one of the journals built in">Open ▾</button>
+      <ul class="list" aria-label="The journals built in">
         @for (journal of io.repository(); track journal.name) {
           <li><button type="button" (click)="open(journal.name)" [title]="journal.description ?? ''">
             {{ journal.title }} <em>{{ journal.name }}</em>
@@ -26,7 +26,13 @@ import { JournalStore } from '../services/journal-store.service';
         }
       </ul>
     </div>
-    <button type="button" (click)="importZip()" title="Load a zipped journal, in place of this one">Import…</button>
+    <div class="menu">
+      <button type="button" aria-haspopup="true" title="Load a journal, in place of this one">Import ▾</button>
+      <ul class="list" aria-label="Import a journal">
+        <li><button type="button" (click)="importZip()" title="Load a zipped journal, as Export makes">Zipped journal…</button></li>
+        <li><button type="button" (click)="importDirectory()" title="Load a journal's directory, unzipped: one of the repository's journals/, say">Journal folder…</button></li>
+      </ul>
+    </div>
     <button type="button" class="primary" (click)="exportZip()" [disabled]="io.exporting()"
             title="Download the journal as a zip, with the library files it uses">{{ io.exporting() ? 'Exporting…' : 'Export' }}</button>
   `,
@@ -85,10 +91,19 @@ export class JournalBarComponent {
     }
   }
 
-  protected async importZip() {
+  protected importZip() {
+    return this.import(() => this.io.importZip());
+  }
+
+  protected importDirectory() {
+    return this.import(() => this.io.importDirectory());
+  }
+
+  private async import(load: () => Promise<boolean>) {
+    (document.activeElement as HTMLElement | null)?.blur();
     if (!this.discard('Import another journal')) return;
     try {
-      if (await this.io.importZip()) this.say(`Imported ${this.store.name()}.`);
+      if (await load()) this.say(`Imported ${this.store.name()}.`);
     } catch (err) {
       this.say(`Couldn't import it: ${(err as Error).message}`, true);
     }

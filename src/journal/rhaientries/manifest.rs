@@ -170,7 +170,7 @@ mod tests {
     #[test]
     fn every_repository_journal_opens() {
         let mut opened = 0;
-        for dir in std::fs::read_dir(super::super::DEFAULT_JOURNALS_DIR).unwrap().flatten() {
+        for dir in super::super::DEFAULT_JOURNALS_DIRS.iter().flat_map(|dir| std::fs::read_dir(dir).unwrap().flatten()) {
             let journal = Journal::open(dir.path()).unwrap_or_else(|e| panic!("{}", e));
             assert!(journal.unlisted_entries().is_empty(), "{}: entries not in its manifest: {:?}", journal.name(), journal.unlisted_entries());
             opened += 1;

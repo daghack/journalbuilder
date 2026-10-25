@@ -1243,7 +1243,7 @@ doc += api("fn example()", "Optional, in a style file: the text to preview it wi
 
 doc += heading("Building");
 doc += api("journalbuild NAME [flags]", "Runs a journal's entries, each on its own, and renders their pages, an entry's into a directory named for it.", [
-	arg("NAME", "Which journal.", "a directory in the journals directory with a journal.json, or a journal directory's path (anything with a slash)."),
+	arg("NAME", "Which journal.", "a directory with a journal.json in the journals directories (the first that has it), or a journal directory's path (anything with a slash)."),
 	opt("--entry E,...", "every entry, in order", "Builds only these entries.", "entry names, separated by commas, as --entry letter_1."),
 	opt("--page P,...", "every page", "Renders only these pages of each entry built; other pages' existing output is kept.", "page indices (from 0) or names, separated by commas, as --page 0,maze."),
 	opt("--scale S", "1", "Scales output images, brushes included; Darkly work scales with output size, so 0.25 renders much faster.", "a positive number."),
@@ -1253,7 +1253,7 @@ doc += api("journalbuild NAME [flags]", "Runs a journal's entries, each on its o
 	opt("--parchment", "off", "Renders each page as one image, darkly_PAGE.png, its canvases layered on procedural parchment; light inks are drawn dark, and ink soaks in a little unevenly, very slightly thinner in places.", "a flag."),
 	opt("--pdf", "off", "Puts each entry's pages in one PDF, ENTRY.pdf, a page each at 150 canvas units to the inch, rather than writing images; on parchment with --parchment; with --stitch N, N pages side by side to a PDF page.", "a flag."),
 	opt("--stitch N", "off", "Also lays every N pages side by side, in order, tops level, named for the pages they hold: page_0 to page_5 as darkly_page_0-5.png (the last may have fewer; a page left alone is not stitched). Pages are rendered one image each, as with --parchment, on parchment with it. With --pdf, the PDF's pages are the stitches instead, a page left alone at the end a page of its own.", "a whole number of at least 1."),
-	opt("--journals-dir DIR", "the repository's webapp/journals/", "Where journals are.", "a directory."),
+	opt("--journals-dir DIR", "the repository's journals/, then webapp/journals/ (the web editor's built-in journals)", "Where journals are, in place of the default's two.", "a directory."),
 	opt("--library DIR", "the repository's webapp/library/", "The built-in library the journal's files stand in front of.", "a directory."),
 	opt("--output-dir DIR", "NAME_output in the current directory", "Where renders go, a directory for each entry. The default's entry directories are emptied first, except with --page; in a given directory, earlier .png, .svg and .pdf renders in an entry's directory are cleared first, except with --page.", "a directory."),
 ]);

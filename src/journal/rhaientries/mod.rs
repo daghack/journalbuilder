@@ -24,7 +24,7 @@ mod text_styles;
 mod vec;
 
 pub use sources::Sources;
-pub use resources::{Resources, DEFAULT_JOURNALS_DIR, DEFAULT_LIBRARY_DIR, KINDS};
+pub use resources::{Resources, BUILT_IN_JOURNALS_DIR, DEFAULT_JOURNALS_DIR, DEFAULT_JOURNALS_DIRS, DEFAULT_LIBRARY_DIR, KINDS};
 #[cfg(feature = "embedded-assets")]
 pub use resources::embedded;
 pub use locks::{LockLibrary, SourceKind};

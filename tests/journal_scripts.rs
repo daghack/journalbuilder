@@ -39,8 +39,8 @@ fn check_journals(dirs: &[PathBuf]) {
 
 #[test]
 fn every_journal_entry_evaluates() {
-    let journals = journals(scribe::journal::rhaientries::DEFAULT_JOURNALS_DIR);
-    assert!(!journals.is_empty(), "no journals found in webapp/journals/");
+    let journals: Vec<PathBuf> = scribe::journal::rhaientries::DEFAULT_JOURNALS_DIRS.iter().flat_map(|dir| journals(dir)).collect();
+    assert!(!journals.is_empty(), "no journals found in journals/ or webapp/journals/");
     check_journals(&journals);
 }
 

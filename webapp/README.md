@@ -2,18 +2,20 @@
 
 A browser editor for a journal: its entries, and the files they draw with,
 over the built-in library. One journal at a time: the bar along the top
-names it and starts a new one, opens one of the repository's, imports a
-zipped journal or exports this one. The sidebar lists its files, kind by
+names it and starts a new one, opens one of those built in, imports a
+journal (zipped, or its directory) or exports this one. The sidebar lists its files, kind by
 kind, each kind with the library's files beside the journal's; picking one
 opens it in the editor for its kind. The address keeps the file open
 (`#entries/letter_1.rhai`).
 
 ## The journal
 
-- **New** starts a journal of one blank entry, with the library. The
-  repository's journals aren't loaded until opened from **Open**.
-- **Import** loads a zipped journal (a journal's directory, as
-  journalbuild reads it) in place of this one, and **Export** downloads
+- **New** starts a journal of one blank entry, with the library. **Open**
+  loads one of the two journals built in, the showcase and the API
+  reference (`webapp/journals/`).
+- **Import** loads a journal in place of this one: a zipped journal, or
+  a journal's directory as journalbuild reads it (one of the repository's
+  `journals/`, say). **Export** downloads
   this one as a zip, with the library files its entries use bundled in and
   listed in its `journal.json`, so it renders the same wherever the
   library has changed; importing drops them again. Nothing is merged:
@@ -192,15 +194,15 @@ reuse BuildKit's caches.
 |---|---|
 | `wasm/` | `scribe-wasm`, the engine for the browser: the `scribe` library with the built-in library (`library/`) compiled in (its `embedded-assets` feature). `setJournal(files)` gives it the journal's own files, by path, in front of the library's. `evaluate(source)` runs an entry and lists its pages, `pageSvg(i)` draws one as SVG, and `Renderer` renders pages with Darkly (`renderPage`, `exportPdf`). For the other editors: `previewSvg`, `libraryFiles`, `usedLibrary` (what an export bundles), `lockTypes`, `lockPorts`, `lockExamples`, `chainTypes`, `runChain`, `readChain`, `valueKinds`, `illustrationTypes`, `illustrationPorts`, `illustrationPreview`, `layoutTypes`, `layoutPreview`, `styleTypes` and `stylePreview`. |
 | `frontend/` | the Angular app (standalone components, signals, no zone.js) |
-| `frontend/src/app/journal/` | the journal as files by path (`journal-files.ts`: kinds, the manifest, zips), new files' templates, symbols content, and the entry editor |
+| `frontend/src/app/journal/` | the journal as files by path (`journal-files.ts`: kinds, the manifest, zips; `journal-folder.ts`: journals' directories), new files' templates, symbols content, and the entry editor |
 | `frontend/src/app/workers/` | the web workers the engine runs in. `eval.worker` runs the entry as you type, sends its pages, then sends each page's SVG, the page shown first. `darkly.worker` renders with Darkly. `tools.worker` answers the other editors. Typing never waits on any of them. |
-| `frontend/src/app/services/` | `JournalStore` (the journal, kept in IndexedDB), `JournalIoService` (open, import, export), `LibraryService` (the library's files), `JournalService` (the entry shown, its pages), `RenderService` (the script and Darkly workers), `ToolsService` (the tools worker), `FileService` (picking files, downloads) |
+| `frontend/src/app/services/` | `JournalStore` (the journal, kept in IndexedDB), `JournalIoService` (open, import, export), `LibraryService` (the library's files), `JournalService` (the entry shown, its pages), `RenderService` (the script and Darkly workers), `ToolsService` (the tools worker), `FileService` (picking files and directories, downloads) |
 | `frontend/src/app/shell/`, `layout/` | the journal bar, the files sidebar, which file shows, and the three resizable columns the editors have |
 | `frontend/src/app/fonts/` | the glyphset editor. `font-file.ts` reads and writes glyphset files; `glyph-path.ts` reads and writes path data; `glyph-edit.ts` is what the canvas does to a path. |
 | `frontend/src/app/locks/` | the chain editor. `chain-model.ts` is the graph and its rules; `chain-source.ts` writes it as a chain file. |
 | `frontend/src/app/resources/` | the lock, illustration, layout, style and helper editor, the content editor, and the library banner |
 | `frontend/src/app/editor/` | the CodeMirror editor and its rhai highlighting (`rhai-language.ts`) |
-| `frontend/scripts/examples.mjs` | copies every journal (its manifest and files) into `generated/journals/` for the Open menu, and the repository files the unit tests check against into `generated/fixtures/` |
+| `frontend/scripts/examples.mjs` | copies the built-in journals, `showcase` and `api_reference` (their manifests and files), into `generated/journals/` for the Open menu, and the repository files the unit tests check against into `generated/fixtures/` |
 
 While one script runs, only the newest edit waits to run next. A script
 that runs for more than 20 seconds (an endless loop, say) is stopped and

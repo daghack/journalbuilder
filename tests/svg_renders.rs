@@ -197,22 +197,26 @@ fn showcase() {
     check("webapp/journals", "showcase", Pages::All);
 }
 
-/// Page 0 of every entry of the other journals, as scripts/smoke.sh renders
-/// them.
+#[test]
+fn api_reference() {
+    check("webapp/journals", "api_reference", Pages::Only(&[0]));
+}
+
+/// Page 0 of every entry of the repository's journals, in journals/, as
+/// scripts/smoke.sh renders them.
 macro_rules! first_pages {
     ($($journal:ident),* $(,)?) => {
         const CHECKED_JOURNALS: &[&str] = &[$(stringify!($journal)),*];
         $(
             #[test]
             fn $journal() {
-                check("webapp/journals", stringify!($journal), Pages::Only(&[0]));
+                check("journals", stringify!($journal), Pages::Only(&[0]));
             }
         )*
     };
 }
 
 first_pages!(
-    api_reference,
     becoming_us,
     black_priests,
     copper_letter_1,
@@ -229,10 +233,13 @@ first_pages!(
 
 #[test]
 fn every_journal_is_checked() {
-    let checked = [CHECKED_JOURNALS, &["showcase"]].concat();
-    let missing: Vec<String> = std::fs::read_dir(format!("{}/webapp/journals", ROOT)).unwrap()
-        .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
-        .filter(|name| Path::new(&format!("{}/webapp/journals/{}/journal.json", ROOT, name)).is_file())
+    let checked = [CHECKED_JOURNALS, &["showcase", "api_reference"]].concat();
+    let missing: Vec<String> = ["journals", "webapp/journals"].iter()
+        .flat_map(|dir| std::fs::read_dir(format!("{}/{}", ROOT, dir)).unwrap())
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            entry.path().join("journal.json").is_file().then(|| entry.file_name().into_string().ok())?
+        })
         .filter(|name| !checked.contains(&name.as_str()))
         .collect();
     assert!(missing.is_empty(), "add these journals to first_pages! in tests/svg_renders.rs: {}", missing.join(", "));

@@ -29,7 +29,14 @@ use std::rc::Rc;
 pub const DEFAULT_LIBRARY_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/webapp/library");
 
 /// The repository's journals.
-pub const DEFAULT_JOURNALS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/webapp/journals");
+pub const DEFAULT_JOURNALS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/journals");
+
+/// The journals built into the web editor: the showcase and the API
+/// reference.
+pub const BUILT_IN_JOURNALS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/webapp/journals");
+
+/// Where journals are found by name, in order.
+pub const DEFAULT_JOURNALS_DIRS: [&str; 2] = [DEFAULT_JOURNALS_DIR, BUILT_IN_JOURNALS_DIR];
 
 /// Every kind of resource: its directory, and its files' extension.
 pub const KINDS: [(&str, &str); 10] = [

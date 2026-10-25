@@ -145,10 +145,32 @@ export function packZip(journal: JournalData, bundled: Record<string, string> = 
 }
 
 /**
- * The journal in a zip: one holding a journal's directory (or the
- * directory's contents). Library files its manifest lists as bundled are
- * dropped, so the journal uses the library's own.
+ * The journal in a directory's files: `manifest`, its journal.json's text,
+ * and the rest by path from the directory. Library files the manifest lists
+ * as bundled are dropped, so the journal uses the library's own, as are
+ * files in no kind's directory.
  */
+export function readJournal(name: string, manifest: string, files: Record<string, string>): JournalData {
+  let manifestValue: unknown;
+  try {
+    manifestValue = JSON.parse(manifest);
+  } catch (err) {
+    throw new Error(`journal.json isn't JSON: ${(err as Error).message}`);
+  }
+  const checked = checkManifest(manifestValue);
+  const bundled = new Set(checked.bundled ?? []);
+  delete checked.bundled;
+  const own = Object.fromEntries(Object.entries(files).filter(([path]) => !bundled.has(path) && splitPath(path)));
+  checkEntries(checked, own);
+  return { name, manifest: checked, files: own };
+}
+
+/** `name` made a journal's name, all but letters, digits and _ made _; `fallback` if it's empty. */
+export function journalName(name: string, fallback: string): string {
+  return name.replace(/[^A-Za-z0-9_]/g, '_') || fallback;
+}
+
+/** The journal in a zip: one holding a journal's directory (or the directory's contents). */
 export function unpackZip(bytes: Uint8Array, fallbackName: string): JournalData {
   const entries = unzipSync(bytes, { filter: (file) => !file.name.endsWith('/') });
   const paths = Object.keys(entries).filter((path) => !/(^|\/)(__MACOSX|\.DS_Store)/.test(path));
@@ -156,25 +178,13 @@ export function unpackZip(bytes: Uint8Array, fallbackName: string): JournalData 
   if (!manifests.length) throw new Error('the zip has no journal.json: is it a journal?');
   const manifestPath = manifests.sort((a, b) => a.split('/').length - b.split('/').length)[0];
   const root = manifestPath.slice(0, -MANIFEST.length);
-  let manifestValue: unknown;
-  try {
-    manifestValue = JSON.parse(strFromU8(entries[manifestPath]));
-  } catch (err) {
-    throw new Error(`journal.json isn't JSON: ${(err as Error).message}`);
-  }
-  const manifest = checkManifest(manifestValue);
-  const bundled = new Set(manifest.bundled ?? []);
-  delete manifest.bundled;
   const files: Record<string, string> = {};
   for (const path of paths) {
-    if (!path.startsWith(root) || path === manifestPath) continue;
-    const inner = path.slice(root.length);
-    if (bundled.has(inner) || !splitPath(inner)) continue;
-    files[inner] = strFromU8(entries[path]);
+    if (!path.startsWith(root) || path === manifestPath || !splitPath(path.slice(root.length))) continue;
+    files[path.slice(root.length)] = strFromU8(entries[path]);
   }
-  checkEntries(manifest, files);
   const name = root.replace(/\/$/, '').split('/').pop() || fallbackName;
-  return { name: VALID_NAME.test(name) ? name : fallbackName, manifest, files };
+  return readJournal(VALID_NAME.test(name) ? name : fallbackName, strFromU8(entries[manifestPath]), files);
 }
 
 /** FNV-1a of `text`, to tell versions apart. */

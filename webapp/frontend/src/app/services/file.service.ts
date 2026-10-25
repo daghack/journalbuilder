@@ -2,14 +2,28 @@ import { Injectable } from '@angular/core';
 
 // The File System Access API (Chromium only), when the browser has it.
 interface FileHandle {
+  kind: 'file';
   name: string;
   getFile(): Promise<File>;
   createWritable(): Promise<{ write(data: string | Blob): Promise<void>; close(): Promise<void> }>;
 }
+interface DirectoryHandle {
+  kind: 'directory';
+  name: string;
+  values(): AsyncIterable<FileHandle | DirectoryHandle>;
+}
 type FilePickerWindow = Window & {
   showOpenFilePicker?: (options?: object) => Promise<FileHandle[]>;
   showSaveFilePicker?: (options?: object) => Promise<FileHandle>;
+  showDirectoryPicker?: (options?: object) => Promise<DirectoryHandle>;
 };
+
+/** A directory on the user's disk, read as it's walked. */
+export interface Directory {
+  name: string;
+  /** What's directly in it: its files by name, to read, and its subdirectories. */
+  list(): Promise<{ files: Map<string, () => Promise<string>>; dirs: Directory[] }>;
+}
 
 /** What a file picker offers: a description and the file types. */
 export interface FileKind {
@@ -44,7 +58,7 @@ export interface OpenedFile {
   handle: FileHandle | null;
 }
 
-/** Reading and writing local files: scripts, and exports to download. */
+/** Reading and writing local files: scripts, journals' directories, and exports to download. */
 @Injectable({ providedIn: 'root' })
 export class FileService {
   private get picker(): FilePickerWindow {
@@ -82,6 +96,20 @@ export class FileService {
       file = await pickWithInput(kind.accept);
     }
     return file ? { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) } : null;
+  }
+
+  /** Let the user pick a directory; null if they don't. */
+  async openDirectory(): Promise<Directory | null> {
+    if (this.picker.showDirectoryPicker) {
+      try {
+        return handleDirectory(await this.picker.showDirectoryPicker({ mode: 'read' }));
+      } catch (err) {
+        if (isAbort(err)) return null;
+        throw err;
+      }
+    }
+    const files = await pickDirectoryWithInput();
+    return files ? filesDirectory(files) : null;
   }
 
   /**
@@ -128,6 +156,60 @@ export class FileService {
 
 function isAbort(err: unknown): boolean {
   return err instanceof DOMException && err.name === 'AbortError';
+}
+
+/** The directory `handle` names, read as it's listed. */
+function handleDirectory(handle: DirectoryHandle): Directory {
+  return {
+    name: handle.name,
+    async list() {
+      const files = new Map<string, () => Promise<string>>();
+      const dirs: Directory[] = [];
+      for await (const entry of handle.values()) {
+        if (entry.kind === 'directory') dirs.push(handleDirectory(entry));
+        else files.set(entry.name, async () => (await entry.getFile()).text());
+      }
+      return { files, dirs };
+    },
+  };
+}
+
+/** The directory a plain file input picked, from its files' paths. */
+function filesDirectory(picked: File[]): Directory {
+  interface Node { files: Map<string, File>; dirs: Map<string, Node> }
+  const root: Node = { files: new Map(), dirs: new Map() };
+  let name = 'folder';
+  for (const file of picked) {
+    const [top, ...path] = file.webkitRelativePath.split('/');
+    name = top;
+    let node = root;
+    for (const dir of path.slice(0, -1)) {
+      let next = node.dirs.get(dir);
+      if (!next) node.dirs.set(dir, (next = { files: new Map(), dirs: new Map() }));
+      node = next;
+    }
+    node.files.set(path[path.length - 1], file);
+  }
+  const directory = (name: string, node: Node): Directory => ({
+    name,
+    list: async () => ({
+      files: new Map([...node.files].map(([name, file]) => [name, () => file.text()])),
+      dirs: [...node.dirs].map(([name, dir]) => directory(name, dir)),
+    }),
+  });
+  return directory(name, root);
+}
+
+/** The files under a directory picked with a plain file input; null if none is. */
+function pickDirectoryWithInput(): Promise<File[] | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.webkitdirectory = true;
+    input.onchange = () => resolve(input.files ? [...input.files] : null);
+    input.oncancel = () => resolve(null);
+    input.click();
+  });
 }
 
 /** A file picked with a plain file input; null if none is. */

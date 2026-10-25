@@ -6,7 +6,7 @@
 //! `brush_names()`, and every variant of every glyph of every glyphset in
 //! `glyphset_names()`.
 
-use scribe::journal::rhaientries::{Journal, JournalEngine, Resources, DEFAULT_JOURNALS_DIR};
+use scribe::journal::rhaientries::{Journal, JournalEngine, Resources, BUILT_IN_JOURNALS_DIR};
 use std::rc::Rc;
 
 /// Functions scripts can call that aren't capabilities to show.
@@ -17,7 +17,7 @@ const NOT_SHOWN: &[(&str, &str)] = &[
 
 /// Every entry of the showcase, one after another.
 fn showcase() -> String {
-    let journal = Journal::open(format!("{}/showcase", DEFAULT_JOURNALS_DIR)).unwrap_or_else(|e| panic!("{}", e));
+    let journal = Journal::open(format!("{}/showcase", BUILT_IN_JOURNALS_DIR)).unwrap_or_else(|e| panic!("{}", e));
     journal.manifest.entries.iter().map(|name| journal.entry_source(name).unwrap()).collect::<Vec<_>>().join("\n")
 }
 

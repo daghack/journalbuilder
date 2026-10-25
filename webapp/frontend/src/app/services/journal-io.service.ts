@@ -1,11 +1,12 @@
 import { Injectable, inject, signal } from '@angular/core';
-import { checkManifest, entryPath, packZip, unpackZip } from '../journal/journal-files';
+import { checkManifest, entryPath, journalName, packZip, unpackZip } from '../journal/journal-files';
+import { readDirectory } from '../journal/journal-folder';
 import { FileService, ZIP_FILES } from './file.service';
 import { JournalStore } from './journal-store.service';
 import { LibraryService } from './library.service';
 import { ToolsService, failed } from './tools.service';
 
-/** A journal in the repository, as the Open menu lists it. */
+/** A journal built into the editor, as the Open menu lists it. */
 export interface RepositoryJournal {
   name: string;
   title: string;
@@ -14,9 +15,10 @@ export interface RepositoryJournal {
 }
 
 /**
- * Journals in and out: the repository's (copied into the site by
- * scripts/examples.mjs), zips imported and exported. Nothing is merged: a
- * journal loaded replaces the one being edited.
+ * Journals in and out: the built-in ones (copied into the site by
+ * scripts/examples.mjs), zips and journals' directories imported, zips
+ * exported. Nothing is merged: a journal loaded replaces the one being
+ * edited.
  */
 @Injectable({ providedIn: 'root' })
 export class JournalIoService {
@@ -25,7 +27,7 @@ export class JournalIoService {
   private readonly library = inject(LibraryService);
   private readonly files = inject(FileService);
 
-  /** The repository's journals; empty until fetched. */
+  /** The built-in journals; empty until fetched. */
   readonly repository = signal<RepositoryJournal[]>([]);
   /** An export under way. */
   readonly exporting = signal(false);
@@ -37,7 +39,7 @@ export class JournalIoService {
       .catch(() => this.repository.set([]));
   }
 
-  /** Load the repository's journal `name`. */
+  /** Load the built-in journal `name`. */
   async openRepository(name: string) {
     const response = await fetch(`journals/${encodeURIComponent(name)}.json`);
     if (!response.ok) throw new Error(`couldn't fetch the journal ${name}: ${response.status}`);
@@ -49,8 +51,20 @@ export class JournalIoService {
   async importZip(): Promise<boolean> {
     const picked = await this.files.openBytes(ZIP_FILES);
     if (!picked) return false;
-    const journal = unpackZip(picked.bytes, picked.name.replace(/\.zip$/i, '').replace(/[^A-Za-z0-9_]/g, '_') || 'imported');
+    const journal = unpackZip(picked.bytes, journalName(picked.name.replace(/\.zip$/i, ''), 'imported'));
     this.store.load(journal);
+    return true;
+  }
+
+  /**
+   * Let the user pick a journal's directory, unzipped (one of the
+   * repository's journals/, say), and load it. Returns false if they don't
+   * pick one.
+   */
+  async importDirectory(): Promise<boolean> {
+    const picked = await this.files.openDirectory();
+    if (!picked) return false;
+    this.store.load(await readDirectory(picked));
     return true;
   }
 

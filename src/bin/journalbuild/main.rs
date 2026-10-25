@@ -1,4 +1,4 @@
-use scribe::journal::rhaientries::{Journal, LockLibrary, Resources, DEFAULT_JOURNALS_DIR, DEFAULT_LIBRARY_DIR};
+use scribe::journal::rhaientries::{Journal, LockLibrary, Resources, DEFAULT_JOURNALS_DIRS, DEFAULT_LIBRARY_DIR};
 use scribe::journal::{fonts, darkly, publish};
 use scribe::journal::progress::{clock, Progress};
 use std::cell::RefCell;
@@ -92,7 +92,8 @@ const USAGE: &str = "Usage: journalbuild <journal> [--entry E[,E...]] [--page N[
                       it off). Smooths thin, aliased strokes; render time
                       grows with K squared.
   --journals-dir DIR  Directory containing journals (default: the
-                      repository's webapp/journals/).
+                      repository's journals/, then webapp/journals/, the
+                      web editor's built-in ones).
   --library DIR       The built-in library journals' resources stand in
                       front of (default: the repository's webapp/library/).
   --output-dir DIR    Where to write renders, a directory per entry (default:
@@ -114,7 +115,7 @@ struct Args {
     check_locks: bool,
     check_gpu: bool,
     journal: Option<String>,
-    journals_dir: String,
+    journals_dirs: Vec<String>,
     library_dir: String,
     entries: Option<Vec<String>>,
     pages: Option<Vec<String>>,
@@ -150,7 +151,7 @@ fn parse_args() -> Result<Args, String> {
     // grows with K²).
     let mut supersample = DEFAULT_SUPERSAMPLE;
     // Defaults are found from the repository, not the working directory.
-    let mut journals_dir = DEFAULT_JOURNALS_DIR.to_string();
+    let mut journals_dirs: Vec<String> = DEFAULT_JOURNALS_DIRS.iter().map(|dir| dir.to_string()).collect();
     let mut library_dir = DEFAULT_LIBRARY_DIR.to_string();
     let mut output_dir = None;
     let mut parchment = false;
@@ -180,7 +181,7 @@ fn parse_args() -> Result<Args, String> {
                     .ok_or_else(|| format!("--stitch needs a whole number of at least 1, got '{}'", value))?);
             }
             "--journals-dir" => {
-                journals_dir = args.next().ok_or("--journals-dir needs a directory")?;
+                journals_dirs = vec![args.next().ok_or("--journals-dir needs a directory")?];
             }
             "--library" => {
                 library_dir = args.next().ok_or("--library needs a directory")?;
@@ -210,7 +211,7 @@ fn parse_args() -> Result<Args, String> {
     if check_locks && (entries.is_some() || pages.is_some()) {
         return Err("--check-locks checks lock and chain files, so it takes no --entry or --page".to_string());
     }
-    Ok(Args { strict_glyphs, check_locks, check_gpu, journal, journals_dir, library_dir, entries, pages, svg, scale, supersample, output_dir, parchment, pdf, stitch })
+    Ok(Args { strict_glyphs, check_locks, check_gpu, journal, journals_dirs, library_dir, entries, pages, svg, scale, supersample, output_dir, parchment, pdf, stitch })
 }
 
 fn main() {
@@ -232,19 +233,26 @@ fn main() {
     }
 }
 
-/// The journal `name`: a directory in `journals_dir`, or, with a `/`, a
-/// path.
-fn open_journal(name: &str, journals_dir: &str) -> Result<Journal, String> {
-    let dir = if name.contains('/') { std::path::PathBuf::from(name) } else { std::path::Path::new(journals_dir).join(name) };
-    if !dir.is_dir() {
-        return Err(format!("no journal {}: {} isn't a directory", name, dir.display()));
+/// The journal `name`: a directory in the first of `journals_dirs` that
+/// has it, or, with a `/`, a path.
+fn open_journal(name: &str, journals_dirs: &[String]) -> Result<Journal, String> {
+    if name.contains('/') {
+        let dir = std::path::PathBuf::from(name);
+        if !dir.is_dir() {
+            return Err(format!("no journal {}: {} isn't a directory", name, dir.display()));
+        }
+        return Journal::open(dir);
     }
-    Journal::open(dir)
+    let dirs: Vec<_> = journals_dirs.iter().map(|dir| std::path::Path::new(dir).join(name)).collect();
+    match dirs.iter().find(|dir| dir.is_dir()) {
+        Some(dir) => Journal::open(dir),
+        None => Err(format!("no journal {}: none of {} is a directory", name, dirs.iter().map(|dir| dir.display().to_string()).collect::<Vec<_>>().join(", "))),
+    }
 }
 
 fn run(args: &Args) -> Result<(), String> {
     let started = std::time::Instant::now();
-    let journal = open_journal(args.journal.as_deref().unwrap_or_default(), &args.journals_dir)?;
+    let journal = open_journal(args.journal.as_deref().unwrap_or_default(), &args.journals_dirs)?;
     let journal_name = journal.name();
     for unlisted in journal.unlisted_entries() {
         eprintln!("warning: {} isn't in {}'s journal.json, so it isn't built", journal.entry_path(&unlisted).display(), journal_name);
@@ -348,7 +356,7 @@ fn check_locks(args: &Args) -> Result<(), String> {
     let (resources, own) = match &args.journal {
         None => (library, None),
         Some(name) => {
-            let journal = open_journal(name, &args.journals_dir)?;
+            let journal = open_journal(name, &args.journals_dirs)?;
             let resources = journal.resources(library);
             let locks = resources.locks.own_names().map_err(|e| e.to_string())?;
             let chains = resources.chains.own_names().map_err(|e| e.to_string())?;
