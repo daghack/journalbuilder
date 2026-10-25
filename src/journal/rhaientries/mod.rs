@@ -269,7 +269,7 @@ impl JournalEngine {
             }
         });
 
-        art::register(&mut engine, rng.clone());
+        art::register(&mut engine, (symdict.clone(), rng.clone()));
         avoid::register(&mut engine);
         layout::register(&mut engine, symdict.clone(), rng.clone(), resources.layouts.clone());
         markdown::register(&mut engine);

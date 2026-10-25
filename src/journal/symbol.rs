@@ -563,6 +563,10 @@ impl Outline {
     pub fn height(&self) -> f32 {
         self.max.y - self.min.y
     }
+    /// How far it reaches across the line from its position, either way.
+    pub fn reach(&self) -> f32 {
+        self.min.y.abs().max(self.max.y.abs())
+    }
     /// The outline `dy` further down across the line, as a glyph's is when
     /// it's set that far below the others.
     pub fn shifted(&self, dy: f32) -> Outline {
@@ -698,11 +702,25 @@ pub struct SymbolPlacementArgs<'a> {
     pub angle: Option<f32>,
     /// A shape each glyph's ink must lie wholly inside, as a text box's.
     pub within: Option<&'a Region>,
+    /// How much bigger or smaller than `symbol_scale` a glyph is set, by
+    /// how far along the walk its room starts.
+    pub scale_at: Option<ScaleField<'a>>,
+}
+
+/// Glyphs' scale by how far along the walk they're set, a factor of the
+/// symbol scale.
+#[derive(Clone, Copy)]
+pub struct ScaleField<'a>(pub &'a dyn Fn(f32) -> f32);
+
+impl std::fmt::Debug for ScaleField<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ScaleField")
+    }
 }
 
 impl SymbolPlacementArgs<'_> {
     pub fn new(symbol_scale: f32) -> Self {
-        SymbolPlacementArgs { avoid: None, padding: 0.0, symbol_scale, spacing: 0.0, baseline_shift: 0.0, angle: None, within: None }
+        SymbolPlacementArgs { avoid: None, padding: 0.0, symbol_scale, spacing: 0.0, baseline_shift: 0.0, angle: None, within: None, scale_at: None }
     }
 }
 
@@ -735,6 +753,8 @@ const REFINE_STEPS: usize = 4;
 struct Piece {
     symbol: Symbol,
     outline: Rc<Outline>,
+    /// The scale it's placed at.
+    scale: f32,
 }
 
 /// Places glyphs along walks, clear of the avoidance tree and of each
@@ -769,7 +789,7 @@ impl<'a> Placer<'a> {
     }
 
     fn piece(&self, symbol: Symbol) -> Piece {
-        Piece { outline: Rc::new(symbol.outline(self.args.symbol_scale)), symbol }
+        Piece { outline: Rc::new(symbol.outline(self.args.symbol_scale)), symbol, scale: self.args.symbol_scale }
     }
 
     fn gap(&self) -> f32 {
@@ -778,13 +798,18 @@ impl<'a> Placer<'a> {
 
     /// `piece` as it's set from `at` along `walk`: at a fixed angle, its
     /// outline is turned as the glyph is against the path there, so it's
-    /// set as close as it is at that angle. Otherwise it's as it was made.
+    /// set as close as it is at that angle; with a scale field, it's the
+    /// size the field gives there. Otherwise it's as it was made.
     fn shaped(&self, walk: &Walk, at: f32, piece: &Piece) -> Piece {
-        let Some(angle) = self.args.angle else { return piece.clone() };
-        let Some(here) = walk.at(at.clamp(0.0, walk.length())) else { return piece.clone() };
+        if self.args.angle.is_none() && self.args.scale_at.is_none() { return piece.clone(); }
+        let at = at.clamp(0.0, walk.length());
+        let Some(here) = walk.at(at) else { return piece.clone() };
+        let scale = self.args.scale_at.map_or(1.0, |field| (field.0)(at)) * self.args.symbol_scale;
         let mut turned = piece.symbol.clone();
-        turned.rotate_rad_by(angle - path_turn(here.normal));
-        Piece { outline: Rc::new(turned.outline(self.args.symbol_scale)), symbol: piece.symbol.clone() }
+        if let Some(angle) = self.args.angle {
+            turned.rotate_rad_by(angle - path_turn(here.normal));
+        }
+        Piece { outline: Rc::new(turned.outline(scale)), symbol: piece.symbol.clone(), scale }
     }
 
     /// Where `piece` starts set after `spacing`, `cursor` being where it
@@ -806,7 +831,7 @@ impl<'a> Placer<'a> {
         let mut placed = piece.symbol.clone();
         placed.set_position(l.point.lerp(r.point, 0.5) - Vec2::new(turn.cos(), turn.sin()) * middle + l.normal * (self.args.baseline_shift * outline.height()));
         placed.rotate_rad_by(self.args.angle.unwrap_or(turn));
-        placed.scale_by(self.args.symbol_scale);
+        placed.scale_by(piece.scale);
         Some(placed)
     }
 
@@ -817,7 +842,7 @@ impl<'a> Placer<'a> {
             .or_else(|| self.spot(walk, (walk.length() - piece.outline.width()).max(0.0), piece))
             .unwrap_or_else(|| {
                 let mut placed = piece.symbol.clone();
-                placed.scale_by(self.args.symbol_scale);
+                placed.scale_by(piece.scale);
                 placed
             })
     }

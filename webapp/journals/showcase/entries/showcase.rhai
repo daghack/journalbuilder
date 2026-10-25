@@ -17,7 +17,8 @@
 //             algorithm and metric, balanced-ternary values (as glyphs, and
 //             along paths), angles in degrees
 //   text      text boxes, text kept clear of drawings, text along paths
-//             (turned to them or held at an angle), scattered notes,
+//             (turned to them or held at an angle), text in a spiral,
+//             scattered notes,
 //             words split round drawings, shaped boxes, paragraph styles,
 //             and writing by hand: lines, blocks and glyphs set a little
 //             off true
@@ -1181,6 +1182,39 @@ text.add(board.scatter_notes(["lorem ipsum", "dolor sit amet", "consectetur adip
 }));
 book.bind("text", text);
 
+// Text in a spiral: art::spiral_text(text, center, radius, settings)
+// writes out from the middle, clockwise, as large as all of it fits in the
+// circle. Glyphs keep one size until they'd come nearer the circle than
+// the paragraph's clearance; then each fills the room left between the
+// circle and the turn inside it, shrinking as that narrows, until it'd be
+// smaller than minimum_scale (default a third) of the rest. Turns are the
+// paragraph's line height apart, in the glyphs' own height.
+let text = sheet("text");
+let spiral_text = LOREM.sub_string(0, 200);
+text.add(caption("art::spiral_text(text, center, radius, settings): out from the middle, as large as fits the circle", TOP));
+for (minimum, i) in [1.0 / 3.0, 0.1, 1.0] {
+	let at = vec2(LEFT + 170 + i * 330, TOP + 230);
+	text.add(new_circle(at, 160), CAPTION);
+	text.add(art::spiral_text(spiral_text, at, 160, #{ style: TEXT, type: #{ glyphset: PLAIN }, minimum_scale: minimum }));
+}
+text.add(write("default: the last turn shrinks to a third", LEFT, TOP + 430, 18));
+text.add(write("#{ minimum_scale: 0.1 }", LEFT + 380, TOP + 430, 18));
+text.add(write("#{ minimum_scale: 1 }: one size", LEFT + 680, TOP + 430, 18));
+text.add(caption("#{ inner, paragraph: #{ line_height, clearance } }; a glyph_scale caps the size", TOP + 520));
+let at = vec2(LEFT + 170, TOP + 750);
+text.add(new_circle(at, 160), CAPTION);
+text.add(art::spiral_text(spiral_text, at, 160, #{ style: pen(RED), type: #{ glyphset: PLAIN }, inner: 50, paragraph: #{ line_height: 1.5 } }));
+let at = vec2(LEFT + 500, TOP + 750);
+text.add(new_circle(at, 160), CAPTION);
+text.add(art::spiral_text(spiral_text, at, 160, #{ style: TEXT, type: #{ glyphset: PLAIN }, paragraph: #{ clearance: 20 } }));
+let at = vec2(LEFT + 830, TOP + 750);
+text.add(new_circle(at, 160), CAPTION);
+text.add(art::spiral_text("lorem ipsum dolor sit amet", at, 160, #{ style: TEXT, type: #{ glyphset: PLAIN, glyph_scale: 34 } }));
+text.add(write("#{ inner: 50, paragraph: #{ line_height: 1.5 } }", LEFT, TOP + 950, 18));
+text.add(write("#{ paragraph: #{ clearance: 20 } }", LEFT + 380, TOP + 950, 18));
+text.add(write("type: #{ glyph_scale: 34 }", LEFT + 700, TOP + 950, 18));
+book.bind("text", text);
+
 // Words round a drawing: whole, moved past it (the default), broken
 // round it with split_words, and with split_padding to keep the pieces
 // further off. split_words: n is the shortest piece allowed.
@@ -1566,8 +1600,20 @@ let watched = new_lock("watched")
 	.connect("sub.cipher_text", "eye.inner")
 	.run(#{ "sub.plain_text": symbols(27, "EVERY LOCK OPENS") });
 drawn.add(watched.canvases("eye")[0].scale_by(0.22).translate_by(vec2(LEFT + 20, TOP + 890)));
-drawn.add(write_in("eye (outer_base, inner_base, length, width, top_ink, bottom_ink, inner_ink):", LEFT + 220, TOP + 1000, 22, CAPTION, PLAIN));
-drawn.add(write_in("a substitution cipher's ordering round the iris, its cipher text in the pupil", LEFT + 220, TOP + 1034, 22, CAPTION, PLAIN));
+// The same eye with its pupil's text in a spiral, the last turn shrinking
+// to fill the room left, down to a tenth.
+let spiralled = new_lock("spiralled")
+	.add("sub", "substitution_cipher", #{ base_n: 27 })
+	.set_input("sub.ordering", symbols(27, "MQ ZEHWBRKYDTXOAJGNLUFCVISP"))
+	.attach("eye", "eye", #{ top_ink: RED, bottom_ink: INK, inner_ink: INK, pupil: "spiral", pupil_minimum_scale: 0.1 })
+	.connect("sub.ordering", "eye.outer")
+	.connect("sub.cipher_text", "eye.inner")
+	.run(#{ "sub.plain_text": symbols(27, "EVERY LOCK OPENS ONCE ITS KEY IS FOUND") });
+drawn.add(spiralled.canvases("eye")[0].scale_by(0.22).translate_by(vec2(LEFT + 200, TOP + 890)));
+drawn.add(write_in("eye (outer_base, inner_base, length, width, top_ink,", LEFT + 400, TOP + 980, 22, CAPTION, PLAIN));
+drawn.add(write_in("bottom_ink, inner_ink, pupil, pupil_minimum_scale): a", LEFT + 400, TOP + 1014, 22, CAPTION, PLAIN));
+drawn.add(write_in("substitution cipher's ordering round the iris, its cipher", LEFT + 400, TOP + 1048, 22, CAPTION, PLAIN));
+drawn.add(write_in("text in the pupil: in lines, and pupil: spiral, minimum 0.1", LEFT + 400, TOP + 1082, 22, CAPTION, PLAIN));
 book.bind("locks", drawn);
 
 // Sources: a chain drawing on the journal's files, each a node with one
