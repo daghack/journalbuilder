@@ -1,7 +1,7 @@
 import { Component, ElementRef, effect, inject, viewChildren } from '@angular/core';
 import { JournalService } from '../services/journal.service';
 
-/** The left column: a thumbnail of each page; the one picked shows in the middle. */
+/** The Pages tab: a thumbnail of each page; the one picked shows in the middle. */
 @Component({
   selector: 'app-page-list',
   template: `

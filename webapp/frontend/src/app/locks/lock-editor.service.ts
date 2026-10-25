@@ -129,7 +129,7 @@ export class LockEditorService {
   /** Why the chain can't run yet, if it can't. */
   readonly blocked = computed<string | null>(() => {
     const model = this.model();
-    if (!model.nodes.length) return 'Add a lock from the left to start a chain.';
+    if (!model.nodes.length) return 'Add a lock from the Library tab to start a chain.';
     const missingPorts = model.nodes.find((n) => !this.ports()[n.id]);
     if (missingPorts) return 'Working out the locks\' ports…';
     const errors = Object.keys(this.nodeErrors());

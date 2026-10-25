@@ -89,7 +89,7 @@ type Drag =
         }
       </div>
       @if (!editor.model().nodes.length && !editor.model().renderers.length && !editor.model().sources.length) {
-        <p class="empty">Drag lock types here from the left, or click one, then wire outputs to inputs.</p>
+        <p class="empty">Drag lock types here from the Library tab, or click one, then wire outputs to inputs.</p>
       }
       @if (wireError(); as error) { <p class="wire-error">{{ error }}</p> }
     </div>

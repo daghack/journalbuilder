@@ -32,7 +32,10 @@ function readOpen(): Record<string, boolean> {
   }
 }
 
-/** On the left: the journal's title and its files, kind by kind, with the library's beside them. */
+/** Which kinds' lists are open: one for every editor's Files tab. */
+const open = signal<Record<string, boolean>>(readOpen());
+
+/** The Files tab: the journal's title and its files, kind by kind, with the library's beside them. */
 @Component({
   selector: 'app-file-sidebar',
   template: `
@@ -96,7 +99,7 @@ function readOpen(): Record<string, boolean> {
     @if (message(); as m) { <p class="message">{{ m }}</p> }
   `,
   styles: `
-    :host { display: flex; flex-direction: column; overflow: auto; background: var(--surface); border-right: 1px solid var(--border); font-size: 12px; padding-bottom: 12px; }
+    :host { display: flex; flex-direction: column; overflow: auto; background: var(--surface); font-size: 12px; padding-bottom: 12px; }
     header { padding: 8px; display: flex; flex-direction: column; gap: 4px; border-bottom: 1px solid var(--border); }
     .title { font-weight: 600; font-size: 13px; }
     .description { resize: vertical; font: inherit; color: var(--muted); }
@@ -132,7 +135,7 @@ export class FileSidebarComponent {
   protected readonly shell = inject(ShellService);
   private readonly library = inject(LibraryService);
   protected readonly message = signal<string | null>(null);
-  private readonly open = signal<Record<string, boolean>>(readOpen());
+  private readonly open = open;
   protected readonly nameOf = nameOf;
 
   protected readonly groups = computed<Group[]>(() => {

@@ -1,7 +1,7 @@
 import { Component, computed, inject } from '@angular/core';
 import { EditorComponent } from '../editor/editor.component';
 import { EDITOR_DOCUMENT } from '../editor/editor-document';
-import { ThreePaneComponent } from '../layout/three-pane.component';
+import { PaneTabDirective, ThreePaneComponent, type PaneTab } from '../layout/three-pane.component';
 import { RenderPagesComponent } from '../locks/render-pages.component';
 import { failed } from '../services/tools.service';
 import { LibraryBannerComponent } from './library-banner.component';
@@ -18,24 +18,26 @@ const DEFINES: Record<string, string> = {
 };
 
 /**
- * A lock, illustration, layout, style or helper file: its options on the
- * left, given values to preview with; its preview in the middle; its code
- * on the right. Helpers have only their code.
+ * A lock, illustration, layout, style or helper file: its options in a
+ * tab beside the files, given values to preview with; its preview in the
+ * middle; its code on the right. Helpers have only their code.
  */
 @Component({
   selector: 'app-resource-editor',
-  imports: [ThreePaneComponent, EditorComponent, RenderPagesComponent, OptionsFormComponent, LibraryBannerComponent],
+  imports: [ThreePaneComponent, PaneTabDirective, EditorComponent, RenderPagesComponent, OptionsFormComponent, LibraryBannerComponent],
   providers: [ResourceEditorService, { provide: EDITOR_DOCUMENT, useFactory: () => inject(ResourceEditorService).document }],
   template: `
     @if (editor.kind() === 'lib') {
-      <div class="lib">
+      <app-three-pane key="lib" [right]="false">
+      <div center class="lib">
         <app-library-banner [path]="editor.path()" [own]="editor.own()" [builtin]="editor.builtin()" (copy)="editor.copyIn()" (revert)="editor.revertToLibrary()" />
         <app-editor class="code" />
         <p class="hint">{{ defines() }}</p>
       </div>
+      </app-three-pane>
     } @else {
-      <app-three-pane key="resource" [leftDefault]="220" [rightFraction]="0.42" [rightMin]="380">
-        <aside left class="options" aria-label="Options">
+      <app-three-pane key="resource" [tabs]="tabs" [rightFraction]="0.42" [rightMin]="380">
+        <aside appPaneTab="options" class="options" aria-label="Options">
           <h3>Options</h3>
           @if (editor.info()?.description; as description) { <p class="description">{{ description }}</p> }
           <app-options-form [fields]="editor.info()?.fields ?? []" [values]="editor.values()" (changed)="editor.setValue($event.name, $event.value)" />
@@ -88,6 +90,7 @@ const DEFINES: Record<string, string> = {
 export class ResourceEditorComponent {
   protected readonly editor = inject(ResourceEditorService);
   protected readonly defines = computed(() => DEFINES[this.editor.kind() ?? ''] ?? '');
+  protected readonly tabs: PaneTab[] = [{ id: 'options', label: 'Options', title: 'Values to preview the file with' }];
 
   protected readonly examples = computed(() => {
     const examples = this.editor.lockCheck()?.examples;

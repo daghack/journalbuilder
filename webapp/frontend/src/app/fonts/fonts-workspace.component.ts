@@ -1,5 +1,5 @@
 import { Component, ElementRef, inject, viewChild } from '@angular/core';
-import { ThreePaneComponent } from '../layout/three-pane.component';
+import { PaneTabDirective, ThreePaneComponent, type PaneTab } from '../layout/three-pane.component';
 import { FontEditorService } from './font-editor.service';
 import { FontPanelComponent } from './font-panel.component';
 import { GlyphCanvasComponent } from './glyph-canvas.component';
@@ -7,15 +7,15 @@ import { GlyphListComponent } from './glyph-list.component';
 import { GlyphToolbarComponent } from './glyph-toolbar.component';
 import { TextPreviewComponent } from './text-preview.component';
 
-/** The glyphset editor: the glyphset's glyphs, the glyph drawn with a preview of text in it, and the glyphset's options. */
+/** The glyphset editor: the glyphset's glyphs (a tab beside the files), the glyph drawn with a preview of text in it, and the glyphset's options. */
 @Component({
   selector: 'app-fonts-workspace',
-  imports: [ThreePaneComponent, GlyphListComponent, GlyphToolbarComponent, GlyphCanvasComponent, TextPreviewComponent, FontPanelComponent],
+  imports: [ThreePaneComponent, PaneTabDirective, GlyphListComponent, GlyphToolbarComponent, GlyphCanvasComponent, TextPreviewComponent, FontPanelComponent],
   providers: [FontEditorService],
   host: { '(window:keydown)': 'onKey($event)' },
   template: `
-    <app-three-pane key="fonts" [leftDefault]="230" [rightFraction]="0.28" [rightMin]="320">
-      <app-glyph-list left />
+    <app-three-pane key="fonts" [tabs]="tabs" [rightFraction]="0.28" [rightMin]="320">
+      <app-glyph-list appPaneTab="glyphs" />
       <section center class="centre" aria-label="Glyph">
         <app-glyph-toolbar [canvas]="canvas()" />
         <app-glyph-canvas class="canvas" />
@@ -34,6 +34,7 @@ export class FontsWorkspaceComponent {
   private readonly editor = inject(FontEditorService);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   protected readonly canvas = viewChild(GlyphCanvasComponent);
+  protected readonly tabs: PaneTab[] = [{ id: 'glyphs', label: 'Glyphs', title: 'Every glyph of the glyphset: pick one to draw, or add one' }];
 
   /** Undo and redo, when the glyphset editor shows and no text field has the keyboard. */
   protected onKey(event: KeyboardEvent) {

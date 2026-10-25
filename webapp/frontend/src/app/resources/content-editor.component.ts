@@ -6,6 +6,7 @@ import { JournalStore } from '../services/journal-store.service';
 import { LibraryService } from '../services/library.service';
 import { ToolsService } from '../services/tools.service';
 import { ShellService } from '../shell/shell.service';
+import { ThreePaneComponent } from '../layout/three-pane.component';
 import { LibraryBannerComponent } from './library-banner.component';
 
 /** How long typing pauses before the preview is drawn again. */
@@ -28,8 +29,10 @@ function previewScript(name: string, markdown: boolean): string {
  */
 @Component({
   selector: 'app-content-editor',
-  imports: [LibraryBannerComponent],
+  imports: [ThreePaneComponent, LibraryBannerComponent],
   template: `
+    <app-three-pane key="content" [right]="ext() !== 'json'" [rightFraction]="0.4" [rightMin]="320">
+    <section center class="centre">
     <app-library-banner [path]="path()" [own]="own()" [builtin]="builtin()" (copy)="copyIn()" (revert)="revert()" />
     @if (ext() === 'json') {
       <div class="symbols">
@@ -49,22 +52,24 @@ function previewScript(name: string, markdown: boolean): string {
         }
       </div>
     } @else {
-      <div class="split">
         <section class="preview" aria-label="Preview">
           @if (previewUrl(); as url) { <img [src]="url" alt="The content, written" /> }
           @if (preview()?.error; as error) { <p class="error">{{ error.message }}</p> }
           <p class="hint">Written in the library's plain_hand. An entry reads it with content("{{ name() }}"){{ ext() === 'md' ? ', and sets it marked up with markdown(content("' + name() + '"))' : '' }}.</p>
         </section>
-        <textarea class="text" spellcheck="true" aria-label="The text" [value]="text()" (input)="setText($any($event.target).value)"></textarea>
-      </div>
     }
+    </section>
+    @if (ext() !== 'json') {
+      <textarea right class="text" spellcheck="true" aria-label="The text" [value]="text()" (input)="setText($any($event.target).value)"></textarea>
+    }
+    </app-three-pane>
   `,
   styles: `
     :host { display: flex; flex-direction: column; min-height: 0; height: 100%; }
-    .split { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 1fr); min-height: 0; }
-    .preview { overflow: auto; padding: 12px; background: var(--stage-bg); display: flex; flex-direction: column; gap: 8px; }
+    .centre { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+    .preview { flex: 1; overflow: auto; padding: 12px; background: var(--stage-bg); display: flex; flex-direction: column; gap: 8px; }
     img { width: 100%; max-width: 700px; background: var(--paper); border-radius: 4px; box-shadow: 0 1px 6px rgb(0 0 0 / 0.25); }
-    .text { resize: none; border: 0; border-left: 1px solid var(--border); padding: 12px; font: 14px/1.6 var(--font); background: var(--editor-bg); color: var(--editor-fg); }
+    .text { resize: none; border: 0; padding: 12px; font: 14px/1.6 var(--font); background: var(--editor-bg); color: var(--editor-fg); }
     .symbols { padding: 14px; display: flex; flex-direction: column; gap: 10px; max-width: 760px; overflow: auto; }
     .row { display: flex; align-items: center; gap: 8px; }
     .column { display: flex; flex-direction: column; gap: 4px; }
