@@ -81,7 +81,7 @@ use crate::journal::clip::{clip, Keep};
 use crate::journal::hatch::{FillRule, HatchOptions};
 use crate::journal::canvas::textbox::TextBoxLineMode;
 use crate::journal::paths::StrokePath;
-use crate::journal::symbol::{joined_paths, place_along_path, place_words_along_path, Symbol, SymbolPlacementArgs};
+use crate::journal::symbol::{joined_paths, place_along_path, place_words_along_path, ScaleField, Symbol, SymbolPlacementArgs};
 use crate::journal::fonts::FontBook;
 use crate::journal::ternary::{ternary_along, TernaryOptions};
 use super::generate::BalancedTernary;
@@ -116,11 +116,21 @@ struct PathText {
     jitter: Jitter,
     /// The glyph scale, if the type gives one.
     size: Option<f32>,
+    /// The paragraph's line height, in glyph scales.
+    line_height: f32,
+    /// How far it keeps from what it avoids.
+    clearance: f32,
+    /// The settings' own options, besides a style, a type and a paragraph.
+    options: Map,
 }
 
 impl PathText {
-    fn parse(caller: &str, msg: &str, settings: Map, (symdict, rng): &TextSource) -> RhaiResult<PathText> {
-        let text = TextSettings::read(caller, settings, &PATH_TEXT_KEYS)?;
+    fn parse(caller: &str, msg: &str, settings: Map, text: &TextSource) -> RhaiResult<PathText> {
+        PathText::parse_with(caller, msg, settings, text, &PATH_TEXT_KEYS)
+    }
+    /// As `parse`, taking `keys` besides a style, a type and a paragraph.
+    fn parse_with(caller: &str, msg: &str, settings: Map, (symdict, rng): &TextSource, keys: &[&str]) -> RhaiResult<PathText> {
+        let text = TextSettings::read(caller, settings, keys)?;
         let font = text.type_.glyphset(caller)?;
         Ok(PathText {
             symbols: font.build(msg, symdict, &mut *rng.borrow_mut()),
@@ -130,7 +140,10 @@ impl PathText {
             angle: text.paragraph.angle(),
             jitter: text.jitter(),
             size: if text.type_.has_size() { Some(text.type_.size(caller)?) } else { None },
+            line_height: text.paragraph.line_height(),
+            clearance: text.paragraph.clearance(),
             style: text.style,
+            options: text.options,
         })
     }
     /// The glyph scale `caller` sets text at.
@@ -211,6 +224,159 @@ fn fit_text(path: &mut Path, msg: &str, settings: Map, text: &TextSource) -> Rha
             "{}: the text doesn't fit on the path even at glyph scale {}: {} of {} glyphs left over",
             CALLER, window_min, unplaced.len(), placed.len() + unplaced.len(),
         ).into());
+    }
+    Ok(set.draw(placed, &text.1))
+}
+
+/// What `art::spiral_text` takes, besides a style, a type and a paragraph.
+const SPIRAL_TEXT_KEYS: [&str; 3] = ["avoid", "inner", "minimum_scale"];
+
+/// A clockwise spiral on the page about `center`, from the top, out from
+/// `inner`, for glyphs reaching `reach` either side of it and `wide` times
+/// that along it, turns `gap` apart between their glyphs. Once full-size
+/// glyphs would cross the circle of radius `room`, corners and all, each
+/// fills the band between it and the glyphs on the turn inside, shrinking
+/// as the band narrows, and the spiral ends
+/// where they'd reach less than `least`. The path, a polyline fine enough
+/// for glyphs `fine` across, and how far along it each point is with the
+/// glyphs' reach there as a factor of `reach`.
+fn spiral(center: PVec, inner: f32, reach: f32, wide: f32, gap: f32, room: f32, least: f32, fine: f32) -> (StrokePath, Vec<(f32, f32)>) {
+    use std::f32::consts::{FRAC_PI_2, TAU};
+    // The most a glyph can reach either side of its centre, `base + (k -
+    // 1) a` from the centre, its outer corners inside the circle. Glyphs are
+    // turned to the spiral where they start, so they lean out by about half
+    // the angle they span.
+    let fits = |base: f32, k: f32, a: f32| {
+        let (r, h) = (base + (k - 1.0) * a, wide * a);
+        let lean = h / r.max(1e-3);
+        let (out, along) = (r + a * lean.cos() + h * lean.sin(), h * lean.cos() - a * lean.sin());
+        out * out + along * along <= room * room
+    };
+    let most = |base: f32, k: f32| {
+        if fits(base, k, reach) { return reach; }
+        let (mut low, mut high) = (0.0, reach);
+        for _ in 0..24 {
+            let mid = (low + high) / 2.0;
+            if fits(base, k, mid) { low = mid } else { high = mid }
+        }
+        low
+    };
+    let at = |t: f32, r: f32| center + PVec::new((t - FRAC_PI_2).cos(), (t - FRAC_PI_2).sin()) * r;
+    // Each point's angle, radius and glyphs' reach.
+    let mut turns: Vec<(f32, f32, f32)> = Vec::new();
+    let mut sizes = Vec::new();
+    let mut path = StrokePath::new();
+    let (mut t, mut length) = (0.0, 0.0);
+    let mut last = at(0.0, inner);
+    loop {
+        let (r, a) = if t < TAU {
+            // The first turn: nothing inside it.
+            let r = inner + (2.0 * reach + gap) * t / TAU;
+            (r, most(r, 1.0))
+        } else {
+            // The glyphs a turn in, where this angle last came round.
+            let back = t - TAU;
+            let k = turns.partition_point(|&(u, _, _)| u < back).clamp(1, turns.len() - 1);
+            let ((u0, r0, a0), (u1, r1, a1)) = (turns[k - 1], turns[k]);
+            let f = ((back - u0) / (u1 - u0)).clamp(0.0, 1.0);
+            let top = r0 + (r1 - r0) * f + a0 + (a1 - a0) * f + gap;
+            let a = most(top, 2.0);
+            (top + a, a)
+        };
+        if a < least || turns.len() > 1_000_000 {
+            break;
+        }
+        let p = at(t, r);
+        if turns.is_empty() {
+            path = path.move_to(p.x, p.y);
+        } else {
+            length += (p - last).length();
+            path = path.line_to(p.x, p.y);
+        }
+        last = p;
+        turns.push((t, r, a));
+        sizes.push((length, a / reach));
+        t += (fine * 0.05 / r.max(fine * 0.1)).min(0.1);
+    }
+    (path, sizes)
+}
+
+/// `art::spiral_text(text, center, radius, settings)`: the text written
+/// out from the middle in a clockwise spiral, as big as it can be and still
+/// fit inside the circle of `radius` about `center`, and no bigger than
+/// the type's glyph_scale if it gives one. Glyphs keep one size until
+/// they'd come nearer the circle than the paragraph's clearance; from
+/// there on each fills the room left between the turn inside it and the
+/// circle (less the clearance), shrinking as that narrows, until they'd be
+/// smaller than `minimum_scale` of their size (default a third). Turns
+/// are the paragraph's line height apart, in the glyphs' own height (the
+/// tallest's) rather than glyph scales; the spiral starts `inner` from the
+/// centre (default 0.85 of the glyph scale).
+pub(super) fn spiral_text(msg: &str, center: Vec2, radius: &Dynamic, settings: Map, text: &TextSource) -> RhaiResult<Canvas> {
+    const CALLER: &str = "art::spiral_text";
+    let radius = as_number(CALLER, "radius", radius)?;
+    if !(radius > 0.0) {
+        return Err(format!("{}: radius must be positive, got {}", CALLER, radius).into());
+    }
+    let set = PathText::parse_with(CALLER, msg, settings, text, &SPIRAL_TEXT_KEYS)?;
+    let inner = if set.options.contains_key("inner") { Some(number(CALLER, &set.options, "inner")?.unwrap_or(0.0).max(0.0)) } else { None };
+    let minimum_scale = if set.options.contains_key("minimum_scale") { positive(CALLER, &set.options, "minimum_scale")?.min(1.0) } else { 1.0 / 3.0 };
+    let center: PVec = center.into();
+    // How far the glyphs reach either side of the spiral, and how far
+    // apart turns are, in glyph scales.
+    let reach = set.symbols.iter().filter(|g| !g.is_blank()).map(|g| g.outline(1.0).reach()).fold(0.0, f32::max).max(0.05);
+    let line = reach * 2.0 * set.line_height;
+    // How far the widest glyph reaches along the spiral, in reaches.
+    let wide = set.symbols.iter().filter(|g| !g.is_blank()).map(|g| g.outline(1.0).width() / 2.0).fold(0.0, f32::max) / reach;
+    // The glyphs' ink stays the clearance inside the circle.
+    let room = radius - set.clearance;
+    if !(room > 0.0) {
+        return Err(format!("{}: the circle is no bigger than the clearance, {}", CALLER, set.clearance).into());
+    }
+    let ring: Vec<PVec> = (0..256).map(|i| {
+        let a = i as f32 / 256.0 * std::f32::consts::TAU;
+        center + PVec::new(a.cos(), a.sin()) * room
+    }).collect();
+    let within = crate::journal::canvas::textbox::Region::new(vec![ring]);
+    let tree = set.avoid.tree.as_ref().map(|a| a.borrow());
+    let args = SymbolPlacementArgs {
+        avoid: tree.as_deref(),
+        padding: set.avoid.padding(),
+        spacing: set.spacing,
+        angle: set.angle,
+        within: Some(&within),
+        ..SymbolPlacementArgs::new(1.0)
+    };
+    let place = |scale: f32| {
+        let start = inner.unwrap_or(scale * 0.85);
+        let full = scale * reach;
+        let (path, sizes) = spiral(center, start, full, wide, scale * (line - 2.0 * reach), room, full * minimum_scale, scale * minimum_scale);
+        if sizes.len() < 2 {
+            return (Vec::new(), set.symbols.clone());
+        }
+        // A glyph's size where its room starts along the spiral.
+        let scale_at = |d: f32| {
+            let k = sizes.partition_point(|&(l, _)| l < d).clamp(1, sizes.len() - 1);
+            let ((l0, f0), (l1, f1)) = (sizes[k - 1], sizes[k]);
+            f0 + (f1 - f0) * ((d - l0) / (l1 - l0).max(1e-6)).clamp(0.0, 1.0)
+        };
+        let args = SymbolPlacementArgs { symbol_scale: scale, scale_at: Some(ScaleField(&scale_at)), ..args.clone() };
+        place_text(set.symbols.clone(), &path, &args, &set.mode)
+    };
+    let largest = set.size.map_or(radius, |size| size.min(radius));
+    let (placed, unplaced) = place(largest);
+    if unplaced.is_empty() {
+        return Ok(set.draw(placed, &text.1));
+    }
+    let (mut window_min, mut window_max) = (0.0, largest);
+    while window_max - window_min > radius * 0.0005 {
+        let scale = (window_max + window_min) / 2.0;
+        if place(scale).1.is_empty() { window_min = scale } else { window_max = scale }
+    }
+    let (placed, unplaced) = place(window_min);
+    if window_min <= 0.0 || !unplaced.is_empty() {
+        return Err(format!("{}: the text doesn't fit in the circle at any glyph scale{}", CALLER,
+            if inner.is_some() { "; make 'inner' smaller" } else { "" }).into());
     }
     Ok(set.draw(placed, &text.1))
 }

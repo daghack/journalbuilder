@@ -285,6 +285,7 @@ impl<'a> TextBox<'a> {
             baseline_shift: BASELINE_SHIFT,
             angle: None,
             within: None,
+            scale_at: None,
         };
         match self.layout {
             TextBoxLineMode::Flat => place_along_path(symbols, &stroke, &args),
@@ -303,6 +304,7 @@ impl<'a> TextBox<'a> {
             baseline_shift: BASELINE_SHIFT,
             angle: None,
             within: Some(region),
+            scale_at: None,
         };
         let mut placed = Vec::new();
         let mut to_place = symbols;
@@ -350,6 +352,7 @@ impl<'a> TextBox<'a> {
             baseline_shift: BASELINE_SHIFT,
             angle: None,
             within: Some(region),
+            scale_at: None,
         };
         self.line_spans(y_pos).iter().any(|&(left, right)| {
             let (start, end) = (self.place(left - self.symbol_scale, y_pos), self.place(right + self.symbol_scale, y_pos));

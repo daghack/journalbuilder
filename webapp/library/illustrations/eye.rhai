@@ -17,10 +17,15 @@
 // Unwired, the styles are rough ink pens, the lids, rings and iris inked
 // from top_ink down to bottom_ink and the pupil in inner_ink, and the
 // glyphsets balanced ternary.
+//
+// pupil is how the pupil's text goes: "lines", across it line under line,
+// or "spiral", round and round out from its middle (art::spiral_text),
+// its last turn's glyphs shrinking to fill the room left down to
+// pupil_minimum_scale of their size.
 
 fn options() {
 	#{
-		outer_base: 27, inner_base: 27,
+		outer_base: 27, inner_base: 27, pupil: "lines", pupil_minimum_scale: 0.33,
 		length: 1640.0, width: 717.2,
 		top_ink: "#09603d", bottom_ink: "#0b2a1c", inner_ink: "#000000",
 	}
@@ -56,7 +61,12 @@ fn render(o, i) {
 	let shape = eye_shape(centre, o.length, o.width);
 	let canvas = new_canvas();
 	draw_eye(canvas, centre, shape, i, letters(i.outer, o.outer_base));
-	fill_pupil(canvas, centre, shape, i, letters(i.inner, o.inner_base));
+	let text = letters(i.inner, o.inner_base);
+	switch o.pupil {
+		"lines" => fill_pupil(canvas, centre, shape, i, text),
+		"spiral" => spiral_pupil(canvas, centre, shape, i, text, o.pupil_minimum_scale),
+		_ => throw `the pupil should be "lines" or "spiral", got "${o.pupil}"`,
+	}
 	canvas
 }
 
@@ -110,6 +120,20 @@ fn draw_eye(canvas, centre, shape, i, key_text) {
 		g.rotation = at.angle + random_range(-0.07, 0.07);
 		canvas.add(g.scale_by(random_range(0.93, 1.07)), key);
 	}
+}
+
+// The pupil filled with the text in i's pupil glyphs and style, written
+// round and round out from the middle to the inner ring, at the largest
+// size, up to 40, that holds all of it, the last turn's glyphs shrinking
+// to fill the room left, down to minimum_scale of that size.
+fn spiral_pupil(canvas, centre, shape, i, text, minimum_scale) {
+	if text == "" { return; }
+	canvas.add(art::spiral_text(text, centre, shape.inner - 7.0, #{
+		style: i.pupil_style.style,
+		type: #{ glyphset: i.pupil_glyphs, glyph_scale: 40.0 },
+		paragraph: #{ line_height: 1.05, clearance: 4.0 },
+		minimum_scale: minimum_scale,
+	}));
 }
 
 // The pupil filled with the text in i's pupil glyphs and style, glyph by

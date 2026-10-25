@@ -101,6 +101,22 @@
 //! let e = art::eye(vec2(0.0, 0.0), 300.0, #{ gaze_angle: PI(), messiness: 0.8, seed: 7, angle: 1.2, gaze: 1.0, openness: 0.6, flat: true });
 //! ```
 //!
+//! `spiral_text` writes text in a spiral out from the middle of a circle,
+//! clockwise from the top, as large as all of it fits: glyphs keep one
+//! size until they'd come nearer the circle than the paragraph's
+//! clearance, then each fills the room left between the circle and the
+//! turn inside it, shrinking as that narrows, until they'd be smaller than
+//! `minimum_scale` of the rest (default a third). It takes the usual text
+//! settings, a type's glyph_scale capping the size; turns are the
+//! paragraph's line height apart in the glyphs' own height, and the
+//! spiral starts `inner` from the centre (default 0.85 of the glyph scale).
+//!
+//! ```rhai
+//! canvas.add(art::spiral_text("lorem ipsum dolor sit amet", vec2(0, 0), 160.0, #{
+//!     style: ink, type: #{ glyphset: glyphset("plain") }, minimum_scale: 0.1,
+//! }));
+//! ```
+//!
 //! `moon` draws the moon in a phase: 0 new, 0.25 first quarter (right half
 //! lit), 0.5 full, 0.75 last quarter, wrapping round at 1. It gives its
 //! parts as paths: the disc's outline, the terminator between light and
@@ -148,7 +164,7 @@ use rhai::{Dynamic, Engine, EvalAltResult, Map, Module, NativeCallContext};
 use super::locks::LockValue;
 use super::options::{check_keys, float, number};
 use super::random::SharedRng;
-use super::{Path, Vec2};
+use super::{Canvas, Path, Vec2};
 use crate::lockbuilder::symbols_to_string;
 use crate::journal::art;
 
@@ -429,8 +445,12 @@ pub(super) fn sketch_parts(sketch: crate::journal::kinds::Sketch) -> Map {
     parts
 }
 
-pub fn register(engine: &mut Engine, rng: SharedRng) {
+pub fn register(engine: &mut Engine, text: super::path::TextSource) {
+    let rng = text.1.clone();
     let mut module = Module::new();
+    module.set_native_fn("spiral_text", move |ctx: NativeCallContext, msg: &str, center: Vec2, radius: Dynamic, settings: Map| -> RhaiResult<Canvas> {
+        super::path::spiral_text(msg, center, &radius, settings, &text).map_err(|err| error(&ctx, err.to_string()))
+    });
     module.set_native_fn("moon", |ctx: NativeCallContext, center: Vec2, radius: Dynamic, phase: Dynamic| -> RhaiResult<Map> {
         moon(&ctx, center, &radius, &phase)
     });
