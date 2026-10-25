@@ -141,6 +141,29 @@ export class FileService {
     return { name: saveAs, text, handle: null };
   }
 
+  /**
+   * Save `blob` where the user picks, named `name` to begin with. Returns
+   * the name it was saved as, or null if the user didn't pick anywhere.
+   * Without the File System Access API it downloads, as `name`.
+   */
+  async saveBlob(blob: Blob, name: string, kind: FileKind): Promise<string | null> {
+    if (!this.picker.showSaveFilePicker) {
+      this.download(blob, name);
+      return name;
+    }
+    let handle: FileHandle;
+    try {
+      handle = await this.picker.showSaveFilePicker({ suggestedName: name, types: kind.types });
+    } catch (err) {
+      if (isAbort(err)) return null;
+      throw err;
+    }
+    const writable = await handle.createWritable();
+    await writable.write(blob);
+    await writable.close();
+    return handle.name;
+  }
+
   /** Hand `blob` to the browser to save as `name`. */
   download(blob: Blob, name: string) {
     const url = URL.createObjectURL(blob);

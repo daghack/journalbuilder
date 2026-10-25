@@ -1,6 +1,6 @@
 import { Injectable, computed, effect, signal, untracked } from '@angular/core';
 import {
-  BLANK_ENTRY, MANIFEST_VERSION, VALID_NAME, blankJournal, checkEntries, checkManifest, entryPath, journalHash, kindOf, splitPath,
+  BLANK_ENTRY, MANIFEST_VERSION, VALID_NAME, blankJournal, checkEntries, checkManifest, entryPath, journalHash, kindOf, snakeCase, splitPath,
   type JournalData, type Manifest,
 } from '../journal/journal-files';
 import { idbGet, idbSet } from './idb';
@@ -176,6 +176,11 @@ export class JournalStore {
 
   setManifest(patch: Partial<Pick<Manifest, 'title' | 'description'>>) {
     this.update((j) => ({ ...j, manifest: checkManifest({ ...j.manifest, ...patch }) }));
+  }
+
+  /** Retitle the journal, and name its directory (and an export's) for the title, in snake_case. */
+  setTitle(title: string) {
+    this.update((j) => ({ ...j, name: snakeCase(title, j.name), manifest: checkManifest({ ...j.manifest, title }) }));
   }
 
   /** Rename the journal (its directory, and an export's). Returns why it can't, or null. */

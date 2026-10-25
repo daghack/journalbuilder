@@ -170,6 +170,16 @@ export function journalName(name: string, fallback: string): string {
   return name.replace(/[^A-Za-z0-9_]/g, '_') || fallback;
 }
 
+/** `text` (a title, say) in snake_case, made a journal's name: "My Journal!" is my_journal; `fallback` if nothing's left. */
+export function snakeCase(text: string, fallback: string): string {
+  const words = text
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .split(/[^A-Za-z0-9]+/)
+    .filter(Boolean);
+  return words.join('_').toLowerCase() || fallback;
+}
+
 /** The journal in a zip: one holding a journal's directory (or the directory's contents). */
 export function unpackZip(bytes: Uint8Array, fallbackName: string): JournalData {
   const entries = unzipSync(bytes, { filter: (file) => !file.name.endsWith('/') });

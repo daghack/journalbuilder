@@ -1,5 +1,5 @@
 import { Injectable, inject, signal } from '@angular/core';
-import { checkManifest, entryPath, journalName, packZip, unpackZip } from '../journal/journal-files';
+import { checkManifest, entryPath, journalName, packZip, snakeCase, unpackZip } from '../journal/journal-files';
 import { readDirectory } from '../journal/journal-folder';
 import { FileService, ZIP_FILES } from './file.service';
 import { JournalStore } from './journal-store.service';
@@ -71,9 +71,11 @@ export class JournalIoService {
   /**
    * The journal as a zip, to download: its files, and the library files its
    * entries use, so it renders as it does here wherever the library has
-   * changed. Returns the library files bundled.
+   * changed. It's saved where the user picks, named for the journal's title
+   * in snake_case to begin with. Returns the name it was saved as and the
+   * library files bundled, or null if the user didn't pick anywhere.
    */
-  async exportZip(): Promise<string[]> {
+  async exportZip(): Promise<{ saved: string; bundled: string[] } | null> {
     this.exporting.set(true);
     try {
       const journal = this.store.journal();
@@ -83,9 +85,11 @@ export class JournalIoService {
       const library = this.library.files();
       const bundled = Object.fromEntries(used.paths.filter((path) => path in library).map((path) => [path, library[path]]));
       const zip = packZip(journal, bundled);
-      this.files.download(new Blob([zip as BlobPart], { type: 'application/zip' }), `${journal.name}.zip`);
+      const name = `${snakeCase(journal.manifest.title, journal.name)}.zip`;
+      const saved = await this.files.saveBlob(new Blob([zip as BlobPart], { type: 'application/zip' }), name, ZIP_FILES);
+      if (!saved) return null;
       this.store.markSaved();
-      return Object.keys(bundled).filter((path) => !(path in journal.files));
+      return { saved, bundled: Object.keys(bundled).filter((path) => !(path in journal.files)) };
     } finally {
       this.exporting.set(false);
     }

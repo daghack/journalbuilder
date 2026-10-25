@@ -1,5 +1,5 @@
 import { strToU8, zipSync } from 'fflate';
-import { blankJournal, checkManifest, journalHash, manifestText, packZip, splitPath, unpackZip, type JournalData } from './journal-files';
+import { blankJournal, checkManifest, journalHash, manifestText, packZip, snakeCase, splitPath, unpackZip, type JournalData } from './journal-files';
 
 const journal: JournalData = {
   name: 'letters',
@@ -50,5 +50,13 @@ describe('a journal', () => {
     const blank = blankJournal();
     expect(blank.manifest.entries).toEqual(['entry_1']);
     expect(Object.keys(blank.files)).toEqual(['entries/entry_1.rhai']);
+  });
+
+  it("names a journal for its title in snake_case", () => {
+    expect(snakeCase('My Journal!', 'x')).toBe('my_journal');
+    expect(snakeCase('  The  API reference — v2 ', 'x')).toBe('the_api_reference_v2');
+    expect(snakeCase('lockNodeHTMLString', 'x')).toBe('lock_node_html_string');
+    expect(snakeCase('already_snake', 'x')).toBe('already_snake');
+    expect(snakeCase('!!!', 'untitled')).toBe('untitled');
   });
 });

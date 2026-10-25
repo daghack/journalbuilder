@@ -1,14 +1,19 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, ElementRef, effect, inject, signal, viewChild } from '@angular/core';
 import { JournalIoService } from '../services/journal-io.service';
 import { JournalStore } from '../services/journal-store.service';
 
-/** Across the top: the journal's name, and new, open, import (a zip or a directory) and export. */
+/** Across the top: the journal's name (click its title to change it), and new, open, import (a zip or a directory) and export. */
 @Component({
   selector: 'app-journal-bar',
   template: `
     <span class="name" [title]="'The journal: ' + store.manifest().title">
       <button type="button" class="dir" (click)="rename()" title="Rename the journal's directory (its zip's name)">{{ store.name() }}/</button>
-      <span class="title">{{ store.manifest().title }}</span>
+      @if (editing()) {
+        <input #titleInput class="title-edit" [value]="store.manifest().title" aria-label="The journal's title"
+               (keydown.enter)="commitTitle(titleInput.value)" (keydown.escape)="editing.set(false)" (blur)="commitTitle(titleInput.value)" />
+      } @else {
+        <button type="button" class="title" (click)="editTitle()" title="Retitle the journal: its directory, and an export's name, follow in snake_case">{{ store.manifest().title }}</button>
+      }
       @if (store.dirty()) { <span class="dirty" title="Changed since it was last exported">●</span> }
     </span>
     <span class="spacer"></span>
@@ -41,7 +46,10 @@ import { JournalStore } from '../services/journal-store.service';
     .name { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; }
     .dir { background: transparent; border: 0; color: var(--rail-fg); font-family: var(--mono); padding: 2px 0; cursor: pointer; opacity: 0.75; }
     .dir:hover { opacity: 1; text-decoration: underline; }
-    .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .title { background: transparent; border: 0; color: var(--rail-fg); font: inherit; font-weight: 600; padding: 2px 0; cursor: text;
+             white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .title:hover { text-decoration: underline dotted; }
+    .title-edit { font: inherit; font-weight: 600; padding: 1px 4px; min-width: 16ch; }
     .dirty { color: var(--accent); }
     .spacer { flex: 1; }
     .message { opacity: 0.85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40vw; }
@@ -64,6 +72,19 @@ export class JournalBarComponent {
   protected readonly io = inject(JournalIoService);
   protected readonly message = signal<{ text: string; error: boolean } | null>(null);
   private messageTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The title being edited, in place. */
+  protected readonly editing = signal(false);
+  private readonly titleInput = viewChild<ElementRef<HTMLInputElement>>('titleInput');
+
+  constructor() {
+    effect(() => {
+      const input = this.titleInput()?.nativeElement;
+      if (input) {
+        input.focus();
+        input.select();
+      }
+    });
+  }
 
   /** Whether it's fine to replace the journal: it's saved, or the user says to throw its changes away. */
   private discard(doing: string): boolean {
@@ -111,13 +132,26 @@ export class JournalBarComponent {
 
   protected async exportZip() {
     try {
-      const bundled = await this.io.exportZip();
+      const exported = await this.io.exportZip();
+      if (!exported) return;
+      const { saved, bundled } = exported;
       this.say(bundled.length
-        ? `Exported ${this.store.name()}.zip, with ${bundled.length} library file${bundled.length === 1 ? '' : 's'} it uses.`
-        : `Exported ${this.store.name()}.zip.`);
+        ? `Exported ${saved}, with ${bundled.length} library file${bundled.length === 1 ? '' : 's'} it uses.`
+        : `Exported ${saved}.`);
     } catch (err) {
       this.say(`Couldn't export it: ${(err as Error).message}`, true);
     }
+  }
+
+  protected editTitle() {
+    this.editing.set(true);
+  }
+
+  protected commitTitle(value: string) {
+    if (!this.editing()) return;
+    this.editing.set(false);
+    const title = value.trim();
+    if (title && title !== this.store.manifest().title) this.store.setTitle(title);
   }
 
   protected rename() {
