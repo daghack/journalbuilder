@@ -410,7 +410,7 @@ doc += api("brush_style.min_pressure = number, brush_style.max_pressure = number
 	arg("number", "The pressure.", "a number from 0 to 1, min_pressure at most max_pressure (checked once a constructor's options are all set)."),
 ]);
 doc += api("brush_style.pressure_profile = name", "How pressure runs along each stroke.", [
-	arg("name", "The profile.", "ramp (min to max, the default), taper (min to max at the middle and back) or constant (max all along)."),
+	arg("name", "The profile.", "ramp (min to max, the default), taper (min to max at the middle and back), constant (max all along) or pointed (by direction, as a pointed nib: max going down, min going up or across)."),
 ]);
 doc += api("brush_style.pressure_wander = number", "Pressure wanders along a stroke, so ramps and tapers look less mechanical.", [
 	arg("number", "How far it wanders either way, as a fraction of the pressure. Default 0.", "a number from 0 up to, not including, 1."),

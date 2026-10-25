@@ -5,7 +5,8 @@
 //! let ink = new_brush_style("#253443", "Ink Pen", 1.2);
 //! let pen = new_brush_style("#253443", "Ink Pen", 1.2, #{
 //!     min_pressure: 0.4, max_pressure: 0.8,   // default 0.3 and 0.7
-//!     pressure_profile: "taper",              // or "ramp" (the default) or "constant"
+//!     pressure_profile: "taper",              // or "ramp" (the default), "constant" or "pointed"
+//!                                             // (heavy going down, hairline going up)
 //!     pressure_wander: 0.2,                   // pressure wandering 20% either way (default 0)
 //!     pressure_wander_length: 8.0,            // rising and falling about every 8 units (default 12)
 //!     pool: 0.4,                              // ink pooling: 40% heavier at the bottom (default 0)

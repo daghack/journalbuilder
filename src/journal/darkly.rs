@@ -482,11 +482,11 @@ impl Pen<'_> {
             let sample_count = samples.len();
             let mut distance = 0.0;
             let mut last = samples.first().map(|s| s.point);
-            for (i, CurveSample { point,  .. }) in samples.into_iter().enumerate() {
+            for (i, CurveSample { point, normal, .. }) in samples.into_iter().enumerate() {
                 distance += last.map_or(0.0, |l| l.distance(point));
                 last = Some(point);
                 let t_param = i as f32 / sample_count as f32;
-                let pressure = (brush.pressure_profile.at(t_param) * pressure_range + pressure_min)
+                let pressure = (brush.pressure_profile.at(t_param, normal) * pressure_range + pressure_min)
                     * brush.pooling(point.y, top, bottom)
                     * variation.as_ref().map_or(1.0, |v| v.at(distance));
                 // Where it is in the whole page's render, less the offset:

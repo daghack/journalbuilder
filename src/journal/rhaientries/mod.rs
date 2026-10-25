@@ -1177,7 +1177,7 @@ brush.color = \"darkredd\";", BRUSH)).expect_err("bad color should fail").to_str
         assert_eq!(jc.strokes()[0].style.brush.as_ref().unwrap().pressure_profile, PressureProfile::Taper);
         let err = engine().build_entry_str("let b = new_brush_style(\"black\", \"Ink Pen\", 1.0);\nb.pressure_profile = \"wobbly\";")
             .expect_err("unknown profile should fail").to_string();
-        assert!(err.contains("unknown pressure_profile 'wobbly'") && err.contains("ramp, taper, constant") && err.contains("line 2"), "{}", err);
+        assert!(err.contains("unknown pressure_profile 'wobbly'") && err.contains("ramp, taper, constant, pointed") && err.contains("line 2"), "{}", err);
     }
 
     #[test]

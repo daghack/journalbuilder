@@ -172,14 +172,26 @@ book.bind("pens", pens);
 // min_pressure and max_pressure.
 let pens = sheet("pens");
 pens.add(subhead("pressure profiles", TOP));
-pens.add(caption("new_brush_style(..., #{ pressure_profile }): \"ramp\", \"taper\" or \"constant\"; brush_style.brush", TOP + 50));
+pens.add(caption("new_brush_style(..., #{ pressure_profile }): \"ramp\", \"taper\", \"constant\" or \"pointed\"; brush_style.brush", TOP + 50));
 let steady = new_handwriting_style();
 let y = TOP + 110;
-for profile in ["ramp", "taper", "constant"] {
+for profile in ["ramp", "taper", "constant", "pointed"] {
 	let brush = new_brush_style(GOLD, "Ink Pen", 10, #{ min_pressure: 0.05, max_pressure: 1.0, pressure_profile: profile });
 	assert(brush.min_pressure == 0.05 && brush.max_pressure == 1.0 && brush.brush == "Ink Pen", "unexpected brush style");
 	pens.add(write(profile, LEFT, y, 24));
-	pens.add(new_line(vec2(380, y), vec2(RIGHT, y)), new_style(brush, steady));
+	if profile == "pointed" {
+		// Pointed goes by which way the pen moves, so it's a zigzag: heavy
+		// going down, a hairline going up.
+		brush.min_pressure = 0.2;
+		let x = 380.0;
+		while x < RIGHT - 60 {
+			pens.add(new_line(vec2(x, y - 20), vec2(x + 30, y + 20)), new_style(brush, steady));
+			pens.add(new_line(vec2(x + 30, y + 20), vec2(x + 60, y - 20)), new_style(brush, steady));
+			x += 60;
+		}
+	} else {
+		pens.add(new_line(vec2(380, y), vec2(RIGHT, y)), new_style(brush, steady));
+	}
 	y += 60;
 }
 
@@ -417,6 +429,7 @@ let samples = [
 	#{ label: "glyphset(\"loche_upper\"): capitals, lowercase text set in them", glyphs: LOCHE, lines: [alphabet, lorem + ".", "punctuation . , ; : ' \" ? - —"] },
 	#{ label: "glyphset(\"loche_lower\"): falling back to loche_upper for capitals and stops", glyphs: glyphset("loche_lower"), lines: [alphabet, "Lorem ipsum dolor sit amet, consectetur."] },
 	#{ label: "glyphset(\"nivelia\"): traced from her letter, falling back to loche_upper for the capitals she never wrote", glyphs: glyphset("nivelia"), size: 46, lines: [alphabet, alphabet.to_upper(), "Lorem ipsum dolor sit amet, consectetur.", "A iq ixoias rx jrg, ibs A srb'z Kibz zr nc."] },
+	#{ label: "glyphset(\"ayan\"): a cursive traced from the US Declaration typeface, here with pressure_profile: \"pointed\"", glyphs: glyphset("ayan"), size: 90, style: new_style(new_brush_style(INK, "Ink Pen", 1.1, #{ min_pressure: 0.45, max_pressure: 0.9, pressure_profile: "pointed" }), new_handwriting_style()), lines: [alphabet, "ABCDEFGHIJKLM", "NOPQRSTUVWXYZ", "Lorem ipsum dolor sit amet, consectetur."] },
 	#{ label: "glyphset(\"lang\")", glyphs: glyphset("lang"), lines: [alphabet.to_upper(), alphabet, "Lorem ipsum dolor sit amet."] },
 	#{ label: "glyphset(\"eldritch\")", glyphs: glyphset("eldritch"), lines: [alphabet, "lorem ipsum dolor sit amet"] },
 	#{ label: "glyphset(\"sharp_lower\")", glyphs: glyphset("sharp_lower"), lines: [alphabet, "lorem ipsum dolor sit amet"] },
@@ -438,7 +451,7 @@ for f in samples {
 	sets.add(caption(f.label, y));
 	y += 50 + (leading - 54) / 2;
 	for line in f.lines {
-		sets.add(write_in(line, LEFT, y, size, SAMPLE, f.glyphs));
+		sets.add(write_in(line, LEFT, y, size, if "style" in f { f.style } else { SAMPLE }, f.glyphs));
 		y += leading;
 	}
 	y += 30;

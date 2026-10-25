@@ -188,16 +188,21 @@ pub enum PressureProfile {
     Taper,
     /// Max all the way.
     Constant,
+    /// By which way the pen moves, as a pointed nib: max going down (a
+    /// little to the left, as a slanted hand writes), min going up or
+    /// across, so downstrokes swell and upstrokes and joins are hairlines.
+    Pointed,
 }
 
 impl PressureProfile {
-    pub const NAMES: [&'static str; 3] = ["ramp", "taper", "constant"];
+    pub const NAMES: [&'static str; 4] = ["ramp", "taper", "constant", "pointed"];
 
     pub fn from_name(name: &str) -> Option<Self> {
         match name {
             "ramp" => Some(Self::Ramp),
             "taper" => Some(Self::Taper),
             "constant" => Some(Self::Constant),
+            "pointed" => Some(Self::Pointed),
             _ => None,
         }
     }
@@ -207,16 +212,24 @@ impl PressureProfile {
             Self::Ramp => "ramp",
             Self::Taper => "taper",
             Self::Constant => "constant",
+            Self::Pointed => "pointed",
         }
     }
 
     /// Where pressure sits between min (0) and max (1), `t` of the way
-    /// along a stroke.
-    pub fn at(self, t: f32) -> f32 {
+    /// along a stroke, at a sample whose normal is `normal` (y down).
+    pub fn at(self, t: f32, normal: Vec2) -> f32 {
         match self {
             Self::Ramp => t,
             Self::Taper => (t * std::f32::consts::PI).sin(),
             Self::Constant => 1.0,
+            Self::Pointed => {
+                // The normal is the tangent turned a quarter clockwise.
+                let tangent = Vec2::new(normal.y, -normal.x);
+                let down = tangent.dot(Vec2::new(-0.26, 0.97));
+                let x = ((down - 0.2) / 0.7).clamp(0.0, 1.0);
+                x * x * (3.0 - 2.0 * x)
+            }
         }
     }
 }
@@ -723,7 +736,11 @@ impl Canvas {
             let mut along = 0.0;
             let heavier: Vec<f32> = samples.iter().enumerate().map(|(i, sample)| {
                 along += if i > 0 { samples[i - 1].point.distance(sample.point) } else { 0.0 };
-                brush.map_or(1.0, |b| b.pooling(sample.point.y, top, bottom))
+                // A pointed pen's width follows its pressure; the other
+                // profiles keep the trailed-off width.
+                let pointed = brush.filter(|b| b.pressure_profile == PressureProfile::Pointed && b.max_pressure > 0.0)
+                    .map_or(1.0, |b| (b.min_pressure + PressureProfile::Pointed.at(0.0, sample.normal) * (b.max_pressure - b.min_pressure)) / b.max_pressure);
+                pointed * brush.map_or(1.0, |b| b.pooling(sample.point.y, top, bottom))
                     * variation.as_ref().map_or(1.0, |v| v.at(along))
             }).collect();
             // Reversed, the right side's trail runs from the other end.
@@ -901,7 +918,7 @@ mod svg_output_tests {
 
 #[cfg(test)]
 mod pressure_tests {
-    use super::{Brush, PressureProfile};
+    use super::{Brush, PressureProfile, Vec2};
 
     fn brush(pool: f32, pressure_variation: f32) -> Brush {
         Brush { name: "Ink Pen".into(), size: 1.0, min_pressure: 0.2, max_pressure: 0.8, pressure_profile: PressureProfile::Ramp, pool, pool_depth: 0.25, pressure_variation, variation_length: 10.0 }
@@ -935,13 +952,19 @@ mod pressure_tests {
 
     #[test]
     fn profiles_run_between_min_and_max() {
+        let across = Vec2::new(0.0, 1.0);
         for t in [0.0, 0.25, 0.5, 0.75] {
-            assert_eq!(PressureProfile::Ramp.at(t), t);
-            assert_eq!(PressureProfile::Constant.at(t), 1.0);
+            assert_eq!(PressureProfile::Ramp.at(t, across), t);
+            assert_eq!(PressureProfile::Constant.at(t, across), 1.0);
         }
-        let taper = |t| PressureProfile::Taper.at(t);
+        let taper = |t| PressureProfile::Taper.at(t, across);
         assert!(taper(0.0).abs() < 1e-6 && taper(1.0).abs() < 1e-6 && (taper(0.5) - 1.0).abs() < 1e-6);
         assert!((taper(0.25) - taper(0.75)).abs() < 1e-6);
+        // Pointed: by direction (normals of strokes heading down, up, right).
+        let pointed = |normal| PressureProfile::Pointed.at(0.5, normal);
+        assert!((pointed(Vec2::new(-1.0, 0.0)) - 1.0).abs() < 0.05);
+        assert_eq!(pointed(Vec2::new(1.0, 0.0)), 0.0);
+        assert_eq!(pointed(across), 0.0);
         for name in PressureProfile::NAMES {
             assert_eq!(PressureProfile::from_name(name).unwrap().name(), name);
         }
