@@ -189,9 +189,7 @@ fn index_glyphs(glyphs, n, at, size) {
 // (in base 3, 0, 1 and 2 are -1, 0 and +1; in base 27, -13 to 13), in as
 // many trits as the base needs, so every link carries as many marks.
 fn trits(d, base) {
-	let most = base - 1 - (base - 1) / 2;
 	let w = 1;
-	let reach = 1;
-	while reach < most { w += 1; reach = reach * 3 + 1; }
-	balanced_ternary(balanced_ternary(d - (base - 1) / 2).digits(w)[0])
+	while 3 ** w < base { w += 1; }
+	balanced_ternary(d - (base - 1) / 2, #{ width: w })
 }

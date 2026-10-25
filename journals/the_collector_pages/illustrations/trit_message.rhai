@@ -51,14 +51,12 @@ fn render(o, i) {
 	c.add(write_line(o.title, vec2(100, 100), #{ style: i.heading_style.style, type: new_type_style(i.heading_glyphs, 44) }));
 	c.add(new_line(vec2(100, 132), vec2(o.width - 100, 132)), i.rule_style.style);
 	let step = (o.width - 200) / o.per_row;
-	let row = 0;
-	while row * o.per_row < marks.len() {
+	for row in 0..(marks.len() + o.per_row - 1) / o.per_row {
 		let these = marks.extract(row * o.per_row, o.per_row);
 		let y = 230 + row * 90;
 		let line = new_line(vec2(100, y), vec2(100 + these.len() * step, y));
 		c.add(line, fine);
 		c.add(line.fit_text(balanced_ternary(these), #{ style: i.mark_style.style, width: 30 }));
-		row += 1;
 	}
 	c
 }
@@ -68,11 +66,9 @@ fn example() {
 }
 
 // A symbol of `base` as balanced ternary, shifted to sit round 0, in as
-// many trits as the base needs.
+// many trits as the base needs: w trits write 3^w numbers.
 fn trits(d, base) {
-	let most = base - 1 - (base - 1) / 2;
 	let w = 1;
-	let reach = 1;
-	while reach < most { w += 1; reach = reach * 3 + 1; }
-	balanced_ternary(balanced_ternary(d - (base - 1) / 2).digits(w)[0])
+	while 3 ** w < base { w += 1; }
+	balanced_ternary(d - (base - 1) / 2, #{ width: w })
 }

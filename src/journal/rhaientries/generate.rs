@@ -11,6 +11,7 @@
 //! let five = balanced_ternary(5);        // +--: 9 - 3 - 1
 //! five.digits();                         // [1, -1, -1]
 //! five.digits(2);                        // [[0, 1], [-1, -1]]: twos, padded in front
+//! balanced_ternary(5, #{ width: 5 });   // 00+--
 //! balanced_ternary("+--").value;         // 5, as balanced_ternary([1, -1, -1]).value
 //! ```
 //!
@@ -135,18 +136,28 @@ pub struct BalancedTernary {
 
 impl BalancedTernary {
     const CALLER: &'static str = "balanced_ternary";
-    fn from_int(n: INT) -> Self {
-        BalancedTernary { digits: balanced_ternary(n).into_iter().map(|d| d as i8).collect() }
+    /// `n` in as few digits as it needs, or at least `width` of them, the
+    /// rest 0s in front.
+    fn from_int(n: INT, options: &Map) -> RhaiResult<Self> {
+        check_keys(Self::CALLER, options, &["width"])?;
+        let width = match options.get("width") {
+            None => 1,
+            Some(w) => match w.as_int() {
+                Ok(w) if w >= 1 => w as usize,
+                _ => return Err(format!("{}: 'width' should be a whole number of at least 1, got {}", Self::CALLER, w).into()),
+            },
+        };
+        let digits = balanced_ternary(n);
+        let mut padded = vec![0i8; width.saturating_sub(digits.len())];
+        padded.extend(digits.into_iter().map(|d| d as i8));
+        Ok(BalancedTernary { digits: padded })
     }
-    /// From digits, as given (leading 0s kept), checking the number they
-    /// make fits a whole number.
+    /// From digits, as given (leading 0s kept), however many there are.
     fn from_digits(digits: Vec<i8>) -> RhaiResult<Self> {
         if digits.is_empty() {
             return Err(format!("{}: needs at least one digit", Self::CALLER).into());
         }
-        let bt = BalancedTernary { digits };
-        bt.checked_value().ok_or_else(|| format!("{}: too many digits for a whole number", Self::CALLER))?;
-        Ok(bt)
+        Ok(BalancedTernary { digits })
     }
     fn from_str(text: &str) -> RhaiResult<Self> {
         let digits = text.chars().map(|c| match c {
@@ -164,11 +175,9 @@ impl BalancedTernary {
         }).collect::<Result<Vec<i8>, _>>()?;
         Self::from_digits(digits)
     }
-    fn checked_value(&self) -> Option<INT> {
+    /// The whole number it is, if it isn't too long to be one.
+    pub fn value(&self) -> Option<INT> {
         self.digits.iter().try_fold(0 as INT, |n, &d| n.checked_mul(3)?.checked_add(d as INT))
-    }
-    pub fn value(&self) -> INT {
-        self.checked_value().expect("checked when made")
     }
     pub fn digits(&self) -> &[i8] {
         &self.digits
@@ -247,10 +256,13 @@ pub(super) fn register(engine: &mut Engine, rng: SharedRng) {
     engine.register_fn("new_edges", |points: Array, pairs: Array| edges(&points, &pairs));
 
     engine.register_type_with_name::<BalancedTernary>("BalancedTernary")
-        .register_fn("balanced_ternary", BalancedTernary::from_int)
+        .register_fn("balanced_ternary", |n: INT| BalancedTernary::from_int(n, &Map::new()))
+        .register_fn("balanced_ternary", |n: INT, options: Map| BalancedTernary::from_int(n, &options))
         .register_fn("balanced_ternary", |text: &str| BalancedTernary::from_str(text))
         .register_fn("balanced_ternary", |digits: Array| BalancedTernary::from_array(&digits))
-        .register_get("value", |bt: &mut BalancedTernary| bt.value())
+        .register_get("value", |bt: &mut BalancedTernary| -> RhaiResult<INT> {
+            bt.value().ok_or_else(|| format!("value: {} digits are too many for a whole number", bt.digits.len()).into())
+        })
         .register_fn("digits", |bt: &mut BalancedTernary| -> Array { bt.digits.iter().map(|&d| Dynamic::from(d as INT)).collect() })
         .register_fn("digits", |bt: &mut BalancedTernary, width: INT| bt.chunks(width))
         .register_fn("to_string", |bt: &mut BalancedTernary| bt.to_string())
@@ -281,13 +293,21 @@ mod tests {
                 && five.digits(4) == [[0, 1, -1, -1]] && five.digits(2) == [[0, 1], [-1, -1]]
                 && balanced_ternary(2026).digits(3) == [[0, 1, 0], [-1, 1, 0], [0, 0, 1]]
                 && balanced_ternary("+--") == five && balanced_ternary([0, 1, -1, -1]).value == 5
-                && balanced_ternary("00+").digits() == [0, 0, 1];
+                && balanced_ternary("00+").digits() == [0, 0, 1]
+                && balanced_ternary(5, #{ width: 5 }).digits() == [0, 0, 1, -1, -1]
+                && balanced_ternary(5, #{ width: 2 }) == five;
+            // More digits than a whole number holds are still digits.
+            let long = [];
+            for i in 0..100 { long.push(1); }
+            ok = ok && balanced_ternary(long).digits().len() == 100;
             for n in [-1000, -13, -1, 0, 1, 2, 3, 40, 9223372036854775807, -9223372036854775807] {
                 ok = ok && balanced_ternary(balanced_ternary(n).digits()).value == n;
             }
             ok
         "#).unwrap();
         assert!(ok);
+        let err = engine().engine.eval::<i64>("let d = []; for i in 0..41 { d.push(1); } balanced_ternary(d).value").unwrap_err();
+        assert!(err.to_string().contains("too many"), "{}", err);
     }
 
     #[test]
