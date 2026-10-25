@@ -2,12 +2,11 @@ import { Component, ElementRef, effect, inject, signal, viewChild } from '@angul
 import { JournalIoService } from '../services/journal-io.service';
 import { JournalStore } from '../services/journal-store.service';
 
-/** Across the top: the journal's name (click its title to change it), and new, open, import (a zip or a directory) and export. */
+/** Across the top: the journal's title (click it to change it), and new, open, import (a zip or a directory) and export. */
 @Component({
   selector: 'app-journal-bar',
   template: `
-    <span class="name" [title]="'The journal: ' + store.manifest().title">
-      <button type="button" class="dir" (click)="rename()" title="Rename the journal's directory (its zip's name)">{{ store.name() }}/</button>
+    <span class="name">
       @if (editing()) {
         <input #titleInput class="title-edit" [value]="store.manifest().title" aria-label="The journal's title"
                (keydown.enter)="commitTitle(titleInput.value)" (keydown.escape)="editing.set(false)" (blur)="commitTitle(titleInput.value)" />
@@ -44,8 +43,6 @@ import { JournalStore } from '../services/journal-store.service';
   styles: `
     :host { display: flex; align-items: center; gap: 8px; padding: 4px 10px; background: var(--rail-bg); color: var(--rail-fg); font-size: 12px; }
     .name { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; }
-    .dir { background: transparent; border: 0; color: var(--rail-fg); font-family: var(--mono); padding: 2px 0; cursor: pointer; opacity: 0.75; }
-    .dir:hover { opacity: 1; text-decoration: underline; }
     .title { background: transparent; border: 0; color: var(--rail-fg); font: inherit; font-weight: 600; padding: 2px 0; cursor: text;
              white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .title:hover { text-decoration: underline dotted; }
@@ -152,12 +149,5 @@ export class JournalBarComponent {
     this.editing.set(false);
     const title = value.trim();
     if (title && title !== this.store.manifest().title) this.store.setTitle(title);
-  }
-
-  protected rename() {
-    const name = prompt("The journal's directory name (letters, digits and _):", this.store.name())?.trim();
-    if (!name || name === this.store.name()) return;
-    const problem = this.store.setName(name);
-    if (problem) this.say(problem, true);
   }
 }

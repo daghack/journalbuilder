@@ -182,13 +182,6 @@ export class JournalStore {
   setTitle(title: string) {
     this.update((j) => ({ ...j, name: snakeCase(title, j.name), manifest: checkManifest({ ...j.manifest, title }) }));
   }
-
-  /** Rename the journal (its directory, and an export's). Returns why it can't, or null. */
-  setName(name: string): string | null {
-    if (!VALID_NAME.test(name)) return "a journal's name is letters, digits and _ only";
-    this.update((j) => ({ ...j, name }));
-    return null;
-  }
 }
 
 /**
