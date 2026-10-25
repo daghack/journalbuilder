@@ -250,27 +250,197 @@ fn join(a: &Symbol, b: &Symbol, from: Vec2, to: Vec2) -> bool {
         && from.distance(to) < JOIN_REACH * a.scale.max(b.scale)
 }
 
-/// A subpath's first point and the way it sets off, and its last point
-/// and the way it arrives.
-fn ends(subpath: &[PathCmd]) -> Option<((Vec2, Vec2), (Vec2, Vec2))> {
+/// A subpath's first and last points.
+fn ends(subpath: &[PathCmd]) -> Option<(Vec2, Vec2)> {
     let start = subpath.first()?.ending_point()?;
-    let towards = |cmd: &PathCmd, from: Vec2| match *cmd {
-        PathCmd::CubicCurveTo(x1, y1, ..) | PathCmd::QuadraticCurveTo(x1, y1, ..) => Vec2::new(x1, y1) - from,
-        _ => cmd.ending_point().map_or(Vec2::ZERO, |p| p - from),
-    };
-    let leave = subpath.get(1).map_or(Vec2::ZERO, |c| towards(c, start)).normalize_or_zero();
-    let mut at = start;
-    let mut arrive = Vec2::ZERO;
-    for cmd in &subpath[1..] {
-        let Some(end) = cmd.ending_point() else { continue };
-        arrive = match *cmd {
-            PathCmd::CubicCurveTo(_, _, x2, y2, ..) => end - Vec2::new(x2, y2),
-            PathCmd::QuadraticCurveTo(x1, y1, ..) => end - Vec2::new(x1, y1),
-            _ => end - at,
-        };
-        at = end;
+    Some((start, subpath.iter().rev().find_map(|c| c.ending_point())?))
+}
+
+/// A drawing command's point `t` of the way along, from `p0`.
+fn point_on(p0: Vec2, cmd: &PathCmd, t: f32) -> Vec2 {
+    let u = 1.0 - t;
+    match *cmd {
+        PathCmd::CubicCurveTo(x1, y1, x2, y2, x, y) => {
+            p0 * (u * u * u) + Vec2::new(x1, y1) * (3.0 * u * u * t) + Vec2::new(x2, y2) * (3.0 * u * t * t) + Vec2::new(x, y) * (t * t * t)
+        }
+        PathCmd::QuadraticCurveTo(x1, y1, x, y) => p0 * (u * u) + Vec2::new(x1, y1) * (2.0 * u * t) + Vec2::new(x, y) * (t * t),
+        _ => cmd.ending_point().map_or(p0, |p| p0.lerp(p, t)),
     }
-    Some(((start, leave), (at, arrive.normalize_or_zero())))
+}
+
+/// A drawing command split `t` of the way along, from `p0`: the part
+/// before and the part after.
+fn split_cmd(p0: Vec2, cmd: &PathCmd, t: f32) -> (PathCmd, PathCmd) {
+    match *cmd {
+        PathCmd::CubicCurveTo(x1, y1, x2, y2, x, y) => {
+            let (p1, p2, p3) = (Vec2::new(x1, y1), Vec2::new(x2, y2), Vec2::new(x, y));
+            let (a, b, c) = (p0.lerp(p1, t), p1.lerp(p2, t), p2.lerp(p3, t));
+            let (d, e) = (a.lerp(b, t), b.lerp(c, t));
+            let m = d.lerp(e, t);
+            (PathCmd::CubicCurveTo(a.x, a.y, d.x, d.y, m.x, m.y), PathCmd::CubicCurveTo(e.x, e.y, c.x, c.y, x, y))
+        }
+        PathCmd::QuadraticCurveTo(x1, y1, x, y) => {
+            let (p1, p2) = (Vec2::new(x1, y1), Vec2::new(x, y));
+            let (a, b) = (p0.lerp(p1, t), p1.lerp(p2, t));
+            let m = a.lerp(b, t);
+            (PathCmd::QuadraticCurveTo(a.x, a.y, m.x, m.y), PathCmd::QuadraticCurveTo(b.x, b.y, x, y))
+        }
+        _ => {
+            let m = point_on(p0, cmd, t);
+            (PathCmd::LineTo(m.x, m.y), *cmd)
+        }
+    }
+}
+
+/// A place along a subpath: its command and how far along that.
+#[derive(Clone, Copy)]
+struct At {
+    cmd: usize,
+    t: f32,
+    point: Vec2,
+    /// Which way the subpath runs there.
+    heading: Vec2,
+    /// How far along the subpath it is.
+    run: f32,
+}
+
+const SAMPLES_PER_CMD: usize = 12;
+
+/// Places along a subpath, evenly in each command's `t`, its first and last
+/// point included.
+fn places(subpath: &[PathCmd]) -> Vec<At> {
+    let Some(start) = subpath.first().and_then(|c| c.ending_point()) else { return Vec::new() };
+    let mut out = vec![At { cmd: 1, t: 0.0, point: start, heading: Vec2::ZERO, run: 0.0 }];
+    let mut p0 = start;
+    for (i, cmd) in subpath.iter().enumerate().skip(1) {
+        let Some(end) = cmd.ending_point() else { continue };
+        for k in 1..=SAMPLES_PER_CMD {
+            let t = k as f32 / SAMPLES_PER_CMD as f32;
+            let point = point_on(p0, cmd, t);
+            let last = out.last().unwrap();
+            let run = last.run + last.point.distance(point);
+            out.push(At { cmd: i, t, point, heading: Vec2::ZERO, run });
+        }
+        p0 = end;
+    }
+    // Each place's heading: along its neighbours.
+    for k in 0..out.len() {
+        let (a, b) = (out[k.saturating_sub(1)].point, out[(k + 1).min(out.len() - 1)].point);
+        out[k].heading = (b - a).normalize_or_zero();
+    }
+    out
+}
+
+/// A subpath from `at` on.
+fn from_place(subpath: &[PathCmd], at: &At) -> Vec<PathCmd> {
+    let p0 = subpath[..at.cmd].iter().rev().find_map(|c| c.ending_point()).unwrap_or(at.point);
+    let mut out = vec![PathCmd::MoveTo(at.point.x, at.point.y)];
+    if at.t < 1.0 {
+        out.push(split_cmd(p0, &subpath[at.cmd], at.t).1);
+    }
+    out.extend_from_slice(&subpath[at.cmd + 1..]);
+    out
+}
+
+/// A subpath up to `at`.
+fn up_to_place(subpath: &[PathCmd], at: &At) -> Vec<PathCmd> {
+    let p0 = subpath[..at.cmd].iter().rev().find_map(|c| c.ending_point()).unwrap_or(at.point);
+    let mut out = subpath[..at.cmd].to_vec();
+    if at.t > 0.0 {
+        out.push(split_cmd(p0, &subpath[at.cmd], at.t).0);
+    }
+    out
+}
+
+/// How sharply a line through `points` turns, setting off `from` and
+/// arriving `to`: each turn's angle squared, summed.
+fn turning(points: impl IntoIterator<Item = Vec2>, from: Vec2, to: Vec2) -> f32 {
+    let mut total = 0.0;
+    let mut last: Option<Vec2> = None;
+    let mut heading = from;
+    for p in points {
+        if let Some(q) = last {
+            let d = (p - q).normalize_or_zero();
+            if d != Vec2::ZERO {
+                if heading != Vec2::ZERO {
+                    total += heading.angle_to(d).powi(2);
+                }
+                heading = d;
+            }
+        }
+        last = Some(p);
+    }
+    if heading != Vec2::ZERO && to != Vec2::ZERO {
+        total += heading.angle_to(to).powi(2);
+    }
+    total
+}
+
+/// The join from `from`, arriving that way, to `to`, setting off that
+/// way: along both, a third of the way each. Where either turns back
+/// against the way across, it's a sharp turn there, as a pen turns back
+/// over its stroke, rather than a loop.
+fn connector(from: &At, to: &At) -> PathCmd {
+    let reach = from.point.distance(to.point) / 3.0;
+    let across = (to.point - from.point).normalize_or_zero();
+    let along = |d: Vec2| if d.dot(across) < 0.0 { across } else { d };
+    let (c1, c2) = (from.point + along(from.heading) * reach, to.point - along(to.heading) * reach);
+    PathCmd::CubicCurveTo(c1.x, c1.y, c2.x, c2.y, to.point.x, to.point.y)
+}
+
+/// How far back a join may take the stroke before it, and into the one
+/// after, in glyph scales: along an exit's tail and an entry's lead-in
+/// (where they don't head down), and a little more, into a downstroke.
+const JOIN_TRIM_BACK: f32 = 0.3;
+const JOIN_TRIM_IN: f32 = 0.3;
+const JOIN_TRIM_DOWN: (f32, f32) = (0.12, 0.03);
+/// What trimming costs, in radians of turning per glyph scale trimmed.
+const JOIN_TRIM_COST: f32 = 2.0;
+
+/// Where to join `stroke` (as far as written) to `next`, the next glyph's
+/// first stroke: the place on each to join at, and the join between them.
+/// An exit's tail and an entry's lead-in are the same hairline in a
+/// joined hand, and as each glyph has its own, they can run back over
+/// each other (a blob where the pen doubles back) or kink (a hump).
+/// So each may be trimmed a little, wherever the join turns least
+/// smoothly (its turns squared, so a sharp turn costs more than a long
+/// one), and a little for what's trimmed.
+fn best_join(stroke: &[PathCmd], next: &[PathCmd], scale: f32, down: Vec2) -> Option<(At, At, PathCmd)> {
+    let (tail, head) = (places(stroke), places(next));
+    let (end, len) = (tail.last()?.run, head.last()?.run);
+    // Places from an end inwards, given with how far in they are, within
+    // `reach` and as far as the hairline goes: until it heads down, and a
+    // little way on.
+    let window = |inwards: Vec<(f32, At)>, reach: f32, past_down: f32| {
+        let mut downstroke: Option<f32> = None;
+        let mut out = Vec::new();
+        for (d, a) in inwards {
+            if d > reach || downstroke.is_some_and(|from| d - from > past_down * scale) {
+                break;
+            }
+            if downstroke.is_none() && a.heading.dot(down) > 0.3 {
+                downstroke = Some(d);
+            }
+            out.push((d, a));
+        }
+        out
+    };
+    let back = window(tail.iter().rev().map(|a| (end - a.run, *a)).collect(), (JOIN_TRIM_BACK * scale).min(end / 2.0), JOIN_TRIM_DOWN.0);
+    let ahead = window(head.iter().map(|a| (a.run, *a)).collect(), (JOIN_TRIM_IN * scale).min(len / 2.0), JOIN_TRIM_DOWN.1);
+    let mut best: Option<(f32, usize, usize)> = None;
+    for (i, (cut, from)) in back.iter().enumerate() {
+        for (j, (into, to)) in ahead.iter().enumerate() {
+            let join = connector(from, to);
+            let turns = turning((0..=SAMPLES_PER_CMD).map(|k| point_on(from.point, &join, k as f32 / SAMPLES_PER_CMD as f32)), from.heading, to.heading);
+            let cost = turns + JOIN_TRIM_COST * (cut + into) / scale;
+            if best.is_none_or(|(b, ..)| cost < b - 1e-4) {
+                best = Some((cost, i, j));
+            }
+        }
+    }
+    let (_, i, j) = best?;
+    let (from, to) = (back[i].1, ahead[j].1);
+    Some((from, to, connector(&from, &to)))
 }
 
 /// Glyphs' strokes as they're written: each glyph's own, unless it's
@@ -294,20 +464,16 @@ pub fn joined_paths(glyphs: &[Symbol], breaks: impl Fn(usize) -> bool) -> Vec<(R
         let mut lifts: Vec<PathCmd> = subpaths.flatten().collect();
         while i + 1 < glyphs.len() && !breaks(i + 1) && !glyphs[i + 1].is_blank() {
             let next = glyphs[i + 1].placed_strokepath().subpaths().into_iter().map(|p| p.commands().to_vec()).collect::<Vec<_>>();
-            let (Some((_, (from, arrive))), Some(((to, leave), _))) = (ends(&stroke), next.first().and_then(|n| ends(n))) else { break };
+            let (Some((_, from)), Some((to, _))) = (ends(&stroke), next.first().and_then(|n| ends(n))) else { break };
             if !join(&glyphs[i], &glyphs[i + 1], from, to) {
                 break;
             }
-            // Along both: out the way the stroke arrived, in the way the
-            // next sets off, a third of the way each. Where either turns
-            // back against the way across, it's a sharp turn there, as a
-            // pen turns back over its stroke, rather than a loop.
-            let reach = from.distance(to) / 3.0;
-            let across = (to - from).normalize_or_zero();
-            let along = |d: Vec2| if d.dot(across) < 0.0 { across } else { d };
-            let (c1, c2) = (from + along(arrive) * reach, to - along(leave) * reach);
-            stroke.push(PathCmd::CubicCurveTo(c1.x, c1.y, c2.x, c2.y, to.x, to.y));
-            stroke.extend_from_slice(&next[0][1..]);
+            let scale = glyphs[i].scale.max(glyphs[i + 1].scale);
+            let down = Vec2::new(-glyphs[i].rotation_rad.sin(), glyphs[i].rotation_rad.cos());
+            let Some((cut, into, join)) = best_join(&stroke, &next[0], scale, down) else { break };
+            stroke = up_to_place(&stroke, &cut);
+            stroke.push(join);
+            stroke.extend_from_slice(&from_place(&next[0], &into)[1..]);
             lifts.extend(next[1..].iter().flatten());
             i += 1;
         }
@@ -933,7 +1099,7 @@ mod tests {
         assert_eq!(paths[0].0, 0..2);
         let subpaths = paths[0].1.subpaths();
         assert_eq!(subpaths.len(), 3);
-        let ((start, _), (end, _)) = ends(subpaths[0].commands()).unwrap();
+        let (start, end) = ends(subpaths[0].commands()).unwrap();
         assert!(start.distance(Vec2::new(-0.5, 0.0)) < 1e-6 && end.distance(Vec2::new(1.7, 0.0)) < 1e-6, "{:?} {:?}", start, end);
         // A glyph alone is drawn as it is.
         assert_eq!(joined_paths(&word[..1], |_| false)[0].1.commands().len(), word[0].placed_strokepath().commands().len());
@@ -952,6 +1118,21 @@ mod tests {
         let mut leaves_not = joining(0.0);
         leaves_not.base = Rc::new((*leaves_not.base).clone().with_joins(Some(Joins { leaves: false, ..leaves_not.joins().unwrap() })));
         assert_eq!(spans(&[leaves_not, joining(1.2)], &|_| false), [0..1, 1..2]);
+    }
+
+    #[test]
+    fn joins_trim_lead_ins_that_start_behind_the_last_stroke() {
+        // The second's lead-in starts a little behind where the first
+        // ends, below it: joined as it is, the pen would double back over
+        // itself there. The join trims the lead-in, and the word runs on.
+        let joins = Joins { enters: true, leaves: true, entry_high: false, exit_high: false };
+        let base = SymbolBase::new(SymbolType::Pathed("M -1 0.1 L 1 -0.1".parse().unwrap())).with_joins(Some(joins));
+        let mut second = Symbol::new_default_from_base_rc(Rc::new(base)).with_joined(true);
+        second.set_position(Vec2::new(0.95, 0.0));
+        let path = &joined_paths(&[joining(0.0), second], |_| false)[0].1;
+        let samples = path.to_substrokes()[0].get_point_samples(0.01);
+        assert!(samples.windows(2).all(|w| w[1].point.x > w[0].point.x - 1e-4), "{:?}", path.commands());
+        assert!(samples.last().unwrap().point.distance(Vec2::new(1.45, -0.05)) < 0.02, "{:?}", path.commands());
     }
 
     #[test]

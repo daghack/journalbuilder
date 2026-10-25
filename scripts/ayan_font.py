@@ -344,10 +344,11 @@ def entered_low(strokes):
 
 
 def entered_high(strokes):
-	"""The glyph with its lead-in cut off: its first stroke starting where
-	it first comes up near the x-height."""
+	"""The glyph with the lower half of its lead-in cut off: its first
+	stroke starting where it first comes up to the height the high exits
+	(b, o, v, w) leave at, about half the x-height."""
 	first = strokes[0]
-	top = next(i for i, p in enumerate(first) if p != "|" and p[1] >= 0.7 * XHEIGHT)
+	top = next(i for i, p in enumerate(first) if p != "|" and p[1] >= 0.5 * XHEIGHT)
 	rest = first[top:]
 	return [rest] + strokes[1:]
 
