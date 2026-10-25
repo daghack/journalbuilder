@@ -747,12 +747,13 @@ doc += api("new_edges(points, pairs)", "A path of straight lines, one between th
 
 doc += heading("Balanced Ternary");
 doc += para("A balanced-ternary value is a number's digits, -1, 0 and 1, most significant first, each worth three times the next: 5 is +--, 9 - 3 - 1. It's a value: glyphsets draw it as a glyph and paths write it as marks.");
-doc += api("balanced_ternary(n), balanced_ternary(text), balanced_ternary(digits)", "A balanced-ternary value: from a whole number, in as few digits as it needs (0 is 0), or from its digits as given, leading 0s kept.", [
+doc += api("balanced_ternary(n, options), balanced_ternary(text), balanced_ternary(digits)", "A balanced-ternary value: from a whole number, in as few digits as it needs (0 is 0) or at least options.width of them, or from its digits as given, leading 0s kept, as many as there are.", [
 	arg("n", "The number.", "a whole number."),
+	opt("options.width", "1", "The fewest digits: a shorter number is padded with 0s in front. balanced_ternary(5, #{ width: 5 }) is 00+--.", "a whole number of at least 1."),
 	arg("text", "The digits as text: - for -1, 0, and + for 1.", "a non-empty string of -, 0 and +."),
 	arg("digits", "The digits.", "a non-empty array of -1, 0 and 1."),
 ]);
-doc += api("bt.value", "Read only: the whole number it is.");
+doc += api("bt.value", "Read only: the whole number it is; an error for more digits than a whole number holds (over 39).");
 doc += api("bt.digits()", "Its digits, an array of -1, 0 and 1.");
 doc += api("bt.digits(width)", "Its digits in chunks of width, an array of arrays, the first padded with 0s in front so every chunk reads as a number: balanced_ternary(2026).digits(3) is [[0, 1, 0], [-1, 1, 0], [0, 0, 1]], 3, -6 and 1.", [
 	arg("width", "Digits to a chunk.", "a whole number of at least 1."),

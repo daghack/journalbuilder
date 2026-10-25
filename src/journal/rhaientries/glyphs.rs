@@ -181,7 +181,7 @@ fn setting(value: f32) -> Dynamic {
 /// balanced-ternary value (its number).
 fn glyph_key(key: &Dynamic) -> String {
     match key.clone().try_cast::<super::generate::BalancedTernary>() {
-        Some(bt) => bt.value().to_string(),
+        Some(bt) => bt.value().map_or_else(|| bt.to_string(), |n| n.to_string()),
         None => key.to_string(),
     }
 }

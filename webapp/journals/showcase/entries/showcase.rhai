@@ -1015,7 +1015,7 @@ book.bind("generators", gen);
 // significant first, each worth three times the next. It's made from a
 // whole number, "+-0" text or an array of digits; .value reads it back,
 // .digits() gives the digits and .digits(width) them in chunks of width,
-// padded in front. Three digits make a number from -13 to 13, drawn here
+// padded in front; balanced_ternary(n, #{ width }) pads n to width digits. Three digits make a number from -13 to 13, drawn here
 // as its glyph in the balanced_ternary font, which was made for them.
 let gen = sheet("generators");
 let ternary = glyphset("balanced_ternary");
@@ -1055,8 +1055,8 @@ assert((degrees(180) - PI()).abs() < 1e-12, "degrees should be radians");
 // sets them size apart, over as many copies of the path as it takes. The
 // path is drawn too.
 let y = TOP + 700;
-let nine = balanced_ternary(year.digits(9)[0]);
-gen.add(caption(`path.fit_text(balanced_ternary(${nine}), #{ style }) down a stem, and #{ style, width: 32 } along a wave`, y));
+let nine = balanced_ternary(2026, #{ width: 9 });
+gen.add(caption("fit_text(balanced_ternary(2026, #{ width: 9 }), #{ style }) down a stem; #{ style, width: 32 } along a wave", y));
 let stem = new_line(vec2(LEFT + 30, y + 40), vec2(LEFT + 30, y + 280));
 gen.add(stem, LINE);
 gen.add(stem.fit_text(nine, #{ style: LINE }));
