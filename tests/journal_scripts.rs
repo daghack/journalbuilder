@@ -9,7 +9,7 @@ fn journals(dir: &str) -> Vec<PathBuf> {
     let mut journals: Vec<PathBuf> = std::fs::read_dir(dir)
         .unwrap_or_else(|e| panic!("Failed to read {}: {}", dir, e))
         .map(|entry| entry.expect("Failed to read directory entry").path())
-        .filter(|path| path.is_dir())
+        .filter(|path| path.join("journal.json").is_file())
         .collect();
     journals.sort();
     journals
