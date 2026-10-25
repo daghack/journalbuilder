@@ -457,6 +457,29 @@ for f in samples {
 	y += 30;
 }
 
+// Joined cursive: a glyphset whose file gives joins writes each word in
+// one stroke, a variant entered high after a letter left high ("o", "b").
+if y + 560 > BOTTOM {
+	book.bind("glyphsets", sets);
+	sets = sheet("glyphsets");
+	y = TOP;
+}
+let pointed = new_style(new_brush_style(INK, "Ink Pen", 1.1, #{ min_pressure: 0.45, max_pressure: 0.9, pressure_profile: "pointed" }), new_handwriting_style());
+let cursive = glyphset("ayan");
+assert(cursive.joined && !glyphset("ayan", #{ joined: false }).joined, "ayan joins up");
+for row in [
+	["glyphset(\"ayan\"): joined up, as its file's joins say; \"or\" and \"ob\" entered high", cursive],
+	["glyphset(\"ayan\", #{ joined: false }), or a type's joined: false: each glyph on its own", glyphset("ayan", #{ joined: false })],
+] {
+	sets.add(caption(row[0], y));
+	sets.add(write_in("Lorem ipsum dolor, border robe.", LEFT, y + 110, 90, pointed, row[1]));
+	y += 190;
+}
+sets.add(caption("canvas.add(textbox.fill(glyphset(\"ayan\").glyphs(text)).placed, style): placed glyphs join too", y));
+let joined_box = new_textbox(#{ center: vec2((LEFT + RIGHT) / 2, y + 120), width: RIGHT - LEFT, height: 140, type: #{ glyph_scale: 90 } });
+sets.add(joined_box.fill(cursive.glyphs("minimum lorem cursive")).placed, pointed);
+y += 210;
+
 // A glyphset's settings, from its file unless changed: the gap between
 // glyphs' outlines and the width of a space (both in glyph scales), and
 // the glyphset to fall back to. Changing one changes that copy only.

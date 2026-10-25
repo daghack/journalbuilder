@@ -55,7 +55,7 @@ use super::random::SharedRng;
 use rand::RngCore;
 use super::{Canvas, CanvasData, Path, Shared, Style, Vec2};
 use crate::journal::fonts::{Font, Mapping};
-use crate::journal::symbol::Symbol;
+use crate::journal::symbol::{joined_paths, Symbol};
 use crate::journal::fonts::FontBook;
 
 use super::RhaiResult;
@@ -110,6 +110,17 @@ pub(super) fn add_glyph(canvas: &mut CanvasData, glyph: &Glyph, style: &Style, r
     let glyph = glyph.borrow();
     if !glyph.is_blank() {
         let path = glyph.placed_strokepath();
+        super::check_finite("add_glyph", &path)?;
+        canvas.add_path(path, style, rng);
+    }
+    Ok(())
+}
+
+/// Add glyphs' strokes to a canvas, as `add_glyph` does, joined up where
+/// their glyphset joins (see `symbol::joined_paths`), but not to a glyph
+/// where `breaks` says so.
+pub(super) fn add_glyphs(canvas: &mut CanvasData, glyphs: &[Symbol], breaks: impl Fn(usize) -> bool, style: &Style, rng: &mut dyn RngCore) -> RhaiResult<()> {
+    for (_, path) in joined_paths(glyphs, breaks) {
         super::check_finite("add_glyph", &path)?;
         canvas.add_path(path, style, rng);
     }
@@ -195,7 +206,7 @@ fn glyph(f: &Font, key: &Dynamic) -> RhaiResult<Glyph> {
 }
 
 /// What `glyphset` and `ternary_glyphset` take, as a glyphset's properties.
-const GLYPHSET_PROPS: [&str; 4] = ["glyph_outline_gap", "space_width", "skew", "fallback"];
+const GLYPHSET_PROPS: [&str; 5] = ["glyph_outline_gap", "space_width", "skew", "joined", "fallback"];
 /// What `glyphset.glyph` takes, as a glyph's properties.
 const GLYPH_PROPS: [&str; 4] = ["position", "scale", "rotation", "skew"];
 
@@ -237,6 +248,17 @@ pub fn register(engine: &mut Engine, symdict: Rc<FontBook>, rng: SharedRng) {
             f.skew = skew_angle("glyphset.skew", &value)?;
             Ok(())
         });
+    // Whether a cursive glyphset's words are joined up: true from a file
+    // with `joins`, and only ever true for one.
+    engine.register_get_set("joined",
+        |f: &mut Font| f.joined,
+        |f: &mut Font, joined: bool| -> RhaiResult<()> {
+            if joined && !f.joins() {
+                return Err(format!("glyphset.joined: glyphset '{}' has no joins, so can't join up", f.name()).into());
+            }
+            f.joined = joined;
+            Ok(())
+        });
     let b = book.clone();
     engine.register_get_set("fallback",
         |f: &mut Font| f.fallback.as_deref().map_or(Dynamic::UNIT, |fallback| Dynamic::from(fallback.clone())),
@@ -271,12 +293,8 @@ pub fn register(engine: &mut Engine, symdict: Rc<FontBook>, rng: SharedRng) {
     });
     engine.register_fn("add", move |canvas: &mut Canvas, glyphs: Array, style: Style| -> RhaiResult<Canvas> {
         let glyphs = glyph_array("canvas.add", glyphs)?;
-        let mut data = canvas.borrow_mut();
-        let mut rng = rng.borrow_mut();
-        for glyph in glyphs {
-            add_glyph(&mut data, &glyph, &style, &mut *rng)?;
-        }
-        drop(data);
+        let glyphs: Vec<Symbol> = glyphs.iter().map(|g| g.borrow().clone()).collect();
+        add_glyphs(&mut canvas.borrow_mut(), &glyphs, |_| false, &style, &mut *rng.borrow_mut())?;
         Ok(canvas.clone())
     });
     // An array of glyphs moved, scaled or turned as one: each glyph

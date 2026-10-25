@@ -910,13 +910,13 @@ brush.color = \"darkredd\";", BRUSH)).expect_err("bad color should fail").to_str
             }
             assert!(left > 0 && left < strokes.len(), "{}: text should be on both sides of the post", layout);
         }
-        // "words" moves the whole word that would straddle the post.
+        // "words" moves the whole word that would straddle the post past
+        // it, where "flat" sets what fits before it: fewer strokes before.
         let words = engine().build_entry_str(&script("words")).unwrap();
         let flat = engine().build_entry_str(&script("flat")).unwrap();
-        let first_after = |entry: &Entry| entry.pages[0].canvases()[0].strokes.iter()
-            .map(|s| s.path.points_within().iter().map(|p| p.x).fold(f32::MAX, f32::min))
-            .find(|x| *x > 300.0).unwrap();
-        assert!(first_after(&words) >= first_after(&flat));
+        let before = |entry: &Entry| entry.pages[0].canvases()[0].strokes.iter()
+            .filter(|s| s.path.points_within().iter().all(|p| p.x < 300.0)).count();
+        assert!(before(&words) < before(&flat), "{} < {}", before(&words), before(&flat));
     }
 
     const SPLIT: &str = r##"

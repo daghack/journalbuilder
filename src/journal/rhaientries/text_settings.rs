@@ -7,6 +7,7 @@
 //!     glyph_outline_gap: 0.1,    // room between glyphs' outlines, in glyph scales (default: the glyphset's)
 //!     space_width: 0.4,          // a space's width, in glyph scales (default: the glyphset's)
 //!     skew: 0.2,                 // glyphs leant 0.2 radians (default: the glyphset's); or italic: true
+//!     joined: false,             // a cursive glyphset's words written unjoined (default: the glyphset's)
 //!     glyph_scale_factor: 1.5,   // times the glyph scale (default 1)
 //!     underline: true,           // one line under (or a number of lines, or #{ count, spacing, style })
 //!     strike: 2,                 // two lines through
@@ -123,6 +124,7 @@ pub struct TypeStyle {
     glyph_tracking: f64,
     space_width: Option<f64>,
     skew: Option<f64>,
+    joined: Option<bool>,
     underline: Option<RuleStyle>,
     strike: Option<RuleStyle>,
 }
@@ -138,12 +140,13 @@ impl TypeStyle {
             glyph_tracking: 0.0,
             space_width: None,
             skew: None,
+            joined: None,
             underline: None,
             strike: None,
         }
     }
-    /// The glyphset, as this type sets it: its gap, space and skew
-    /// overridden as the type says. `caller` needs one.
+    /// The glyphset, as this type sets it: its gap, space, skew and
+    /// joining overridden as the type says. `caller` needs one.
     pub(super) fn glyphset(&self, caller: &str) -> RhaiResult<Font> {
         let mut font = self.glyphset.clone().ok_or_else(|| format!("{}: the type has no 'glyphset', the glyphs text is set in", caller))?;
         if let Some(gap) = self.glyph_outline_gap {
@@ -154,6 +157,9 @@ impl TypeStyle {
         }
         if let Some(skew) = self.skew {
             font.skew = skew as f32;
+        }
+        if let Some(joined) = self.joined {
+            font.joined = joined && font.joins();
         }
         Ok(font)
     }
@@ -186,7 +192,7 @@ impl TypeStyle {
 impl Settings for TypeStyle {
     const NAME: &'static str = "type_style";
     const KEYS: &'static [&'static str] = &[
-        "glyphset", "glyph_scale", "glyph_scale_factor", "glyph_outline_gap", "glyph_tracking", "space_width", "skew", "italic", "underline", "strike",
+        "glyphset", "glyph_scale", "glyph_scale_factor", "glyph_outline_gap", "glyph_tracking", "space_width", "skew", "italic", "joined", "underline", "strike",
     ];
     fn get(&self, key: &str) -> Dynamic {
         let optional = |v: Option<f64>| v.map_or(Dynamic::UNIT, Dynamic::from);
@@ -200,6 +206,7 @@ impl Settings for TypeStyle {
             "space_width" => optional(self.space_width),
             "skew" => optional(self.skew),
             "italic" => self.skew.map_or(Dynamic::UNIT, |s| Dynamic::from(s != 0.0)),
+            "joined" => self.joined.map_or(Dynamic::UNIT, Dynamic::from),
             "underline" => rule(&self.underline),
             "strike" => rule(&self.strike),
             _ => Dynamic::UNIT,
@@ -228,6 +235,7 @@ impl Settings for TypeStyle {
                 let italic = value.as_bool().map_err(|t| format!("{}: 'italic' should be true or false, got {}", caller, t))?;
                 self.skew = Some(if italic { ITALIC_SKEW } else { 0.0 });
             }
+            "joined" => self.joined = Some(value.as_bool().map_err(|t| format!("{}: 'joined' should be true or false, got {}", caller, t))?),
             "underline" => self.underline = RuleStyle::read(caller, key, value)?,
             "strike" => self.strike = RuleStyle::read(caller, key, value)?,
             _ => unreachable!("{} isn't a type setting", key),

@@ -57,7 +57,7 @@ use rand::Rng;
 use rhai::{Array, Dynamic, Engine, EvalAltResult, Map};
 use std::rc::Rc;
 
-use super::glyphs::{add_glyph, glyph_array, Glyph};
+use super::glyphs::{add_glyphs, glyph_array, Glyph};
 use super::random::SharedRng;
 use super::{Canvas, CanvasData, Path, Vec2};
 use crate::journal::canvas::artistic::{jitter_symbols, scatter_notes, ScatterOptions};
@@ -258,11 +258,11 @@ fn splat(canvas: &Canvas, msgs: Array, width_range: Dynamic, height_range: Dynam
         .map_err(|err| format!("{}: {}", CALLER, err))?;
 
     let mut splatted = CanvasData::default();
+    // Each note's first glyph, which doesn't join the last note.
+    let firsts: Vec<usize> = placed.iter().scan(0, |at, note| { let first = *at; *at += note.len(); Some(first) }).collect();
     let mut placed: Vec<Symbol> = placed.into_iter().flatten().collect();
     after.apply(&mut placed, &mut *rng);
-    for symbol in placed {
-        add_glyph(&mut splatted, &Glyph::new(symbol), &text.style, &mut *rng)?;
-    }
+    add_glyphs(&mut splatted, &placed, |k| firsts.contains(&k), &text.style, &mut *rng)?;
     Ok(Canvas::new(splatted))
 }
 
@@ -328,9 +328,7 @@ fn write_block(msg: &str, at: Vec2, width: Dynamic, settings: Map, symdict: &Fon
             Wander::new(wander, size, width + size * 2.0, &mut *r).bend(&mut row, at.x);
         }
         tb.jitter.apply(&mut row, &mut *r);
-        for g in row.iter() {
-            add_glyph(&mut canvas, &Glyph::new(g.clone()), &text.style, &mut *r)?;
-        }
+        add_glyphs(&mut canvas, &row, |_| false, &text.style, &mut *r)?;
     }
     let rows = lines;
     let mut out = Map::new();

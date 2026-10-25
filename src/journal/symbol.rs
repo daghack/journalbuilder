@@ -1,10 +1,11 @@
 use super::avoid::{shapes_within, AvoidanceTree};
 use super::canvas::textbox::Region;
-use super::paths::{StrokePath, Walk};
+use super::paths::{PathCmd, StrokePath, Walk};
 use parry2d::math::Vec2;
 
 use std::rc::Rc;
 use std::collections::VecDeque;
+use std::ops::Range;
 
 #[derive(Debug, Clone)]
 pub enum SymbolType {
@@ -19,6 +20,20 @@ pub struct SymbolBase {
     hull_aabb: parry2d::bounding_volume::Aabb,
     /// The convex hull of its strokes, unplaced: what text keeps clear of.
     hull: Vec<Vec2>,
+    /// How it joins its neighbours, in a glyphset that joins up.
+    joins: Option<Joins>,
+}
+
+/// How a glyph of a joined-up glyphset joins its neighbours (see
+/// `fonts`): whether it joins the glyph before and the glyph after, whether
+/// its first stroke starts high (nearer the x-height than the baseline),
+/// and whether it's left high.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Joins {
+    pub enters: bool,
+    pub leaves: bool,
+    pub entry_high: bool,
+    pub exit_high: bool,
 }
 
 impl SymbolBase {
@@ -28,7 +43,15 @@ impl SymbolBase {
             hull_aabb: hull.local_aabb(),
             hull: hull.points().to_vec(),
             symbol_type,
+            joins: None,
         }
+    }
+    pub fn with_joins(mut self, joins: Option<Joins>) -> SymbolBase {
+        self.joins = joins;
+        self
+    }
+    pub fn joins(&self) -> Option<Joins> {
+        self.joins
     }
     pub fn is_blank(&self) -> bool {
         matches!(self.symbol_type, SymbolType::Blank(_, _))
@@ -85,6 +108,8 @@ pub struct Symbol {
     /// Room between this glyph and its neighbours when text is set, in
     /// font sizes: its font's character padding, half each side.
     padding: f32,
+    /// Whether it joins its neighbours, if its glyphset joins up.
+    joined: bool,
 }
 
 impl Symbol {
@@ -99,7 +124,20 @@ impl Symbol {
             rotation_rad,
             skew_rad: 0.0,
             padding: 0.0,
+            joined: false,
         }
+    }
+    /// The same glyph joining its neighbours or not, if its glyphset
+    /// joins up.
+    pub fn with_joined(mut self, joined: bool) -> Symbol {
+        self.joined = joined;
+        self
+    }
+    pub fn joined(&self) -> bool {
+        self.joined
+    }
+    pub fn joins(&self) -> Option<Joins> {
+        self.base.joins
     }
     /// The same glyph with `padding` (in font sizes) between it and its
     /// neighbours when text is set. What text keeps clear of is still its
@@ -197,6 +235,87 @@ impl Symbol {
     pub fn is_blank(&self) -> bool {
         self.base.is_blank()
     }
+}
+
+/// How far apart, in glyph scales, a glyph's end and the next's start can
+/// be and still be joined. Further, they've been set apart (at a line's
+/// end, round something text avoids, by hand) and are written apart.
+const JOIN_REACH: f32 = 0.5;
+
+/// Whether `a` joins on to `b`, written after it: both join, `a` leaves
+/// and `b` enters, and they're close enough.
+fn join(a: &Symbol, b: &Symbol, from: Vec2, to: Vec2) -> bool {
+    let (Some(ja), Some(jb)) = (a.joins(), b.joins()) else { return false };
+    a.joined && b.joined && ja.leaves && jb.enters
+        && from.distance(to) < JOIN_REACH * a.scale.max(b.scale)
+}
+
+/// A subpath's first point and the way it sets off, and its last point
+/// and the way it arrives.
+fn ends(subpath: &[PathCmd]) -> Option<((Vec2, Vec2), (Vec2, Vec2))> {
+    let start = subpath.first()?.ending_point()?;
+    let towards = |cmd: &PathCmd, from: Vec2| match *cmd {
+        PathCmd::CubicCurveTo(x1, y1, ..) | PathCmd::QuadraticCurveTo(x1, y1, ..) => Vec2::new(x1, y1) - from,
+        _ => cmd.ending_point().map_or(Vec2::ZERO, |p| p - from),
+    };
+    let leave = subpath.get(1).map_or(Vec2::ZERO, |c| towards(c, start)).normalize_or_zero();
+    let mut at = start;
+    let mut arrive = Vec2::ZERO;
+    for cmd in &subpath[1..] {
+        let Some(end) = cmd.ending_point() else { continue };
+        arrive = match *cmd {
+            PathCmd::CubicCurveTo(_, _, x2, y2, ..) => end - Vec2::new(x2, y2),
+            PathCmd::QuadraticCurveTo(x1, y1, ..) => end - Vec2::new(x1, y1),
+            _ => end - at,
+        };
+        at = end;
+    }
+    Some(((start, leave), (at, arrive.normalize_or_zero())))
+}
+
+/// Glyphs' strokes as they're written: each glyph's own, unless it's
+/// joined to its neighbours (see `fonts`), when a word is written in one
+/// stroke: each glyph's first stroke and a stroke joining it to the next,
+/// then their lifts (dots, crossbars) after. A glyph can't join the one
+/// before where `breaks` says so (where the ink changes, say). Each path is
+/// given with the glyphs it draws; blanks draw nothing.
+pub fn joined_paths(glyphs: &[Symbol], breaks: impl Fn(usize) -> bool) -> Vec<(Range<usize>, StrokePath)> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < glyphs.len() {
+        if glyphs[i].is_blank() {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        let placed = glyphs[i].placed_strokepath();
+        let mut subpaths = placed.subpaths().into_iter().map(|p| p.commands().to_vec());
+        let mut stroke = subpaths.next().unwrap_or_default();
+        let mut lifts: Vec<PathCmd> = subpaths.flatten().collect();
+        while i + 1 < glyphs.len() && !breaks(i + 1) && !glyphs[i + 1].is_blank() {
+            let next = glyphs[i + 1].placed_strokepath().subpaths().into_iter().map(|p| p.commands().to_vec()).collect::<Vec<_>>();
+            let (Some((_, (from, arrive))), Some(((to, leave), _))) = (ends(&stroke), next.first().and_then(|n| ends(n))) else { break };
+            if !join(&glyphs[i], &glyphs[i + 1], from, to) {
+                break;
+            }
+            // Along both: out the way the stroke arrived, in the way the
+            // next sets off, a third of the way each. Where either turns
+            // back against the way across, it's a sharp turn there, as a
+            // pen turns back over its stroke, rather than a loop.
+            let reach = from.distance(to) / 3.0;
+            let across = (to - from).normalize_or_zero();
+            let along = |d: Vec2| if d.dot(across) < 0.0 { across } else { d };
+            let (c1, c2) = (from + along(arrive) * reach, to - along(leave) * reach);
+            stroke.push(PathCmd::CubicCurveTo(c1.x, c1.y, c2.x, c2.y, to.x, to.y));
+            stroke.extend_from_slice(&next[0][1..]);
+            lifts.extend(next[1..].iter().flatten());
+            i += 1;
+        }
+        let path = if i == start { placed } else { StrokePath::from_commands(stroke.into_iter().chain(lifts).collect()) };
+        out.push((start..i + 1, path));
+        i += 1;
+    }
+    out
 }
 
 impl From<Symbol> for StrokePath {
@@ -792,6 +911,60 @@ mod tests {
 
     fn glyph(svg: &str) -> Symbol {
         Symbol::new_default_from_base_rc(Rc::new(SymbolBase::new(SymbolType::Pathed(svg.parse().unwrap()))))
+    }
+
+    /// A joining glyph two units wide: a stroke across, entered and left,
+    /// and a dot above it, at `x`.
+    fn joining(x: f32) -> Symbol {
+        let joins = Joins { enters: true, leaves: true, entry_high: false, exit_high: false };
+        let base = SymbolBase::new(SymbolType::Pathed("M -1 0 L 1 0 M 0 -1 L 0 -0.9".parse().unwrap())).with_joins(Some(joins));
+        let mut glyph = Symbol::new_default_from_base_rc(Rc::new(base)).with_joined(true);
+        glyph.set_position(Vec2::new(x, 0.0));
+        glyph
+    }
+
+    #[test]
+    fn joined_glyphs_are_one_stroke_then_their_lifts() {
+        // Each glyph is a unit wide as placed, so 1.2 apart they're 0.2
+        // from end to start: joined, a word of one stroke and two dots.
+        let word = [joining(0.0), joining(1.2)];
+        let paths = joined_paths(&word, |_| false);
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0].0, 0..2);
+        let subpaths = paths[0].1.subpaths();
+        assert_eq!(subpaths.len(), 3);
+        let ((start, _), (end, _)) = ends(subpaths[0].commands()).unwrap();
+        assert!(start.distance(Vec2::new(-0.5, 0.0)) < 1e-6 && end.distance(Vec2::new(1.7, 0.0)) < 1e-6, "{:?} {:?}", start, end);
+        // A glyph alone is drawn as it is.
+        assert_eq!(joined_paths(&word[..1], |_| false)[0].1.commands().len(), word[0].placed_strokepath().commands().len());
+    }
+
+    #[test]
+    fn joins_break_at_blanks_distances_breaks_and_unjoined_glyphs() {
+        let blank = Symbol::new_default_from_base_rc(Rc::new(SymbolBase::new(SymbolType::Blank(0.2, 1.0))));
+        let spans = |glyphs: &[Symbol], breaks: &dyn Fn(usize) -> bool| -> Vec<Range<usize>> {
+            joined_paths(glyphs, breaks).into_iter().map(|(span, _)| span).collect()
+        };
+        assert_eq!(spans(&[joining(0.0), blank, joining(1.2)], &|_| false), [0..1, 2..3]);
+        assert_eq!(spans(&[joining(0.0), joining(3.0)], &|_| false), [0..1, 1..2]);
+        assert_eq!(spans(&[joining(0.0), joining(1.2), joining(2.4)], &|k| k == 2), [0..2, 2..3]);
+        assert_eq!(spans(&[joining(0.0), joining(1.2).with_joined(false)], &|_| false), [0..1, 1..2]);
+        let mut leaves_not = joining(0.0);
+        leaves_not.base = Rc::new((*leaves_not.base).clone().with_joins(Some(Joins { leaves: false, ..leaves_not.joins().unwrap() })));
+        assert_eq!(spans(&[leaves_not, joining(1.2)], &|_| false), [0..1, 1..2]);
+    }
+
+    #[test]
+    fn joins_turn_sharply_rather_than_loop() {
+        // The second glyph sets off back the way the join came: the join
+        // runs straight in, its last handle on the line across.
+        let back = Joins { enters: true, leaves: true, entry_high: false, exit_high: false };
+        let base = SymbolBase::new(SymbolType::Pathed("M 1 0 L -1 0".parse().unwrap())).with_joins(Some(back));
+        let mut second = Symbol::new_default_from_base_rc(Rc::new(base)).with_joined(true);
+        second.set_position(Vec2::new(0.2, 0.0));
+        let path = &joined_paths(&[joining(0.0), second], |_| false)[0].1;
+        let join = path.commands().iter().find_map(|c| match *c { PathCmd::CubicCurveTo(_, _, x2, y2, x, y) => Some((Vec2::new(x2, y2), Vec2::new(x, y))), _ => None }).unwrap();
+        assert!(join.0.y.abs() < 1e-6 && join.0.x < join.1.x, "{:?}", join);
     }
 
     #[test]

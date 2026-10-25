@@ -81,7 +81,7 @@ use crate::journal::clip::{clip, Keep};
 use crate::journal::hatch::{FillRule, HatchOptions};
 use crate::journal::canvas::textbox::TextBoxLineMode;
 use crate::journal::paths::StrokePath;
-use crate::journal::symbol::{place_along_path, place_words_along_path, Symbol, SymbolPlacementArgs};
+use crate::journal::symbol::{joined_paths, place_along_path, place_words_along_path, Symbol, SymbolPlacementArgs};
 use crate::journal::fonts::FontBook;
 use crate::journal::ternary::{ternary_along, TernaryOptions};
 use super::generate::BalancedTernary;
@@ -141,8 +141,8 @@ impl PathText {
         let mut rng = rng.borrow_mut();
         self.jitter.apply(&mut placed, &mut *rng);
         let mut canvas = CanvasData::default();
-        for symbol in placed {
-            canvas.add_path(symbol.placed_strokepath(), &self.style, &mut *rng);
+        for (_, path) in joined_paths(&placed, |_| false) {
+            canvas.add_path(path, &self.style, &mut *rng);
         }
         Canvas::new(canvas)
     }

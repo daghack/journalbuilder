@@ -27,6 +27,22 @@
 //!   needs it: drawn, its ink is as wide as the padding, so a full stop
 //!   between letters (`page.tile`) is lost in them.
 //! - `fallback` names a font to look in for characters this one hasn't.
+//! - `joins` makes a cursive glyphset join up, each word written in one
+//!   stroke, as handwriting is:
+//!
+//!   ```json
+//!   "joins": { "enter": "abc…z", "leave": "abc…z", "leave_high": "bo", "x_height": -0.02, "baseline": 0.25 }
+//!   ```
+//!
+//!   A glyph's first stroke runs from where it's entered to where it's
+//!   left; dots, crossbars and other lifts come after. A glyph in `leave`
+//!   joins on to the next when that's in `enter`: a stroke from its first
+//!   stroke's end to the next's start, along both. Each variant is entered
+//!   high or low, by whether its first stroke starts nearer the x-height
+//!   or the baseline (heights in glyph units, y down), and a glyph after
+//!   one in `leave_high` (default none) is drawn as a variant entered
+//!   high, if it has one (an `r` after an `o`, say). Otherwise variants
+//!   entered as its first are picked from. See `symbol::joined_paths`.
 //!
 //! Text is set with each glyph as close to the last as their outlines (the
 //! convex hulls of their strokes, leant as they're drawn) allow, plus the
@@ -45,7 +61,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
 use super::paths::StrokePath;
-use super::symbol::{Symbol, SymbolBase, SymbolType};
+use super::symbol::{Joins, Symbol, SymbolBase, SymbolType};
 
 /// The built-in library's glyphsets directory. Resolved at build time, so
 /// it's found whatever directory journalbuild (or a test) runs from.
@@ -108,7 +124,21 @@ struct FontEntry {
     fallback: Option<String>,
     #[serde(default)]
     glyph_padding: BTreeMap<String, f32>,
+    joins: Option<JoinsEntry>,
     glyphs: BTreeMap<String, Variants>,
+}
+
+/// A glyphset file's `joins`: which glyphs join, and the heights their
+/// ends are told apart by.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JoinsEntry {
+    enter: String,
+    leave: String,
+    #[serde(default)]
+    leave_high: String,
+    x_height: f32,
+    baseline: f32,
 }
 
 fn default_space_width() -> f32 {
@@ -129,6 +159,8 @@ pub struct Glyphs {
     glyphs: BTreeMap<String, Vec<Rc<SymbolBase>>>,
     /// Room glyphs keep on top of the font's padding, in font sizes.
     padding: BTreeMap<String, f32>,
+    /// Whether the file gives `joins`.
+    joins: bool,
 }
 
 /// How a font turns characters into glyphs.
@@ -156,6 +188,8 @@ pub struct Font {
     pub skew: f32,
     pub fallback: Option<Box<Font>>,
     pub mapping: Mapping,
+    /// Whether its glyphs join up, for a glyphset with `joins`.
+    pub joined: bool,
 }
 
 impl Font {
@@ -174,7 +208,11 @@ impl Font {
     /// The glyph `key` drawn as `base`, padded as the font pads it.
     fn symbol(&self, key: &str, base: &Rc<SymbolBase>) -> Symbol {
         let padding = self.character_padding + self.glyphs.padding.get(key).copied().unwrap_or(0.0);
-        Symbol::new_default_from_base_rc(base.clone()).with_padding(padding).with_skew(self.skew)
+        Symbol::new_default_from_base_rc(base.clone()).with_padding(padding).with_skew(self.skew).with_joined(self.joined)
+    }
+    /// Whether the font's glyphs can join: it has `joins`.
+    pub fn joins(&self) -> bool {
+        self.glyphs.joins
     }
     /// This font and then its fallbacks, in order.
     fn chain(&self) -> impl Iterator<Item = &Font> {
@@ -194,12 +232,15 @@ impl Font {
     /// several. Characters with no glyph anywhere are drawn with `book`'s
     /// fallback glyph, and recorded there.
     pub fn build(&self, text: &str, book: &FontBook, rng: &mut dyn RngCore) -> Vec<Symbol> {
+        // Whether the last glyph was left high, if it joins on.
+        let mut left_high = None;
         text.chars().map(|c| {
-            let glyph = self.glyph_for(c, book, rng);
+            let glyph = self.glyph_for(c, book, rng, left_high);
+            left_high = glyph.joins().filter(|j| j.leaves && glyph.joined()).map(|j| j.exit_high);
             if glyph.is_blank() { glyph } else { glyph.with_skew(self.skew) }
         }).collect()
     }
-    fn glyph_for(&self, c: char, book: &FontBook, rng: &mut dyn RngCore) -> Symbol {
+    fn glyph_for(&self, c: char, book: &FontBook, rng: &mut dyn RngCore, left_high: Option<bool>) -> Symbol {
         if self.mapping == Mapping::BalancedTernary {
             let key = balanced_base27_symbol(c).to_string();
             return match self.find(&key) {
@@ -221,13 +262,28 @@ impl Font {
         }
         for key in &keys {
             if let Some((font, bases)) = self.find(key) {
+                let bases = font.joining(bases, left_high);
                 // Always drawn from rng, one variant or many, so a font
                 // gaining variants doesn't shift every pick after it.
-                return font.symbol(key, &bases[rng.random_range(0..bases.len())]);
+                return font.symbol(key, bases[rng.random_range(0..bases.len())]);
             }
         }
         let tried: Vec<String> = keys.iter().flat_map(|key| self.chain().map(move |font| font.tried(key))).collect();
         book.fallback_symbol(c, &tried)
+    }
+    /// The variants to pick from after a glyph left high or low (or
+    /// neither, `None`): those entered as it was left, if this glyph joins
+    /// on, or else as the first variant is; all of them if none are, or
+    /// the font doesn't join.
+    fn joining<'b>(&self, bases: &'b [Rc<SymbolBase>], left_high: Option<bool>) -> Vec<&'b Rc<SymbolBase>> {
+        let all = || bases.iter().collect();
+        let Some(first) = bases[0].joins() else { return all() };
+        let high = match left_high {
+            Some(high) if first.enters && self.joined => high,
+            _ => first.entry_high,
+        };
+        let matching: Vec<_> = bases.iter().filter(|b| b.joins().is_some_and(|j| j.entry_high == high)).collect();
+        if matching.is_empty() { all() } else { matching }
     }
     fn tried(&self, key: &str) -> String {
         format!("{} '{}'", self.name(), key)
@@ -298,6 +354,16 @@ impl FontBook {
                     return Err(bad(format!("glyph_padding for '{}' must be a number of at least 0, got {}", key, extra)));
                 }
             }
+            if let Some(joins) = &entry.joins {
+                for (what, chars) in [("enter", &joins.enter), ("leave", &joins.leave), ("leave_high", &joins.leave_high)] {
+                    if let Some(c) = chars.chars().find(|c| !entry.glyphs.contains_key(&c.to_string())) {
+                        return Err(bad(format!("joins.{} gives '{}', which isn't a glyph", what, c)));
+                    }
+                }
+                if !(joins.x_height.is_finite() && joins.baseline.is_finite() && joins.x_height < joins.baseline) {
+                    return Err(bad(format!("joins.x_height and joins.baseline must be numbers, the x-height above (less than) the baseline, got {} and {}", joins.x_height, joins.baseline)));
+                }
+            }
             let mut glyphs = BTreeMap::new();
             for (key, variants) in &entry.glyphs {
                 let paths: Vec<&String> = match variants {
@@ -309,11 +375,21 @@ impl FontBook {
                 }
                 let bases = paths.into_iter().map(|data| {
                     let path: StrokePath = data.parse().map_err(|e| bad(format!("glyph '{}': {}", key, e)))?;
-                    Ok(Rc::new(SymbolBase::new(SymbolType::Pathed(path))))
+                    let ends = entry.joins.as_ref().and_then(|joins| path.subpaths().first().and_then(|first| {
+                        let points: Vec<_> = first.commands().iter().filter_map(|c| c.ending_point()).collect();
+                        let high = |y: f32| (y - joins.x_height).abs() < (y - joins.baseline).abs();
+                        Some(Joins {
+                            enters: joins.enter.contains(key.as_str()),
+                            leaves: joins.leave.contains(key.as_str()),
+                            entry_high: high(points.first()?.y),
+                            exit_high: joins.leave_high.contains(key.as_str()),
+                        })
+                    }));
+                    Ok(Rc::new(SymbolBase::new(SymbolType::Pathed(path)).with_joins(ends)))
                 }).collect::<Result<Vec<_>, String>>()?;
                 glyphs.insert(key.clone(), bases);
             }
-            loaded.insert(name.clone(), (Rc::new(Glyphs { name: name.clone(), glyphs, padding: entry.glyph_padding.clone() }), entry));
+            loaded.insert(name.clone(), (Rc::new(Glyphs { name: name.clone(), glyphs, padding: entry.glyph_padding.clone(), joins: entry.joins.is_some() }), entry));
         }
         // Fonts with their fallbacks, which mustn't loop.
         fn resolve(name: &str, loaded: &BTreeMap<String, (Rc<Glyphs>, &FontEntry)>, seen: &mut Vec<String>) -> Result<Font, String> {
@@ -331,6 +407,7 @@ impl FontBook {
                 skew: 0.0,
                 fallback,
                 mapping: Mapping::Characters,
+                joined: entry.joins.is_some(),
             })
         }
         let fonts = loaded.keys().map(|name| Ok((name.clone(), resolve(name, &loaded, &mut Vec::new())?)))
@@ -456,6 +533,38 @@ mod tests {
         assert_eq!(lower.name(), "lower");
         assert_eq!(caps.characters(), ["A", "B"]);
         assert!(b.missing_glyphs().is_empty());
+    }
+
+    #[test]
+    fn joined_glyphs_are_entered_as_the_last_was_left() {
+        // a is left high; b is entered low (0.4 wide) or high (0.6 wide).
+        let b = book(r#"{ "j": {
+            "joins": { "enter": "ab", "leave": "ab", "leave_high": "a", "x_height": -0.5, "baseline": 0.5 },
+            "glyphs": { "a": "M -0.5 0.5 L 0.5 -0.5", "b": ["M -0.2 0.5 L 0.2 0.5", "M -0.3 -0.5 L 0.3 0.5"] }
+        } }"#);
+        let mut j = b.font("j").unwrap();
+        assert!(j.joined && j.joins());
+        // Low as its first variant at the start, high after a.
+        assert_eq!(keys(&j, "babb", &b), ["0.39", "0.99", "0.59", "0.39"]);
+        // Unjoined, as its first.
+        j.joined = false;
+        assert_eq!(keys(&j, "bab", &b), ["0.39", "0.99", "0.39"]);
+        assert!(b.font("j").unwrap().build("ab", &b, &mut StdRng::seed_from_u64(1))[1].joined());
+    }
+
+    #[test]
+    fn joins_are_checked() {
+        for (json, error) in [
+            (r#"{ "f": { "joins": { "enter": "az", "leave": "", "x_height": 0, "baseline": 1 }, "glyphs": { "a": "M 0 0 L 1 0" } } }"#, "joins.enter gives 'z', which isn't a glyph"),
+            (r#"{ "f": { "joins": { "enter": "", "leave": "", "x_height": 1, "baseline": 0 }, "glyphs": {} } }"#, "the x-height above (less than) the baseline"),
+            (r#"{ "f": { "joins": { "enter": "" }, "glyphs": {} } }"#, "missing field"),
+        ] {
+            let err = FontBook::from_bytes(json.as_bytes()).unwrap_err();
+            assert!(err.contains(error), "{}", err);
+        }
+        // A glyphset without joins doesn't join.
+        let b = book(&format!(r#"{{ "f": {{ "glyphs": {{ "a": "{}" }} }} }}"#, LINE));
+        assert!(!b.font("f").unwrap().joined);
     }
 
     #[test]

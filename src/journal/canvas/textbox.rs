@@ -338,6 +338,26 @@ impl<'a> TextBox<'a> {
         (placed, to_place)
     }
 
+    /// Whether `glyph` fits somewhere on the line at `y_pos` with nothing
+    /// else on it.
+    fn holds_alone(&self, glyph: &Symbol, y_pos: f32) -> bool {
+        let Some(region) = &self.region else { return true };
+        let args = SymbolPlacementArgs {
+            avoid: self.avoid,
+            padding: self.padding,
+            symbol_scale: self.symbol_scale,
+            spacing: self.spacing,
+            baseline_shift: BASELINE_SHIFT,
+            angle: None,
+            within: Some(region),
+        };
+        self.line_spans(y_pos).iter().any(|&(left, right)| {
+            let (start, end) = (self.place(left - self.symbol_scale, y_pos), self.place(right + self.symbol_scale, y_pos));
+            let stroke = StrokePath::new().move_to(start.x, start.y).line_to(end.x, end.y);
+            !place_along_path(vec![glyph.clone()], &stroke, &args).0.is_empty()
+        })
+    }
+
     /// Whether glyphs placed on a line are where they may be: inside the
     /// shape and clear of what's avoided.
     fn fits(&self, glyphs: &[Symbol]) -> bool {
@@ -462,8 +482,22 @@ impl<'a> TextBox<'a> {
         let mut placed_symbols = Vec::new();
         let mut last = Vec::new();
         let mut first = top;
+        let empty_step = if self.region.is_some() { EMPTY_LINE_STEP * self.symbol_scale } else { self.symbol_scale };
+        // How far the current line has moved down for its glyphs to fit.
+        let mut lowered = 0.0;
         while current_y - min_y < height {
-            let (placed_line, not_placed) = self.fill_line_with(to_place, current_y, rng);
+            let (placed_line, not_placed) = self.fill_line_with(to_place.clone(), current_y, rng);
+            // A line that stops at a glyph too tall for it, where it would
+            // stop with room to spare (a dotted i after a short m, at a
+            // shape's top), goes lower, up to a glyph scale: else the rest
+            // goes on a line barely below it, and over it.
+            if !placed_line.is_empty() && lowered + empty_step <= self.symbol_scale && current_y + empty_step - min_y < height
+                && not_placed.iter().find(|g| !g.is_blank()).is_some_and(|g| !self.holds_alone(g, current_y)) {
+                current_y += empty_step;
+                lowered += empty_step;
+                continue;
+            }
+            lowered = 0.0;
             to_place = not_placed;
             let max_height = placed_line.iter()
                 .map(|symbol| symbol.hull_aabb().extents().y * self.symbol_scale / 2.0)
@@ -475,7 +509,6 @@ impl<'a> TextBox<'a> {
                 last = placed_line.clone();
             }
             placed_symbols.extend(placed_line);
-            let empty_step = if self.region.is_some() { EMPTY_LINE_STEP * self.symbol_scale } else { self.symbol_scale };
             current_y += if max_height > 0.0 { max_height } else { empty_step };
             if to_place.is_empty() {
                break;
@@ -538,6 +571,20 @@ mod tests {
 
     fn textbox(shape: Vec<Vec<Vec2>>, angle: f32) -> TextBox<'static> {
         TextBox::new(TextBoxOptions { angle, ..options(shape) })
+    }
+
+    #[test]
+    fn a_short_glyph_doesnt_keep_a_tall_one_off_its_line() {
+        // A short glyph (an m) fits at the box's top; a tall one (an i,
+        // dotted) doesn't. The line goes lower, holding both, rather than
+        // leaving the m alone on a line just above the rest.
+        let glyph = |d: &str| Symbol::new_default_from_base_rc(Rc::new(SymbolBase::new(SymbolType::Pathed(d.parse().unwrap()))));
+        let short = glyph("M -0.5 0 L 0.5 0.5");
+        let tall = glyph("M -0.2 -1 L 0.2 0.5");
+        let tb = textbox(rectangle(bounding_volume::Aabb::new(Vec2::new(-50.0, -20.0), Vec2::new(50.0, 20.0))), 0.0);
+        let (placed, rest) = tb.fill_bounds_with(vec![short, tall], &mut rand::rngs::mock::StepRng::new(0, 1));
+        assert!(rest.is_empty());
+        assert!(placed[0].position().x < placed[1].position().x, "{:?} {:?}", placed[0].position(), placed[1].position());
     }
 
     #[test]

@@ -62,7 +62,9 @@ describe('checking fonts', () => {
       "b": {"fallback": "c", "glyphs": {}},
       "c": {"fallback": "b", "glyphs": {}},
       "d": {"glyph_padding": {"Z": 0.1, ".": -1}, "glyphs": {".": "M 0 0 L 0 0.01"}},
-      "e": {"glyph_padding": 0.2, "glyphs": {}}
+      "e": {"glyph_padding": 0.2, "glyphs": {}},
+      "f": {"joins": {"enter": "az", "leave": 1, "x_height": 0.3, "baseline": 0.2}, "glyphs": {"a": "M 0 0 L 1 0"}},
+      "g": {"joins": {"enter": "a"}, "glyphs": {}}
     }`)).map((problem) => problem.message);
     expect(messages).toEqual([
       'character_padding must be a number of at least 0, got -1',
@@ -73,6 +75,10 @@ describe('checking fonts', () => {
       "glyph_padding gives 'Z', which isn't a glyph",
       "glyph_padding for '.' must be a number of at least 0, got -1",
       'glyph_padding must map glyphs to numbers, got 0.2',
+      "joins.enter gives 'z', which isn't a glyph",
+      'joins.leave must be a string of glyphs, got 1',
+      'joins.x_height and joins.baseline must be numbers, the x-height above (less than) the baseline, got 0.3 and 0.2',
+      'joins must give enter, leave, x_height, baseline and may give leave_high, got {"enter": "a"}',
       "falls back to 'nope', which isn't a font",
       'fonts fall back in a loop: b -> c -> b',
       'fonts fall back in a loop: c -> b -> c',

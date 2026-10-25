@@ -23,6 +23,7 @@ import json, os
 
 ASCENT = 3100
 DESCENT = 1850
+XHEIGHT = 942
 K = 2.0 / (ASCENT + DESCENT)
 BASELINE = -1.0 + ASCENT * K
 
@@ -34,7 +35,7 @@ GLYPHS = {
 		[(-105, 306), (-49, 358), (51, 390), (143, 310), (355, 654), (499, 830), (623, 906), (735, 914), (807, 990), (883, 1030), (1535, 1658), (1715, 1870), (1879, 2162), (1907, 2298), (1891, 2386), (1687, 2338), (1379, 2010), (707, 1150), (651, 914), (547, 866), (455, 786), (139, 298), (155, 142), (231, 66), (399, 82), (627, 254), (767, 422), (803, 502), (883, 578), (887, 782), (735, 914), "|", (887, 782), (883, 578), (935, 530), (955, 450), (1011, 430), (1091, 446), (1323, 558)],
 	]),
 	'c': (1054, [
-		[(797, 578), (849, 698), (865, 782), (849, 810), (749, 842), (637, 822), (481, 730), (285, 498), (173, 290), (157, 194), (189, 102), (229, 62), (557, 106), (669, 146), (961, 302), (1101, 414)],
+		[(865, 782), (849, 810), (749, 842), (637, 822), (481, 730), (285, 498), (173, 290), (157, 194), (189, 102), (229, 62), (557, 106), (669, 146), (961, 302), (1101, 414)],
 	]),
 	'd': (1262, [
 		[(1004, 846), (864, 946), (652, 890), (472, 762), (196, 462), (104, 326), (80, 158), (112, 66), (312, 110), (464, 214), (576, 246), (640, 218), (720, 394), (972, 734), (1004, 846), (1088, 874), (1116, 906), (2224, 2402), (2256, 2482), "|", (2224, 2402), (1116, 906), (1088, 874), (1004, 846), (972, 734), (720, 394), (660, 274), (640, 206), (692, 58), (868, 42), (1052, 170), (1272, 370), (1316, 426), (1320, 474)],
@@ -333,6 +334,24 @@ def placed(advance):
 	return lambda p: ((p[0] - advance / 2) * K, BASELINE - p[1] * K)
 
 
+LOWER = "abcdefghijklmnopqrstuvwxyz"
+
+
+def entered_low(strokes):
+	"""Whether a glyph's first stroke starts nearer the baseline than the
+	x-height."""
+	return strokes[0][0][1] < XHEIGHT / 2
+
+
+def entered_high(strokes):
+	"""The glyph with its lead-in cut off: its first stroke starting where
+	it first comes up near the x-height."""
+	first = strokes[0]
+	top = next(i for i, p in enumerate(first) if p != "|" and p[1] >= 0.7 * XHEIGHT)
+	rest = first[top:]
+	return [rest] + strokes[1:]
+
+
 def raw(advance):
 	return lambda p: p
 
@@ -344,8 +363,20 @@ if __name__ == "__main__":
 	# --traced writes the strokes in typeface units, to lay over its outlines.
 	scale = raw if "--traced" in sys.argv else placed
 	glyphs = {k: path(strokes, scale(advance)) for k, (advance, strokes) in GLYPHS.items()}
+	# After a letter left high, the next is entered high, without its
+	# lead-in (but e, which would lose half its loop).
+	for k in LOWER:
+		advance, strokes = GLYPHS[k]
+		if k != "e" and entered_low(strokes):
+			glyphs[k] = [glyphs[k], path(entered_high(strokes), scale(advance))]
 	out = sys.argv[-1] if sys.argv[-1].endswith(".json") else os.path.join(glyphsets, "ayan.json")
-	font = {"character_padding": 0.0, "space_width": 0.26, "fallback": "plain", "glyph_padding": {".": 0.1}, "glyphs": glyphs}
+	# Every lowercase letter joins up but f, whose first stroke ends at the
+	# foot of its descender. b and o are left high, on the x-height.
+	joins = {"enter": LOWER, "leave": LOWER.replace("f", ""), "leave_high": "bo", "x_height": round(BASELINE - XHEIGHT * K, 4), "baseline": round(BASELINE, 4)}
+	font = {"character_padding": 0.0, "space_width": 0.26, "fallback": "plain", "glyph_padding": {".": 0.1}, "joins": joins, "glyphs": glyphs}
+	# As the web editor writes glyphset files: a line for each setting and
+	# each glyph, its variants on it.
+	settings = [f"\t{json.dumps(k)}: {json.dumps(v)}," for k, v in font.items() if k != "glyphs"]
+	lines = [f"\t\t{json.dumps(k, ensure_ascii=False)}: {json.dumps(v, ensure_ascii=False)}" for k, v in glyphs.items()]
 	with open(out, "w") as f:
-		json.dump(font, f, indent="\t", ensure_ascii=False)
-		f.write("\n")
+		f.write("\n".join(["{", *settings, '\t"glyphs": {', ",\n".join(lines), "\t}", "}"]) + "\n")

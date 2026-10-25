@@ -175,7 +175,7 @@ doc += api("canvas.add(path, style)", "Adds the path, drawn in the style.", [
 	arg("path", "The lines to draw.", "a path whose points are all finite (no infinity or NaN)."),
 	style_arg(),
 ]);
-doc += api("canvas.add(glyph, style), canvas.add(glyphs, style)", "Adds a placed glyph's strokes, or each of an array of glyphs', drawn in the style.", [
+doc += api("canvas.add(glyph, style), canvas.add(glyphs, style)", "Adds a placed glyph's strokes, or each of an array of glyphs', drawn in the style; an array's glyphs join up as glyphset.joined says.", [
 	arg("glyph, glyphs", "What to draw, where it's placed.", "a glyph, or an array of them (as glyphset.glyphs or textbox.fill give); a blank one (a space) adds nothing."),
 	style_arg(),
 ]);
@@ -489,12 +489,13 @@ doc += api("glyphset(name, options)", "A glyphset with settings changed, as sett
 	opt("options.glyph_outline_gap", "the file's", "Room between glyphs' outlines, in glyph scales.", "a number of at least 0."),
 	opt("options.space_width", "the file's", "A space's width, in glyph scales.", "a positive number."),
 	opt("options.skew", "the file's", "Leans the glyphs into italics, tops forward.", "a number, in radians, between -PI() / 2 and PI() / 2."),
+	opt("options.joined", "true if the file gives joins", "As glyphset.joined.", "as glyphset.joined."),
 	opt("options.fallback", "the file's", "Where characters the glyphset hasn't are looked for.", "a glyphset, a glyphset's name, or () for nowhere."),
 ]);
 doc += api("glyphset_names()", "Every glyphset's name, sorted.");
 doc += api("ternary_glyphset(name), ternary_glyphset(name, options)", "A glyphset whose letters are balanced-ternary digits: a to m are 1 to 13, n to z are -13 to -1.", [
 	arg("name", "The glyphset whose glyphs draw the digits.", "one of glyphset_names()."),
-	opt("options", "none", "The glyphset's settings, as glyphset(name, options) takes them.", "a map of glyph_outline_gap, space_width, skew and fallback."),
+	opt("options", "none", "The glyphset's settings, as glyphset(name, options) takes them.", "a map of glyph_outline_gap, space_width, skew, joined and fallback."),
 ]);
 doc += api("glyphset.name", "Read only: the glyphset's name.");
 doc += api("glyphset.glyph_outline_gap = number", "Text is set with each glyph as close to the last as their outlines allow, plus this.", [
@@ -505,6 +506,9 @@ doc += api("glyphset.space_width = number", "A space's width.", [
 ]);
 doc += api("glyphset.skew = angle", "Leans the glyphset's glyphs, and its fallbacks', into italics. Spacing isn't opened up.", [
 	arg("angle", "How far they lean, tops forward; negative leans them back.", "a number, in radians, between -PI() / 2 and PI() / 2."),
+]);
+doc += api("glyphset.joined = on", "Whether a cursive glyphset's words are joined up, each written in one stroke: each glyph's first stroke, joined to the next's by a stroke along both, then their lifts (dots and crossbars). Glyphs join where the file's joins says they do and they're less than half a glyph scale apart, end to start, so text set apart (at a line's end, round what it avoids, by hand) isn't joined; blanks, and changes of ink in marked-up text, break joins. Text calls and canvas.add(glyphs, style) join glyphs; canvas.add(glyph, style) and glyph.path() don't. A glyph after one in the file's leave_high is drawn as a variant entered high, if it has one.", [
+	arg("on", "Whether they join. Default true for a glyphset whose file gives joins.", "true or false; true only for a glyphset whose file gives joins."),
 ]);
 doc += api("glyphset.fallback = glyphset", "Where characters the glyphset hasn't are looked for.", [
 	arg("glyphset", "The fallback.", "a glyphset, a glyphset's name, or () for nowhere."),
@@ -574,6 +578,7 @@ doc += api("new_type_style(glyphset, glyph_scale), new_type_style(glyphset, glyp
 	opt("options.space_width", "the glyphset's", "As type_style.space_width.", "as type_style.space_width."),
 	opt("options.skew", "the glyphset's", "As type_style.skew.", "as type_style.skew."),
 	opt("options.italic", "the glyphset's", "As type_style.italic.", "as type_style.italic."),
+	opt("options.joined", "the glyphset's", "As type_style.joined.", "as type_style.joined."),
 	opt("options.underline", "false", "As type_style.underline.", "as type_style.underline."),
 	opt("options.strike", "false", "As type_style.strike.", "as type_style.strike."),
 ]);
@@ -598,6 +603,9 @@ doc += api("type_style.space_width = number", "A space's width, over the glyphse
 doc += api("type_style.skew = angle, type_style.italic = on", "Leans the glyphs, over the glyphset's skew: italic true leans them 0.25 radians, false sets them upright.", [
 	arg("angle", "How far they lean, tops forward.", "a number, in radians, between -PI() / 2 and PI() / 2."),
 	arg("on", "Whether the text is italic.", "true or false."),
+]);
+doc += api("type_style.joined = on", "Whether a cursive glyphset's words are joined up, over the glyphset's (see glyphset.joined).", [
+	arg("on", "Whether they join; true joins only a glyphset whose file gives joins.", "true or false."),
 ]);
 doc += api("type_style.underline = lines, type_style.strike = lines", "Lines under the text, one below another, or through it, back and forth as one stroke, scribbling it out. Drawn where text is typeset (flows and labels, and spans in markdown); lines run across the spaces between words and break where the text does.", [
 	arg("lines", "Which lines.", "true for one, false for none, a number of lines from 1 to 20, or #{ count, spacing, style }: count lines (default 1), spacing glyph scales apart (default as the pen sets them), drawn in style, a style or a map of style settings over the text's (default the text's)."),
@@ -1129,6 +1137,14 @@ doc += listing("journal.json: the journal's manifest, a JSON object.", [
 	opt("description", "none", "What it is.", "a string."),
 	req("entries", "Its entries, in order: entries/NAME.rhai each.", "a non-empty array of names: letters, digits and underscores."),
 	opt("bundled", "none", "Library files an export copied in beside the journal's own, as paths from the journal (locks/huffman.rhai), so an import can drop them.", "an array of strings."),
+]);
+doc += listing("glyphsets/NAME.json: a glyphset, a JSON object. Glyph units span about -1 to 1, y down; a glyph scale is 2 of them.", [
+	req("glyphs", "Each character's glyph (or each symbol's, by name): SVG path data, or an array of variants, one picked at random each time it's set. A cursive glyph's first stroke runs from where it's entered to where it's left; dots and crossbars come after.", "an object of strings or arrays of strings."),
+	opt("character_padding", "0", "Room between glyphs' outlines, in glyph scales.", "a number of at least 0."),
+	opt("space_width", "0.5", "A space's width, in glyph scales.", "a positive number."),
+	opt("fallback", "none", "The glyphset to look in for characters this one hasn't.", "a glyphset's name."),
+	opt("glyph_padding", "none", "Room some glyphs keep on top of character_padding, in glyph scales.", "an object of glyphs to numbers of at least 0."),
+	opt("joins", "none", "Joins words up, as glyphset.joined says: enter and leave, the glyphs that join the glyph before and the glyph after; leave_high, those left high, after which a variant entered high is drawn; x_height and baseline, the heights a variant's entry is told high or low by.", "an object: enter, leave and leave_high (default none), strings of glyphs; x_height and baseline, glyph units, x_height less than baseline."),
 ]);
 doc += api("text_style(name), text_style(name, options)", "A text style file's bundle, styles/NAME.rhai, the journal's or the library's: #{ style, type, paragraph, spans }, the style, type and paragraph whole (a map's settings over default_style(), no type and the default paragraph), and spans if it gives any. It's a role for typeset, and the settings map of any text call, which ignores spans unless it sets marked-up text.", [
 	arg("name", "Which style file.", "a style file's name without .rhai."),

@@ -47,7 +47,7 @@ use super::{check_finite, RhaiResult, Style};
 use crate::journal::avoid::AvoidanceTree;
 use crate::journal::fonts::FontBook;
 use crate::journal::markup::{Markup, SpanKind, Value};
-use crate::journal::symbol::Symbol;
+use crate::journal::symbol::{joined_paths, Symbol};
 use crate::journal::typeset::{marked_runs, rule_path, Rule, Setting};
 
 /// How a span changes the text it covers: a style, a type, each whole or
@@ -415,8 +415,10 @@ impl Styled {
             canvas.add_path(path, &style, rng);
             Ok(())
         };
-        for (glyph, place) in setting.placed.iter().zip(&setting.places) {
-            add(glyph.placed_strokepath(), self.look(start + place.index).ink.on(CALLER, style)?)?;
+        // Joined up, but not where the look changes.
+        let look_at = |k: usize| self.look_of[start + setting.places[k].index];
+        for (glyphs, path) in joined_paths(&setting.placed[..setting.places.len().min(setting.placed.len())], |k| look_at(k) != look_at(k - 1)) {
+            add(path, self.look(start + setting.places[glyphs.start].index).ink.on(CALLER, style)?)?;
         }
         for rule in [Rule::Under, Rule::Through] {
             let mark = |k: usize| {

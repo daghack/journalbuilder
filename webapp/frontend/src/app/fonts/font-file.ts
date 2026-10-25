@@ -23,7 +23,7 @@ export interface Glyph {
 export type FontsFile = Font[];
 
 /** The options a font can have besides its glyphs (see FontEntry in src/journal/fonts.rs). */
-export const OPTION_KEYS = ['character_padding', 'space_width', 'fallback', 'glyph_padding'] as const;
+export const OPTION_KEYS = ['character_padding', 'space_width', 'fallback', 'glyph_padding', 'joins'] as const;
 export type OptionKey = (typeof OPTION_KEYS)[number];
 
 /** A space's width in fonts that don't give one, in font sizes (DEFAULT_SPACE_WIDTH). */
@@ -289,6 +289,24 @@ export function checkFonts(fonts: FontsFile): FontProblem[] {
           } else if (!(typeof extra === 'number' && Number.isFinite(extra) && extra >= 0)) {
             problem(`glyph_padding for '${glyph}' must be a number of at least 0, got ${JSON.stringify(extra)}`, { option: key });
           }
+        }
+      } else if (key === 'joins') {
+        const joins = value as Record<string, unknown>;
+        const fields = ['enter', 'leave', 'x_height', 'baseline'];
+        if (typeof value !== 'object' || value === null || Array.isArray(value) || fields.some((f) => !(f in joins)) || Object.keys(joins).some((f) => ![...fields, 'leave_high'].includes(f))) {
+          problem(`joins must give ${fields.join(', ')} and may give leave_high, got ${raw}`, { option: key });
+          continue;
+        }
+        for (const what of ['enter', 'leave', 'leave_high']) {
+          if (what === 'leave_high' && !('leave_high' in joins)) continue;
+          const chars = joins[what];
+          const missing = typeof chars === 'string' ? [...chars].find((c) => !font.glyphs.some((g) => g.key === c)) : undefined;
+          if (typeof chars !== 'string') problem(`joins.${what} must be a string of glyphs, got ${JSON.stringify(chars)}`, { option: key });
+          else if (missing !== undefined) problem(`joins.${what} gives '${missing}', which isn't a glyph`, { option: key });
+        }
+        const [x, base] = [joins['x_height'], joins['baseline']];
+        if (!(typeof x === 'number' && typeof base === 'number' && Number.isFinite(x) && Number.isFinite(base) && x < base)) {
+          problem(`joins.x_height and joins.baseline must be numbers, the x-height above (less than) the baseline, got ${JSON.stringify(x)} and ${JSON.stringify(base)}`, { option: key });
         }
       }
     }
