@@ -101,11 +101,15 @@ fn same_base(ctx: &rhai::NativeCallContext, symbols: &LockValue, input_base: i64
     Ok(())
 }
 
-/// A value for a lock's port: a lock value as it is, or a value kind's
-/// data (a map with a `kind`), checked and typed as that kind.
+/// A value for a lock's port: a lock value as it is, a string as a String,
+/// or a value kind's data (a map with a `kind`), checked and typed as that
+/// kind.
 fn port_value(value: Dynamic, what: &str, name: &str) -> RhaiResult<InfoVar> {
     if let Some(value) = value.clone().try_cast::<LockValue>() {
         return Ok(value.var);
+    }
+    if value.is_string() {
+        return Ok(InfoVar::new(InfoVarType::Named("String".to_string()), value));
     }
     match crate::journal::kinds::kind_of(&value) {
         Some(kind) => {
@@ -860,7 +864,7 @@ mod tests {
             ("let l = new_lock(\"x\").add(\"a\", \"substitution_cipher\", #{ base_n: 27 });\nl.set_input(\"a.ordering\", symbols(10, \"123\"));", "expects Base27Symbol, got Base10Symbol"),
             ("let l = new_lock(\"x\").add(\"a\", \"substitution_cipher\", #{ base_n: 27 });\nl.set_input(\"a.missing\", symbols(27, \"A\"));", "isn't an open input"),
             ("let l = new_lock(\"x\").add(\"a\", \"substitution_cipher\", #{ base_n: 27 });\nl.run(#{ \"a.plain_text\": symbols(27, \"HI\") });", "missing"),
-            ("let l = new_lock(\"x\").add(\"a\", \"substitution_cipher\", #{ base_n: 27 });\nl.run(#{ \"a.plain_text\": \"HI\" });", "must be a lock value"),
+            ("let l = new_lock(\"x\").add(\"a\", \"substitution_cipher\", #{ base_n: 27 });\nl.run(#{ \"a.plain_text\": #{ hi: 1 } });", "must be a lock value"),
             ("let ok = 1;\nlet v = symbols(27, \"hello, world\");", "',' isn't a base-27 symbol"),
             ("let ok = 1;\nlet v = symbols(40, \"A\");", "between 2 and 27"),
         ];

@@ -1372,6 +1372,8 @@ let rows = [
 	["doublering", new_lock("ring").add("d", "doublering", #{ canonical_order: "QWERTYUIOPASDFGHJKLZXCVBNM" }), #{ "d.plain_text": symbols(26, letters) }, "d.cipher_text"],
 	["keyed_doublering", new_lock("keyed").add("k", "keyed_doublering", #{ base: 26 }), #{ "k.plain_text": symbols(26, letters), "k.base_ordering": ordering }, "k.cipher_text"],
 	["merge_alpha", new_lock("merge").add("m", "merge_alpha", #{ base_n: 27, input_count: 2 }), #{ "m.input_0": symbols(27, "EVERY LOCK"), "m.input_1": symbols(27, " OPENS") }, "m.merged_output"],
+	// A string read as symbols; lenient makes any text fit the base.
+	["string_to_symbols", new_lock("read").add("r", "string_to_symbols", #{ base: 27, lenient: true }), #{ "r.text": "Every lock — opens!" }, "r.symbols"],
 	["split_symbols", new_lock("split").add("s", "split_symbols", #{ base_n: 27, output_count: 2 }), #{ "s.plain_text": symbols(27, plain) }, "s.output_1"],
 	// A composite lock file: shift_cipher wired into vigenere_cipher.
 	// Its shift is 3 unless an option says otherwise.

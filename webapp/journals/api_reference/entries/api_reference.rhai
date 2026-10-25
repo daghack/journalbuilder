@@ -1006,7 +1006,7 @@ doc += api("lock.connect(from, to)", "Wires one lock's output to another's input
 ]);
 doc += api("lock.set_input(input, value)", "Fixes an input, so running doesn't need it. Returns the chain.", [
 	arg("input", "The input.", "ID.NAME of an input not wired to an output."),
-	arg("value", "Its value.", "a lock value of the input's type, as symbols(27, TEXT) gives, or a value kind's data, as huffman::code gives (checked against the kind's shape)."),
+	arg("value", "Its value.", "a lock value of the input's type, as symbols(27, TEXT) gives, a string for a String input, or a value kind's data, as huffman::code gives (checked against the kind's shape)."),
 ]);
 doc += api("lock.attach(id, illustration), lock.attach(id, illustration, options)", "Attaches an illustration, an illustrations/TYPE.rhai file drawing the values wired to its inputs with lock.connect as canvases, which result.canvases gives. It runs in the journal's engine, not the lock's: locking and unlocking never see it. Returns the chain.", [
 	arg("id", "The illustration's name in the chain, as in ID.NAME for its inputs.", "a string, not empty, with no dot, that no lock or illustration in the chain has."),
@@ -1024,13 +1024,13 @@ doc += api("lock.illustrations()", "Every illustration attached, a chain file's 
 doc += api("lock.inputs()", "The inputs still needing a value when it's run: #{ NAME: type }.");
 doc += api("lock.outputs()", "The chain's final outputs: #{ NAME: type }.");
 doc += api("lock.run(), lock.run(inputs)", "Runs the chain: a lock result of its outputs.", [
-	opt("inputs", "none, for a chain whose inputs are all set", "A value for every open input.", "a map of the names lock.inputs() gives to lock values of their types, or value kinds' data."),
+	opt("inputs", "none, for a chain whose inputs are all set", "A value for every open input.", "a map of the names lock.inputs() gives to lock values of their types, strings for String inputs, or value kinds' data."),
 ]);
 doc += api("lock.unlock(result)", "Recovers the inputs from a run's result: a lock result.", [
 	arg("result", "What running the chain gave.", "a lock result, from run."),
 ]);
 doc += api("lock.unlock(outputs)", "Recovers the inputs from outputs given by hand: a lock result.", [
-	arg("outputs", "The chain's outputs.", "a map of the names lock.outputs() gives to lock values or value kinds' data."),
+	arg("outputs", "The chain's outputs.", "a map of the names lock.outputs() gives to lock values, strings or value kinds' data."),
 ]);
 doc += api("result.get(name)", "One value, as a lock value.", [
 	arg("name", "Which value.", "one of the result's names, as values() lists them."),
@@ -1080,6 +1080,7 @@ doc += listing("Lock types: the files in locks/, with the options lock.add gives
 	arg("shift_vigenere", "The key shifted along the alphabet, then used as a Vigenere key; a composite of shift_cipher and vigenere_cipher, base 27. Takes key and plain_text, gives cipher_text and shifted_key.", "options: shift (optional, default 3), a whole number."),
 	arg("star_chart", "An art node: a HuffmanCode drawn as a StarChart, every node a named star, every link carrying its digit, the sky cut into constellations of at most most_stars stars, a page each, every one fitted to its page; neighbouring pages share a star under the same name. The root is Shiathri, a letter's star is named for its letter (the space's, in base 27, Vacii). Unlocking reads only what the pages show: it joins them on their shared names, takes the root as the star no link points to, a leaf's symbol from its name's first letter and each digit from its link. Takes code, gives chart.", "options: input_base and output_base (required), the code's (input_base 27 or a base of letters, 2 to 26 but not 10); most_stars (default 9), at least 2; seed (7), the sky's shape; name_seed (11), the names; size_seed (29), the stars' sizes; star_size (22), the biggest star's radius as it's laid out; width and height (1000 and 860), each page's sky; label_width, label_height and label_gap (26.4, 33.6 and 14), the room each star's label needs, as art::constellations takes them."),
 	arg("split_symbols", "A text cut into pieces each as long as the first, the last ones shorter or empty. Takes plain_text, gives output_0 to output_N.", "options: base_n (required), a whole number from 2 to 27; output_count (required), a whole number of at least 1."),
+	arg("string_to_symbols", "A string read as symbols in the base, as symbols(base, text) reads it. Takes text, a String; gives symbols, in the base. Unlocking writes the symbols back out as text, the text as it was fitted when lenient.", "options: base (required), a whole number from 2 to 27; lenient (optional, default false), true or false: makes any text fit the base first, as symbols' lenient option does; without it, text the base can't write is an error."),
 	arg("substitution_cipher", "Each symbol replaced by the ordering's symbol at its position. Takes plain_text and ordering (every symbol of the base once), gives cipher_text and ordering.", "options: base_n (required), a whole number from 2 to 27."),
 	arg("vigenere_cipher", "Each plain symbol plus the key symbol under it, the key repeating, mod cipher_base. Takes plain_text and key, gives cipher_text and key.", "options: plain_base, key_base and cipher_base (all required), whole numbers from 2 to 27."),
 ]);
