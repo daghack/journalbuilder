@@ -1,46 +1,15 @@
 import { Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
-import type { ChainFile, ChainRun, ChainType, LockOption, LockType, RenderPreview, RendererType } from '../scribe';
-import { FileService, RHAI_FILES, type OpenedFile } from '../services/file.service';
+import { kindOf, nameOf, pathOf, VALID_NAME } from '../journal/journal-files';
+import { template } from '../journal/templates';
+import type { ChainFile, ChainRun, ChainType, IllustrationType, LayoutType, LockOption, LockType, RenderPreview } from '../scribe';
+import { JournalStore } from '../services/journal-store.service';
+import { LibraryService } from '../services/library.service';
 import { ToolsService, failed } from '../services/tools.service';
-import { WorkspaceService } from '../services/workspace.service';
+import { ShellService } from '../shell/shell.service';
 import * as chain from './chain-model';
-import type { ChainModel, ChainNode, PortsByNode, RendererNode, TestValue } from './chain-model';
-import { chainSource, hasExample, journalChain, journalSnippet } from './chain-source';
+import type { ChainModel, ChainNode, PortsByNode, RendererNode, SourceKind, SourceNode, TestValue } from './chain-model';
+import { chainSource, journalChain, journalSnippet } from './chain-source';
 
-const DRAFT_KEY = 'journal-editor.lock-draft';
-const RENDERER_DRAFT_KEY = 'journal-editor.renderer-draft';
-
-/** A renderer file being written in the editor. */
-export interface RendererDraft {
-  name: string;
-  source: string;
-}
-
-/** A new renderer file to start from. */
-export function rendererTemplate(name: string): string {
-  return `// ${name}: what it draws, and how.
-
-fn options() {
-\t#{ size: 40.0 }
-}
-
-fn inputs(o) {
-\t#{ text: "Base27Symbol" }
-}
-
-fn render(o, i) {
-\tlet c = new_canvas();
-\tlet style = new_style(new_brush_style("#2b1d12", "Ink Pen", 1.6), new_handwriting_style());
-\tc.add(write_line(\`\${i.text.len()} symbols\`, vec2(0, 0), #{ style: style, type: new_type_style(glyphset("plain"), o.size) }));
-\tc
-}
-
-// What the editor previews it with.
-fn example() {
-\t#{ text: symbols(27, "HELLO").symbols() }
-}
-`;
-}
 const HISTORY = 200;
 
 /** A message for the panel: what happened, or went wrong. */
@@ -50,32 +19,33 @@ export interface Note {
 }
 
 /**
- * The chain being built in the lock editor: its model, each lock's ports
- * (which depend on its options, so the renderer works them out), and the
- * test run, made again whenever the chain or its test changes. As it's
- * edited, the chain is a chain file in the workspace under its name, so
- * journals using chain(name) follow along, as they do font edits.
+ * The chain being edited in the chain editor: the chains/NAME.rhai file the
+ * sidebar opened, as a model; each lock's ports (which depend on its
+ * options, so the engine works them out); and the test run, made again
+ * whenever the chain or its test changes. Edits are written back to the
+ * file once the ports are known: a library chain edited gives the journal a
+ * copy that stands in for it.
  */
 @Injectable()
 export class LockEditorService {
   private readonly tools = inject(ToolsService);
-  private readonly workspace = inject(WorkspaceService);
-  private readonly files = inject(FileService);
+  private readonly store = inject(JournalStore);
+  private readonly library = inject(LibraryService);
+  private readonly shell = inject(ShellService);
 
   readonly types = signal<LockType[]>([]);
-  readonly rendererTypes = signal<RendererType[]>([]);
-  /** The chain files: compiled in, and the workspace's (this one among them, as it's edited). */
+  readonly rendererTypes = signal<IllustrationType[]>([]);
+  /** The text styles and layouts sources draw on, with their options' defaults. */
+  readonly styleTypes = signal<LayoutType[]>([]);
+  readonly layoutTypes = signal<LayoutType[]>([]);
+  /** The chain files: the journal's over the library's. */
   readonly chainTypes = signal<ChainType[]>([]);
-  /** What each renderer in the chain draws of the last run, by renderer. */
+  /** What each illustration in the chain draws of the last run, by illustration. */
   readonly previews = signal<Record<string, RenderPreview | { error: string }>>({});
-  /** The renderer file being written, if one is: the middle shows it in place of the chain. */
-  readonly editing = signal<RendererDraft | null>(readRendererDraft());
-  readonly editingPreview = signal<RenderPreview | { error: string } | null>(null);
-  readonly editingSaved = signal<string | null>(null);
   /** Each value kind's example, rhai that makes one, by kind name. */
   readonly kinds = signal<Map<string, string | null>>(new Map());
   readonly typesError = signal<string | null>(null);
-  readonly model = signal<ChainModel>(readDraft() ?? chain.emptyChain());
+  readonly model = signal<ChainModel>(chain.emptyChain());
   readonly ports = signal<PortsByNode>({});
   /** The lock picked in the graph, and the wire (by the input it feeds). */
   readonly selected = signal<string | null>(null);
@@ -83,9 +53,20 @@ export class LockEditorService {
   readonly result = signal<ChainRun | { error: string } | null>(null);
   readonly running = signal(false);
   readonly note = signal<Note | null>(null);
-  /** Counts chains opened or started, for the graph to fit each in view. */
+  /** Counts chains opened, for the graph to fit each in view. */
   readonly opened = signal(0);
-  private handle: OpenedFile['handle'] = null;
+
+  /** The chain file edited: the last chains/ file the sidebar opened. */
+  readonly path = signal<string | null>(null);
+  /** Its text: the journal's, or the library's until it's changed. */
+  readonly text = computed(() => {
+    const path = this.path();
+    return path ? (this.store.files()[path] ?? this.library.files()[path] ?? null) : null;
+  });
+  /** Whether the journal has the file (else it's the library's). */
+  readonly own = computed(() => (this.path() ?? '') in this.store.files());
+  /** Whether the library has a chain of its name: the journal's stands in for it. */
+  readonly builtin = computed(() => this.library.has(this.path() ?? ''));
 
   private undoStack: ChainModel[] = [];
   private redoStack: ChainModel[] = [];
@@ -100,6 +81,24 @@ export class LockEditorService {
   readonly inputs = computed(() => chain.openInputs(this.model(), this.ports()));
   readonly outputs = computed(() => chain.openOutputs(this.model(), this.ports()));
   readonly node = computed(() => this.model().nodes.find((n) => n.id === this.selected()) ?? null);
+  /** The source picked in the graph, if a source is what's picked. */
+  readonly source = computed(() => this.model().sources.find((s) => s.id === this.selected()) ?? null);
+  /** The chain's nodes whose files stand in for the library's, by id: the graph marks them. */
+  readonly overrides = computed(() => {
+    const model = this.model();
+    const files = this.store.files();
+    const library = this.library.files();
+    const types = this.typeByName();
+    const illustrations = this.rendererByName();
+    const ids = new Set<string>();
+    for (const node of model.nodes) if (types.get(node.type)?.own && types.get(node.type)?.builtin) ids.add(node.id);
+    for (const r of model.renderers) if (illustrations.get(r.type)?.own && illustrations.get(r.type)?.builtin) ids.add(r.id);
+    for (const source of model.sources) {
+      const path = this.sourcePath(source);
+      if (path && path in files && path in library) ids.add(source.id);
+    }
+    return ids;
+  });
   /** The chain's options' values for a test run: their defaults. */
   readonly optionValues = computed(() => Object.fromEntries(this.model().options.filter((o) => o.default !== undefined).map((o) => [o.name, o.default])));
   /** Problems with a lock's ports, by lock. */
@@ -123,7 +122,7 @@ export class LockEditorService {
   private readonly runSource = computed(() => {
     const model = this.model();
     // Renderers aren't part of the lock: changing one needn't run it again.
-    const unplaced = { ...model, nodes: model.nodes.map((n) => ({ ...n, x: 0, y: 0 })), renderers: [], renderWires: [], test: {} };
+    const unplaced = { ...model, nodes: model.nodes.map((n) => ({ ...n, x: 0, y: 0 })), sources: model.sources.map((s) => ({ ...s, x: 0, y: 0 })), renderers: [], renderWires: [], test: {} };
     return chainSource(unplaced, { ports: this.ports(), optionKinds: (t) => this.optionKinds(t) });
   });
 
@@ -143,98 +142,62 @@ export class LockEditorService {
 
   private portKeys = new Map<string, string>();
   private runTimer: ReturnType<typeof setTimeout> | null = null;
-  private draftTimer: ReturnType<typeof setTimeout> | null = null;
-  private liveTimer: ReturnType<typeof setTimeout> | null = null;
+  private writeTimer: ReturnType<typeof setTimeout> | null = null;
   private previewTimer: ReturnType<typeof setTimeout> | null = null;
-  private editingTimer: ReturnType<typeof setTimeout> | null = null;
-  /** The name the chain was last put in the workspace under, as it's edited: renamed, it moves. */
-  private liveName: string | null = null;
-  /**
-   * The chain as opened, or as kept from the last visit: it goes into the
-   * workspace only once it's edited, so an old draft never stands in for a
-   * chain file that's changed since.
-   */
-  private readonly untouched = signal<ChainModel | null>(this.model());
-  /** The chain as last opened, and the workspace's copy it was read from (null: the file compiled in), for Revert. */
-  private readonly loaded = signal<{ name: string; model: ChainModel; source: string | null } | null>(null);
-  /** Whether the chain being edited is one of webapp/library/chains/'s. */
-  readonly builtin = computed(() => this.chainTypes().some((c) => c.name === this.model().name && c.builtin));
-  /**
-   * Whether there's something to revert: this browser's copy of a chain in
-   * webapp/library/chains/, or edits since a chain only this browser has was opened.
-   */
-  readonly canRevert = computed(() => {
-    if (this.builtin()) return this.model().name in this.workspace.chains() || this.model() !== this.untouched();
-    const loaded = this.loaded();
-    return loaded !== null && this.model() !== loaded.model;
-  });
+  /** The model as last read from the file, and the text it was read from or last written as. */
+  private untouched: ChainModel | null = null;
+  private known: string | null = null;
   private previewAsked = 0;
   private asked = 0;
+  private reading = 0;
 
   constructor() {
-    // The lock and renderer types, again whenever the workspace's files change.
+    // The lock and illustration types, again whenever the journal's files change.
     effect(() => {
-      this.workspace.locks();
-      this.workspace.renderers();
-      untracked(() => void this.loadTypes());
-    });
-    // The workspace cleared: nothing of this browser's is left to edit.
-    effect(() => {
-      if (!this.workspace.cleared()) return;
+      this.store.resources();
       untracked(() => {
-        if (this.liveTimer) clearTimeout(this.liveTimer);
-        const empty = chain.emptyChain('my_chain_1');
-        this.untouched.set(empty);
-        this.loaded.set(null);
-        this.liveName = null;
-        this.update(() => empty);
-        this.closeRenderer();
-        this.selected.set(null);
-        this.note.set(null);
-        this.opened.update((n) => n + 1);
+        void this.loadTypes();
+        void this.loadChains();
       });
     });
-    // The chain files likewise.
+    // The chain the sidebar opens.
     effect(() => {
-      this.workspace.chains();
-      untracked(() => void this.loadChains());
+      const path = this.shell.selected();
+      if (!path || kindOf(path) !== 'chains') return;
+      untracked(() => {
+        if (path !== this.path()) this.path.set(path);
+      });
     });
-    // Each lock's and renderer's ports, when its type or options change (or its file does).
+    // Its file, read when it's opened, and again when it changes other than by the editor.
+    effect(() => {
+      const path = this.path();
+      const text = this.text();
+      if (path === null || text === null) return;
+      untracked(() => {
+        if (text !== this.known) void this.read(path, text);
+      });
+    });
+    // Each lock's and illustration's ports, when its type or options change (or its file does).
     effect(() => {
       const model = this.model();
-      this.workspace.locks();
-      this.workspace.renderers();
-      untracked(() => this.refreshPorts(model));
+      const files = this.store.resources();
+      untracked(() => this.refreshPorts(model, files));
     });
-    // The chain as it's edited goes into the workspace under its name, so
-    // journals using it (chain("name")) follow along, as font edits do.
+    // The chain as it's edited goes into its file, so journals using it
+    // (chain("name")) follow along.
     effect(() => {
       const model = this.model();
       const ports = this.ports();
-      if (this.liveTimer) clearTimeout(this.liveTimer);
-      this.liveTimer = setTimeout(() => untracked(() => this.pushLive(model, ports)), 400);
+      if (this.writeTimer) clearTimeout(this.writeTimer);
+      this.writeTimer = setTimeout(() => untracked(() => this.write(model, ports)), 400);
     });
-    // What each renderer draws of the last run.
+    // What each illustration draws of the last run.
     effect(() => {
       const result = this.result();
       const model = this.model();
       const ports = this.ports();
       if (this.previewTimer) clearTimeout(this.previewTimer);
       this.previewTimer = setTimeout(() => untracked(() => void this.refreshPreviews(result, model, ports)), 150);
-    });
-    // A renderer file being written: previewed with its example() as it's
-    // typed, and (when it draws) put in the workspace, so journals follow.
-    effect(() => {
-      const draft = this.editing();
-      try {
-        if (draft) localStorage.setItem(RENDERER_DRAFT_KEY, JSON.stringify(draft));
-        else localStorage.removeItem(RENDERER_DRAFT_KEY);
-      } catch {
-        // Not kept, then.
-      }
-      if (this.editingTimer) clearTimeout(this.editingTimer);
-      if (!draft) return;
-      this.editingTimer = setTimeout(() => untracked(() => void this.previewEditing(draft)), 300);
     });
     // Run the test whenever the chain or its test case changes.
     effect(() => {
@@ -249,18 +212,6 @@ export class LockEditorService {
       }
       this.runTimer = setTimeout(() => void this.runTest(source, options, test), 250);
     });
-    // Keep the chain between visits.
-    effect(() => {
-      const model = this.model();
-      if (this.draftTimer) clearTimeout(this.draftTimer);
-      this.draftTimer = setTimeout(() => {
-        try {
-          localStorage.setItem(DRAFT_KEY, JSON.stringify(model));
-        } catch {
-          // Not kept, then.
-        }
-      }, 300);
-    });
   }
 
   optionKinds(type: string): Record<string, LockOption['kind']> {
@@ -272,7 +223,9 @@ export class LockEditorService {
       const types = await this.tools.lockTypes();
       if (failed(types)) throw new Error(types.error);
       this.types.set(types);
-      this.rendererTypes.set(await this.tools.rendererTypes());
+      this.rendererTypes.set(await this.tools.illustrationTypes());
+      this.styleTypes.set(await this.tools.styleTypes());
+      this.layoutTypes.set(await this.tools.layoutTypes());
       this.kinds.set(new Map((await this.tools.valueKinds()).map((k) => [k.name, k.example])));
       this.typesError.set(null);
     } catch (err) {
@@ -285,8 +238,8 @@ export class LockEditorService {
     if (!failed(chains)) this.chainTypes.set(chains);
   }
 
-  private refreshPorts(model: ChainModel) {
-    const ids = new Set(model.nodes.map((n) => n.id));
+  private refreshPorts(model: ChainModel, files: Record<string, string>) {
+    const ids = new Set([...model.nodes, ...model.sources, ...model.renderers].map((n) => n.id));
     let changed = false;
     const ports = { ...this.ports() };
     for (const id of Object.keys(ports)) {
@@ -298,15 +251,20 @@ export class LockEditorService {
     }
     if (changed) this.ports.set(ports);
     // A lock's ports change only when its own file does: the chain going
-    // into the workspace as it's edited mustn't ask for them all again.
-    const locks = this.workspace.locks();
-    const renderers = this.workspace.renderers();
+    // into its file as it's edited mustn't ask for them all again.
+    for (const source of model.sources) {
+      const path = this.sourcePath(source);
+      const key = JSON.stringify(['source', source.kind, source.name, source.base ?? null, path, path ? files[path] ?? null : null]);
+      if (this.portKeys.get(source.id) === key) continue;
+      this.portKeys.set(source.id, key);
+      this.ports.update((p) => ({ ...p, [source.id]: this.sourcePorts(source) }));
+    }
     for (const renderer of model.renderers) {
       const options = chain.resolvedOptions(model, renderer);
-      const key = JSON.stringify(['renderer', renderer.type, options, renderers[renderer.type] ?? null]);
+      const key = JSON.stringify(['illustration', renderer.type, options, files[pathOf('illustrations', renderer.type)] ?? null]);
       if (this.portKeys.get(renderer.id) === key) continue;
       this.portKeys.set(renderer.id, key);
-      void this.tools.rendererPorts(renderer.type, options).then(
+      void this.tools.illustrationPorts(renderer.type, options).then(
         (answer) => {
           if (this.portKeys.get(renderer.id) !== key) return;
           const ports = failed(answer) ? answer : { inputs: answer.inputs, outputs: [], options };
@@ -319,7 +277,7 @@ export class LockEditorService {
     }
     for (const node of model.nodes) {
       const options = chain.resolvedOptions(model, node);
-      const key = JSON.stringify([node.type, options, locks[node.type] ?? null]);
+      const key = JSON.stringify([node.type, options, files[pathOf('locks', node.type)] ?? null]);
       if (this.portKeys.get(node.id) === key) continue;
       this.portKeys.set(node.id, key);
       void this.tools.lockPorts(node.type, options).then(
@@ -407,7 +365,7 @@ export class LockEditorService {
 
   moveNode(id: string, x: number, y: number) {
     const place = <T extends { id: string; x: number; y: number }>(n: T): T => (n.id === id ? { ...n, x: Math.round(x), y: Math.round(y) } : n);
-    this.update((m) => ({ ...m, nodes: m.nodes.map(place), renderers: m.renderers.map(place) }), `move:${id}`);
+    this.update((m) => ({ ...m, nodes: m.nodes.map(place), sources: m.sources.map(place), renderers: m.renderers.map(place) }), `move:${id}`);
   }
 
   removeNode(id: string) {
@@ -537,20 +495,76 @@ export class LockEditorService {
     }), `renderer-option:${id}:${option}`);
   }
 
-  /** The last run's values for renderer `renderer`'s inputs, or null if it can't draw yet. */
+  /**
+   * The last run's values for renderer `renderer`'s inputs, or null if it
+   * can't draw yet. A source's value is written as `{ $source }`, for the
+   * engine to make (a style's bundle, say), so a chain of sources alone draws.
+   */
   private rendererInputs(renderer: RendererNode, result: ChainRun | { error: string } | null, model: ChainModel, ports: PortsByNode): Record<string, unknown> | null {
-    if (!result || failed(result)) return null;
     const p = chain.portsOf(ports, renderer.id);
     if (!p) return null;
-    const trace = new Map(result.trace);
+    const trace = new Map(result && !failed(result) ? result.trace : []);
     const inputs: Record<string, unknown> = {};
     for (const [name] of p.inputs) {
       const wire = model.renderWires.find((w) => w.to === `${renderer.id}.${name}`);
-      const value = wire ? trace.get(wire.from) : undefined;
+      if (!wire) return null;
+      const source = model.sources.find((s) => `${s.id}.${chain.SOURCE_PORT}` === wire.from);
+      if (source) {
+        inputs[name] = { $source: sourceSpec(source) };
+        continue;
+      }
+      const value = trace.get(wire.from);
       if (!value) return null;
       inputs[name] = value.json;
     }
     return inputs;
+  }
+
+  // ---- sources ----
+
+  /** The file a source draws on, if there is one: content's of whichever extension it has. */
+  sourcePath(source: Pick<SourceNode, 'kind' | 'name'>): string | null {
+    const files = this.store.files();
+    const library = this.library.files();
+    const candidates = source.kind === 'content' ? ['txt', 'md', 'json'].map((ext) => pathOf('content', source.name, ext))
+      : [pathOf(chain.sourceDir(source.kind), source.name)];
+    return candidates.find((path) => path in files || path in library) ?? null;
+  }
+
+  /** A source's port, as the engine types it: symbols or String for content, TextStyle, Glyphset or Layout. */
+  private sourcePorts(source: SourceNode): { inputs: [string, string][]; outputs: [string, string][]; options: Record<string, unknown> } | { error: string } {
+    const path = this.sourcePath(source);
+    if (!path) return { error: `there's no ${source.kind} named '${source.name}'` };
+    let type: string;
+    if (source.kind === 'content') {
+      if (path.endsWith('.json')) {
+        if (source.base !== undefined) return { error: `${path} is symbols in its own base already: give text content a base` };
+        try {
+          const base = JSON.parse(this.store.files()[path] ?? this.library.files()[path]).base;
+          type = `Base${base}Symbol`;
+        } catch {
+          return { error: `${path} isn't symbols` };
+        }
+      } else {
+        type = source.base !== undefined ? `Base${source.base}Symbol` : 'String';
+      }
+    } else {
+      type = source.kind === 'style' ? 'TextStyle' : source.kind === 'glyphset' ? 'Glyphset' : 'Layout';
+    }
+    return { inputs: [], outputs: [[chain.SOURCE_PORT, type]], options: {} };
+  }
+
+  /** A source of `kind` drawing on file `name`, added at (x, y). */
+  addSource(kind: SourceKind, name: string, x: number, y: number) {
+    const id = chain.freshId(this.model(), name);
+    this.update((m) => ({ ...m, sources: [...m.sources, { id, kind, name, options: {}, x: Math.round(x), y: Math.round(y) }] }));
+    this.selected.set(id);
+    this.selectedWire.set(null);
+  }
+
+  /** Change source `id`: its file, options or base. */
+  setSource(id: string, patch: Partial<Pick<SourceNode, 'name' | 'options' | 'base'>>) {
+    this.update((m) => ({ ...m, sources: m.sources.map((s) => (s.id === id ? { ...s, ...patch } : s)) }), `source:${id}`);
   }
 
   private async refreshPreviews(result: ChainRun | { error: string } | null, model: ChainModel, ports: PortsByNode) {
@@ -559,89 +573,41 @@ export class LockEditorService {
     for (const renderer of model.renderers) {
       const inputs = this.rendererInputs(renderer, result, model, ports);
       if (!inputs) continue;
-      previews[renderer.id] = await this.tools.renderPreview(renderer.type, null, chain.resolvedOptions(model, renderer), inputs).catch((err: Error) => ({ error: err.message }));
+      previews[renderer.id] = await this.tools.illustrationPreview(renderer.type, null, chain.resolvedOptions(model, renderer), inputs).catch((err: Error) => ({ error: err.message }));
     }
     if (asked === this.previewAsked) this.previews.set(previews);
   }
 
   /**
-   * Put the chain in the workspace under its name, as it is: a journal
-   * using chain("name") runs it as it's edited, mistakes and all. Renamed,
-   * it moves.
+   * Write the chain into its file, as it is: a journal using
+   * chain("name") runs it as it's edited, mistakes and all. A chain only
+   * read isn't written, so a library chain isn't copied unless it's changed.
    */
-  private pushLive(model: ChainModel, ports: PortsByNode) {
-    const name = model.name;
+  private write(model: ChainModel, ports: PortsByNode) {
+    const path = this.path();
     // Its values are written by their ports' types, so wait for the ports.
-    if (!/^[A-Za-z0-9_]+$/.test(name) || !model.nodes.length || !model.nodes.every((n) => ports[n.id]) || model === untracked(() => this.untouched())) return;
-    if (this.liveName && this.liveName !== name) this.workspace.removeChain(this.liveName);
-    this.workspace.setChain(name, chainSource(model, { ports, optionKinds: (t) => this.optionKinds(t) }));
-    this.liveName = name;
+    if (!path || model === this.untouched || !model.nodes.every((n) => ports[n.id])) return;
+    const source = chainSource(model, { ports, optionKinds: (t) => this.optionKinds(t) });
+    this.known = source;
+    if (source !== this.text()) this.store.setFile(path, source);
   }
 
-  // ---- renderer files ----
+  // ---- illustration and chain files ----
 
-  /** Write a new renderer file. */
-  newRenderer() {
-    const names = new Set(this.rendererTypes().map((t) => t.name));
-    let name = 'my_renderer';
-    for (let n = 2; names.has(name); n++) name = `my_renderer${n}`;
-    this.editing.set({ name, source: rendererTemplate(name) });
-    this.editingSaved.set(null);
+  /** Make a new file of `kind` (asking its name), and open it. */
+  newFile(kind: 'illustrations' | 'chains' | 'locks') {
+    const what = kind === 'illustrations' ? 'illustration' : kind === 'chains' ? 'chain' : 'lock type';
+    const name = prompt(`New ${what}'s name (letters, digits and _):`)?.trim();
+    if (!name) return;
+    if (!VALID_NAME.test(name)) return this.note.set({ kind: 'error', text: 'A name is letters, digits and _ only.' });
+    const path = pathOf(kind, name);
+    if (!(path in this.store.files())) this.store.setFile(path, template(kind, name, 'rhai'));
+    this.shell.open(path);
   }
 
-  /** Edit renderer `name`'s file (the workspace's, if it has one). */
-  async editRenderer(name: string) {
-    const answer = await this.tools.rendererSource(name).catch((err: Error) => ({ error: err.message }));
-    if (failed(answer)) return this.note.set({ kind: 'error', text: `Couldn't open ${name}: ${answer.error}` });
-    this.editing.set({ name, source: answer.source });
-    this.editingSaved.set(null);
-  }
-
-  setRendererSource(source: string) {
-    const draft = this.editing();
-    if (draft && draft.source !== source) this.editing.set({ ...draft, source });
-  }
-
-  setRendererName(name: string) {
-    const draft = this.editing();
-    if (draft && draft.name !== name) this.editing.set({ ...draft, name });
-  }
-
-  closeRenderer() {
-    this.editing.set(null);
-    this.editingPreview.set(null);
-  }
-
-  private async previewEditing(draft: RendererDraft) {
-    if (!/^[A-Za-z0-9_]+$/.test(draft.name)) {
-      this.editingPreview.set({ error: "An illustration's name is its file's: letters, digits and _ only." });
-      return;
-    }
-    const preview = await this.tools.renderPreview(draft.name, draft.source, {}, null).catch((err: Error) => ({ error: err.message }));
-    if (this.editing() !== draft) return;
-    this.editingPreview.set(preview);
-    // It draws: journals and chains use it as it is now.
-    if (!failed(preview)) this.workspace.setRenderer(draft.name, draft.source);
-  }
-
-  /** Save the illustration file: into the workspace, and to a file to put in webapp/library/illustrations/. */
-  async saveRenderer() {
-    const draft = this.editing();
-    if (!draft) return;
-    const preview = await this.tools.renderPreview(draft.name, draft.source, {}, null).catch((err: Error) => ({ error: err.message }));
-    if (failed(preview)) return this.editingSaved.set(`${draft.name}.rhai doesn't draw its example: ${preview.error}`);
-    this.workspace.setRenderer(draft.name, draft.source);
-    try {
-      await this.files.save(draft.source, `${draft.name}.rhai`, null, RHAI_FILES);
-    } catch (err) {
-      return this.editingSaved.set(`Added ${draft.name} to this browser's illustrations, but couldn't write the file: ${(err as Error).message}`);
-    }
-    this.editingSaved.set(`${draft.name} is an illustration in this browser now: in the palette, and in journals as lock.attach("x", "${draft.name}"). To add it to the repository, put ${draft.name}.rhai in webapp/library/illustrations/ and rebuild the renderer (npm run wasm).`);
-  }
-
-  /** Remove a renderer type only this browser has. */
-  removeWorkspaceRenderer(name: string) {
-    this.workspace.removeRenderer(name);
+  /** Open file `path` in its editor. */
+  openFile(path: string) {
+    this.shell.open(path);
   }
 
   /** Fix input `port` to `value` in the chain itself, or (undefined) leave it open. */
@@ -664,65 +630,43 @@ export class LockEditorService {
     }, `test:${port}`);
   }
 
-  setName(name: string) {
-    this.update((m) => ({ ...m, name }), 'name');
-  }
-
   setDescription(description: string) {
     this.update((m) => ({ ...m, description }), 'description');
   }
 
-  // ---- files ----
+  // ---- the file ----
 
-  /** Start a new chain, under a name no chain has; the last one stays in the workspace. */
-  newChain() {
-    const names = new Set(this.chainTypes().map((c) => c.name));
-    let n = 1;
-    while (names.has(`my_chain_${n}`)) n++;
-    this.update(() => chain.emptyChain(`my_chain_${n}`));
-    this.liveName = null;
-    this.handle = null;
-    this.selected.set(null);
-    this.note.set(null);
-    this.opened.update((n) => n + 1);
-  }
-
-  /** Edit chain file `name` (one compiled in or in the workspace). */
-  async openChain(name: string) {
-    await this.read(name, null);
-  }
-
-  /** Open a chain file from disk. */
-  async openFile() {
-    const opened = await this.files.open(RHAI_FILES);
-    if (!opened) return;
-    const name = opened.name.replace(/\.rhai$/, '');
-    if (await this.read(name, opened.text)) this.handle = opened.handle;
-  }
-
-  private async read(name: string, source: string | null): Promise<boolean> {
+  /** Read chain file `path` (`source`, its text) as the model to edit. */
+  private async read(path: string, source: string): Promise<boolean> {
+    const reading = ++this.reading;
+    const name = nameOf(path);
     let file: ChainFile | { error: string };
     try {
       file = await this.tools.readChain(name, source);
     } catch (err) {
       file = { error: (err as Error).message };
     }
+    if (reading !== this.reading) return false;
+    this.known = source;
     if (failed(file)) {
-      this.note.set({ kind: 'error', text: `Couldn't open ${name}: ${file.error}` });
+      this.note.set({ kind: 'error', text: `Couldn't read ${path}: ${file.error}. Fix it in a text editor, or remove it.` });
       return false;
     }
     const model = await this.modelOf(file);
-    this.untouched.set(model);
-    this.loaded.set({ name, model, source: source === null ? (this.workspace.chains()[name] ?? null) : null });
-    this.update(() => model);
-    // Editing it edits that chain: renamed, it moves.
-    this.liveName = name;
-    this.handle = null;
-    this.selected.set(null);
-    this.opened.update((n) => n + 1);
+    if (reading !== this.reading) return false;
+    const reopened = this.model().name === model.name;
+    this.untouched = model;
+    this.model.set(model);
+    if (!reopened) {
+      this.undoStack = [];
+      this.redoStack = [];
+      this.history();
+      this.selected.set(null);
+      this.opened.update((n) => n + 1);
+    }
     this.note.set(file.promotionsLost
       ? { kind: 'note', text: `${name}'s chain(o) works its options out, which the editor can't show: they're read with their defaults, and editing writes them as values.` }
-      : { kind: 'ok', text: `Editing ${name}: journals using chain("${name}") follow along.` });
+      : null);
     return true;
   }
 
@@ -748,6 +692,11 @@ export class LockEditorService {
       nodes,
       wires: (file.chain.connect ?? []).map(([from, to]) => ({ from, to })),
     };
+    for (const [id, spec] of Object.entries(file.chain.sources ?? {})) {
+      const [x, y] = file.layout?.[id] ?? [-240, 60 + 140 * model.sources.length];
+      const options = Object.fromEntries(Object.entries(spec.options ?? {}).filter(([, v]) => !(v && typeof v === 'object' && '$option' in v)));
+      model.sources.push({ id, kind: spec.type, name: spec.name, options, ...(spec.base !== undefined ? { base: spec.base } : {}), x, y });
+    }
     for (const [id, spec] of Object.entries(file.chain.illustrations ?? {})) {
       const [x, y] = file.layout?.[id] ?? [120 + 360 * nodes.length, 300];
       model.renderers.push({ id, type: spec.type, ...split(spec.options), x, y });
@@ -767,54 +716,35 @@ export class LockEditorService {
     return model;
   }
 
-  /**
-   * Throw away this browser's edits to the chain. One in webapp/library/chains/ is
-   * read again from there, its copy here gone, so journals use the file;
-   * one only this browser has goes back to how it was opened.
-   */
-  async revert() {
-    const name = this.model().name;
-    if (this.builtin()) {
-      if (this.liveTimer) clearTimeout(this.liveTimer);
-      this.workspace.removeChain(name);
-      if (await this.read(name, null)) this.note.set({ kind: 'ok', text: `${name} is back as it is in webapp/library/chains/; journals use that again.` });
-      return;
-    }
-    const loaded = this.loaded();
-    if (!loaded) return;
-    const current = this.model().name;
-    this.update(() => loaded.model);
-    this.untouched.set(loaded.model);
-    if (current !== loaded.name) this.workspace.removeChain(current);
-    if (loaded.source === null) this.workspace.removeChain(loaded.name);
-    else this.workspace.setChain(loaded.name, loaded.source);
-    this.liveName = loaded.name;
-    this.selected.set(null);
-    this.note.set({ kind: 'ok', text: `${loaded.name} is back as it was opened.` });
+  /** Rename the chain: its file. Returns why it can't be, or null. */
+  rename(name: string): string | null {
+    const path = this.path();
+    if (!path || name === nameOf(path)) return null;
+    if (!VALID_NAME.test(name)) return "a chain's name is its file's: letters, digits and _ only";
+    if (!this.own()) return "it's the library's: change it first, so the journal has a copy to rename";
+    const to = pathOf('chains', name);
+    const problem = this.store.renameFile(path, to);
+    if (problem) return problem;
+    this.model.update((m) => ({ ...m, name }));
+    this.untouched = this.model();
+    this.path.set(to);
+    this.shell.open(to);
+    return null;
   }
 
-  /** Save the chain file, to put in webapp/library/chains/; it's in this browser's workspace already. */
-  async save() {
-    const model = this.model();
-    const name = model.name;
-    if (!/^[A-Za-z0-9_]+$/.test(name)) return this.note.set({ kind: 'error', text: 'A chain\'s name is its file\'s: letters, digits and _ only.' });
-    const source = chainSource(model, { ports: this.ports(), optionKinds: (t) => this.optionKinds(t) });
-    this.workspace.setChain(name, source);
-    this.liveName = name;
-    let saved: OpenedFile | null = null;
-    try {
-      saved = await this.files.save(source, `${name}.rhai`, this.handle, RHAI_FILES);
-    } catch (err) {
-      return this.note.set({ kind: 'error', text: `Couldn't write ${name}.rhai: ${(err as Error).message}` });
-    }
-    if (saved) this.handle = saved.handle;
-    const result = this.result();
-    const unchecked = !hasExample(model, this.ports()) ? ' It has no example yet: give every input a test value, and cargo test checks it.'
-      : result && failed(result) ? ` Its test run fails, though: ${result.error}` : '';
-    this.note.set({
-      kind: 'ok',
-      text: `Saved ${name}.rhai. To add it to the repository, put it in webapp/library/chains/ and rebuild the renderer (npm run wasm).${unchecked}`,
-    });
+  /** Give the journal a copy of the library's chain, to change. */
+  copyIn() {
+    const path = this.path();
+    const text = this.text();
+    if (path && text !== null && !this.own()) this.store.setFile(path, text);
+  }
+
+  /** Remove the journal's copy of a library chain: the library's is used again. */
+  useLibrary() {
+    const path = this.path();
+    if (!path || !this.own() || !this.builtin()) return;
+    if (this.writeTimer) clearTimeout(this.writeTimer);
+    this.store.removeFile(path);
   }
 
   /** The chain as journal script, for the clipboard: chain("name") in use, or the chain built lock by lock. */
@@ -824,16 +754,6 @@ export class LockEditorService {
       : journalChain(this.model(), { ports: this.ports(), optionKinds: (t) => this.optionKinds(t) });
   }
 
-  /** Remove a lock type only this browser has. */
-  removeWorkspaceLock(name: string) {
-    this.workspace.removeLock(name);
-  }
-
-  /** Remove a chain file only this browser has (or this browser's edit of one compiled in). */
-  removeWorkspaceChain(name: string) {
-    this.workspace.removeChain(name);
-    if (this.liveName === name) this.liveName = null;
-  }
 }
 
 /** A value to start a required option at, so a new lock has ports to show. */
@@ -854,24 +774,12 @@ function startingValue(option: LockOption): unknown {
   }
 }
 
-function readRendererDraft(): RendererDraft | null {
-  try {
-    const draft = JSON.parse(localStorage.getItem(RENDERER_DRAFT_KEY) ?? 'null');
-    return draft && typeof draft.name === 'string' && typeof draft.source === 'string' ? draft : null;
-  } catch {
-    return null;
-  }
-}
-
-function readDraft(): ChainModel | null {
-  try {
-    const draft = JSON.parse(localStorage.getItem(DRAFT_KEY) ?? 'null');
-    if (!draft || !Array.isArray(draft.nodes) || !Array.isArray(draft.wires)) return null;
-    // Drafts from before chains were chain files named their ports.
-    const { inputNames: _, outputNames: __, ...rest } = draft;
-    const renderers = (draft.renderers ?? []).map((r: RendererNode) => ({ ...r, promoted: r.promoted ?? {} }));
-    return { ...chain.emptyChain(), ...rest, renderers };
-  } catch {
-    return null;
-  }
+/** A source as a chain file's sources write it, for the engine. */
+function sourceSpec(source: SourceNode): Record<string, unknown> {
+  return {
+    type: source.kind,
+    name: source.name,
+    ...(Object.keys(source.options).length && (source.kind === 'style' || source.kind === 'layout') ? { options: source.options } : {}),
+    ...(source.base !== undefined && source.kind === 'content' ? { base: source.base } : {}),
+  };
 }

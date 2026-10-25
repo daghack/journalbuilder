@@ -3,16 +3,16 @@
 // for the preview and PNG exports, and PDFs. One render at a time; the app
 // cancels one by ending the worker.
 
-import init, { Renderer, lastPanic, setWorkspace } from '../../../wasm-pkg/scribe_wasm.js';
-import type { DarklyReply, DarklyRequest, WorkspacePayload } from '../scribe';
+import init, { Renderer, lastPanic, setJournal } from '../../../wasm-pkg/scribe_wasm.js';
+import type { DarklyReply, DarklyRequest, JournalPayload } from '../scribe';
 
 const post = (reply: DarklyReply, transfer: Transferable[] = []) => postMessage(reply, transfer);
 
 let renderer: Promise<Renderer> | null = null;
 let wasmUrl = '';
-/** The workspace to render with, and the one the renderer has. */
-let workspace: WorkspacePayload | null = null;
-let applied: WorkspacePayload | null = null;
+/** The journal's files to render with, and the ones the engine has. */
+let journal: JournalPayload | null = null;
+let applied: JournalPayload | null = null;
 
 function getRenderer(): Promise<Renderer> {
   if (!renderer) {
@@ -39,7 +39,7 @@ let current: number | null = null;
 // this worker, whose module can't be trusted after a panic.
 const onCrash = (event: Event, err: unknown) => {
   event.preventDefault();
-  const message = `the renderer crashed: ${safeLastPanic() ?? String(err)}`;
+  const message = `the engine crashed: ${safeLastPanic() ?? String(err)}`;
   if (current !== null) post({ type: 'error', id: current, message });
 };
 addEventListener('error', (event) => onCrash(event, (event as ErrorEvent).message));
@@ -58,23 +58,23 @@ addEventListener('message', ({ data }: MessageEvent<DarklyRequest>) => {
     wasmUrl = data.wasmUrl;
     return;
   }
-  if (data.type === 'workspace') {
+  if (data.type === 'journal') {
     // Taken up by the next render, not one under way.
-    workspace = data.workspace;
+    journal = data.files;
     return;
   }
   // One at a time: the renderer has one GPU canvas.
   queue = queue.then(() => handle(data)).catch(() => {});
 });
 
-async function handle(request: Exclude<DarklyRequest, { type: 'init' | 'workspace' }>) {
+async function handle(request: Exclude<DarklyRequest, { type: 'init' | 'journal' }>) {
   const { id } = request;
   current = id;
   try {
     const r = await getRenderer();
-    if (workspace !== applied) {
-      setWorkspace(workspace?.fonts ?? null, workspace?.locks ?? {}, workspace?.renderers ?? {}, workspace?.chains ?? {});
-      applied = workspace;
+    if (journal !== applied) {
+      setJournal(journal ?? {});
+      applied = journal;
     }
     if (request.type === 'renderPages') {
       const pages = request.indices.length;

@@ -1,7 +1,8 @@
 import { Component, ElementRef, computed, effect, inject, signal, untracked, viewChild, type OnDestroy } from '@angular/core';
 import { JournalService } from '../services/journal.service';
 import { RenderService, type RenderProgress } from '../services/render.service';
-import { WorkspaceService, hash } from '../services/workspace.service';
+import { hash, kindOf } from '../journal/journal-files';
+import { JournalStore } from '../services/journal-store.service';
 import { ShellService } from '../shell/shell.service';
 
 /** A Darkly render of a page: its PNG as an object URL, `width` pixels across at `scale` pixels per unit. */
@@ -90,8 +91,10 @@ const CACHE_SIZE = 24;
 export class PagePreviewComponent implements OnDestroy {
   protected readonly journal = inject(JournalService);
   private readonly render = inject(RenderService);
-  private readonly workspace = inject(WorkspaceService);
+  private readonly journalStore = inject(JournalStore);
   private readonly shell = inject(ShellService);
+  /** Whether an entry is the file shown: Darkly renders only then. */
+  private readonly entryShown = computed(() => kindOf(this.shell.selected() ?? '') === 'entries');
   private readonly stage = viewChild.required<ElementRef<HTMLElement>>('stage');
 
   protected readonly scales = [0.25, 0.5, 0.75, 1];
@@ -114,7 +117,8 @@ export class PagePreviewComponent implements OnDestroy {
   private readonly darklyKey = computed(() => {
     const page = this.page();
     if (!page) return null;
-    return `${hash(this.journal.shownSource())}|w${this.workspace.version()}|${page.index}|${this.scale()}|${this.parchment()}`;
+    const files = this.journalStore.resources();
+    return `${hash(this.journal.shownSource())}|${hash(JSON.stringify(files))}|${page.index}|${this.scale()}|${this.parchment()}`;
   });
 
   /** Pixels per canvas unit on screen. */
@@ -145,7 +149,7 @@ export class PagePreviewComponent implements OnDestroy {
     effect(() => this.observer.observe(this.stage().nativeElement));
     // In Darkly mode, render what's shown when it changes (one at a time; the newest waits).
     effect(() => {
-      if (this.mode() !== 'darkly' || this.shell.mode() !== 'journal') return;
+      if (this.mode() !== 'darkly' || !this.entryShown()) return;
       const key = this.darklyKey();
       if (key && !this.cache().some((c) => c.key === key)) untracked(() => this.startDarkly());
     });
@@ -196,7 +200,7 @@ export class PagePreviewComponent implements OnDestroy {
       this.progress.set(null);
       // Something newer to render?
       const current = this.darklyKey();
-      if (this.mode() === 'darkly' && this.shell.mode() === 'journal' && !this.darklyError() && current && !this.cache().some((c) => c.key === current)) this.startDarkly();
+      if (this.mode() === 'darkly' && this.entryShown() && !this.darklyError() && current && !this.cache().some((c) => c.key === current)) this.startDarkly();
     });
   }
 

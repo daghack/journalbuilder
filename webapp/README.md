@@ -1,14 +1,33 @@
 # Journal editor
 
-A browser editor for journal scripts, and for the fonts and lock types they
-draw with. Tabs along the top switch between the three editors (the address
-keeps which: `#fonts`, `#locks`); each stays as you left it while another
-shows.
+A browser editor for a journal: its entries, and the files they draw with,
+over the built-in library. One journal at a time: the bar along the top
+names it and starts a new one, opens one of the repository's, imports a
+zipped journal or exports this one. The sidebar lists its files, kind by
+kind, each kind with the library's files beside the journal's; picking one
+opens it in the editor for its kind. The address keeps the file open
+(`#entries/letter_1.rhai`).
 
-## Journals
+## The journal
+
+- **New** starts a journal of one blank entry, with the library. The
+  repository's journals aren't loaded until opened from **Open**.
+- **Import** loads a zipped journal (a journal's directory, as
+  journalbuild reads it) in place of this one, and **Export** downloads
+  this one as a zip, with the library files its entries use bundled in and
+  listed in its `journal.json`, so it renders the same wherever the
+  library has changed; importing drops them again. Nothing is merged:
+  New, Open and Import ask first if the journal has changes not exported.
+- The journal is kept in this browser between visits.
+- **Library files.** Any of the library's files opens, to read. Changing
+  one gives the journal a copy, marked ⚠, which stands in for it; the
+  banner over its editor removes the copy, to use the library's again.
+
+## Entries
 
 The code is on the right, a thumbnail of each page on the left, and the
-page you pick in the middle. Pages redraw as you type.
+page you pick in the middle. Pages redraw as you type, and when any of the
+journal's other files changes.
 
 - **Preview.** By default each page is drawn as SVG, from the same strokes
   `journalbuild --svg` draws. Switch the preview to **Darkly** to render the
@@ -18,10 +37,6 @@ page you pick in the middle. Pages redraw as you type.
   marked and completed. The last run's error is marked on its line, with
   `warn()` warnings on theirs. The panel under the editor lists them, with
   missing glyphs and anything the script `print`s.
-- **Files.** Open and save `.rhai` files (Ctrl/⌘ O, Ctrl/⌘ S, Ctrl/⌘
-  Shift S). In Chromium browsers, Save writes back to the file you opened;
-  elsewhere it downloads. The Examples menu opens the repository's
-  journals. Your work is kept in the browser between visits.
 - **Export.** One Export button opens a dialog: export as PDF (as
   `journalbuild --pdf` makes it) or as a zip of PNGs, one per page, rendered
   with Darkly, with a progress bar. The dialog sets the scale, supersample,
@@ -31,11 +46,13 @@ page you pick in the middle. Pages redraw as you type.
 Darkly previews and exports need WebGPU: a current Chrome, Edge or Safari.
 The SVG preview works anywhere.
 
-## Fonts
+## Glyphsets
 
-The whole of the library's `glyphsets/` (a file per glyphset), one font at a time: its glyphs on the
-left, each with its variants; the variant you pick in the middle, to draw;
-the font's options on the right.
+Every glyphset the journal has, its own files over the library's, one at a
+time: its glyphs on the left, each with its variants; the variant you pick
+in the middle, to draw; the glyphset's options on the right. Each glyphset
+that differs from the library's is a file of the journal's,
+`glyphsets/NAME.json`, written as you edit.
 
 - **Drawing.** Glyphs are pen strokes, y down, roughly −1 to 1, with the
   font's cap height, x-height, baseline and descender worked out from its
@@ -51,22 +68,20 @@ the font's options on the right.
 - **Preview.** Under the glyph, type text to see it set in the font exactly
   as a journal sets it (`fill_with_text`): spacing, fallbacks and variant
   picks included. Reroll picks other variants.
-- **Fonts and options.** Pick, add, copy, rename or delete fonts; set
-  `character_padding`, `space_width` and `fallback`. What fonts.rs would
-  reject is listed, and the journals keep the last good fonts until it's
-  fixed.
-- **Export** writes the whole fonts.json in the layout it is kept in,
-  one glyph to a line, so a glyph changed is a line changed in the diff.
-  Split it into `library/glyphsets/` with `npm run split-fonts -- exported.json`. A new font of 20 glyphs or more needs a
-  line in the showcase.
+- **Glyphsets and options.** Pick, add, duplicate, rename or delete the
+  journal's glyphsets (the library's can't be renamed or deleted, only
+  copied); set `character_padding`, `space_width` and `fallback`. What
+  fonts.rs would reject is listed, and the journal keeps its last good
+  glyphsets until it's fixed. Files are written one glyph to a line, so a
+  glyph changed is a line changed in a diff.
 
-## Locks
+## Chains
 
-Chains, built as graphs: the chains (every `library/chains/*.rhai`, and this
-browser's), lock types (every `library/locks/*.rhai`) and illustrations
-(every `library/illustrations/*.rhai`) on the left, the chain in the middle, and on the right
-its name, the picked lock's or illustration's options, and the chain's inputs
-and outputs with a test case. A journal uses a chain by name:
+A chain file, built as a graph: the chains (the journal's and the
+library's), the sources a chain can draw on, the lock types and the
+illustrations on the left; the chain in the middle; and on the right its
+name, the picked node's settings, and the chain's inputs and outputs with
+a test case. An entry uses a chain by name:
 
 ```rhai
 let c = chain("my_chain_1");
@@ -74,17 +89,21 @@ let result = c.run(#{ "ml.maze_text": symbols(27, "HELLO"), "ml.random_seed": sy
 let pages = result.canvases("mg");
 ```
 
-- **Live.** As you edit, the chain is a chain file in this browser under
-  its name, so a journal using `chain("name")` follows along, as one using
-  an edited font does, mistakes and all. Click a chain on the left to edit
-  it (a compiled-in one too: the browser's copy then stands in for it until
-  removed with ×); New starts another, and the last one stays. Renamed, a
-  chain moves.
+- **Live.** As you edit, the chain is written into its file,
+  `chains/NAME.rhai`, so entries using `chain("name")` follow along,
+  mistakes and all. Click a chain on the left to edit it; a library chain
+  changed gives the journal a copy that stands in for it. Renamed, a
+  chain's file moves.
 - **Building.** Drag a lock type into the middle (or click it). Drag from
   an output to an input to wire them: only ports of the same type (or
   `Any`) take a wire, an input takes one wire, and nothing can feed back
   into itself. One output can feed several inputs. A lock's ports follow
   its options (`merge_alpha`'s `input_count`, say).
+- **Sources.** The journal's files a chain draws on: content, styles,
+  glyphsets and layouts, each a node with one output, `value` (see
+  library/chains/README.md). Content feeds locks (text as symbols in a base
+  set on it, or as text) and illustrations; styles, glyphsets and layouts
+  only illustrations. Pick one to change its file, base or options.
 - **Ports.** The inputs and outputs left unwired are the chain's, named
   as its locks name them, `lock.port`. Fix an input to give it its value
   in the chain itself. "Chain's" makes a lock's or illustration's option one
@@ -97,28 +116,30 @@ let pages = result.canvases("mg");
   FOX"), 27, 3)`. A value kind with a sketch, such as a StarChart from
   `star_chart`, is drawn under its output. The test case is the chain
   file's `example()`.
-- **Illustrations.** An illustration draws the chain's values as canvases: a star
-  chart's pages, a maze with its glyphs. Drag one in (or click it) and wire
-  a value to its inputs; the chain itself is left as it was. Pick it to set
-  its options and see what it draws of the test run. New writes an illustration
-  file in the browser and Edit opens one; the middle becomes its editor,
-  previewing its `example()` as you type, and it's usable as it draws (see
-  library/illustrations/README.md). A journal's `result.canvases("id")` is what it draws.
-- **Saving** writes the chain file. To add it to the repository, put it in
-  `library/chains/` (see library/chains/README.md), use it in the showcase, and rebuild
-  the renderer. Open… reads a chain file back. The snippets copy journal
-  script: `chain("name")` in use, or the chain built lock by lock with
-  `new_lock`.
+- **Illustrations.** An illustration draws the chain's values as canvases:
+  a star chart's pages, a maze with its glyphs. Drag one in (or click it)
+  and wire a value to its inputs; the chain itself is left as it was. Pick
+  it to set its options and see what it draws of the test run. New and
+  Open open an illustration file in its own editor.
+- **⚠** marks a node whose file is the journal's, standing in for the
+  library's of the same name. It's a note, not an error.
+- The snippets copy entry script: `chain("name")` in use, or the chain
+  built node by node with `new_lock`.
 
-## The workspace
+## Locks, illustrations, layouts, styles and helpers
 
-Fonts edited, and chains, illustrations and lock types made here, are the
-workspace: every script, in every editor, runs with them (the diagnostics
-say when), and Darkly renders and exports do too. They're kept in this
-browser only until exported into the repository; the tabs show what's in
-use, and Clear workspace, beside them, throws it all away (and the
-editors' drafts) to use the repository's files again. If the files in
-library/glyphsets/ change after edits began, the font editor says so.
+Each opens in three panes: on the left the options its file declares, to
+give values to preview with; in the middle the preview (a lock's examples,
+run, and its ports; what an illustration draws of its `example()`; a
+layout typesetting its `example()`; a style writing its example text); on
+the right its code. Helpers (`lib/`) have only their code.
+
+## Content
+
+Plain (`.txt`) and marked-up (`.md`) text, typed beside a page writing it
+in the library's plain hand. Symbols (`.json`) are typed as text in their
+base, which is picked beside them: nobody edits the JSON a symbols file is
+kept as.
 
 ## Running it
 
@@ -137,7 +158,7 @@ cd webapp/frontend && npm install
 cd webapp/frontend && npm start
 ```
 
-`npm start` builds the renderer (`npm run wasm`, a release build that takes
+`npm start` builds the engine (`npm run wasm`, a release build that takes
 a few minutes the first time) and serves the editor at
 http://localhost:4200. After changing only the frontend, `npm run serve`
 skips the wasm build. `npm run build` puts a static site in
@@ -148,7 +169,7 @@ server can host. `npm test` runs the frontend's unit tests.
 
 ### In Docker
 
-`webapp/Dockerfile` builds the renderer and the site and serves them with
+`webapp/Dockerfile` builds the engine and the site and serves them with
 nginx; it needs only Docker. Build from the repository root:
 
 ```bash
@@ -168,20 +189,22 @@ reuse BuildKit's caches.
 
 | path | what's there |
 |---|---|
-| `wasm/` | `scribe-wasm`, the renderer for the browser: the `scribe` library with the built-in library (`library/`) compiled in (its `embedded-assets` feature). `evaluate(source)` runs a script and lists its pages, `pageSvg(i)` draws one as SVG, and `Renderer` renders pages with Darkly (`renderPage`, `exportPdf`). `setWorkspace(fonts, locks, renderers, chains)` has scripts run with edited fonts and extra lock, renderer and chain files. For the font and lock editors: `previewSvg`, `builtinFonts`, `lockTypes`, `lockPorts`, `chainTypes`, `runChain`, `readChain`, `valueKinds`, `rendererTypes`, `rendererPorts`, `renderPreview` and `rendererSource`. |
+| `wasm/` | `scribe-wasm`, the engine for the browser: the `scribe` library with the built-in library (`library/`) compiled in (its `embedded-assets` feature). `setJournal(files)` gives it the journal's own files, by path, in front of the library's. `evaluate(source)` runs an entry and lists its pages, `pageSvg(i)` draws one as SVG, and `Renderer` renders pages with Darkly (`renderPage`, `exportPdf`). For the other editors: `previewSvg`, `libraryFiles`, `usedLibrary` (what an export bundles), `lockTypes`, `lockPorts`, `lockExamples`, `chainTypes`, `runChain`, `readChain`, `valueKinds`, `illustrationTypes`, `illustrationPorts`, `illustrationPreview`, `layoutTypes`, `layoutPreview`, `styleTypes` and `stylePreview`. |
 | `frontend/` | the Angular app (standalone components, signals, no zone.js) |
-| `frontend/src/app/workers/` | the web workers the renderer runs in. `eval.worker` runs the script as you type, sends its pages, then sends each page's SVG, the page shown first. `darkly.worker` renders with Darkly. `tools.worker` answers the font and lock editors. Typing never waits on any of them. |
-| `frontend/src/app/services/` | `JournalService` (the script, its pages, the file), `RenderService` (the script and Darkly workers), `ToolsService` (the tools worker), `WorkspaceService` (edited fonts, and lock, renderer and chain files), `FileService` (opening, saving, downloads) |
-| `frontend/src/app/shell/`, `layout/` | the tabs, and the three resizable columns every editor has |
-| `frontend/src/app/fonts/` | the font editor. `font-file.ts` reads and writes fonts.json; `glyph-path.ts` reads and writes path data; `glyph-edit.ts` is what the canvas does to a path. |
-| `frontend/src/app/locks/` | the lock editor. `chain-model.ts` is the graph and its rules; `chain-source.ts` writes it as a chain file; `renderer-editor.component.ts` edits renderer files. |
+| `frontend/src/app/journal/` | the journal as files by path (`journal-files.ts`: kinds, the manifest, zips), new files' templates, symbols content, and the entry editor |
+| `frontend/src/app/workers/` | the web workers the engine runs in. `eval.worker` runs the entry as you type, sends its pages, then sends each page's SVG, the page shown first. `darkly.worker` renders with Darkly. `tools.worker` answers the other editors. Typing never waits on any of them. |
+| `frontend/src/app/services/` | `JournalStore` (the journal, kept in IndexedDB), `JournalIoService` (open, import, export), `LibraryService` (the library's files), `JournalService` (the entry shown, its pages), `RenderService` (the script and Darkly workers), `ToolsService` (the tools worker), `FileService` (picking files, downloads) |
+| `frontend/src/app/shell/`, `layout/` | the journal bar, the files sidebar, which file shows, and the three resizable columns the editors have |
+| `frontend/src/app/fonts/` | the glyphset editor. `font-file.ts` reads and writes glyphset files; `glyph-path.ts` reads and writes path data; `glyph-edit.ts` is what the canvas does to a path. |
+| `frontend/src/app/locks/` | the chain editor. `chain-model.ts` is the graph and its rules; `chain-source.ts` writes it as a chain file. |
+| `frontend/src/app/resources/` | the lock, illustration, layout, style and helper editor, the content editor, and the library banner |
 | `frontend/src/app/editor/` | the CodeMirror editor and its rhai highlighting (`rhai-language.ts`) |
-| `frontend/scripts/examples.mjs` | copies every entry of every journal, `journals/*/entries/*.rhai`, into `generated/examples/` for the Examples menu, and the repository files the unit tests check against into `generated/fixtures/` |
+| `frontend/scripts/examples.mjs` | copies every journal (its manifest and files) into `generated/journals/` for the Open menu, and the repository files the unit tests check against into `generated/fixtures/` |
 
 While one script runs, only the newest edit waits to run next. A script
 that runs for more than 20 seconds (an endless loop, say) is stopped and
 its worker restarted. A script with an error leaves the last good pages
 showing.
 
-The renderer is about 17 MB (9 MB gzipped), mostly Darkly's built-in
+The engine is about 17 MB (9 MB gzipped), mostly Darkly's built-in
 textures and fonts.

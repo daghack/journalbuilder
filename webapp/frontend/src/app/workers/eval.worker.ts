@@ -3,7 +3,7 @@
 // with its pages, then sends each page's SVG, the page the editor shows
 // first. A newer script stops the SVGs of an older one.
 
-import init, { apiNames, evaluate, lastPanic, pageSvg, setWorkspace } from '../../../wasm-pkg/scribe_wasm.js';
+import init, { apiNames, evaluate, lastPanic, pageSvg, setJournal } from '../../../wasm-pkg/scribe_wasm.js';
 import type { EvalReply, EvalRequest, Evaluation } from '../scribe';
 
 const post = (reply: EvalReply) => postMessage(reply);
@@ -22,12 +22,12 @@ addEventListener('message', ({ data }: MessageEvent<EvalRequest>) => {
         (err) => post({ type: 'failed', message: String(err) }),
       );
       break;
-    case 'workspace':
+    case 'journal':
       // The app sends it just before the script that needs it: both wait
       // on `ready`, and run in the order they came.
       void ready?.then(() => {
         try {
-          setWorkspace(data.workspace.fonts, data.workspace.locks, data.workspace.renderers ?? {}, data.workspace.chains ?? {});
+          setJournal(data.files);
         } catch (err) {
           crashed(err);
         }
@@ -48,7 +48,7 @@ addEventListener('message', ({ data }: MessageEvent<EvalRequest>) => {
 /** The renderer panicked: say why, and stop; the app starts another worker. */
 function crashed(err: unknown) {
   generation = -1;
-  post({ type: 'crashed', message: `the renderer crashed: ${lastPanic() ?? String(err)}` });
+  post({ type: 'crashed', message: `the engine crashed: ${lastPanic() ?? String(err)}` });
   close();
 }
 

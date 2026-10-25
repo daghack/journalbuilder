@@ -1,6 +1,7 @@
-// A lock chain as the lock editor holds it: lock types placed as nodes,
+// A lock chain as the chain editor holds it: lock types placed as nodes,
 // wires from outputs to inputs, values fixed, options of its own and a test
-// case; and renderers attached to it, which draw its values. It's a chain
+// case; sources, the journal's files it draws on; and illustrations
+// attached to it, which draw its values. It's a chain
 // file (see chain-source.ts and webapp/library/chains/README.md), which journals use
 // with chain(name); its values are its locks' own ports, "lock.port".
 
@@ -33,6 +34,35 @@ export interface RendererNode {
   promoted: Record<string, string>;
   x: number;
   y: number;
+}
+
+/** What a source draws on: content (data), or a style, glyphset or layout (for illustrations). */
+export type SourceKind = 'content' | 'style' | 'glyphset' | 'layout';
+
+/**
+ * A source: one of the journal's files the chain draws on, with one
+ * output, "id.value". Content feeds locks and illustrations; a style,
+ * glyphset or layout only illustrations.
+ */
+export interface SourceNode {
+  id: string;
+  kind: SourceKind;
+  /** The file's name. */
+  name: string;
+  /** A style's or layout's options. */
+  options: Record<string, unknown>;
+  /** Text content as symbols in this base. */
+  base?: number;
+  x: number;
+  y: number;
+}
+
+/** The port a source's value comes out of. */
+export const SOURCE_PORT = 'value';
+
+/** The directory a source's file is in. */
+export function sourceDir(kind: SourceKind): 'content' | 'styles' | 'glyphsets' | 'layouts' {
+  return kind === 'content' ? 'content' : kind === 'style' ? 'styles' : kind === 'glyphset' ? 'glyphsets' : 'layouts';
 }
 
 /** A wire: an output ("lock.port") feeding an input. */
@@ -70,6 +100,8 @@ export interface ChainModel {
   description: string;
   options: ChainOption[];
   nodes: ChainNode[];
+  /** The journal's files it draws on. */
+  sources: SourceNode[];
   wires: Wire[];
   /** Renderers attached, and the wires from locks' outputs to their inputs ("pages.chart"). */
   renderers: RendererNode[];
@@ -81,7 +113,7 @@ export interface ChainModel {
 }
 
 export function emptyChain(name = 'my_chain'): ChainModel {
-  return { name, description: '', options: [], nodes: [], wires: [], renderers: [], renderWires: [], fixed: {}, test: {} };
+  return { name, description: '', options: [], nodes: [], sources: [], wires: [], renderers: [], renderWires: [], fixed: {}, test: {} };
 }
 
 /** A port of the chain open for the outside, "lock.port", and its type. */
@@ -173,6 +205,11 @@ export function wouldLoop(model: ChainModel, from: string, to: string): boolean 
   return false;
 }
 
+/** Whether `id` is one of the chain's sources. */
+export function isSource(model: ChainModel, id: string): boolean {
+  return model.sources.some((s) => s.id === id);
+}
+
 /** Whether `id` is one of the chain's renderers (not a lock). */
 export function isRenderer(model: ChainModel, id: string): boolean {
   return model.renderers.some((r) => r.id === id);
@@ -182,7 +219,11 @@ export function isRenderer(model: ChainModel, id: string): boolean {
 export function wireProblem(model: ChainModel, ports: PortsByNode, from: string, to: string): string | null {
   const a = portType(ports, from, 'outputs');
   const b = portType(ports, to, 'inputs');
-  if (isRenderer(model, splitPort(from)[0])) return 'a renderer has no outputs to wire';
+  if (isRenderer(model, splitPort(from)[0])) return 'an illustration has no outputs to wire';
+  if (isSource(model, splitPort(to)[0])) return 'a source has no inputs';
+  if (isSource(model, splitPort(from)[0]) && !isRenderer(model, splitPort(to)[0]) && model.sources.find((s) => s.id === splitPort(from)[0])?.kind !== 'content') {
+    return 'a style, glyphset or layout is something to draw with: only an illustration takes one';
+  }
   if (a === null) return `${from} isn't an output`;
   if (b === null) return `${to} isn't an input`;
   if (!compatible(a, b)) return `${from} gives ${a}, but ${to} takes ${b}`;
@@ -212,7 +253,7 @@ export function freshId(model: ChainModel, type: string): string {
   const base = type.split('_').map((word) => word[0]).join('') || 'lock';
   for (let n = 1; ; n++) {
     const id = n === 1 ? base : `${base}${n}`;
-    if (!model.nodes.some((node) => node.id === id) && !model.renderers.some((r) => r.id === id)) return id;
+    if (!model.nodes.some((node) => node.id === id) && !model.renderers.some((r) => r.id === id) && !model.sources.some((s) => s.id === id)) return id;
   }
 }
 
@@ -223,6 +264,7 @@ export function renameNode(model: ChainModel, id: string, to: string): ChainMode
   return {
     ...model,
     nodes: model.nodes.map((node) => (node.id === id ? { ...node, id: to } : node)),
+    sources: model.sources.map((s) => (s.id === id ? { ...s, id: to } : s)),
     wires: model.wires.map((w) => ({ from: port(w.from), to: port(w.to) })),
     renderers: model.renderers.map((r) => (r.id === id ? { ...r, id: to } : r)),
     renderWires: model.renderWires.map((w) => ({ from: port(w.from), to: port(w.to) })),
@@ -238,6 +280,7 @@ export function removeNode(model: ChainModel, id: string): ChainModel {
   return {
     ...model,
     nodes: model.nodes.filter((node) => node.id !== id),
+    sources: model.sources.filter((s) => s.id !== id),
     wires: model.wires.filter((w) => keep(w.from) && keep(w.to)),
     renderers: model.renderers.filter((r) => r.id !== id),
     renderWires: model.renderWires.filter((w) => keep(w.from) && keep(w.to)),

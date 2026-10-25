@@ -59,9 +59,35 @@ fn example() {
 | function | gives |
 |---|---|
 | `options()` *(optional)* | the chain's options, declared as a lock file declares its own (`integer(3)`, `one_of([...], default)`; see locks/README.md), which `chain(name, options)` gives |
-| `chain(o)` | `locks` (each id's `type` and `options`), `connect` (`[output, input]` pairs), `fixed` (values for inputs, by port) and `illustrations` (each id's `type`, `options` and `inputs`, each illustration input -> the port it draws) |
+| `chain(o)` | `sources` (optional: the journal's files it draws on, below), `locks` (each id's `type` and `options`), `connect` (`[output, input]` pairs), `fixed` (values for inputs, by port) and `illustrations` (each id's `type`, `options` and `inputs`, each illustration input -> the port it draws) |
 | `layout()` *(optional)* | where the lock editor draws each lock and illustration |
 | `example()` *(optional)* | a value for every open input, by port: the editor's test case, which `journalbuild --check-locks` and `cargo test` lock and unlock, needing the inputs back |
+
+## Sources
+
+A chain can draw on the journal's files, each a source with one output,
+`ID.value`, wired as a lock's output is:
+
+```rhai
+sources: #{
+	secret: #{ type: "content", name: "lorem", base: 27 },   // symbols in base 27
+	words: #{ type: "content", name: "lorem" },              // text: a String
+	hand: #{ type: "style", name: "plain_hand", options: #{ size: 22.0 } },
+	copper: #{ type: "glyphset", name: "copper" },
+	page: #{ type: "layout", name: "two_column_article", options: #{} },
+},
+connect: [["secret.value", "shift.plain_text"]],
+illustrations: #{ note: #{ type: "styled_text", inputs: #{ text: "words.value", style: "hand.value" } } },
+```
+
+Content is data, so it feeds a lock's input (fixing its value) or an
+illustration's: a `.json` file's symbols in its own base, a `.txt` or `.md`
+file's text as symbols in `base` (what doesn't fit dropped) or, without
+one, as text. Styles, glyphsets and layouts are things to draw with, so only
+illustrations take them, at inputs typed `TextStyle`, `Glyphset` and
+`Layout`; they're made in the journal's engine as the illustration draws.
+Journals add sources to a chain too: `lock.source(id, kind, name, #{
+options, base })`.
 
 A chain file runs in the lock files' engine, so it writes values as lock
 files do: `symbols(27, "HI")` is an array, and value kinds' functions

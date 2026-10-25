@@ -1503,6 +1503,25 @@ drawn.add(write_in("eye (outer_base, inner_base, length, width, top_ink, bottom_
 drawn.add(write_in("a substitution cipher's ordering round the iris, its cipher text in the pupil", LEFT + 220, TOP + 1034, 22, CAPTION, PLAIN));
 book.bind("locks", drawn);
 
+// Sources: a chain drawing on the journal's files, each a node with one
+// output, ID.value. Content is data a lock takes (text as symbols in a
+// base, or as a String); a style, glyphset or layout only an illustration
+// takes, here styled_text writing content in a text style.
+let sourced = sheet("locks");
+sourced.add(caption("chain sources: #{ type: content, style, glyphset or layout, name, options, base }; chains/sourced_note.rhai", TOP));
+let note = chain("sourced_note").run();
+sourced.add(caption(`content("lorem") as base-27 symbols into shift_cipher: ${note.text("shift.cipher_text").sub_string(0, 40)}...`, TOP + 50));
+sourced.add(note.canvases("note")[0].translate_by(vec2(LEFT, TOP + 100)));
+sourced.add(caption("lock.source(id, kind, name, #{ options, base }): the same in a script; styled_text in the showcase's margin_note", TOP + 380));
+let scripted = new_lock("scripted")
+	.source("hand", "style", "margin_note", #{ options: #{ size: 26 } })
+	.source("words", "content", "lorem")
+	.attach("note", "styled_text", #{ width: 960.0 })
+	.connect("words.value", "note.text")
+	.connect("hand.value", "note.style");
+sourced.add(scripted.run().canvases("note")[0].translate_by(vec2(LEFT, TOP + 430)));
+book.bind("locks", sourced);
+
 // ---- a spread: one drawing over two pages ----
 //
 // A page twice as wide, split into two tiles side by side: each a page of

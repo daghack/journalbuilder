@@ -1,8 +1,11 @@
 import { Component, computed, inject, signal } from '@angular/core';
-import type { LockType, RendererType } from '../scribe';
+import type { IllustrationType, LockType } from '../scribe';
+import { JournalStore } from '../services/journal-store.service';
+import { LibraryService } from '../services/library.service';
+import type { SourceKind } from './chain-model';
 import { LockEditorService } from './lock-editor.service';
 
-/** The left: the chains, to edit; every lock type and renderer type, to drag into the chain (or click to add). */
+/** The left: the chains, to edit; every lock type and illustration, to drag into the chain (or click to add). */
 @Component({
   selector: 'app-lock-palette',
   template: `
@@ -10,16 +13,14 @@ import { LockEditorService } from './lock-editor.service';
       <input type="text" placeholder="Find a lock type or illustration" aria-label="Find a lock type" [value]="filter()" (input)="filter.set($any($event.target).value)" />
     </div>
     @if (editor.typesError(); as error) { <p class="error">{{ error }}</p> }
-    <h3 class="renderers-head">Chains <button type="button" class="open" (click)="editor.newChain()" title="Start a new chain">New</button></h3>
-    <p class="note">Click one to edit it: journals using chain("name") follow along.</p>
+    <h3 class="renderers-head">Chains <button type="button" class="open" (click)="editor.newFile('chains')" title="Start a new chain">New</button></h3>
+    <p class="note">Click one to edit it: entries using chain("name") follow along.</p>
     <ul>
       @for (c of chains(); track c.name) {
-        <li class="type chain" [class.current]="c.name === editor.model().name" [class.broken]="!!c.error" (click)="editor.openChain(c.name)" [title]="c.error ?? c.description ?? ''">
+        <li class="type chain" [class.current]="c.name === editor.model().name" [class.broken]="!!c.error" (click)="editor.openFile('chains/' + c.name + '.rhai')" [title]="c.error ?? c.description ?? ''">
           <span class="name">{{ c.name }}</span>
-          @if (c.workspace) { <span class="tag" title="Only in this browser, or edited here">browser</span> }
-          @if (c.workspace) {
-            <button type="button" class="remove" (click)="$event.stopPropagation(); editor.removeWorkspaceChain(c.name)" title="Remove this browser's copy of the chain">×</button>
-          }
+          @if (c.own && c.builtin) { <span class="tag warn" title="The journal's stands in for the library's chain of that name">⚠</span> }
+          @else if (c.own) { <span class="tag" title="The journal's own">journal</span> }
           <span class="about">{{ c.error ?? c.description }}</span>
         </li>
       }
@@ -33,27 +34,38 @@ import { LockEditorService } from './lock-editor.service';
                 (click)="!type.error && add(type)" [title]="type.error ?? type.description ?? ''">
               <span class="name">{{ type.name }}</span>
               @if (type.composite) { <span class="tag" title="A composite lock file: other lock types wired together">composite</span> }
-              @if (type.workspace) {
-                <button type="button" class="remove" (click)="$event.stopPropagation(); editor.removeWorkspaceLock(type.name)" title="Remove this lock type from this browser">×</button>
-              }
+              @if (type.own && type.builtin) { <span class="tag warn" title="The journal's stands in for the library's lock type of that name">⚠</span> }
+              <button type="button" class="open" (click)="$event.stopPropagation(); editor.openFile('locks/' + type.name + '.rhai')" title="Open this lock type's file">Open</button>
               <span class="about">{{ type.error ?? type.description }}</span>
             </li>
           }
         </ul>
       }
     }
-    <h3 class="renderers-head">Illustrations <button type="button" class="open" (click)="editor.newRenderer()" title="Write a new illustration file">New</button></h3>
-    <p class="note">Draw a lock's values as canvases: wire an output to one. Journals attach them with lock.attach.</p>
+    <h3 class="renderers-head">Sources</h3>
+    <p class="note">The journal's files a chain draws on: content feeds locks and illustrations; styles, glyphsets and layouts feed illustrations.</p>
+    @for (group of sources(); track group.kind) {
+      @if (group.names.length) {
+        <h3>{{ group.title }}</h3>
+        <ul>
+          @for (name of group.names; track name) {
+            <li class="type source" draggable="true" (dragstart)="dragSource($event, group.kind, name)" (click)="addSource(group.kind, name)"
+                [title]="'Add a ' + group.kind + ' source drawing on ' + name">
+              <span class="name">{{ name }}</span>
+            </li>
+          }
+        </ul>
+      }
+    }
+    <h3 class="renderers-head">Illustrations <button type="button" class="open" (click)="editor.newFile('illustrations')" title="Write a new illustration file">New</button></h3>
+    <p class="note">Draw a lock's values as canvases: wire an output to one. Entries attach them with lock.attach.</p>
     <ul>
       @for (type of renderers(); track type.name) {
         <li class="type renderer" draggable="true" [class.broken]="!!type.error" (dragstart)="dragRenderer($event, type)"
             (click)="!type.error && addRenderer(type)" [title]="type.error ?? type.description ?? ''">
           <span class="name">{{ type.name }}</span>
-          @if (type.workspace) { <span class="tag" title="Only in this browser">browser</span> }
-          <button type="button" class="open" (click)="$event.stopPropagation(); editor.editRenderer(type.name)" title="Edit this illustration's file">Edit</button>
-          @if (type.workspace) {
-            <button type="button" class="remove" (click)="$event.stopPropagation(); editor.removeWorkspaceRenderer(type.name)" title="Remove this illustration from this browser">×</button>
-          }
+          @if (type.own && type.builtin) { <span class="tag warn" title="The journal's stands in for the library's illustration of that name">⚠</span> }
+          <button type="button" class="open" (click)="$event.stopPropagation(); editor.openFile('illustrations/' + type.name + '.rhai')" title="Open this illustration's file">Open</button>
           <span class="about">{{ type.error ?? type.description }}</span>
         </li>
       }
@@ -77,20 +89,24 @@ import { LockEditorService } from './lock-editor.service';
     .renderers-head { display: flex; align-items: center; gap: 6px; margin-top: 14px; }
     .note { margin: 0 10px 4px; color: #a39b90; font-size: 11px; }
     .type.renderer { border-left: 2px dashed #8fc1e3; }
+    .type.source { border-left: 2px solid #c9a227; cursor: grab; }
     .type.chain { cursor: pointer; }
     .type.chain.current { border-color: var(--rail-selected); }
+    .tag.warn { color: var(--warning); border-color: var(--warning); background: transparent; }
   `,
 })
 export class LockPaletteComponent {
   protected readonly editor = inject(LockEditorService);
+  private readonly store = inject(JournalStore);
+  private readonly library = inject(LibraryService);
   protected readonly filter = signal('');
 
   protected readonly groups = computed(() => {
     const filter = this.filter().trim().toLowerCase();
     const types = this.editor.types().filter((t) => !filter || t.name.includes(filter) || (t.description ?? '').toLowerCase().includes(filter));
     return [
-      { title: 'Lock types in this browser', types: types.filter((t) => t.workspace) },
-      { title: 'Lock types', types: types.filter((t) => !t.workspace) },
+      { title: "The journal's lock types", types: types.filter((t) => t.own) },
+      { title: 'Lock types', types: types.filter((t) => !t.own) },
     ];
   });
 
@@ -104,14 +120,42 @@ export class LockPaletteComponent {
     return this.editor.rendererTypes().filter((t) => !filter || t.name.includes(filter) || (t.description ?? '').toLowerCase().includes(filter));
   });
 
-  protected dragRenderer(event: DragEvent, type: RendererType) {
+  /** The files a source can draw on, by kind: the journal's and the library's. */
+  protected readonly sources = computed(() => {
+    const filter = this.filter().trim().toLowerCase();
+    const paths = [...Object.keys(this.store.files()), ...Object.keys(this.library.files())];
+    const names = (dir: string) => [...new Set(paths.filter((p) => p.startsWith(`${dir}/`)).map((p) => p.slice(dir.length + 1).replace(/\.[a-z]+$/, '')))]
+      .filter((name) => !filter || name.includes(filter)).sort();
+    return [
+      { kind: 'content' as SourceKind, title: 'Content', names: names('content') },
+      { kind: 'style' as SourceKind, title: 'Styles', names: names('styles') },
+      { kind: 'glyphset' as SourceKind, title: 'Glyphsets', names: names('glyphsets') },
+      { kind: 'layout' as SourceKind, title: 'Layouts', names: names('layouts') },
+    ];
+  });
+
+  protected dragSource(event: DragEvent, kind: SourceKind, name: string) {
+    event.dataTransfer?.setData('application/x-source', JSON.stringify({ kind, name }));
+    event.dataTransfer!.effectAllowed = 'copy';
+  }
+
+  /** Clicked: add it left of the locks. */
+  protected addSource(kind: SourceKind, name: string) {
+    const model = this.editor.model();
+    const placed = [...model.nodes, ...model.sources];
+    const x = placed.length ? Math.min(...placed.map((n) => n.x)) - (model.sources.length ? 0 : 300) : 120;
+    const y = model.sources.length ? Math.max(...model.sources.map((n) => n.y)) + 120 : 60;
+    this.editor.addSource(kind, name, x, y);
+  }
+
+  protected dragRenderer(event: DragEvent, type: IllustrationType) {
     if (type.error) return event.preventDefault();
     event.dataTransfer?.setData('application/x-renderer-type', type.name);
     event.dataTransfer!.effectAllowed = 'copy';
   }
 
   /** Clicked: attach it below the locks. */
-  protected addRenderer(type: RendererType) {
+  protected addRenderer(type: IllustrationType) {
     const model = this.editor.model();
     const placed = [...model.nodes, ...model.renderers];
     const x = placed.length ? Math.max(...placed.map((n) => n.x)) + 360 : 120;

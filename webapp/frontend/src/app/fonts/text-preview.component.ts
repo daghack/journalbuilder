@@ -83,7 +83,7 @@ export class TextPreviewComponent implements OnDestroy {
   constructor() {
     effect(() => {
       const script = this.script();
-      const fonts = this.editor.text();
+      const fonts = this.editor.previewFiles();
       if (script === null || fonts === null) return;
       if (this.timer) clearTimeout(this.timer);
       this.timer = setTimeout(() => this.draw(script, fonts), 250);
@@ -99,7 +99,7 @@ export class TextPreviewComponent implements OnDestroy {
     }
   }
 
-  private async draw(script: string, fonts: string) {
+  private async draw(script: string, fonts: Record<string, string>) {
     const asked = ++this.asked;
     this.busy.set(true);
     let preview: Preview;

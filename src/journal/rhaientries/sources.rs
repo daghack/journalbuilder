@@ -9,7 +9,7 @@
 
 use rhai::{Engine, EvalAltResult, Module, ModuleResolver, Position, Scope, Shared, AST};
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -30,12 +30,14 @@ pub struct Sources {
     /// Files these stand in front of: a file there is one here too, unless
     /// one of the same name is here.
     under: Option<Rc<Sources>>,
+    /// Where the names of these' own files are noted as they're read.
+    used: Option<Rc<RefCell<BTreeSet<String>>>>,
 }
 
 impl Sources {
     /// The scripts in `dir`.
     pub fn dir(dir: impl Into<PathBuf>) -> Self {
-        Sources { dir: dir.into(), ext: "rhai", embedded: None, overlay: None, under: None }
+        Sources { dir: dir.into(), ext: "rhai", embedded: None, overlay: None, under: None, used: None }
     }
 
     /// Scripts compiled in, by name, shown as if they were in `dir`.
@@ -79,6 +81,28 @@ impl Sources {
     /// What these stand in front of, if anything.
     pub fn under(&self) -> Option<&Sources> {
         self.under.as_deref()
+    }
+
+    /// These files, noting into `used` the name of each of their own read
+    /// (not those of what they're in front of): which a journal uses.
+    pub fn recording(mut self, used: Rc<RefCell<BTreeSet<String>>>) -> Self {
+        self.used = Some(used);
+        self
+    }
+
+    /// These files, noting nothing as they're read, nor what they're in
+    /// front of.
+    pub fn unrecorded(&self) -> Sources {
+        let mut sources = self.clone();
+        sources.used = None;
+        sources.under = self.under.as_ref().map(|under| Rc::new(under.unrecorded()));
+        sources
+    }
+
+    fn note(&self, name: &str) {
+        if let Some(used) = &self.used {
+            used.borrow_mut().insert(name.to_string());
+        }
     }
 
     fn overlaid(&self, name: &str) -> Option<&str> {
@@ -175,11 +199,15 @@ impl Sources {
     /// The text of the file called `name`.
     pub fn read(&self, name: &str) -> std::io::Result<String> {
         if let Some(source) = self.overlaid(name) {
+            self.note(name);
             return Ok(source.to_string());
         }
         if let Some(under) = &self.under
             && !self.has_own(name) && under.has(name) {
             return under.read(name);
+        }
+        if self.has_own(name) {
+            self.note(name);
         }
         match &self.embedded {
             Some(scripts) => scripts.get(name).map(|source| source.to_string()).ok_or_else(|| {
@@ -313,6 +341,16 @@ mod tests {
         let missing = Sources::dir("/nowhere/at/all").over(Sources::embedded("library", &[("shared", "1")]));
         assert_eq!(missing.names().unwrap(), ["shared"]);
         assert_eq!(missing.read("shared").unwrap(), "1");
+
+        // Reads of a library's files are noted, not the journal's own.
+        let used: Rc<RefCell<BTreeSet<String>>> = Rc::default();
+        let library = Sources::embedded("library", &[("shared", "1"), ("replaced", "2"), ("unread", "3")]).recording(used.clone());
+        let journal = Sources::embedded("journal", &[("replaced", "4")]).over(library);
+        journal.read("shared").unwrap();
+        journal.read("replaced").unwrap();
+        assert_eq!(used.borrow().iter().collect::<Vec<_>>(), ["shared"]);
+        journal.unrecorded().read("unread").unwrap();
+        assert_eq!(used.borrow().len(), 1);
 
         // Other extensions.
         let dir = std::env::temp_dir().join(format!("scribe-sources-ext-{}", std::process::id()));

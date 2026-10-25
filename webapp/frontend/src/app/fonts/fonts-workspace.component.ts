@@ -1,6 +1,5 @@
-import { Component, inject, viewChild } from '@angular/core';
+import { Component, ElementRef, inject, viewChild } from '@angular/core';
 import { ThreePaneComponent } from '../layout/three-pane.component';
-import { ShellService } from '../shell/shell.service';
 import { FontEditorService } from './font-editor.service';
 import { FontPanelComponent } from './font-panel.component';
 import { GlyphCanvasComponent } from './glyph-canvas.component';
@@ -8,7 +7,7 @@ import { GlyphListComponent } from './glyph-list.component';
 import { GlyphToolbarComponent } from './glyph-toolbar.component';
 import { TextPreviewComponent } from './text-preview.component';
 
-/** The font editor: the font's glyphs, the glyph drawn with a preview of text in the font, and the font's options. */
+/** The glyphset editor: the glyphset's glyphs, the glyph drawn with a preview of text in it, and the glyphset's options. */
 @Component({
   selector: 'app-fonts-workspace',
   imports: [ThreePaneComponent, GlyphListComponent, GlyphToolbarComponent, GlyphCanvasComponent, TextPreviewComponent, FontPanelComponent],
@@ -33,12 +32,12 @@ import { TextPreviewComponent } from './text-preview.component';
 })
 export class FontsWorkspaceComponent {
   private readonly editor = inject(FontEditorService);
-  private readonly shell = inject(ShellService);
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   protected readonly canvas = viewChild(GlyphCanvasComponent);
 
-  /** Undo and redo, when the font editor shows and no text field has the keyboard. */
+  /** Undo and redo, when the glyphset editor shows and no text field has the keyboard. */
   protected onKey(event: KeyboardEvent) {
-    if (this.shell.mode() !== 'fonts' || !(event.ctrlKey || event.metaKey)) return;
+    if (this.host.nativeElement.hidden || !(event.ctrlKey || event.metaKey)) return;
     const target = event.target as HTMLElement | null;
     if (target?.closest('input, textarea, select')) return;
     const key = event.key.toLowerCase();
@@ -48,9 +47,6 @@ export class FontsWorkspaceComponent {
     } else if ((key === 'z' && event.shiftKey) || key === 'y') {
       event.preventDefault();
       this.editor.redo();
-    } else if (key === 's') {
-      event.preventDefault();
-      void this.editor.export();
     }
   }
 }

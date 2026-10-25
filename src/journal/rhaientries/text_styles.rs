@@ -41,6 +41,8 @@ pub struct TextStyleFile {
     ast: AST,
     /// Its options' defaults.
     pub defaults: Map,
+    /// The file's opening comment, without its "name: ".
+    pub description: String,
 }
 
 impl TextStyleLibrary {
@@ -68,7 +70,9 @@ impl TextStyleLibrary {
             return Err(format!("{}: {} doesn't define style(o)", what, self.sources.path(name).display()));
         }
         let defaults = super::options::declared_defaults(engine, &ast, &what)?;
-        let loaded = Rc::new(TextStyleFile { name: name.to_string(), ast, defaults });
+        let source = self.sources.read(name).map_err(|e| e.to_string())?;
+        let description = super::illustrations::description(&source, name);
+        let loaded = Rc::new(TextStyleFile { name: name.to_string(), ast, defaults, description });
         self.loaded.borrow_mut().insert(name.to_string(), loaded.clone());
         Ok(loaded)
     }

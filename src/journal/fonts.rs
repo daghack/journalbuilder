@@ -41,7 +41,7 @@
 use rand::{Rng, RngCore};
 use serde::Deserialize;
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
 use super::paths::StrokePath;
@@ -249,6 +249,8 @@ pub struct MissingGlyph {
 pub struct FontBook {
     fonts: BTreeMap<String, Font>,
     missing: RefCell<BTreeMap<char, MissingGlyph>>,
+    /// The glyphsets scripts have looked up, their fallbacks included.
+    used: RefCell<BTreeSet<String>>,
 }
 
 impl FontBook {
@@ -333,7 +335,7 @@ impl FontBook {
         }
         let fonts = loaded.keys().map(|name| Ok((name.clone(), resolve(name, &loaded, &mut Vec::new())?)))
             .collect::<Result<_, String>>()?;
-        Ok(FontBook { fonts, missing: RefCell::default() })
+        Ok(FontBook { fonts, missing: RefCell::default(), used: RefCell::default() })
     }
     /// Every font's name, sorted.
     pub fn names(&self) -> Vec<String> {
@@ -341,7 +343,20 @@ impl FontBook {
     }
     /// A font as the file sets it.
     pub fn font(&self, name: &str) -> Option<Font> {
-        self.fonts.get(name).cloned()
+        let font = self.fonts.get(name).cloned()?;
+        let mut used = self.used.borrow_mut();
+        let mut next = Some(&font);
+        while let Some(f) = next {
+            used.insert(f.name().to_string());
+            next = f.fallback.as_deref();
+        }
+        drop(used);
+        Some(font)
+    }
+    /// The glyphsets looked up so far, by `font` or for the fallback glyph:
+    /// what a journal uses.
+    pub fn used(&self) -> BTreeSet<String> {
+        self.used.borrow().clone()
     }
     /// The fallback glyph for a character no glyph was found for (`X`, or a
     /// built-in cross if the file has none), so a missing glyph never stops
@@ -357,6 +372,7 @@ impl FontBook {
             }
         }
         let (font, key) = FALLBACK_GLYPH;
+        self.used.borrow_mut().insert(font.to_string());
         let base = self.fonts.get(font).and_then(|f| f.glyphs.glyphs.get(key)).map(|bases| bases[0].clone()).unwrap_or_else(|| {
             let cross = StrokePath::new()
                 .move_to(-1.0, -1.0).line_to(1.0, 1.0)

@@ -552,6 +552,23 @@ fn load_layout(ctx: &NativeCallContext, layouts: &Sources, name: &str, options: 
     Ok(Layout { name: name.to_string(), source: Source::File { ast: Rc::new(ast), file }, options })
 }
 
+/// What layout file `name` is: its options' defaults, its opening comment,
+/// and whether it has an `example()` to preview with.
+pub fn layout_info(engine: &Engine, layouts: &Sources, name: &str) -> Result<(Map, String, bool), String> {
+    if !layouts.has(name) {
+        return Err(format!("no layout named '{}'; layouts: {}", name, layouts.names().unwrap_or_default().join(", ")));
+    }
+    let what = format!("layout '{}'", name);
+    let ast = layouts.compile(engine, name).map_err(|e| format!("{}: {}", what, e))?;
+    if !ast.iter_functions().any(|f| f.name == "page" && f.params.len() == 2) {
+        return Err(format!("{}: {} doesn't define page(n, info)", what, layouts.path(name).display()));
+    }
+    let defaults = super::options::declared_defaults(engine, &ast, &what)?;
+    let source = layouts.read(name).map_err(|e| e.to_string())?;
+    let example = ast.iter_functions().any(|f| f.name == "example" && f.params.is_empty());
+    Ok((defaults, super::illustrations::description(&source, name), example))
+}
+
 /// What a layout file gives to preview it with: its `example()`, the
 /// content to typeset (`#{ flows, roles, art, ... }`), if it has one.
 pub fn layout_example(engine: &Engine, layouts: &Sources, name: &str) -> Result<Option<Map>, String> {

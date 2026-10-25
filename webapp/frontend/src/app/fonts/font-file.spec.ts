@@ -1,10 +1,17 @@
 import fontsJson from '../../../generated/fixtures/fonts-json';
-import { checkFonts, fallbackLoop, fontChanges, jsonString, parseFonts, serializeFonts, withOption, type FontsFile } from './font-file';
+import { checkFonts, fallbackLoop, fontChanges, jsonString, parseFont, parseFonts, serializeFont, serializeFonts, withOption, type FontsFile } from './font-file';
 import { formatPath, parsePath } from './glyph-path';
 
 describe('the fonts file', () => {
-  it('writes webapp/config/fonts.json back as it was', () => {
+  it('writes the library\'s glyphsets back as they were', () => {
     expect(serializeFonts(parseFonts(fontsJson))).toBe(fontsJson);
+  });
+
+  it('reads and writes a glyphset file, one font', () => {
+    const plain = parseFonts(fontsJson).find((font) => font.name === 'plain')!;
+    const text = serializeFont(plain);
+    expect(text.startsWith('{\n\t"character_padding"')).toBe(true);
+    expect(parseFont('plain', text)).toEqual(plain);
   });
 
   it('keeps glyph keys in file order, integer-like ones included', () => {

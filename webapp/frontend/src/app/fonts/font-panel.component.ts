@@ -1,38 +1,29 @@
 import { Component, computed, effect, inject, signal } from '@angular/core';
+import { LibraryBannerComponent } from '../resources/library-banner.component';
 import { FontEditorService } from './font-editor.service';
-import { FALLBACK_GLYPH, fallbackLoop, fallbackOf, optionRaw, parseFonts, withOption } from './font-file';
+import { FALLBACK_GLYPH, fallbackLoop, fallbackOf, optionRaw, withOption } from './font-file';
 
-/** The right: which fonts are open and which font is shown, its options, the glyph drawn, and the export. */
+/** The right: the glyphset shown, its options, and the glyph drawn. */
 @Component({
   selector: 'app-font-panel',
+  imports: [LibraryBannerComponent],
   template: `
+    <app-library-banner [path]="editor.fontPath()" [own]="editor.fontOwn()" [builtin]="!!editor.builtinFont()" (copy)="copyIn()" (revert)="editor.useLibraryFont()" />
     <section class="panel-section">
-      <h3>Fonts file</h3>
-      <div class="row">
-        <span class="name">{{ editor.fileName() }}@if (editor.dirty()) {<span class="dirty" title="Changes not exported"> ●</span>}</span>
-      </div>
-      <div class="row">
-        <button type="button" class="primary" (click)="editor.export()" [disabled]="!editor.file() || editor.problems().length > 0"
-                title="Save the whole fonts file: back where it came from in Chromium browsers, else as a download. Split it into webapp/library/glyphsets/ with npm run split-fonts.">Export fonts.json</button>
-        <button type="button" (click)="editor.open()" title="Open a fonts file">Open…</button>
-        <button type="button" (click)="revert()" [disabled]="editor.unchanged()" title="Throw away every font's edits: start again from the built-in fonts as built in">Revert all</button>
-      </div>
       @if (editor.loadError(); as error) { <p class="note-error">{{ error }}</p> }
       <p class="hint">
         @if (editor.problems().length) {
-          Journals keep the last fonts without problems until these are fixed.
-        } @else if (editor.unchanged()) {
-          These are the built-in fonts. Edits apply to journals as you make them.
+          The journal keeps its last glyphsets without problems until these are fixed.
         } @else {
-          Journals use these fonts as edited (in this browser only, until exported).
+          Entries use the glyphsets as you edit them: each that differs from the library's is a file of the journal's, glyphsets/NAME.json.
         }
       </p>
     </section>
 
     @if (editor.file(); as file) {
       <section class="panel-section">
-        <h3>Font</h3>
-        <select aria-label="Font" (change)="editor.pickFont($any($event.target).value)">
+        <h3>Glyphset</h3>
+        <select aria-label="Glyphset" (change)="editor.openFont($any($event.target).value)">
           @for (font of file; track font.name) {
             <option [value]="font.name" [selected]="font.name === editor.fontName()">{{ font.name }} ({{ font.glyphs.length }})</option>
           }
@@ -48,9 +39,8 @@ import { FALLBACK_GLYPH, fallbackLoop, fallbackOf, optionRaw, parseFonts, withOp
         </div>
         @if (fontError(); as error) { <p class="problem">{{ error }}</p> }
         <div class="row">
-          <button type="button" (click)="editor.revertFont()" [disabled]="editor.fontUnchanged()"
-                  [title]="editor.builtinFont() ? 'Put ' + editor.fontName() + ' back as it is in the built-in fonts; other fonts keep their edits' : editor.fontName() + ' is not in the built-in fonts, so has nothing to revert to'">Revert {{ editor.fontName() }}</button>
-          <button type="button" class="danger" (click)="editor.deleteFont()" [disabled]="file.length < 2">Delete {{ editor.fontName() }}</button>
+          <button type="button" class="danger" (click)="editor.deleteFont()" [disabled]="file.length < 2 || !!editor.builtinFont()"
+                  [title]="deleteTitle()">Delete {{ editor.fontName() }}</button>
         </div>
       </section>
 
@@ -167,30 +157,20 @@ export class FontPanelComponent {
     });
   });
 
-  /** The built-in fonts' names, to tell new and renamed fonts by. */
-  private readonly builtinNames = computed(() => {
-    const builtin = this.editor.builtin();
-    try {
-      return builtin ? parseFonts(builtin).map((font) => font.name) : [];
-    } catch {
-      return [];
-    }
-  });
-
   protected readonly notes = computed(() => {
     const notes: string[] = [];
     const file = this.editor.file() ?? [];
-    const builtin = this.builtinNames();
+    const builtin = this.editor.builtinNames();
     for (const name of builtin) {
-      if (!file.some((font) => font.name === name)) notes.push(`There's no font '${name}' any more: scripts calling glyphset("${name}") will fail.`);
+      if (!file.some((font) => font.name === name)) notes.push(`There's no glyphset '${name}' any more: scripts calling glyphset("${name}") will fail.`);
     }
     const symbols = file.find((font) => font.name === FALLBACK_GLYPH.font);
     if (!symbols?.glyphs.some((glyph) => glyph.key === FALLBACK_GLYPH.key)) {
-      notes.push(`Characters no font has are drawn with ${FALLBACK_GLYPH.font}'s ${FALLBACK_GLYPH.key}, which isn't there: the renderer will fail on them.`);
+      notes.push(`Characters no glyphset has are drawn with ${FALLBACK_GLYPH.font}'s ${FALLBACK_GLYPH.key}, which isn't there: the engine will fail on them.`);
     }
     for (const font of file) {
       if (!builtin.includes(font.name) && font.glyphs.length >= 20 && !font.name.startsWith('debug')) {
-        notes.push(`'${font.name}' is new, with ${font.glyphs.length} glyphs: the showcase needs a line of it (tests/showcase.rs checks).`);
+        notes.push(`'${font.name}' is new, with ${font.glyphs.length} glyphs: put in the library, the showcase needs a line of it (tests/showcase.rs checks).`);
       }
     }
     return notes;
@@ -239,7 +219,12 @@ export class FontPanelComponent {
     if (!error) this.keyDraft.set(null);
   }
 
-  protected revert() {
-    if (this.editor.unchanged() || confirm('Throw away every edit to the fonts and start again from the built-in fonts?')) this.editor.revert();
+  protected readonly deleteTitle = computed(() => this.editor.builtinFont()
+    ? `The library has ${this.editor.fontName()}, so it can't be deleted`
+    : `Delete the journal's glyphsets/${this.editor.fontName()}.json`);
+
+  /** Give the journal a copy of the library's glyphset shown, to change. */
+  protected copyIn() {
+    this.editor.copyFont();
   }
 }

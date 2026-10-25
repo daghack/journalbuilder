@@ -190,6 +190,17 @@ export function serializeFonts(fonts: FontsFile): string {
   return lines.join('\n') + '\n';
 }
 
+/** A glyphset file, glyphsets/NAME.json: one font, `{ ..., "glyphs": { ... } }`. Throws if it isn't one. */
+export function parseFont(name: string, text: string): Font {
+  return parseFonts(`{${jsonString(name, true)}: ${text}}`)[0];
+}
+
+/** A font as its glyphset file keeps it: as `serializeFonts` writes it, a tab less indented. */
+export function serializeFont(font: Font): string {
+  const lines = serializeFonts([font]).split('\n');
+  return ['{', ...lines.slice(2, -3).map((line) => line.replace(/^\t/, '')), '}'].join('\n') + '\n';
+}
+
 // ---- options ----
 
 /** Option `key`'s JSON text, or undefined. */

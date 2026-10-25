@@ -10,6 +10,9 @@
 mod chain;
 mod chain_file;
 mod inspect;
+mod sources;
+
+pub use sources::{parse_sources, SourceKind, SourceSpec, SOURCE_PORT};
 
 pub use inspect::{from_json, to_json, value_from_test, value_view, OptionInfo, Ports, RunResult, TypeInfo, ValueView};
 
@@ -51,6 +54,9 @@ pub struct LockLibrary {
     sources: Sources,
     /// The chain files, run in the same engine.
     chains: Sources,
+    /// The content, styles, glyphsets and layouts chain files' sources
+    /// draw on; none without `new`'s resources.
+    resources: Option<Resources>,
     engine: Engine,
     types: RefCell<HashMap<String, Rc<LockType>>>,
     chain_files: RefCell<HashMap<String, Rc<LockType>>>,
@@ -201,7 +207,9 @@ impl LockLibrary {
     /// The lock types and chain files in `resources`, with their helpers
     /// in its `lib`.
     pub fn new(resources: &Resources) -> Self {
-        Self::with_sources(resources.locks.clone(), resources.lib.clone()).with_chains(resources.chains.clone())
+        let mut library = Self::with_sources(resources.locks.clone(), resources.lib.clone()).with_chains(resources.chains.clone());
+        library.resources = Some(resources.clone());
+        library
     }
 
     /// The lock types in `sources`, with their helpers in `lib`, and no
@@ -211,6 +219,7 @@ impl LockLibrary {
             engine: lock_engine(&lib),
             sources,
             chains: Sources::embedded("chains", &[]),
+            resources: None,
             types: RefCell::default(),
             chain_files: RefCell::default(),
             building: RefCell::default(),

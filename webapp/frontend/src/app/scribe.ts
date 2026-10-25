@@ -1,4 +1,4 @@
-// What the renderer (webapp/wasm, run in the workers) gives back, and the
+// What the engine (webapp/wasm, run in the workers) gives back, and the
 // messages the app and its workers send each other.
 
 /** A page of an evaluated journal. Its SVG arrives separately. */
@@ -23,17 +23,12 @@ export interface Evaluation {
   missingGlyphs: string | null;
   error: ScriptError | null;
   millis: number;
-  /** What the workspace changed: edited fonts, lock files of its own. */
-  workspace?: { editedFonts: boolean; locks: string[]; renderers?: string[]; chains?: string[] };
+  /** The journal's files that stand in for the library's, as paths. */
+  overrides?: string[];
 }
 
-/** What the workers are sent of the workspace (see WorkspaceService). */
-export interface WorkspacePayload {
-  fonts: string | null;
-  locks: Record<string, string>;
-  renderers: Record<string, string>;
-  chains: Record<string, string>;
-}
+/** What the workers are sent of the journal: its files besides the entries, by path (see JournalStore). */
+export type JournalPayload = Record<string, string>;
 
 /** How Darkly renders pages, as journalbuild's flags set it. */
 export interface RenderOptions {
@@ -46,7 +41,7 @@ export interface RenderOptions {
 
 export type EvalRequest =
   | { type: 'init'; wasmUrl: string }
-  | { type: 'workspace'; workspace: WorkspacePayload }
+  | { type: 'journal'; files: JournalPayload }
   | { type: 'evaluate'; generation: number; source: string; first: number }
   | { type: 'focus'; generation: number; index: number };
 
@@ -62,7 +57,7 @@ export type EvalReply =
 
 export type DarklyRequest =
   | { type: 'init'; wasmUrl: string }
-  | { type: 'workspace'; workspace: WorkspacePayload }
+  | { type: 'journal'; files: JournalPayload }
   | { type: 'renderPages'; id: number; source: string; indices: number[]; options: RenderOptions }
   | { type: 'exportPdf'; id: number; source: string; title: string; options: RenderOptions };
 
@@ -73,26 +68,28 @@ export type DarklyReply =
   | { type: 'done'; id: number; pdf?: ArrayBuffer }
   | { type: 'error'; id: number; message: string };
 
-// ---- the tools worker: font previews and the lock editor ----
+// ---- the tools worker: previews, and the editors' questions ----
 
-/** The renderer functions the tools worker calls (see webapp/wasm). */
-export type ToolFunction = 'previewSvg' | 'builtinFonts' | 'lockTypes' | 'lockPorts' | 'chainTypes' | 'runChain' | 'readChain' | 'valueKinds'
-  | 'rendererTypes' | 'rendererPorts' | 'renderPreview' | 'rendererSource';
+/** The engine functions the tools worker calls (see webapp/wasm). */
+export type ToolFunction = 'previewSvg' | 'libraryFiles' | 'usedLibrary' | 'lockTypes' | 'lockPorts' | 'lockExamples' | 'chainTypes' | 'runChain' | 'readChain'
+  | 'valueKinds' | 'illustrationTypes' | 'illustrationPorts' | 'illustrationPreview' | 'layoutTypes' | 'layoutPreview' | 'styleTypes' | 'stylePreview';
+
+/** Whose a file is: the journal's own, the library's, or both (the journal's standing in for the library's). */
+export interface Whose {
+  own: boolean;
+  builtin: boolean;
+}
 
 /** A chain file: chains/*.rhai, lock types wired together that journals use with chain(name). */
-export interface ChainType {
+export interface ChainType extends Whose {
   name: string;
   description?: string;
-  /** Whether it's one of the workspace's chain files. */
-  workspace: boolean;
-  /** Whether it's compiled in, from webapp/library/chains/ (a workspace copy stands in for it). */
-  builtin?: boolean;
   /** Why it doesn't load, if it doesn't. */
   error?: string;
 }
 
-/** A renderer type: a renderers/*.rhai file that draws lock values as canvases. */
-export interface RendererType {
+/** An illustration type: an illustrations/*.rhai file that draws lock values as canvases. */
+export interface IllustrationType extends Whose {
   name: string;
   file?: string;
   description?: string;
@@ -102,13 +99,22 @@ export interface RendererType {
   inputs?: [string, string][];
   /** Whether it has an example() to preview with. */
   example?: boolean;
-  /** Whether it's one of the workspace's renderer files. */
-  workspace: boolean;
   /** Why it doesn't load, if it doesn't. */
   error?: string;
 }
 
-/** What a renderer draws, a page per canvas, as SVG. */
+/** A layout file, layouts/*.rhai, or a text style file, styles/*.rhai. */
+export interface LayoutType extends Whose {
+  name: string;
+  description?: string;
+  /** Its options' defaults. */
+  options?: Record<string, unknown>;
+  /** A layout: whether it has an example() to preview with. A style: the text it previews with, if its file gives one. */
+  example?: boolean | string | null;
+  error?: string;
+}
+
+/** What a preview draws, a page per canvas, as SVG. */
 export interface RenderPreview {
   pages: { svg: string | null; view: [number, number, number, number] | null }[];
 }
@@ -121,7 +127,7 @@ export interface ValueKind {
 
 export type ToolsRequest =
   | { type: 'init'; wasmUrl: string }
-  | { type: 'workspace'; workspace: WorkspacePayload }
+  | { type: 'journal'; files: JournalPayload }
   | { type: 'call'; id: number; fn: ToolFunction; args: unknown[] };
 
 export type ToolsReply =
@@ -149,15 +155,13 @@ export interface LockOption {
   default?: unknown;
 }
 
-/** A lock type, as the lock editor's palette lists it. */
-export interface LockType {
+/** A lock type, as the chain editor's palette lists it. */
+export interface LockType extends Whose {
   name: string;
   file?: string;
   description?: string;
   composite?: boolean;
   options?: LockOption[];
-  /** Whether it's one of the workspace's lock files. */
-  workspace: boolean;
   /** Why it doesn't load, if it doesn't. */
   error?: string;
 }
@@ -200,6 +204,8 @@ export interface ChainFile {
     locks: Record<string, { type: string; options?: Record<string, unknown> }>;
     connect?: [string, string][];
     fixed?: Record<string, unknown>;
+    /** The journal's files it draws on, each a node with one output, "id.value". */
+    sources?: Record<string, { type: 'content' | 'style' | 'glyphset' | 'layout'; name: string; options?: Record<string, unknown>; base?: number }>;
     /** Illustrations attached, each input drawing a port, "lock.port". */
     illustrations?: Record<string, { type: string; options?: Record<string, unknown>; inputs?: Record<string, string> }>;
   };

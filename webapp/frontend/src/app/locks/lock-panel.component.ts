@@ -1,9 +1,12 @@
 import { Component, computed, effect, inject, signal } from '@angular/core';
 import type { LockOption } from '../scribe';
+import { JournalStore } from '../services/journal-store.service';
+import { LibraryService } from '../services/library.service';
 import { failed } from '../services/tools.service';
 import { symbolBase, testText, textSymbols, type TestValue } from './chain-model';
 import { optionDeclaration } from './chain-source';
 import { LockEditorService } from './lock-editor.service';
+import { OptionsFormComponent, fieldsOf } from '../resources/options-form.component';
 import { RenderPagesComponent } from './render-pages.component';
 import { ValueViewComponent } from './value-view.component';
 
@@ -35,32 +38,27 @@ function parseValue(text: string, type: string): { value: TestValue; problem: st
 /** The right: the chain being made, the picked lock's options, the chain's ports, and the test. */
 @Component({
   selector: 'app-lock-panel',
-  imports: [ValueViewComponent, RenderPagesComponent],
+  imports: [ValueViewComponent, RenderPagesComponent, OptionsFormComponent],
   template: `
     <section class="panel-section">
       <h3>Chain</h3>
       <label class="field">
         <span>Name</span>
-        <input type="text" [value]="editor.model().name" (input)="editor.setName($any($event.target).value)" (blur)="editor.settle()" spellcheck="false" />
-        <span class="hint">Its file is webapp/library/chains/{{ editor.model().name }}.rhai.</span>
+        <input type="text" [value]="editor.model().name" (change)="renameChain($any($event.target).value)" spellcheck="false" />
+        <span class="hint">Its file is chains/{{ editor.model().name }}.rhai{{ editor.own() ? '' : ", the library's" }}.</span>
       </label>
+      @if (nameError(); as e) { <p class="note-error">{{ e }}</p> }
       <label class="stack">
         <span class="hint">What it does (the file's opening comment)</span>
         <textarea rows="2" [value]="editor.model().description" (input)="editor.setDescription($any($event.target).value)" (blur)="editor.settle()"></textarea>
       </label>
-      <div class="row">
-        <button type="button" class="primary" (click)="editor.save()" title="Save the chain file, to put in webapp/library/chains/">Save file</button>
-        <button type="button" (click)="editor.openFile()" title="Open a chain file">Open…</button>
-        <button type="button" (click)="editor.newChain()">New</button>
-        <button type="button" (click)="revert()" [disabled]="!editor.canRevert()"
-                [title]="editor.builtin() ? 'Throw away the edits made in this browser: put the chain back as it is in webapp/library/chains/' : 'Throw away the edits since the chain was opened'">Revert</button>
-      </div>
+
       <div class="row">
         <button type="button" (click)="copy('chain')" title="A journal script using the chain: chain(name)">Copy journal snippet</button>
         <button type="button" (click)="copy('script')" title="A journal script building the chain lock by lock with new_lock: no chain file needed">Copy as script</button>
       </div>
       @if (copied(); as c) { <p class="hint">{{ c }}</p> }
-      <p class="hint">As you edit it, the chain is in this browser: journals using chain("{{ editor.model().name }}") follow along.</p>
+      <p class="hint">As you edit it, the journal's entries using chain("{{ editor.model().name }}") follow along.</p>
       @if (editor.note(); as note) { <p [class]="note.kind === 'error' ? 'note-error' : note.kind === 'note' ? 'note-warning' : 'hint'">{{ note.text }}</p> }
     </section>
 
@@ -153,13 +151,50 @@ function parseValue(text: string, type: string): { value: TestValue; problem: st
           </div>
         }
         <div class="row">
-          <button type="button" (click)="editor.editRenderer(renderer.type)" title="Edit this illustration's file">Edit {{ renderer.type }}.rhai</button>
+          <button type="button" (click)="editor.openFile('illustrations/' + renderer.type + '.rhai')" title="Open this illustration's file">Open {{ renderer.type }}.rhai</button>
         </div>
         <h4>What it draws of the run</h4>
         @if (editor.previews()[renderer.id]; as preview) {
           <app-render-pages [preview]="preview" />
         } @else {
           <p class="hint">Wire each of its inputs from a lock's output, and give the chain a test that runs.</p>
+        }
+      </section>
+    }
+
+    @if (editor.source(); as source) {
+      <section class="panel-section">
+        <h3>Source: {{ source.kind }}</h3>
+        <div class="row">
+          <input type="text" class="mono" aria-label="Source name" [value]="nodeName() ?? source.id" (input)="nodeName.set($any($event.target).value)" (keydown.enter)="rename(source.id)" />
+          <button type="button" (click)="rename(source.id)" [disabled]="nodeName() === null || nodeName() === source.id">Rename</button>
+          <button type="button" class="danger" (click)="editor.removeNode(source.id)">Remove</button>
+        </div>
+        @if (renameError(); as error) { <p class="problem">{{ error }}</p> }
+        <label class="field">
+          <span>File</span>
+          <select (change)="editor.setSource(source.id, { name: $any($event.target).value })">
+            @for (name of sourceNames(); track name) { <option [value]="name" [selected]="name === source.name">{{ name }}</option> }
+          </select>
+        </label>
+        @if (sourceError(); as error) { <p class="note-error">{{ error }}</p> }
+        @if (source.kind === 'content' && !editor.sourcePath(source)?.endsWith('.json')) {
+          <label class="field">
+            <span>As symbols in base</span>
+            <input type="number" min="2" max="27" step="1" placeholder="none: text, a String" [value]="source.base ?? ''"
+                   (change)="setBase(source.id, $any($event.target).value)" />
+            <span class="hint">Without a base, its text is a String; with one, symbols a lock takes, what doesn't fit dropped.</span>
+          </label>
+        }
+        @if (source.kind === 'style' || source.kind === 'layout') {
+          <app-options-form [fields]="sourceFields()" [values]="source.options" (changed)="setSourceOption(source.id, $event.name, $event.value)" />
+        }
+        <p class="hint">
+          @if (source.kind === 'content') { Content is data: wire it to a lock's input, or an illustration's. }
+          @else { A {{ source.kind }} is something to draw with: wire it to an illustration's input typed {{ source.kind === 'style' ? 'TextStyle' : source.kind === 'glyphset' ? 'Glyphset' : 'Layout' }}. }
+        </p>
+        @if (editor.sourcePath(source); as path) {
+          <div class="row"><button type="button" (click)="editor.openFile(path)">Open {{ path }}</button></div>
         }
       </section>
     }
@@ -226,6 +261,8 @@ function parseValue(text: string, type: string): { value: TestValue; problem: st
 })
 export class LockPanelComponent {
   protected readonly editor = inject(LockEditorService);
+  private readonly store = inject(JournalStore);
+  private readonly library = inject(LibraryService);
   protected readonly nodeName = signal<string | null>(null);
   protected readonly renameError = signal<string | null>(null);
   protected readonly copied = signal<string | null>(null);
@@ -326,9 +363,46 @@ export class LockPanelComponent {
     this.editor.settle();
   }
 
-  protected revert() {
-    const name = this.editor.model().name;
-    if (confirm(this.editor.builtin() ? `Throw away this browser's edits to ${name} and use webapp/library/chains/${name}.rhai again?` : `Throw away the edits to ${name} since it was opened?`)) void this.editor.revert();
+  protected readonly nameError = signal<string | null>(null);
+
+  /** The files a source of the picked one's kind can draw on: the journal's and the library's. */
+  protected readonly sourceNames = computed(() => {
+    const source = this.editor.source();
+    if (!source) return [];
+    const dir = source.kind === 'content' ? 'content' : source.kind === 'style' ? 'styles' : source.kind === 'glyphset' ? 'glyphsets' : 'layouts';
+    const paths = [...Object.keys(this.store.files()), ...Object.keys(this.library.files())].filter((path) => path.startsWith(`${dir}/`));
+    const names = [...new Set(paths.map((path) => path.slice(dir.length + 1).replace(/\.[a-z]+$/, '')))].sort();
+    return names.includes(source.name) ? names : [source.name, ...names];
+  });
+  protected readonly sourceError = computed(() => {
+    const source = this.editor.source();
+    const p = source ? this.editor.ports()[source.id] : null;
+    return p && 'error' in p ? p.error : null;
+  });
+  /** A style's or layout's options, for a source of it. */
+  protected readonly sourceFields = computed(() => {
+    const source = this.editor.source();
+    if (!source) return [];
+    const types = source.kind === 'style' ? this.editor.styleTypes() : this.editor.layoutTypes();
+    return fieldsOf(types.find((t) => t.name === source.name)?.options);
+  });
+
+  protected setBase(id: string, text: string) {
+    const base = Number(text);
+    this.editor.setSource(id, { base: text.trim() && Number.isInteger(base) && base >= 2 && base <= 27 ? base : undefined });
+  }
+
+  protected setSourceOption(id: string, name: string, value: unknown) {
+    const source = this.editor.source();
+    if (!source) return;
+    const options = { ...source.options };
+    if (value === undefined) delete options[name];
+    else options[name] = value;
+    this.editor.setSource(id, { options });
+  }
+
+  protected renameChain(name: string) {
+    this.nameError.set(this.editor.rename(name.trim()));
   }
 
   protected rename(id: string) {

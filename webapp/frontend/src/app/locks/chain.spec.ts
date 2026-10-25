@@ -1,4 +1,5 @@
 import ravenSky from '../../../generated/fixtures/raven-sky';
+import * as chain from './chain-model';
 import type { LockPorts } from '../scribe';
 import {
   connect, connectRenderer, emptyChain, openInputs, openOutputs, removeNode, renameNode, rendererInputs, symbolsText, textSymbols, wireProblem, type ChainModel, type PortsByNode,
@@ -26,6 +27,7 @@ function ravenModel(): { model: ChainModel; ports: PortsByNode } {
           promoted: { most_stars: 'most_stars', name_seed: 'name_seed', output_base: 'output_base', seed: 'seed', size_seed: 'size_seed' }, x: 480, y: 60,
         },
       ],
+      sources: [],
       wires: [{ from: 'enc.code', to: 'sky.code' }, { from: 'enc.code', to: 'msg.code' }],
       renderers: [
         { id: 'message', type: 'trit_message', options: {}, promoted: { base: 'output_base' }, x: 840, y: 300 },
@@ -133,7 +135,7 @@ describe('renderers', () => {
   it('wires renderers only from outputs, by type, one wire an input', () => {
     const { model, ports } = mazeModel();
     expect(wireProblem(model, ports, 'ml.text_length', 'drawn.maze')).toBe('ml.text_length gives LockProcessInfo, but drawn.maze takes Maze');
-    expect(wireProblem(model, ports, 'drawn.maze', 'ml.maze_text')).toBe('a renderer has no outputs to wire');
+    expect(wireProblem(model, ports, 'drawn.maze', 'ml.maze_text')).toBe('an illustration has no outputs to wire');
     const rewired = connectRenderer(model, 'ml.generated_maze', 'drawn.maze');
     expect(rewired.renderWires).toEqual([{ from: 'ml.generated_maze', to: 'drawn.maze' }]);
   });
@@ -167,6 +169,31 @@ function shiftVigenereModel(): { model: ChainModel; ports: PortsByNode } {
     },
   };
 }
+
+describe('sources', () => {
+  it('writes sources into the chain file and journal script, and wires content only to locks', () => {
+    const model: ChainModel = {
+      ...chain.emptyChain('noted'),
+      sources: [
+        { id: 'words', kind: 'content', name: 'lorem', options: {}, base: 27, x: 0, y: 0 },
+        { id: 'hand', kind: 'style', name: 'plain_hand', options: { size: 20.5 }, x: 0, y: 100 },
+      ],
+      nodes: [{ id: 'sc', type: 'shift_cipher', options: { base: 27, shift: 3 }, promoted: {}, x: 300, y: 0 }],
+      wires: [{ from: 'words.value', to: 'sc.plain_text' }],
+    };
+    const ports: PortsByNode = {
+      words: { inputs: [], outputs: [['value', 'Base27Symbol']], options: {} },
+      hand: { inputs: [], outputs: [['value', 'TextStyle']], options: {} },
+      sc: { inputs: [['plain_text', 'Base27Symbol']], outputs: [['cipher_text', 'Base27Symbol']], options: {} },
+    };
+    const source = chainSource(model, { ports, optionKinds: () => ({}) });
+    expect(source).toContain('\t\tsources: #{\n\t\t\thand: #{ type: "style", name: "plain_hand", options: #{ size: 20.5 } },\n\t\t\twords: #{ type: "content", name: "lorem", base: 27 },\n\t\t},');
+    expect(source).toContain('["words.value", "sc.plain_text"]');
+    expect(journalChain(model, { ports, optionKinds: () => ({}) })).toContain('\t.source("hand", "style", "plain_hand", #{ options: #{ size: 20.5 } })');
+    expect(chain.openInputs(model, ports)).toEqual([]);
+    expect(chain.wireProblem(model, ports, 'hand.value', 'sc.plain_text')).toContain('only an illustration takes one');
+  });
+});
 
 describe('chains', () => {
   it('hides an output passing a fixed input through', () => {

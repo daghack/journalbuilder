@@ -6,6 +6,7 @@
 //! fn options() { #{ shift: integer(3) } }                 // optional
 //! fn chain(o) {
 //!     #{
+//!         sources: #{ hand: #{ type: "style", name: "plain_hand" } },   // optional; see sources.rs
 //!         locks: #{ shift: #{ type: "shift_cipher", options: #{ base: 27, shift: o.shift } }, ... },
 //!         connect: [["shift.cipher_text", "vig.key"]],
 //!         fixed: #{ "vig.plain_text": symbols(27, "HELLO") },
@@ -16,12 +17,14 @@
 //! fn example() { #{ "shift.plain_text": symbols(27, "KEY") } }            // optional
 //! ```
 //!
-//! Its values are its locks' own, "lock.port", as `new_lock` names them.
+//! Its values are its locks' own, "lock.port", as `new_lock` names them,
+//! and its sources', "source.value".
 //! It runs in the lock files' engine, so `chain(o)` and `example()` write
 //! values as lock files do; illustrations are only named here, and load in the
 //! journal's engine when a journal uses the chain.
 
 use super::chain::{connections, lock_entries, map, port_type};
+use super::sources::{parse_sources, SourceSpec, SOURCE_PORT};
 use super::{check_options, from_script, same_value, show, sorted, valid_type_name, ExampleResults, LockLibrary, LockType};
 use super::super::compose;
 use crate::lockbuilder::{CompositeLock, InfoVarSet, InfoVarTypeSet, Lock};
@@ -30,7 +33,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
 /// The keys a chain file's `chain(o)` returns.
-const KEYS: [&str; 4] = ["locks", "connect", "fixed", "illustrations"];
+const KEYS: [&str; 5] = ["sources", "locks", "connect", "fixed", "illustrations"];
 
 /// What a chain file's `chain(o)` gives, for some options.
 pub struct ChainSpec {
@@ -43,6 +46,16 @@ pub struct ChainSpec {
     /// Values for inputs, as `chain(o)` wrote them (symbols as arrays).
     pub fixed: Vec<(String, Dynamic)>,
     pub illustrations: Vec<IllustrationSpec>,
+    /// The resources it draws on.
+    pub sources: Vec<SourceSpec>,
+}
+
+impl ChainSpec {
+    /// The source whose output `port` ("id.value") is, if it's one.
+    pub fn source(&self, port: &str) -> Option<&SourceSpec> {
+        let (id, name) = port.split_once('.')?;
+        self.sources.iter().find(|source| source.id == id && name == SOURCE_PORT)
+    }
 }
 
 /// An illustration a chain file attaches: its id, type and options, and the
@@ -115,15 +128,33 @@ impl LockLibrary {
         parse(name, &chain_file.file, spec).map_err(|e| format!("{}: chain(o): {}", chain_file.file, e))
     }
 
-    /// The chain's locks, wired and with their fixed values, without its
-    /// illustrations: what running it locks with.
+    /// The chain's locks, wired and with their fixed values (sources'
+    /// values among them), without its illustrations: what running it
+    /// locks with.
     pub fn chain_lock(self: &Rc<Self>, spec: &ChainSpec) -> Result<CompositeLock, String> {
         let at = |e: String| format!("{}: {}", spec.file, e);
         let mut locks: HashMap<String, Rc<dyn Lock>> = HashMap::new();
         for (id, type_name, options) in &spec.locks {
             locks.insert(id.clone(), Rc::new(self.build(id, type_name, options.clone()).map_err(at)?));
         }
+        let mut source_types = HashMap::new();
+        for source in &spec.sources {
+            source_types.insert(source.id.clone(), self.source_type(source).map_err(at)?);
+        }
         let mut fixed = Vec::new();
+        let mut connect = Vec::new();
+        for (from, to) in &spec.connect {
+            let Some(source) = spec.source(from) else {
+                connect.push((from.clone(), to.clone()));
+                continue;
+            };
+            let input = port_type(&locks, to, |lock| lock.inputs())
+                .ok_or_else(|| at(format!("connect: '{}' isn't an input of the chain's locks", to)))?;
+            if !crate::lockbuilder::compatible(&source_types[&source.id], &input) {
+                return Err(at(format!("connect: can't connect {} ({}) to {} ({})", from, source_types[&source.id], to, input)));
+            }
+            fixed.push((to.clone(), self.source_value(source).map_err(at)?));
+        }
         for (port, value) in &spec.fixed {
             let var_type = port_type(&locks, port, |lock| lock.inputs())
                 .ok_or_else(|| at(format!("fixed: '{}' isn't an input of the chain's locks", port)))?;
@@ -131,17 +162,21 @@ impl LockLibrary {
         }
         for illustration in &spec.illustrations {
             for (input, port) in &illustration.inputs {
+                if spec.source(port).is_some() {
+                    continue;
+                }
                 if port_type(&locks, port, |lock| lock.outputs()).or_else(|| port_type(&locks, port, |lock| lock.inputs())).is_none() {
-                    return Err(at(format!("illustrations: '{}' draws '{}' at its input '{}', which isn't a port of the chain's locks", illustration.id, port, input)));
+                    return Err(at(format!("illustrations: '{}' draws '{}' at its input '{}', which isn't a port of the chain's locks or sources", illustration.id, port, input)));
                 }
             }
         }
-        compose(&spec.name, locks, spec.connect.clone(), &fixed).map_err(at)
+        compose(&spec.name, locks, connect, &fixed).map_err(at)
     }
 
     /// The inputs running the chain needs: its locks' open inputs, not fixed.
     pub fn chain_inputs(spec: &ChainSpec, lock: &CompositeLock) -> InfoVarTypeSet {
-        lock.inputs().into_iter().filter(|(port, _)| !spec.fixed.iter().any(|(fixed, _)| fixed == port)).collect()
+        let sourced = |port: &str| spec.connect.iter().any(|(from, to)| to == port && spec.source(from).is_some());
+        lock.inputs().into_iter().filter(|(port, _)| !spec.fixed.iter().any(|(fixed, _)| fixed == port) && !sourced(port)).collect()
     }
 
     /// Run every chain file's example (see `check_chain`).
@@ -193,7 +228,7 @@ impl LockLibrary {
 
 /// What `chain(o)` returned, checked for its shape.
 pub(super) fn parse(name: &str, file: &str, spec: Dynamic) -> Result<ChainSpec, String> {
-    let spec = spec.try_cast::<Map>().ok_or("must return a map, #{ locks, connect, fixed, illustrations }")?;
+    let spec = spec.try_cast::<Map>().ok_or("must return a map, #{ sources, locks, connect, fixed, illustrations }")?;
     if let Some(unknown) = spec.keys().find(|key| !KEYS.contains(&key.as_str())) {
         return Err(format!("returned '{}'; it returns {}", unknown, KEYS.join(", ")));
     }
@@ -226,5 +261,11 @@ pub(super) fn parse(name: &str, file: &str, spec: Dynamic) -> Result<ChainSpec, 
             .collect::<Result<Vec<_>, String>>()?;
         illustrations.push(IllustrationSpec { id: id.to_string(), illustration, options, inputs });
     }
-    Ok(ChainSpec { name: name.to_string(), file: file.to_string(), locks, connect: connections(&spec)?, fixed, illustrations })
+    let sources = parse_sources(&spec)?;
+    for source in &sources {
+        if locks.iter().any(|(lock, _, _)| *lock == source.id) || illustrations.iter().any(|i| i.id == source.id) {
+            return Err(format!("sources: '{}' is a lock's or illustration's name too", source.id));
+        }
+    }
+    Ok(ChainSpec { name: name.to_string(), file: file.to_string(), locks, connect: connections(&spec)?, fixed, illustrations, sources })
 }

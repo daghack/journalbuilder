@@ -19,7 +19,10 @@
 
 use super::sources::Sources;
 use crate::journal::fonts::FontBook;
+use std::cell::RefCell;
+use std::collections::BTreeSet;
 use std::path::Path;
+use std::rc::Rc;
 
 /// The built-in library's directory. Resolved at build time, so it's found
 /// whatever directory journalbuild (or a test) runs from.
@@ -113,6 +116,31 @@ impl Resources {
         }
     }
 
+    /// These resources, noting each file of theirs read (not those they're
+    /// in front of): see `Used`.
+    pub fn recording(self) -> (Resources, Used) {
+        let mut used = Used::default();
+        let mut record = |sources: Sources| {
+            let names: Rc<RefCell<BTreeSet<String>>> = Rc::default();
+            let (kind, ext) = (sources.root().display().to_string(), sources.ext());
+            used.0.push((kind, ext, names.clone()));
+            sources.recording(names)
+        };
+        let resources = Resources {
+            locks: record(self.locks),
+            layouts: record(self.layouts),
+            illustrations: record(self.illustrations),
+            chains: record(self.chains),
+            styles: record(self.styles),
+            lib: record(self.lib),
+            glyphsets: record(self.glyphsets),
+            text: record(self.text),
+            markdown: record(self.markdown),
+            symbols: record(self.symbols),
+        };
+        (resources, used)
+    }
+
     /// Every kind's files, in `KINDS`' order, with their directory's name.
     pub fn kinds(&self) -> [(&'static str, &Sources); 10] {
         [
@@ -180,14 +208,40 @@ impl Resources {
 
     /// Every glyphset, loaded.
     pub fn glyphset_book(&self) -> Result<FontBook, String> {
-        let names = self.glyphsets.names()
-            .map_err(|e| format!("couldn't read the glyphsets directory {}: {}", self.glyphsets.root().display(), e))?;
+        // Every glyphset is loaded, so reading them says nothing of which a
+        // journal uses: the book notes that as they're looked up.
+        let glyphsets = self.glyphsets.unrecorded();
+        let names = glyphsets.names()
+            .map_err(|e| format!("couldn't read the glyphsets directory {}: {}", glyphsets.root().display(), e))?;
         let files = names.into_iter().map(|name| {
-            let path = self.glyphsets.path(&name);
-            let text = self.glyphsets.read(&name).map_err(|e| format!("{}: {}", path.display(), e))?;
+            let path = glyphsets.path(&name);
+            let text = glyphsets.read(&name).map_err(|e| format!("{}: {}", path.display(), e))?;
             Ok((name, path.display().to_string(), text))
         }).collect::<Result<Vec<_>, String>>()?;
         FontBook::from_files(files)
+    }
+}
+
+/// The files of resources read since `Resources::recording` made them,
+/// kind by kind, for an export to bundle the library files a journal uses.
+#[derive(Default)]
+pub struct Used(Vec<(String, &'static str, Rc<RefCell<BTreeSet<String>>>)>);
+
+impl Used {
+    /// Every file read, as paths from the resources' root
+    /// (`locks/shift_cipher.rhai`), and the glyphsets `book` looked up that
+    /// `glyphsets` has of its own.
+    pub fn paths(&self, book: Option<(&FontBook, &Sources)>) -> BTreeSet<String> {
+        let mut paths: BTreeSet<String> = self.0.iter()
+            .flat_map(|(kind, ext, names)| {
+                let kind = Path::new(kind).file_name().map_or(kind.clone(), |k| k.to_string_lossy().into_owned());
+                names.borrow().iter().map(|name| format!("{}/{}.{}", kind, name, ext)).collect::<Vec<_>>()
+            })
+            .collect();
+        if let Some((book, glyphsets)) = book {
+            paths.extend(book.used().into_iter().filter(|name| glyphsets.has_own(name)).map(|name| format!("glyphsets/{}.json", name)));
+        }
+        paths
     }
 }
 
@@ -229,6 +283,21 @@ mod tests {
         let book = resources.glyphset_book().unwrap();
         assert!(book.names().contains(&"plain".to_string()));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reads_of_the_library_are_noted() {
+        let (library, used) = Resources::library().recording();
+        let mut journal = Resources::none();
+        journal.illustrations = journal.illustrations.with_overlay([("eye".to_string(), "// mine".to_string())]);
+        let resources = journal.over(library);
+        let book = resources.glyphset_book().unwrap();
+        resources.locks.read("shift_cipher").unwrap();
+        resources.illustrations.read("eye").unwrap();
+        book.font("copper");
+        let paths = used.paths(Some((&book, &Resources::library().glyphsets)));
+        let paths: Vec<&str> = paths.iter().map(String::as_str).collect();
+        assert_eq!(paths, ["glyphsets/copper.json", "glyphsets/loche_upper.json", "locks/shift_cipher.rhai"]);
     }
 
     /// The compiled-in library is the library on disk.

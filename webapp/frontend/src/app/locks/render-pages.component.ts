@@ -1,7 +1,7 @@
 import { Component, computed, effect, input, type OnDestroy } from '@angular/core';
 import type { RenderPreview } from '../scribe';
 
-/** What a renderer draws: each canvas it gives, as a page, small. */
+/** What an illustration (or a layout or style) draws: each canvas it gives, as a page. */
 @Component({
   selector: 'app-render-pages',
   template: `
@@ -9,7 +9,7 @@ import type { RenderPreview } from '../scribe';
       @if (error(); as e) {
         <p class="error">{{ e }}</p>
       } @else {
-        <div class="pages">
+        <div class="pages" [class.large]="large()">
           @for (url of urls(); track $index) {
             @if (url) { <img [src]="url" [alt]="'Canvas ' + ($index + 1)" /> } @else { <span class="blank">nothing drawn</span> }
           }
@@ -21,6 +21,7 @@ import type { RenderPreview } from '../scribe';
   styles: `
     :host { display: block; }
     .pages { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 6px; }
+    .pages.large { grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); gap: 12px; }
     img { width: 100%; box-sizing: border-box; padding: 5px; background: var(--paper); border-radius: 4px; box-shadow: 0 1px 4px rgb(0 0 0 / 0.25); }
     .blank { font-size: 11px; color: var(--muted); }
     .error { margin: 0; color: var(--danger); font-size: 12px; white-space: pre-wrap; }
@@ -29,6 +30,8 @@ import type { RenderPreview } from '../scribe';
 })
 export class RenderPagesComponent implements OnDestroy {
   readonly preview = input<RenderPreview | { error: string } | null>(null);
+  /** Pages shown large, a file's preview, rather than as thumbnails. */
+  readonly large = input(false);
   protected readonly error = computed(() => {
     const p = this.preview();
     return p && 'error' in p ? p.error : null;

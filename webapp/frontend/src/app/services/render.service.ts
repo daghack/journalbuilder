@@ -1,6 +1,6 @@
 import { Injectable, inject, signal, untracked } from '@angular/core';
-import type { DarklyReply, DarklyRequest, EvalReply, EvalRequest, Evaluation, RenderOptions, WorkspacePayload } from '../scribe';
-import { WorkspaceService } from './workspace.service';
+import type { DarklyReply, DarklyRequest, EvalReply, EvalRequest, Evaluation, JournalPayload, RenderOptions } from '../scribe';
+import { JournalStore } from './journal-store.service';
 
 /** How long a script may run before it's taken to be stuck (an endless loop). */
 const SCRIPT_TIMEOUT_MS = 20_000;
@@ -29,7 +29,7 @@ export interface EvalCallbacks {
  */
 @Injectable({ providedIn: 'root' })
 export class RenderService {
-  private readonly workspace = inject(WorkspaceService);
+  private readonly store = inject(JournalStore);
   /** Names scripts can call, for the editor; empty until the renderer loads. */
   readonly apiNames = signal<string[]>([]);
   /** Why the renderer couldn't load, if it couldn't. */
@@ -49,19 +49,19 @@ export class RenderService {
   private lastHeard = 0;
   private watchdog: ReturnType<typeof setInterval> | null = null;
 
-  /** The workspace each worker was last sent; null for a new worker. */
-  private evalWorkspace: WorkspacePayload | null = null;
-  private darklyWorkspace: WorkspacePayload | null = null;
+  /** The journal's files each worker was last sent; null for a new worker. */
+  private evalJournal: JournalPayload | null = null;
+  private darklyJournal: JournalPayload | null = null;
 
   /**
-   * Send `worker` the workspace (edited fonts, lock files) if it has changed
-   * since `sent`, just before asking for a run, so the run is sure to use it.
-   * Returns what the worker has now.
+   * Send `worker` the journal's files if they've changed since `sent`, just
+   * before asking for a run, so the run is sure to use them. Returns what
+   * the worker has now.
    */
-  private sendWorkspace(worker: Worker, sent: WorkspacePayload | null): WorkspacePayload {
-    const workspace = untracked(() => this.workspace.payload());
-    if (workspace !== sent) worker.postMessage({ type: 'workspace', workspace } satisfies EvalRequest);
-    return workspace;
+  private sendJournal(worker: Worker, sent: JournalPayload | null): JournalPayload {
+    const files = untracked(() => this.store.resources());
+    if (files !== sent) worker.postMessage({ type: 'journal', files } satisfies EvalRequest);
+    return files;
   }
 
   /** Start the script worker; `callbacks` hear what it makes. */
@@ -94,7 +94,7 @@ export class RenderService {
     worker.onerror = (event) => this.loadError.set(event.message || 'the script worker failed to start');
     worker.postMessage({ type: 'init', wasmUrl: wasmUrl() } satisfies EvalRequest);
     this.evalWorker = worker;
-    this.evalWorkspace = null;
+    this.evalJournal = null;
   }
 
   private runWaiting() {
@@ -103,7 +103,7 @@ export class RenderService {
     this.waiting = null;
     const timer = setTimeout(() => this.stuck(next.generation), SCRIPT_TIMEOUT_MS);
     this.running = { generation: next.generation, timer };
-    this.evalWorkspace = this.sendWorkspace(this.evalWorker!, this.evalWorkspace);
+    this.evalJournal = this.sendJournal(this.evalWorker!, this.evalJournal);
     this.evalWorker!.postMessage({ type: 'evaluate', ...next } satisfies EvalRequest);
   }
 
@@ -164,7 +164,7 @@ export class RenderService {
       };
       worker.postMessage({ type: 'init', wasmUrl: wasmUrl() } satisfies DarklyRequest);
       this.darklyWorker = worker;
-      this.darklyWorkspace = null;
+      this.darklyJournal = null;
     }
     return this.darklyWorker;
   }
@@ -217,7 +217,7 @@ export class RenderService {
               other?: (reply: DarklyReply) => void): Promise<Extract<DarklyReply, { type: 'done' }>> {
     const id = ++this.nextId;
     const worker = this.darkly();
-    this.darklyWorkspace = this.sendWorkspace(worker, this.darklyWorkspace);
+    this.darklyJournal = this.sendJournal(worker, this.darklyJournal);
     this.startWatchdog();
     return new Promise((resolve, reject) => {
       this.jobs.set(id, (reply) => {

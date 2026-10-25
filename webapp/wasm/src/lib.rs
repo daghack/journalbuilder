@@ -1,26 +1,27 @@
-//! The journal editor's renderer, for the browser: runs a journal script
-//! and shows its pages as SVG (`evaluate`), and renders them with Darkly
+//! The journal editor's engine, for the browser: runs a journal's entries
+//! and shows their pages as SVG (`evaluate`), and renders them with Darkly
 //! over WebGPU (`Renderer`), as images, a PDF or PNGs.
 //!
-//! The built-in library (layout, lock, illustration, chain and style files,
+//! The built-in library (lock, layout, illustration, chain and style files,
 //! helpers, glyphsets and content) is compiled in (see
-//! `rhaientries::embedded`), so scripts can use it with nothing to read.
-//! The editor's workspace (`setWorkspace`) can stand in for the glyphsets
-//! and add or stand in for lock, illustration and chain files, for edits
-//! not yet saved into the repository. (The JS names still say renderer
-//! for illustration.)
+//! `rhaientries::embedded`). The journal being edited (`setJournal`) gives
+//! its own files, which stand in front of the library's as a journal's
+//! directory does.
 //!
-//! The font and lock editors use the rest: `previewSvg` draws a script's
-//! first page without touching what `evaluate` keeps, and the lock and
-//! renderer exports (`lockTypes`, `lockPorts`, `chainTypes`, `runChain`,
-//! `readChain`, `rendererTypes`, `rendererPorts`, `renderPreview`,
-//! `rendererSource`, `valueKinds`) answer in JSON.
+//! The editors use the rest, which answer in JSON: `previewSvg` draws a
+//! script's first page without touching what `evaluate` keeps;
+//! `libraryFiles` lists the library and `usedLibrary` the library files a
+//! journal's entries use; the lock and chain editor has `lockTypes`,
+//! `lockPorts`, `lockExamples`, `chainTypes`, `runChain`, `readChain` and
+//! `valueKinds`; and the illustration, layout and style editors have
+//! `illustrationTypes`, `illustrationPorts`, `illustrationPreview`,
+//! `layoutTypes`, `layoutPreview`, `styleTypes` and `stylePreview`.
 
 use scribe::journal::darkly;
 use scribe::journal::fonts::FontBook;
 use scribe::journal::pdf::PdfWriter;
 use scribe::journal::publish::{self, Render, UNITS_PER_INCH};
-use scribe::journal::rhaientries::{Entry, JournalEngine, LockLibrary, Resources, Sources};
+use scribe::journal::rhaientries::{Entry, JournalEngine, LockLibrary, Resources};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::cell::RefCell;
@@ -82,128 +83,104 @@ struct Evaluation {
     missing_glyphs: Option<String>,
     error: Option<ScriptError>,
     millis: f64,
-    workspace: WorkspaceUse,
+    /// The journal's files that stand in for the library's, as paths.
+    overrides: Vec<String>,
 }
 
-/// Edits not yet in the repository, from `setWorkspace`.
+/// The journal being edited, from `setJournal`.
 #[derive(Default)]
-struct Workspace {
-    /// A fonts.json standing in for the compiled-in one, if it loads.
-    fonts: Option<Rc<Vec<u8>>>,
-    /// Why the fonts given don't load, if they don't.
-    fonts_error: Option<String>,
-    /// Lock files by type name, added to the compiled-in ones or in place
-    /// of them.
-    locks: BTreeMap<String, String>,
-    /// Renderer files by type name, likewise.
-    renderers: BTreeMap<String, String>,
-    /// Chain files by name, likewise: the lock editor's, live as it edits.
-    chains: BTreeMap<String, String>,
+struct Journal {
+    /// Its own files, entries aside, by path from its directory:
+    /// `locks/x.rhai`, `glyphsets/y.json`, `content/z.md`.
+    files: BTreeMap<String, String>,
     /// Counts changes, so renders can tell their cache is stale.
     version: u64,
 }
 
 thread_local! {
-    static WORKSPACE: RefCell<Workspace> = RefCell::new(Workspace::default());
+    static JOURNAL: RefCell<Journal> = RefCell::new(Journal::default());
 }
 
-/// Use `fonts` (a fonts.json, or null for the compiled-in one), `locks`
-/// (type name -> lock file source), `renderers` (type name -> renderer
-/// file source) and `chains` (name -> chain file source) for every script
-/// run from now on.
-/// Returns JSON, `{ fontsError }`: why the fonts don't load, if they
-/// don't, in which case the compiled-in ones are used.
-#[wasm_bindgen(js_name = setWorkspace)]
-pub fn set_workspace(fonts: Option<String>, locks: JsValue, renderers: JsValue, chains: JsValue) -> Result<String, JsError> {
-    let files = |value: JsValue| -> Result<BTreeMap<String, String>, JsError> {
-        Ok(if value.is_undefined() || value.is_null() { BTreeMap::new() } else { serde_wasm_bindgen::from_value(value)? })
-    };
-    let (locks, renderers, chains) = (files(locks)?, files(renderers)?, files(chains)?);
-    let error = WORKSPACE.with_borrow_mut(|workspace| {
-        let (loaded, error) = match fonts {
-            None => (None, None),
-            Some(fonts) => match FontBook::from_bytes(fonts.as_bytes()) {
-                Ok(_) => (Some(Rc::new(fonts.into_bytes())), None),
-                Err(e) => (None, Some(e)),
-            },
+/// Use `files` (path from the journal's directory -> text: `locks/x.rhai`,
+/// `glyphsets/y.json`, `content/z.txt`; entries aren't needed) as the
+/// journal's own files, in front of the library's, for everything run from
+/// now on. Files in no resource directory are ignored.
+#[wasm_bindgen(js_name = setJournal)]
+pub fn set_journal(files: JsValue) -> Result<(), JsError> {
+    let files: BTreeMap<String, String> = if files.is_undefined() || files.is_null() { BTreeMap::new() } else { serde_wasm_bindgen::from_value(files)? };
+    JOURNAL.with_borrow_mut(|journal| {
+        journal.files = files;
+        journal.version += 1;
+    });
+    Ok(())
+}
+
+/// `files` (path -> text) as a journal's own resources, with nothing under
+/// them.
+fn journal_files<'a>(files: impl IntoIterator<Item = (&'a str, &'a str)>) -> Resources {
+    let mut journal = Resources::none();
+    for (path, text) in files {
+        let Some((kind, file)) = path.split_once('/') else { continue };
+        let Some((name, ext)) = file.rsplit_once('.') else { continue };
+        let sources = match (kind, ext) {
+            ("locks", "rhai") => &mut journal.locks,
+            ("layouts", "rhai") => &mut journal.layouts,
+            ("illustrations", "rhai") => &mut journal.illustrations,
+            ("chains", "rhai") => &mut journal.chains,
+            ("styles", "rhai") => &mut journal.styles,
+            ("lib", "rhai") => &mut journal.lib,
+            ("glyphsets", "json") => &mut journal.glyphsets,
+            ("content", "txt") => &mut journal.text,
+            ("content", "md") => &mut journal.markdown,
+            ("content", "json") => &mut journal.symbols,
+            _ => continue,
         };
-        workspace.fonts = loaded;
-        workspace.fonts_error = error.clone();
-        workspace.locks = locks;
-        workspace.renderers = renderers;
-        workspace.chains = chains;
-        workspace.version += 1;
-        error
-    });
-    Ok(json!({ "fontsError": error }).to_string())
-}
-
-/// The compiled-in library's glyphsets, as one glyphset file.
-fn builtin_glyphsets() -> &'static str {
-    static GLYPHSETS: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    GLYPHSETS.get_or_init(|| Resources::embedded().glyphsets_json().expect("the compiled-in glyphsets read"))
-}
-
-/// The workspace's fonts, or the compiled-in ones.
-fn font_book() -> Rc<FontBook> {
-    let fonts = WORKSPACE.with_borrow(|workspace| workspace.fonts.clone());
-    let bytes: &[u8] = fonts.as_deref().map(Vec::as_slice).unwrap_or(builtin_glyphsets().as_bytes());
-    Rc::new(FontBook::from_bytes(bytes).expect("the workspace's fonts were checked when set"))
-}
-
-/// `sources` with `files`, and `extra`, over them.
-fn overlaid(sources: Sources, files: BTreeMap<String, String>, extra: &[(&str, &str)]) -> Sources {
-    sources.with_overlay(files).with_overlay(extra.iter().map(|(name, source)| (name.to_string(), source.to_string())))
-}
-
-/// The compiled-in library with the workspace's lock, illustration and
-/// chain files over it, and `illustrations` and `chains` over those.
-fn resources(illustrations: &[(&str, &str)], chains: &[(&str, &str)]) -> Resources {
-    let mut resources = Resources::embedded();
-    WORKSPACE.with_borrow(|workspace| {
-        resources.locks = overlaid(resources.locks.clone(), workspace.locks.clone(), &[]);
-        resources.illustrations = overlaid(resources.illustrations.clone(), workspace.renderers.clone(), illustrations);
-        resources.chains = overlaid(resources.chains.clone(), workspace.chains.clone(), chains);
-    });
-    resources
-}
-
-/// What the workspace changes, for the editor to say so.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct WorkspaceUse {
-    edited_fonts: bool,
-    locks: Vec<String>,
-    renderers: Vec<String>,
-    chains: Vec<String>,
-}
-
-/// Run a journal script: its entry, if it ran, and what it said.
-fn run(source: &str) -> (Result<Entry, ScriptError>, Evaluation) {
-    let (entry, mut evaluation) = run_with(source, font_book());
-    let fonts_error = WORKSPACE.with_borrow(|workspace| workspace.fonts_error.clone());
-    if let Some(error) = fonts_error {
-        evaluation.warnings.insert(0, format!("the edited fonts don't load, so the built-in ones are used: {}", error));
+        *sources = sources.clone().with_overlay([(name.to_string(), text.to_string())]);
     }
-    (entry, evaluation)
+    journal
 }
 
-/// Run a journal script with `fonts`.
-fn run_with(source: &str, fonts: Rc<FontBook>) -> (Result<Entry, ScriptError>, Evaluation) {
-    let mut engine = JournalEngine::with_resources(fonts.clone(), resources(&[], &[]));
+/// The journal's resources, with `extra` files (path -> text) over its own,
+/// in front of `library`.
+fn resources_over(library: Resources, extra: &[(&str, &str)]) -> Resources {
+    JOURNAL.with_borrow(|journal| {
+        let files = journal.files.iter().map(|(path, text)| (path.as_str(), text.as_str())).chain(extra.iter().copied());
+        journal_files(files).over(library)
+    })
+}
+
+/// The journal's resources, with `extra` files over its own, in front of
+/// the compiled-in library.
+fn resources(extra: &[(&str, &str)]) -> Resources {
+    resources_over(Resources::embedded(), extra)
+}
+
+/// The compiled-in library's glyphsets, loaded.
+fn library_glyphsets() -> Rc<FontBook> {
+    Rc::new(Resources::embedded().glyphset_book().expect("the compiled-in glyphsets load"))
+}
+
+/// `resources`' glyphsets, or the library's, with a warning, if the
+/// journal's don't load.
+fn glyphsets(resources: &Resources) -> (Rc<FontBook>, Option<String>) {
+    match resources.glyphset_book() {
+        Ok(book) => (Rc::new(book), None),
+        Err(e) => (library_glyphsets(), Some(format!("the journal's glyphsets don't load, so only the library's are used: {}", e))),
+    }
+}
+
+/// Run a journal entry with `resources`: its entry, if it ran, and what it
+/// said.
+fn run_with(source: &str, resources: Resources) -> (Result<Entry, ScriptError>, Evaluation) {
+    let (book, glyphsets_error) = glyphsets(&resources);
+    let overrides = resources.overrides();
+    let mut engine = JournalEngine::with_resources(book.clone(), resources);
     let prints: Rc<RefCell<Vec<String>>> = Rc::default();
     let printed = prints.clone();
     engine.on_print(move |text| printed.borrow_mut().push(text.to_string()));
     let entry = engine.build_entry(source).map_err(|err| ScriptError { message: err.message, line: err.line, column: err.column });
-    let mut warnings = engine.warnings();
-    let workspace = WORKSPACE.with_borrow(|workspace| {
-        WorkspaceUse {
-            edited_fonts: workspace.fonts.is_some(),
-            locks: workspace.locks.keys().cloned().collect(),
-            renderers: workspace.renderers.keys().cloned().collect(),
-            chains: workspace.chains.keys().cloned().collect(),
-        }
-    });
+    let mut warnings: Vec<String> = glyphsets_error.into_iter().collect();
+    warnings.extend(engine.warnings());
     if let Ok(entry) = &entry {
         if entry.page_count() == 0 {
             warnings.push("the script made no pages; add them with journal_entry.add(page)".to_string());
@@ -217,17 +194,22 @@ fn run_with(source: &str, fonts: Rc<FontBook>) -> (Result<Entry, ScriptError>, E
         pages: Vec::new(),
         warnings,
         prints: prints.take(),
-        missing_glyphs: fonts.missing_glyph_report(),
+        missing_glyphs: book.missing_glyph_report(),
         error: None,
         millis: 0.0,
-        workspace,
+        overrides,
     };
     (entry, evaluation)
 }
 
-/// Run a journal script, keeping the entry it makes for `pageSvg`.
+/// Run a journal entry with the journal's files.
+fn run(source: &str) -> (Result<Entry, ScriptError>, Evaluation) {
+    run_with(source, resources(&[]))
+}
+
+/// Run a journal entry, keeping the entry it makes for `pageSvg`.
 /// Returns `{ pages: [{ index, label, view }], warnings, prints,
-/// missingGlyphs, error: { message, line, column }, millis }`.
+/// missingGlyphs, error: { message, line, column }, millis, overrides }`.
 #[wasm_bindgen]
 pub fn evaluate(source: &str) -> Result<JsValue, JsError> {
     let started = js_sys::Date::now();
@@ -260,23 +242,36 @@ pub fn page_svg(index: usize) -> Option<String> {
     })
 }
 
-/// A script's first page as SVG, for the font editor's text preview, as
-/// JSON: `{ svg, view, warnings, missingGlyphs, error }`. It runs with `fonts`
-/// (a fonts.json) if given, else the workspace's, and leaves what
-/// `evaluate` keeps alone.
+/// `files` (JSON, path -> text) as pairs, or none for null or nothing.
+fn file_pairs(files: Option<String>) -> Result<Vec<(String, String)>, String> {
+    match files.as_deref().map(str::trim) {
+        None | Some("") | Some("null") => Ok(Vec::new()),
+        Some(text) => serde_json::from_str::<BTreeMap<String, String>>(text)
+            .map(|files| files.into_iter().collect())
+            .map_err(|e| format!("files: {}", e)),
+    }
+}
+
+/// An entry's pages as SVG, as JSON: `{ pages: [{ svg, view }] }`.
+fn pages_json(entry: &Entry) -> Value {
+    let pages: Vec<Value> = entry.selected_pages(None).map(|(index, page)| {
+        json!({ "svg": publish::page_svg(page, &page.label(index)).map(|(svg, _)| svg), "view": publish::page_view(page) })
+    }).collect();
+    json!({ "pages": pages })
+}
+
+/// A script's first page as SVG, for previews, as JSON: `{ svg, view,
+/// warnings, missingGlyphs, error }`. `files` (JSON, path -> text, or
+/// null) stand in for the journal's files of the same paths, as an editor
+/// shows them before they're kept. It leaves what `evaluate` keeps alone.
 #[wasm_bindgen(js_name = previewSvg)]
-pub fn preview_svg(source: &str, fonts: Option<String>) -> String {
-    let book = match fonts {
-        None => font_book(),
-        Some(fonts) => match FontBook::from_bytes(fonts.as_bytes()) {
-            Ok(book) => Rc::new(book),
-            Err(e) => {
-                let preview = json!({ "svg": null, "view": null, "warnings": [], "missingGlyphs": null, "error": { "message": format!("the fonts don't load: {}", e) } });
-                return preview.to_string();
-            }
-        },
+pub fn preview_svg(source: &str, files: Option<String>) -> String {
+    let files = match file_pairs(files) {
+        Ok(files) => files,
+        Err(e) => return json!({ "svg": null, "view": null, "warnings": [], "missingGlyphs": null, "error": { "message": e } }).to_string(),
     };
-    let (entry, evaluation) = run_with(source, book);
+    let extra: Vec<(&str, &str)> = files.iter().map(|(path, text)| (path.as_str(), text.as_str())).collect();
+    let (entry, evaluation) = run_with(source, resources(&extra));
     let (svg, view, error) = match entry {
         Ok(entry) => match entry.selected_pages(None).next() {
             Some((index, page)) => (publish::page_svg(page, &page.label(index)).map(|(svg, _)| svg), publish::page_view(page), None),
@@ -291,16 +286,49 @@ pub fn preview_svg(source: &str, fonts: Option<String>) -> String {
     preview.to_string()
 }
 
-/// The compiled-in fonts.json.
-#[wasm_bindgen(js_name = builtinFonts)]
-pub fn builtin_fonts() -> String {
-    builtin_glyphsets().to_string()
+/// Every file of the compiled-in library, as JSON: `{ path: text }`, paths
+/// as a journal's would be (`locks/huffman.rhai`, `lib/names.rhai`).
+#[wasm_bindgen(js_name = libraryFiles)]
+pub fn library_files() -> String {
+    let library = Resources::embedded();
+    let mut files = serde_json::Map::new();
+    for (kind, sources) in library.kinds() {
+        let names = sources.names().unwrap_or_default();
+        for name in names {
+            if let Ok(text) = sources.read(&name) {
+                files.insert(format!("{}/{}.{}", kind, name, sources.ext()), Value::String(text));
+            }
+        }
+    }
+    Value::Object(files).to_string()
 }
 
-/// A lock library over the compiled-in lock files and the workspace's,
-/// with the chain files likewise and `chains` over them.
+/// The library files the journal's entries (`entries`, JSON: an array of
+/// their scripts) use, run with the journal's files: what an export
+/// bundles. JSON: `{ paths: [...] }` (`locks/huffman.rhai`), or `{ error }`
+/// naming the first entry that fails.
+#[wasm_bindgen(js_name = usedLibrary)]
+pub fn used_library(entries: &str) -> String {
+    answer((|| {
+        let entries: Vec<String> = serde_json::from_str(entries).map_err(|e| format!("entries: {}", e))?;
+        let (library, used) = Resources::embedded().recording();
+        let resources = resources_over(library, &[]);
+        let (book, _) = glyphsets(&resources);
+        for (i, source) in entries.iter().enumerate() {
+            let mut engine = JournalEngine::with_resources(book.clone(), resources.clone());
+            engine.build_entry(source).map_err(|e| format!("entry {}: {}", i, e.message))?;
+        }
+        let paths = used.paths(Some((&book, &Resources::embedded().glyphsets)));
+        Ok(json!({ "paths": paths }))
+    })())
+}
+
+/// A lock library over the journal's lock and chain files, and `chains`
+/// over them, in front of the library's.
 fn locks(chains: &[(&str, &str)]) -> Rc<LockLibrary> {
-    Rc::new(LockLibrary::new(&resources(&[], chains)))
+    let chains: Vec<(String, &str)> = chains.iter().map(|(name, text)| (format!("chains/{}.rhai", name), *text)).collect();
+    let extra: Vec<(&str, &str)> = chains.iter().map(|(path, text)| (path.as_str(), *text)).collect();
+    Rc::new(LockLibrary::new(&resources(&extra)))
 }
 
 /// `result` as JSON, or `{ error }`.
@@ -318,23 +346,43 @@ fn parse_json(text: &str, what: &str) -> Result<Value, String> {
     serde_json::from_str(text).map_err(|e| format!("{}: {}", what, e))
 }
 
+/// Whether the journal has file `path` of its own, and the library one.
+fn whose(path: &str) -> Value {
+    let own = JOURNAL.with_borrow(|journal| journal.files.contains_key(path));
+    let builtin = LIBRARY_PATHS.with(|paths| paths.contains(path));
+    json!({ "own": own, "builtin": builtin })
+}
+
+thread_local! {
+    /// Every compiled-in library file's path.
+    static LIBRARY_PATHS: std::collections::BTreeSet<String> = {
+        let library = Resources::embedded();
+        library.kinds().into_iter()
+            .flat_map(|(kind, sources)| sources.names().unwrap_or_default().into_iter().map(move |name| format!("{}/{}.{}", kind, name, sources.ext())))
+            .collect()
+    };
+}
+
+/// `value` (a JSON object) with `own` and `builtin` from `whose(path)`.
+fn marked(mut value: Value, path: &str) -> Value {
+    if let (Value::Object(map), Value::Object(marks)) = (&mut value, whose(path)) {
+        map.extend(marks);
+    }
+    value
+}
+
 /// Every lock type, as JSON: `[{ name, file, description, composite,
-/// options: [{ name, kind, choices?, default? }], workspace }]`, or
-/// `{ name, error }` for one that doesn't load.
+/// options: [{ name, kind, choices?, default? }], own, builtin }]`, or
+/// `{ name, error, own, builtin }` for one that doesn't load. `own` if the
+/// journal has the file, `builtin` if the library does.
 #[wasm_bindgen(js_name = lockTypes)]
 pub fn lock_types() -> String {
-    let library = locks(&[]);
-    let workspace: Vec<String> = WORKSPACE.with_borrow(|workspace| workspace.locks.keys().cloned().collect());
-    answer(library.describe_all().map(|types| {
+    answer(locks(&[]).describe_all().map(|types| {
         types.into_iter().map(|(name, info)| {
-            let in_workspace = workspace.contains(&name);
+            let path = format!("locks/{}.rhai", name);
             match info {
-                Ok(info) => {
-                    let mut value = serde_json::to_value(info).unwrap_or(Value::Null);
-                    value["workspace"] = json!(in_workspace);
-                    value
-                }
-                Err(error) => json!({ "name": name, "error": error, "workspace": in_workspace }),
+                Ok(info) => marked(serde_json::to_value(info).unwrap_or(Value::Null), &path),
+                Err(error) => marked(json!({ "name": name, "error": error }), &path),
             }
         }).collect::<Vec<Value>>()
     }))
@@ -347,19 +395,27 @@ pub fn lock_ports(type_name: &str, options: &str) -> String {
     answer(parse_json(options, "options").and_then(|options| locks(&[]).ports(type_name, &options)))
 }
 
-/// Every chain file, as JSON: `[{ name, description, workspace, builtin }]`,
-/// or `{ name, error, workspace, builtin }` for one that doesn't load;
-/// `builtin` if it's compiled in (the workspace's copy, if any, stands in).
+/// Run lock type `type_name`'s examples through lock and unlock, with
+/// `source` standing in for its file if given: `{ examples }`, how many
+/// passed, or `{ error }`, the first failure.
+#[wasm_bindgen(js_name = lockExamples)]
+pub fn lock_examples(type_name: &str, source: Option<String>) -> String {
+    let path = format!("locks/{}.rhai", type_name);
+    let extra: Vec<(&str, &str)> = source.as_deref().map(|source| (path.as_str(), source)).into_iter().collect();
+    let library = Rc::new(LockLibrary::new(&resources(&extra)));
+    answer(library.check_examples(type_name).map(|examples| json!({ "examples": examples })))
+}
+
+/// Every chain file, as JSON: `[{ name, description, own, builtin }]`, or
+/// `{ name, error, own, builtin }` for one that doesn't load.
 #[wasm_bindgen(js_name = chainTypes)]
 pub fn chain_types() -> String {
-    let workspace: Vec<String> = WORKSPACE.with_borrow(|workspace| workspace.chains.keys().cloned().collect());
     answer(locks(&[]).describe_chains().map(|chains| {
         chains.into_iter().map(|(name, info)| {
-            let in_workspace = workspace.contains(&name);
-            let builtin = Resources::embedded().chains.has(&name);
+            let path = format!("chains/{}.rhai", name);
             match info {
-                Ok(description) => json!({ "name": name, "description": description, "workspace": in_workspace, "builtin": builtin }),
-                Err(error) => json!({ "name": name, "error": error, "workspace": in_workspace, "builtin": builtin }),
+                Ok(description) => marked(json!({ "name": name, "description": description }), &path),
+                Err(error) => marked(json!({ "name": name, "error": error }), &path),
             }
         }).collect::<Vec<Value>>()
     }))
@@ -387,71 +443,120 @@ pub fn read_chain(name: &str, source: Option<String>) -> String {
     answer(locks(&extra).read_chain(name))
 }
 
-/// A journal engine with the workspace, and the renderer file `extra`
-/// (name, source) over the rest, for renderer types and previews.
-fn renderer_engine(extra: Option<(&str, &str)>) -> JournalEngine {
-    let extra: Vec<(&str, &str)> = extra.into_iter().collect();
-    JournalEngine::with_resources(font_book(), resources(&extra, &[]))
+/// A journal engine with the journal's files, and `extra` (path -> text)
+/// over them, for the illustration, layout and style editors.
+fn engine(extra: &[(&str, &str)]) -> JournalEngine {
+    let resources = resources(extra);
+    let (book, _) = glyphsets(&resources);
+    JournalEngine::with_resources(book, resources)
 }
 
-/// Every renderer type, as JSON: `[{ name, file, description, options,
-/// inputs, example, workspace }]`, options its defaults and inputs
-/// `[name, type]` pairs for them, or `{ name, error, workspace }` for one
+/// Every illustration type, as JSON: `[{ name, file, description, options,
+/// inputs, example, own, builtin }]`, options its defaults and inputs
+/// `[name, type]` pairs for them, or `{ name, error, own, builtin }` for one
 /// that doesn't load.
-#[wasm_bindgen(js_name = rendererTypes)]
-pub fn renderer_types() -> String {
-    let engine = renderer_engine(None);
-    let workspace: Vec<String> = WORKSPACE.with_borrow(|workspace| workspace.renderers.keys().cloned().collect());
+#[wasm_bindgen(js_name = illustrationTypes)]
+pub fn illustration_types() -> String {
+    let engine = engine(&[]);
     let types: Vec<Value> = engine.illustration_names().into_iter().map(|name| {
-        let in_workspace = workspace.contains(&name);
+        let path = format!("illustrations/{}.rhai", name);
         match engine.describe_illustration(&name) {
-            Ok(info) => {
-                let mut value = serde_json::to_value(info).unwrap_or(Value::Null);
-                value["workspace"] = json!(in_workspace);
-                value
-            }
-            Err(error) => json!({ "name": name, "error": error, "workspace": in_workspace }),
+            Ok(info) => marked(serde_json::to_value(info).unwrap_or(Value::Null), &path),
+            Err(error) => marked(json!({ "name": name, "error": error }), &path),
         }
     }).collect();
     Value::Array(types).to_string()
 }
 
-/// Renderer `type_name`'s inputs with `options` (JSON) over its defaults:
-/// `{ inputs }`, `[name, type]` pairs, or `{ error }`.
-#[wasm_bindgen(js_name = rendererPorts)]
-pub fn renderer_ports(type_name: &str, options: &str) -> String {
+/// Illustration `type_name`'s inputs with `options` (JSON) over its
+/// defaults: `{ inputs }`, `[name, type]` pairs, or `{ error }`.
+#[wasm_bindgen(js_name = illustrationPorts)]
+pub fn illustration_ports(type_name: &str, options: &str) -> String {
     answer(parse_json(options, "options").and_then(|options| {
-        renderer_engine(None).illustration_inputs(type_name, &options).map(|inputs| json!({ "inputs": inputs }))
+        engine(&[]).illustration_inputs(type_name, &options).map(|inputs| json!({ "inputs": inputs }))
     }))
 }
 
-/// What renderer `type_name` draws, as SVG: `{ pages: [{ svg, view }] }`,
-/// or `{ error }`. It draws `inputs` (JSON, name -> value as a run shows it),
-/// or its own example() if null, with `options` (JSON) over its defaults,
-/// and with `source` standing in for its file if given (as it's edited).
-#[wasm_bindgen(js_name = renderPreview)]
-pub fn render_preview(type_name: &str, source: Option<String>, options: &str, inputs: Option<String>) -> String {
+/// What illustration `type_name` draws, as SVG: `{ pages: [{ svg, view }] }`,
+/// or `{ error }`. It draws `inputs` (JSON, name -> value as a run shows
+/// it), or its own example() if null, with `options` (JSON) over its
+/// defaults, and with `source` standing in for its file if given (as it's
+/// edited).
+#[wasm_bindgen(js_name = illustrationPreview)]
+pub fn illustration_preview(type_name: &str, source: Option<String>, options: &str, inputs: Option<String>) -> String {
     answer((|| {
         let options = parse_json(options, "options")?;
         let inputs = inputs.map(|inputs| parse_json(&inputs, "inputs")).transpose()?;
-        let engine = renderer_engine(source.as_deref().map(|source| (type_name, source)));
-        let entry = engine.render(type_name, &options, inputs.as_ref())?;
-        let pages: Vec<Value> = entry.selected_pages(None).map(|(index, page)| {
-            json!({ "svg": publish::page_svg(page, &page.label(index)).map(|(svg, _)| svg), "view": publish::page_view(page) })
-        }).collect();
-        Ok(json!({ "pages": pages }))
+        let path = format!("illustrations/{}.rhai", type_name);
+        let extra: Vec<(&str, &str)> = source.as_deref().map(|source| (path.as_str(), source)).into_iter().collect();
+        let entry = engine(&extra).render(type_name, &options, inputs.as_ref())?;
+        Ok(pages_json(&entry))
     })())
 }
 
-/// Renderer `type_name`'s file, the workspace's if it has one: `{ source }`
-/// or `{ error }`.
-#[wasm_bindgen(js_name = rendererSource)]
-pub fn renderer_source(type_name: &str) -> String {
-    answer(resources(&[], &[]).illustrations.read(type_name).map(|source| json!({ "source": source })).map_err(|e| format!("no illustration file {}: {}", type_name, e)))
+/// Every layout, as JSON: `[{ name, description, options, example, own,
+/// builtin }]`, or `{ name, error, own, builtin }` for one that doesn't
+/// load.
+#[wasm_bindgen(js_name = layoutTypes)]
+pub fn layout_types() -> String {
+    let engine = engine(&[]);
+    let types: Vec<Value> = engine.layout_names().into_iter().map(|name| {
+        let path = format!("layouts/{}.rhai", name);
+        match engine.describe_layout(&name) {
+            Ok(info) => marked(serde_json::to_value(info).unwrap_or(Value::Null), &path),
+            Err(error) => marked(json!({ "name": name, "error": error }), &path),
+        }
+    }).collect();
+    Value::Array(types).to_string()
+}
+
+/// Layout `name` typesetting its example(), with `options` (JSON) over its
+/// defaults and `source` standing in for its file if given: `{ pages: [{
+/// svg, view }] }`, or `{ error }`.
+#[wasm_bindgen(js_name = layoutPreview)]
+pub fn layout_preview(name: &str, source: Option<String>, options: &str) -> String {
+    answer((|| {
+        let options = parse_json(options, "options")?;
+        let path = format!("layouts/{}.rhai", name);
+        let extra: Vec<(&str, &str)> = source.as_deref().map(|source| (path.as_str(), source)).into_iter().collect();
+        let entry = engine(&extra).preview_layout(name, &options)?;
+        Ok(pages_json(&entry))
+    })())
+}
+
+/// Every text style, as JSON: `[{ name, description, options, example,
+/// own, builtin }]`, or `{ name, error, own, builtin }` for one that
+/// doesn't load.
+#[wasm_bindgen(js_name = styleTypes)]
+pub fn style_types() -> String {
+    let engine = engine(&[]);
+    let types: Vec<Value> = engine.text_style_names().into_iter().map(|name| {
+        let path = format!("styles/{}.rhai", name);
+        match engine.describe_text_style(&name) {
+            Ok(info) => marked(serde_json::to_value(info).unwrap_or(Value::Null), &path),
+            Err(error) => marked(json!({ "name": name, "error": error }), &path),
+        }
+    }).collect();
+    Value::Array(types).to_string()
+}
+
+/// Text style `name` writing its example() (or lorem ipsum) in a block
+/// `width` wide, with `options` (JSON) over its defaults and `source`
+/// standing in for its file if given: `{ pages: [{ svg, view }] }`, or
+/// `{ error }`.
+#[wasm_bindgen(js_name = stylePreview)]
+pub fn style_preview(name: &str, source: Option<String>, options: &str, width: f64) -> String {
+    answer((|| {
+        let options = parse_json(options, "options")?;
+        let path = format!("styles/{}.rhai", name);
+        let extra: Vec<(&str, &str)> = source.as_deref().map(|source| (path.as_str(), source)).into_iter().collect();
+        let entry = engine(&extra).preview_text_style(name, &options, width)?;
+        Ok(pages_json(&entry))
+    })())
 }
 
 /// Every value kind, as JSON: `[{ name, example }]`, example a rhai
-/// expression that makes one (or null), for the lock editor to suggest as
+/// expression that makes one (or null), for the chain editor to suggest as
 /// a test value.
 #[wasm_bindgen(js_name = valueKinds)]
 pub fn value_kinds() -> String {
@@ -465,8 +570,7 @@ pub fn value_kinds() -> String {
 /// for the editor to highlight and complete.
 #[wasm_bindgen(js_name = apiNames)]
 pub fn api_names() -> Vec<String> {
-    let fonts = Rc::new(FontBook::from_bytes(builtin_glyphsets().as_bytes()).expect("the compiled-in glyphsets load"));
-    JournalEngine::embedded(fonts).function_names().into_iter()
+    JournalEngine::embedded(library_glyphsets()).function_names().into_iter()
         .filter(|name| {
             let mut parts = name.split("::");
             parts.all(|part| part.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
@@ -513,14 +617,14 @@ pub struct Renderer {
 
 struct RendererState {
     engine: darkly::DarklyEngine,
-    /// The last script run, the workspace it ran with, and its entry, so
+    /// The last script run, the journal version it ran with, and its entry, so
     /// rendering its pages one by one runs it once.
     last: Option<(String, u64, Rc<Entry>)>,
 }
 
 impl RendererState {
     fn entry(&mut self, source: &str) -> Result<Rc<Entry>, JsError> {
-        let version = WORKSPACE.with_borrow(|workspace| workspace.version);
+        let version = JOURNAL.with_borrow(|journal| journal.version);
         if let Some((last_source, last_version, entry)) = &self.last
             && last_source == source && *last_version == version {
             return Ok(entry.clone());

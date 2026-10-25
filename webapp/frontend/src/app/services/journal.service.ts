@@ -1,15 +1,12 @@
 import { Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
+import { entryPath, splitPath } from '../journal/journal-files';
 import type { Evaluation, PageView, ScriptError } from '../scribe';
 import { ShellService } from '../shell/shell.service';
-import { FileService } from './file.service';
+import { JournalStore } from './journal-store.service';
 import { RenderService } from './render.service';
-import { WorkspaceService } from './workspace.service';
 
 /** How long typing pauses before the script runs again. */
 const DEBOUNCE_MS = 250;
-const DRAFT_KEY = 'journal-editor.draft';
-/** A new journal's script: one blank page. */
-const BLANK_JOURNAL = 'let page = new_page();\njournal_entry.add(page);\n';
 
 /** A page as the editor shows it. */
 export interface Page extends PageView {
@@ -19,25 +16,23 @@ export interface Page extends PageView {
   stale: boolean;
 }
 
-interface Draft {
-  name: string;
-  source: string;
-  saved: string | null;
-}
-
-/** The script being edited, what running it makes, and the page shown. */
+/**
+ * The entry being edited, what running it (with the journal's files) makes,
+ * and the page shown. The entry is the last one the sidebar opened.
+ */
 @Injectable({ providedIn: 'root' })
 export class JournalService {
   private readonly render = inject(RenderService);
-  private readonly files = inject(FileService);
-  private readonly workspace = inject(WorkspaceService);
+  private readonly store = inject(JournalStore);
   private readonly shell = inject(ShellService);
 
-  readonly source = signal('');
-  readonly fileName = signal('untitled.rhai');
-  /** The source as last opened or saved; null if never. */
-  private readonly savedSource = signal<string | null>(null);
-  readonly dirty = computed(() => this.source() !== (this.savedSource() ?? ''));
+  /** The entry being edited, by name. */
+  readonly entry = signal<string | null>(null);
+  /** Its script. */
+  readonly source = computed(() => {
+    const entry = this.entry();
+    return entry === null ? '' : (this.store.files()[entryPath(entry)] ?? '');
+  });
 
   readonly pages = signal<Page[]>([]);
   readonly selectedIndex = signal(0);
@@ -55,49 +50,43 @@ export class JournalService {
   /** The scripts of runs not yet shown, by generation. */
   private runs = new Map<number, string>();
   private debounce: ReturnType<typeof setTimeout> | null = null;
-  private draftTimer: ReturnType<typeof setTimeout> | null = null;
-  /** The workspace the script last ran with. */
-  private ranWith = -1;
+  /** The script and journal files the last run had. */
+  private ran: { source: string; files: unknown } | null = null;
 
   constructor() {
     this.render.connect({
       evaluated: (generation, evaluation) => this.onEvaluated(generation, evaluation),
       svg: (generation, index, svg) => this.onSvg(generation, index, svg),
     });
-    addEventListener('beforeunload', (event) => {
-      if (this.dirty()) event.preventDefault();
-    });
-    // Edited fonts or lock files: run the script again with them, once the
-    // journal editor shows (no need to while another editor's in use).
+    // The entry the sidebar opens.
     effect(() => {
-      const version = this.workspace.version();
-      if (this.shell.mode() !== 'journal' || this.ranWith < 0 || version === this.ranWith) return;
+      const split = splitPath(this.shell.selected() ?? '');
+      if (split?.kind !== 'entries' || split.name === untracked(() => this.entry())) return;
       untracked(() => {
-        if (!this.debounce) this.run();
+        this.entry.set(split.name);
+        this.selectedIndex.set(0);
+        this.clearPages();
+      });
+    });
+    // Run the entry again when it or the journal's other files change,
+    // while it shows (no need to while another file is edited).
+    effect(() => {
+      const source = this.source();
+      const files = this.store.resources();
+      const showing = splitPath(this.shell.selected() ?? '')?.kind === 'entries';
+      if (!showing || this.entry() === null) return;
+      untracked(() => {
+        if (this.ran && this.ran.source === source && this.ran.files === files) return;
+        if (this.debounce) clearTimeout(this.debounce);
+        this.debounce = setTimeout(() => this.run(), this.ran?.source === source ? 0 : DEBOUNCE_MS);
       });
     });
   }
 
-  /** Start with the draft from last time, or `fallback` if there isn't one. */
-  async restore(fallback: () => Promise<{ name: string; source: string }>) {
-    const draft = readDraft();
-    if (draft) {
-      this.fileName.set(draft.name);
-      this.savedSource.set(draft.saved);
-      this.setSource(draft.source, true);
-    } else {
-      const { name, source } = await fallback();
-      this.load(name, source);
-    }
-  }
-
-  /** The script changed: run it again once typing pauses. */
-  setSource(source: string, now = false) {
-    this.source.set(source);
-    if (this.debounce) clearTimeout(this.debounce);
-    this.debounce = setTimeout(() => this.run(), now ? 0 : DEBOUNCE_MS);
-    if (this.draftTimer) clearTimeout(this.draftTimer);
-    this.draftTimer = setTimeout(() => this.saveDraft(), 500);
+  /** The entry's script changed. */
+  setSource(source: string) {
+    const entry = this.entry();
+    if (entry !== null) this.store.setFile(entryPath(entry), source);
   }
 
   select(index: number) {
@@ -108,47 +97,31 @@ export class JournalService {
     this.render.focus(this.latest, clamped);
   }
 
-  /** Show `source` as a newly opened script, `name`. */
-  load(name: string, source: string) {
-    this.fileName.set(name);
-    this.savedSource.set(source);
-    this.selectedIndex.set(0);
-    this.setSource(source, true);
-  }
-
-  /** Start a new, unsaved journal with one blank page. */
-  newJournal() {
-    this.fileName.set('untitled.rhai');
-    this.savedSource.set(null);
-    this.selectedIndex.set(0);
-    this.setSource(BLANK_JOURNAL, true);
-  }
-
-  async open() {
-    const file = await this.files.open();
-    if (file) this.load(file.name, file.text);
-  }
-
-  /** Save where the user picks, suggesting the script's name. */
-  async save() {
-    const source = this.source();
-    const saved = await this.files.save(source, this.fileName(), null);
-    if (!saved) return;
-    this.fileName.set(saved.name);
-    this.savedSource.set(source);
-    this.saveDraft();
-  }
-
-  /** The file name without its extension, for exports. */
-  readonly baseName = computed(() => this.fileName().replace(/\.[^.]*$/, '') || 'journal');
+  /** The journal's and entry's names, for exports. */
+  readonly baseName = computed(() => {
+    const entry = this.entry() ?? 'entry';
+    const journal = this.store.name();
+    return journal === entry ? journal : `${journal}_${entry}`;
+  });
 
   private run() {
     this.debounce = null;
     this.evaluating.set(true);
     const source = this.source();
-    this.ranWith = this.workspace.version();
+    this.ran = { source, files: this.store.resources() };
     this.latest = this.render.evaluate(source, this.selectedIndex());
     this.runs.set(this.latest, source);
+  }
+
+  private clearPages() {
+    for (const page of this.pages()) if (page.svgUrl) URL.revokeObjectURL(page.svgUrl);
+    this.pages.set([]);
+    this.error.set(null);
+    this.evaluation.set(null);
+    this.shownSource.set('');
+    this.ran = null;
+    // Runs of the entry shown before aren't shown.
+    this.shown = this.latest + 1;
   }
 
   private onEvaluated(generation: number, evaluation: Evaluation) {
@@ -183,23 +156,5 @@ export class JournalService {
       const svgUrl = svg ? URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' })) : null;
       return { ...page, svgUrl, stale: false };
     }));
-  }
-
-  private saveDraft() {
-    const draft: Draft = { name: this.fileName(), source: this.source(), saved: this.savedSource() };
-    try {
-      localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
-    } catch {
-      // No storage (private window, or full): the draft just isn't kept.
-    }
-  }
-}
-
-function readDraft(): Draft | null {
-  try {
-    const draft = JSON.parse(localStorage.getItem(DRAFT_KEY) ?? 'null');
-    return draft && typeof draft.source === 'string' && typeof draft.name === 'string' ? draft : null;
-  } catch {
-    return null;
   }
 }

@@ -1,15 +1,14 @@
 import { Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
-import { FileService, JSON_FILES, type OpenedFile } from '../services/file.service';
-import { ToolsService } from '../services/tools.service';
-import { WorkspaceService, hash } from '../services/workspace.service';
+import { kindOf, nameOf, pathOf, splitPath } from '../journal/journal-files';
+import { JournalStore } from '../services/journal-store.service';
+import { LibraryService } from '../services/library.service';
 import { ShellService } from '../shell/shell.service';
-import { checkFonts, parseFonts, serializeFonts, withOption, type Font, type FontsFile, type Glyph } from './font-file';
+import { checkFonts, parseFont, serializeFont, serializeFonts, withOption, type Font, type FontsFile, type Glyph } from './font-file';
 import * as edit from './glyph-edit';
 import type { PointRef, SegmentRef } from './glyph-edit';
 import { formatPath, inkExtent, parsePath, type GlyphPath, type Segment } from './glyph-path';
 
-const DRAFT_KEY = 'journal-editor.fonts-draft';
-/** How long edits pause before journals are given them. */
+/** How long edits pause before the journal is given them. */
 const PUSH_DELAY_MS = 400;
 /** Undo steps kept. */
 const HISTORY = 200;
@@ -23,12 +22,6 @@ export interface Selection {
   variant: number;
 }
 
-interface Draft {
-  name: string;
-  text: string;
-  font: string;
-}
-
 /** Where a font's guides go, in glyph units (y down). */
 export interface Guides {
   cap?: number;
@@ -38,26 +31,29 @@ export interface Guides {
 }
 
 /**
- * The fonts being edited: the whole fonts.json, the font and glyph variant
- * shown, the tool in hand, and undo. Every change that leaves the fonts
- * valid is given to journals (the workspace), once edits pause.
+ * The glyphsets being edited: every one the journal has (its own glyphset
+ * files over the library's), the glyphset and glyph variant shown, the
+ * tool in hand, and undo. Every change that leaves the glyphsets valid is
+ * given to the journal once edits pause, as the glyphset files that differ
+ * from the library's: changing a library glyphset gives the journal a copy
+ * that stands in for it.
  */
 @Injectable()
 export class FontEditorService {
-  private readonly tools = inject(ToolsService);
-  private readonly files = inject(FileService);
-  private readonly workspace = inject(WorkspaceService);
+  private readonly store = inject(JournalStore);
+  private readonly library = inject(LibraryService);
   private readonly shell = inject(ShellService);
 
   readonly file = signal<FontsFile | null>(null);
-  readonly fileName = signal('fonts.json');
-  /** Why the fonts couldn't be loaded, if they couldn't. */
+  /** Why the glyphsets couldn't be loaded, if they couldn't. */
   readonly loadError = signal<string | null>(null);
-  /** The built-in fonts.json, once fetched. */
-  readonly builtin = signal<string | null>(null);
-  private handle: OpenedFile['handle'] = null;
-  /** The file as last loaded or exported. */
-  private readonly savedText = signal<string | null>(null);
+  /** The library's glyphsets, read; null until the library is. */
+  private readonly builtinFile = computed<FontsFile | null>(() => {
+    if (!this.library.loaded()) return null;
+    return fontsOf(this.library.files(), {});
+  });
+  /** The glyphset files the editor last read or wrote, by path, to tell the journal's changes from its own. */
+  private synced: Record<string, string> = {};
 
   readonly fontName = signal<string>('plain');
   readonly selection = signal<Selection | null>(null);
@@ -75,26 +71,23 @@ export class FontEditorService {
     const file = this.file();
     return file ? serializeFonts(file) : null;
   });
-  readonly dirty = computed(() => this.text() !== null && this.text() !== this.savedText());
+  /** The glyphsets as glyphset files, by path, for previews to run with. */
+  readonly previewFiles = computed(() => {
+    const file = this.file();
+    return file ? Object.fromEntries(file.map((font) => [pathOf('glyphsets', font.name), serializeFont(font)])) : null;
+  });
   readonly problems = computed(() => {
     const file = this.file();
     return file ? checkFonts(file) : [];
   });
-  /** Whether the fonts are the built-in ones, unchanged. */
-  readonly unchanged = computed(() => this.text() !== null && this.text() === this.builtin());
-  /** The built-in fonts, read; null until fetched. */
-  private readonly builtinFile = computed(() => {
-    const builtin = this.builtin();
-    return builtin === null ? null : parseFonts(builtin);
-  });
-  /** The built-in font of the shown font's name; null if there's none. */
+  /** The library's names for its glyphsets. */
+  readonly builtinNames = computed(() => (this.builtinFile() ?? []).map((font) => font.name));
+  /** The library's glyphset of the shown one's name; null if there's none. */
   readonly builtinFont = computed(() => this.builtinFile()?.find((font) => font.name === this.fontName()) ?? null);
-  /** Whether the font shown is as built in (or isn't built in, so has nothing to go back to). */
-  readonly fontUnchanged = computed(() => {
-    const font = this.font();
-    const builtin = this.builtinFont();
-    return !font || !builtin || serializeFonts([font]) === serializeFonts([builtin]);
-  });
+  /** The shown glyphset's file. */
+  readonly fontPath = computed(() => pathOf('glyphsets', this.fontName()));
+  /** Whether the journal has the shown glyphset's file (else it's the library's). */
+  readonly fontOwn = computed(() => this.fontPath() in this.store.files());
 
   readonly font = computed<Font | null>(() => this.file()?.find((font) => font.name === this.fontName()) ?? null);
   readonly glyph = computed<Glyph | null>(() => {
@@ -154,38 +147,34 @@ export class FontEditorService {
   private pushTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
-    // Give journals the fonts once edits pause, if they're valid; the
-    // built-in fonts unchanged are no edit at all.
+    // The journal's glyphset files, and the library's, as they change:
+    // read again unless they're what the editor last read or wrote.
     effect(() => {
-      const text = this.text();
-      const ok = this.problems().length === 0;
-      const builtin = this.builtin();
-      if (text === null || !ok || builtin === null) return;
-      if (this.pushTimer) clearTimeout(this.pushTimer);
-      this.pushTimer = setTimeout(() => {
-        this.workspace.setFonts(text === builtin ? null : text, hash(builtin));
-      }, PUSH_DELAY_MS);
-    });
-    // Keep the draft between visits.
-    effect(() => {
-      const text = this.text();
-      const font = this.fontName();
-      if (text === null) return;
-      const draft: Draft = { name: this.fileName(), text, font };
-      try {
-        localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
-      } catch {
-        // No storage: the draft lasts this visit.
-      }
-    });
-    // Another editor asked for a font: show it, once the fonts are loaded.
-    effect(() => {
-      const name = this.shell.fontRequest();
-      const file = this.file();
-      if (name === null || !file) return;
+      const own = this.glyphsetFiles(this.store.files());
+      const library = this.library.files();
+      if (!this.library.loaded()) return;
       untracked(() => {
-        if (file.some((font) => font.name === name)) this.pickFont(name);
-        this.shell.fontRequest.set(null);
+        const current = { ...this.glyphsetFiles(library), ...own };
+        if (this.file() && sameFiles(current, this.synced)) return;
+        this.read(own, library);
+      });
+    });
+    // Give the journal the glyphsets once edits pause, if they're valid.
+    effect(() => {
+      const file = this.file();
+      const ok = this.problems().length === 0;
+      if (!file || !ok) return;
+      if (this.pushTimer) clearTimeout(this.pushTimer);
+      this.pushTimer = setTimeout(() => untracked(() => this.push(file)), PUSH_DELAY_MS);
+    });
+    // The glyphset the sidebar opens.
+    effect(() => {
+      const path = this.shell.selected();
+      const file = this.file();
+      if (!path || kindOf(path) !== 'glyphsets' || !file) return;
+      const name = nameOf(path);
+      untracked(() => {
+        if (name !== this.fontName() && file.some((font) => font.name === name)) this.pickFont(name);
       });
     });
     // A different glyph or variant: nothing of it is picked.
@@ -195,15 +184,6 @@ export class FontEditorService {
       this.picked.set([]);
       this.pickedSegment.set(null);
     });
-    // The workspace cleared: start again from the built-in fonts.
-    effect(() => {
-      if (!this.workspace.cleared()) return;
-      untracked(() => {
-        const builtin = this.builtin();
-        if (builtin !== null) this.load(builtin, 'fonts.json', null);
-      });
-    });
-    void this.start();
   }
 
   // ---- the canvas's edits, to the variant shown ----
@@ -277,76 +257,72 @@ export class FontEditorService {
     this.editPath((path) => edit.movePoints(path, refs, { x: dx, y: dy }), 'nudge');
   }
 
-  /** Pick up where the last visit left off, or start from the built-in fonts. */
-  private async start() {
-    const builtin = await this.tools.builtinFonts().catch((err: Error) => {
-      this.loadError.set(`the renderer didn't load: ${err.message}`);
-      return null;
-    });
-    this.builtin.set(builtin);
-    const draft = readDraft();
-    const text = draft?.text ?? this.workspace.fonts() ?? builtin;
-    if (text === null) return;
-    this.load(text, draft?.name ?? 'fonts.json', null, draft?.font);
-    // The draft was saved as it was; it's only unsaved if it differs from the built-in fonts.
-    if (builtin !== null) this.savedText.set(builtin);
-    if (this.workspace.fonts() !== null && this.workspace.fontsBase() !== null && builtin !== null && this.workspace.fontsBase() !== hash(builtin)) {
-      this.loadError.set('the built-in fonts has changed since these edits began; they may undo newer changes. Revert to the built-in fonts to start again from it.');
-    }
+  /** Every glyphset file of `files`, by path. */
+  private glyphsetFiles(files: Record<string, string>): Record<string, string> {
+    return Object.fromEntries(Object.entries(files).filter(([path]) => kindOf(path) === 'glyphsets'));
   }
 
-  /** Show `text` as the fonts file `name`. */
-  load(text: string, name: string, handle: OpenedFile['handle'], font?: string) {
+  /** Read the glyphsets afresh: the journal's files over the library's. */
+  private read(own: Record<string, string>, library: Record<string, string>) {
     let file: FontsFile;
     try {
-      file = parseFonts(text);
+      file = fontsOf(library, own);
     } catch (err) {
-      this.loadError.set(`${name} isn't a fonts file: ${(err as Error).message}`);
+      this.loadError.set((err as Error).message);
       return;
     }
     this.loadError.set(null);
+    this.synced = { ...this.glyphsetFiles(library), ...own };
+    const keep = this.selection();
     this.file.set(file);
-    this.fileName.set(name);
-    this.handle = handle;
-    this.savedText.set(serializeFonts(file));
     this.undoStack = [];
     this.redoStack = [];
     this.updateHistory();
     const names = file.map((f) => f.name);
-    this.pickFont(font && names.includes(font) ? font : names.includes(this.fontName()) ? this.fontName() : (names[0] ?? ''));
+    const wanted = splitPath(this.shell.selected() ?? '')?.kind === 'glyphsets' ? nameOf(this.shell.selected()!) : this.fontName();
+    if (keep && wanted === this.fontName() && names.includes(wanted)) {
+      this.selection.set(keep);
+      this.keepSelection();
+    } else {
+      this.pickFont(names.includes(wanted) ? wanted : (names[0] ?? ''));
+    }
   }
 
-  async open() {
-    const opened = await this.files.open(JSON_FILES);
-    if (opened) this.load(opened.text, opened.name, opened.handle);
+  /**
+   * Give the journal the glyphsets as they are: a file for each that isn't
+   * the library's as it is, written where it differs from the journal's;
+   * the journal's files of glyphsets no longer there removed.
+   */
+  private push(file: FontsFile) {
+    const library = this.library.files();
+    const files = this.store.files();
+    const builtin = new Map((this.builtinFile() ?? []).map((font) => [font.name, serializeFont(font)]));
+    const names = new Set(file.map((font) => font.name));
+    for (const font of file) {
+      const path = pathOf('glyphsets', font.name);
+      const text = serializeFont(font);
+      const own = files[path];
+      if (own === undefined && builtin.get(font.name) === text) continue;
+      if (own !== undefined && own === text) continue;
+      this.store.setFile(path, text);
+    }
+    for (const path of Object.keys(this.glyphsetFiles(files))) {
+      if (!names.has(nameOf(path))) this.store.removeFile(path);
+    }
+    this.synced = { ...this.glyphsetFiles(library), ...this.glyphsetFiles(this.store.files()) };
   }
 
-  /** Put the font shown back as it is in the built-in fonts, as one undo step; the other fonts keep their edits. */
-  revertFont() {
-    const builtin = this.builtinFont();
-    if (!builtin || this.fontUnchanged()) return;
-    this.updateFont(() => structuredClone(builtin));
-    this.settle();
-    this.keepSelection();
+  /** Remove the journal's copy of the glyphset shown: the library's is used again. */
+  useLibraryFont() {
+    if (!this.fontOwn() || !this.builtinFont()) return;
+    if (this.pushTimer) clearTimeout(this.pushTimer);
+    this.store.removeFile(this.fontPath());
   }
 
-  /** Start again from the built-in fonts as built in, every font. */
-  revert() {
-    const builtin = this.builtin();
-    if (builtin === null) return;
-    this.load(builtin, 'fonts.json', null);
-    this.workspace.setFonts(null);
-  }
-
-  /** Save the fonts file where it came from (or where the user picks), or download it. */
-  async export() {
-    const text = this.text();
-    if (text === null) return;
-    const saved = await this.files.save(text, this.fileName(), this.handle, JSON_FILES);
-    if (!saved) return;
-    this.handle = saved.handle;
-    this.fileName.set(saved.name);
-    this.savedText.set(text);
+  /** Show glyphset `name`, and open its file. */
+  openFont(name: string) {
+    this.pickFont(name);
+    if (name) this.shell.open(pathOf('glyphsets', name));
   }
 
   pickFont(name: string) {
@@ -505,14 +481,21 @@ export class FontEditorService {
     if (problem) return problem;
     const font: Font = from ? { ...from, name } : { name, options: [], glyphs: [] };
     this.update((f) => [...f, font]);
-    this.pickFont(name);
+    this.openFont(name);
     return null;
+  }
+
+  /** Give the journal a copy of the glyphset shown, though it's unchanged: a file of its own to change. */
+  copyFont() {
+    const font = this.font();
+    if (font && !this.fontOwn()) this.store.setFile(this.fontPath(), serializeFont(font));
   }
 
   renameFont(name: string): string | null {
     const file = this.file();
     const old = this.fontName();
     if (!file || name === old) return null;
+    if (this.builtinFont()) return `the library has ${old}: duplicate it under the new name instead`;
     const problem = fontNameProblem(file, name);
     if (problem) return problem;
     const raw = JSON.stringify(old);
@@ -522,14 +505,17 @@ export class FontEditorService {
       return renamed.options.some(([k, v]) => k === 'fallback' && v === raw) ? withOption(renamed, 'fallback', JSON.stringify(name)) : renamed;
     }));
     this.fontName.set(name);
+    this.shell.open(pathOf('glyphsets', name));
     return null;
   }
 
+  /** Delete the glyphset shown, if it's the journal's alone (the library's would come back). */
   deleteFont() {
     const name = this.fontName();
+    if (this.builtinFont()) return;
     this.update((file) => file.filter((font) => font.name !== name));
     const first = this.file()?.[0]?.name;
-    if (first !== undefined) this.pickFont(first);
+    if (first !== undefined) this.openFont(first);
   }
 }
 
@@ -539,11 +525,20 @@ function fontNameProblem(file: FontsFile, name: string): string | null {
   return null;
 }
 
-function readDraft(): Draft | null {
-  try {
-    const draft = JSON.parse(localStorage.getItem(DRAFT_KEY) ?? 'null');
-    return draft && typeof draft.text === 'string' && typeof draft.name === 'string' ? draft : null;
-  } catch {
-    return null;
-  }
+/** The glyphsets of `own` (glyphset files by path) over `library`'s, sorted by name. Throws, naming the file, if one doesn't read. */
+function fontsOf(library: Record<string, string>, own: Record<string, string>): FontsFile {
+  const files = { ...library, ...own };
+  return Object.keys(files).filter((path) => kindOf(path) === 'glyphsets').sort().map((path) => {
+    try {
+      return parseFont(nameOf(path), files[path]);
+    } catch (err) {
+      throw new Error(`${path} isn't a glyphset: ${(err as Error).message}`);
+    }
+  });
+}
+
+/** Two sets of files alike, path for path. */
+function sameFiles(a: Record<string, string>, b: Record<string, string>): boolean {
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length && keys.every((key) => a[key] === b[key]);
 }

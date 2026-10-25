@@ -1,37 +1,47 @@
-// Copies every entry of every journal in webapp/journals
-// (<journal>/entries/<entry>.rhai) to generated/examples/<name>.rhai, named
-// for the journal, or <journal>.<entry> where they differ, with an
-// index.json listing them, for the editor's Examples menu. (Entries using a
-// journal's own files, such as its glyphsets, need the journal loaded.)
-// Also writes generated/fixtures/, the repository files the unit tests
-// check against (the library's glyphsets/ as one fonts.json, a chain
-// file), as modules exporting their text.
+// Copies every journal in webapp/journals (a journal.json, its entries and
+// its own files) to generated/journals/<name>.json, { manifest, files }, with
+// an index.json listing them, for the editor's Open menu. Also writes
+// generated/fixtures/, the repository files the unit tests check against
+// (the library's glyphsets/ as one fonts.json, a chain file), as modules
+// exporting their text.
 
-import { mkdirSync, readdirSync, copyFileSync, existsSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { mkdirSync, readdirSync, existsSync, writeFileSync, rmSync, readFileSync, statSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const journals = join(here, '../../journals');
-const out = join(here, '../generated/examples');
+const out = join(here, '../generated/journals');
 
+/** Every file under `dir`, as paths from it. */
+function walk(dir, root = dir) {
+  return readdirSync(dir).flatMap((name) => {
+    const path = join(dir, name);
+    return statSync(path).isDirectory() ? walk(path, root) : [relative(root, path).split('\\').join('/')];
+  });
+}
+
+rmSync(join(here, '../generated/examples'), { recursive: true, force: true });
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
-const names = [];
-const journalNames = readdirSync(journals, { withFileTypes: true })
+const index = [];
+const names = readdirSync(journals, { withFileTypes: true })
   .filter((dir) => dir.isDirectory() && existsSync(join(journals, dir.name, 'journal.json')))
   .map((dir) => dir.name)
   .sort();
-for (const journal of journalNames) {
-  const manifest = JSON.parse(readFileSync(join(journals, journal, 'journal.json'), 'utf8'));
-  for (const entry of manifest.entries) {
-    const name = entry === journal ? journal : `${journal}.${entry}`;
-    copyFileSync(join(journals, journal, 'entries', `${entry}.rhai`), join(out, `${name}.rhai`));
-    names.push(name);
+for (const name of names) {
+  const dir = join(journals, name);
+  const manifest = JSON.parse(readFileSync(join(dir, 'journal.json'), 'utf8'));
+  const files = {};
+  for (const path of walk(dir).sort()) {
+    if (path === 'journal.json' || !/^[a-z]+\/.+\.(rhai|json|txt|md)$/.test(path)) continue;
+    files[path] = readFileSync(join(dir, path), 'utf8');
   }
+  writeFileSync(join(out, `${name}.json`), JSON.stringify({ manifest, files }));
+  index.push({ name, title: manifest.title, description: manifest.description, entries: manifest.entries });
 }
-writeFileSync(join(out, 'index.json'), JSON.stringify(names, null, 2) + '\n');
-console.log(`examples: ${names.join(', ')}`);
+writeFileSync(join(out, 'index.json'), JSON.stringify(index, null, 2) + '\n');
+console.log(`journals: ${names.join(', ')}`);
 
 const fixtures = join(here, '../generated/fixtures');
 mkdirSync(fixtures, { recursive: true });

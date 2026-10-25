@@ -18,7 +18,7 @@
 
 mod library;
 
-pub use library::LockLibrary;
+pub use library::{parse_sources, LockLibrary, SourceKind, SourceSpec};
 pub use library::{from_json, to_json, value_from_test, value_view, OptionInfo, Ports, RunResult, TypeInfo, ValueView};
 
 use rhai::{Array, CustomType, Dynamic, Engine, EvalAltResult, Map, TypeBuilder};
@@ -125,6 +125,8 @@ pub struct LockBuilder {
     illustration_library: Rc<IllustrationLibrary>,
     /// Illustrations attached, in the order they were.
     illustrations: Vec<Attachment>,
+    /// The resources it draws on, each with its value's type.
+    sources: Vec<(SourceSpec, InfoVarType)>,
     name: String,
     locks: HashMap<String, Rc<dyn Lock>>,
     connections: Vec<(String, String)>,
@@ -144,6 +146,7 @@ impl LockBuilder {
             connections: Vec::new(),
             fixed_inputs: Vec::new(),
             illustrations: Vec::new(),
+            sources: Vec::new(),
             lock,
         })
     }
@@ -154,6 +157,9 @@ impl LockBuilder {
         let spec = library.chain_spec(name, options).map_err(|e| format!("chain: {}", e))?;
         let at = |e: Box<EvalAltResult>| -> Box<EvalAltResult> { format!("chain: {}: {}", spec.file, super::options::unwrap_runtime(&e)).into() };
         let mut lock = Self::new(library.clone(), illustration_library, name)?;
+        for source in &spec.sources {
+            lock.add_source(source.clone()).map_err(at)?;
+        }
         for (id, type_name, options) in &spec.locks {
             lock.add(id, type_name, options.clone()).map_err(at)?;
         }
@@ -199,8 +205,8 @@ impl LockBuilder {
             if next.locks.contains_key(name) {
                 return Err(format!("a lock named '{}' was already added", name));
             }
-            if next.illustrations.iter().any(|r| r.id == name) {
-                return Err(format!("there's an illustration named '{}' already", name));
+            if next.illustrations.iter().any(|r| r.id == name) || next.sources.iter().any(|(s, _)| s.id == name) {
+                return Err(format!("there's an illustration or source named '{}' already", name));
             }
             let lock = next.library.build(name, type_name, options)?;
             next.locks.insert(name.to_string(), Rc::new(lock));
@@ -217,15 +223,50 @@ impl LockBuilder {
         if id.is_empty() || id.contains('.') {
             return Err(format!("attach: illustration id '{}' must be non-empty and contain no '.'", id).into());
         }
-        if self.locks.contains_key(id) || self.illustrations.iter().any(|r| r.id == id) {
-            return Err(format!("attach: there's a lock or illustration named '{}' already", id).into());
+        if self.locks.contains_key(id) || self.illustrations.iter().any(|r| r.id == id) || self.sources.iter().any(|(s, _)| s.id == id) {
+            return Err(format!("attach: there's a lock, illustration or source named '{}' already", id).into());
         }
         self.illustrations.push(Attachment { id: id.to_string(), illustration: illustration.to_string(), options, wires: Vec::new(), types });
         Ok(self.clone())
     }
 
-    /// The type of the chain's port `port` ("lock.name"), input or output.
+    /// `lock.source(id, kind, name[, options])`: a resource the chain
+    /// draws on, its value at port "id.value" (see `library::sources`).
+    fn source(&mut self, id: &str, kind: &str, name: &str, options: Map) -> RhaiResult<Self> {
+        super::options::check_keys("source", &options, &["options", "base"])?;
+        let mut entry = Map::new();
+        entry.insert("type".into(), kind.into());
+        entry.insert("name".into(), name.into());
+        entry.extend(options);
+        let mut sources = Map::new();
+        sources.insert(id.into(), Dynamic::from_map(entry));
+        let mut spec = Map::new();
+        spec.insert("sources".into(), Dynamic::from_map(sources));
+        let source = library::parse_sources(&spec).map_err(|e| format!("source: {}", e))?.remove(0);
+        self.add_source(source)
+    }
+
+    fn add_source(&mut self, source: SourceSpec) -> RhaiResult<Self> {
+        if self.locks.contains_key(&source.id) || self.illustrations.iter().any(|r| r.id == source.id) || self.sources.iter().any(|(s, _)| s.id == source.id) {
+            return Err(format!("source: there's a lock, illustration or source named '{}' already", source.id).into());
+        }
+        let var_type = self.library.source_type(&source).map_err(|e| format!("source: {}", e))?;
+        self.sources.push((source, var_type));
+        Ok(self.clone())
+    }
+
+    /// The source whose output `port` ("id.value") is, if it's one.
+    fn source_at(&self, port: &str) -> Option<&(SourceSpec, InfoVarType)> {
+        let (id, name) = port.split_once('.')?;
+        self.sources.iter().find(|(source, _)| source.id == id && name == library::SOURCE_PORT)
+    }
+
+    /// The type of the chain's port `port` ("lock.name"), input or output,
+    /// or a source's value.
     fn port_type(&self, port: &str) -> Option<InfoVarType> {
+        if let Some((_, var_type)) = self.source_at(port) {
+            return Some(var_type.clone());
+        }
         let (part, name) = port.split_once('.')?;
         let lock = self.locks.get(part)?;
         lock.outputs().get(name).cloned().or_else(|| lock.inputs().get(name).cloned())
@@ -260,6 +301,19 @@ impl LockBuilder {
             if self.illustrations.iter().any(|r| r.id == id) {
                 return self.connect_illustration(from, id, input);
             }
+        }
+        // A source feeding a lock: its value is the input's, fixed.
+        if let Some((source, var_type)) = self.source_at(from).cloned() {
+            let expected = self.lock.inputs().get(to).cloned().ok_or_else(|| format!("connect: '{}' isn't an open input", to))?;
+            if !compatible(&var_type, &expected) {
+                return Err(format!("connect: can't connect {} ({}) to {} ({})", from, var_type, to, expected).into());
+            }
+            let value = self.library.source_value(&source).map_err(|e| format!("connect: {}", e))?;
+            return self.update("connect", |next| {
+                next.fixed_inputs.retain(|(existing, _)| existing != to);
+                next.fixed_inputs.push((to.to_string(), value));
+                Ok(())
+            });
         }
         // CompositeLock::new checks the ports exist, their types match, the
         // input isn't already wired and nothing loops.
@@ -316,7 +370,14 @@ impl LockBuilder {
     }
 
     fn result(&self, values: InfoVarSet, trace: InfoVarSet) -> LockResult {
-        LockResult { values, trace, illustrations: Rc::new(self.illustrations.clone()), illustration_library: self.illustration_library.clone() }
+        LockResult {
+            values,
+            trace,
+            illustrations: Rc::new(self.illustrations.clone()),
+            illustration_library: self.illustration_library.clone(),
+            sources: Rc::new(self.sources.iter().map(|(source, _)| source.clone()).collect()),
+            library: self.library.clone(),
+        }
     }
 }
 
@@ -343,6 +404,8 @@ impl CustomType for LockBuilder {
             .with_fn("attach", |ctx: rhai::NativeCallContext, lock: &mut Self, id: &str, illustration: &str| lock.attach(&ctx, id, illustration, Map::new()))
             .with_fn("attach", |ctx: rhai::NativeCallContext, lock: &mut Self, id: &str, illustration: &str, options: Map| lock.attach(&ctx, id, illustration, options))
             .with_fn("illustrations", Self::illustrations)
+            .with_fn("source", |lock: &mut Self, id: &str, kind: &str, name: &str| lock.source(id, kind, name, Map::new()))
+            .with_fn("source", Self::source)
             .with_fn("set_input", Self::set_input)
             .with_fn("inputs", Self::inputs)
             .with_fn("outputs", Self::outputs)
@@ -473,6 +536,9 @@ pub struct LockResult {
     /// The illustrations attached to the chain, to draw its values.
     illustrations: Rc<Vec<Attachment>>,
     illustration_library: Rc<IllustrationLibrary>,
+    /// The resources the chain draws on, for its illustrations.
+    sources: Rc<Vec<SourceSpec>>,
+    library: Rc<LockLibrary>,
 }
 
 impl LockResult {
@@ -510,6 +576,10 @@ impl LockResult {
         for (input, _) in loaded.inputs(ctx.engine(), &options).map_err(fail)? {
             let port = attachment.wires.iter().find(|(name, _)| *name == input).map(|(_, port)| port)
                 .ok_or_else(|| fail(format!("illustration '{}' has nothing connected to its input '{}'", id, input)))?;
+            if let Some(source) = port.strip_suffix(".value").and_then(|id| self.sources.iter().find(|s| s.id == id)) {
+                inputs.insert(input.into(), source_value(ctx, &self.library, source).map_err(fail)?);
+                continue;
+            }
             let value = self.trace.get(port).or_else(|| self.values.get(port))
                 .ok_or_else(|| fail(format!("illustration '{}' draws '{}', which this result has no value for", id, port)))?;
             inputs.insert(input.into(), value.data.clone());
@@ -529,6 +599,19 @@ impl CustomType for LockResult {
             .with_fn("trace", Self::trace)
             .with_fn("canvases", |ctx: rhai::NativeCallContext, result: &mut Self, id: &str| result.canvases(&ctx, id));
     }
+}
+
+/// What a source gives an illustration: content as lock files see it, a
+/// style's bundle, a glyphset, or a layout, made in the journal's engine
+/// (`ctx`'s).
+pub(super) fn source_value(ctx: &rhai::NativeCallContext, library: &LockLibrary, source: &SourceSpec) -> Result<Dynamic, String> {
+    let made = match source.kind {
+        SourceKind::Content => return library.source_value(source).map(|var| var.data),
+        SourceKind::Style => ctx.call_native_fn::<Dynamic>("text_style", (source.name.clone(), source.options.clone())),
+        SourceKind::Glyphset => ctx.call_native_fn::<Dynamic>("glyphset", (source.name.clone(),)),
+        SourceKind::Layout => ctx.call_native_fn::<Dynamic>("layout", (source.name.clone(), source.options.clone())),
+    };
+    made.map_err(|e| format!("source '{}': {}", source.id, super::options::unwrap_runtime(&e)))
 }
 
 /// `symbols(base, text)`: text as symbols in `base`. Base 10 takes digits,

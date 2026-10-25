@@ -1,17 +1,19 @@
 /// <reference lib="webworker" />
-// Runs what the font and lock editors ask of the renderer (see
-// ToolsService): text previews, and lock types, ports and test runs. Kept
-// apart from the script worker so neither waits on, or crashes, the other.
+// Runs what the editors ask of the engine (see ToolsService): previews,
+// the library's files, and lock types, ports and test runs. Kept apart from
+// the script worker so neither waits on, or crashes, the other.
 
 import init, {
-  builtinFonts, chainTypes, lastPanic, lockPorts, lockTypes, previewSvg, readChain, renderPreview, rendererPorts, rendererSource, rendererTypes, runChain, setWorkspace, valueKinds,
+  chainTypes, illustrationPorts, illustrationPreview, illustrationTypes, lastPanic, layoutPreview, layoutTypes, libraryFiles, lockExamples, lockPorts, lockTypes,
+  previewSvg, readChain, runChain, setJournal, stylePreview, styleTypes, usedLibrary, valueKinds,
 } from '../../../wasm-pkg/scribe_wasm.js';
 import type { ToolFunction, ToolsReply, ToolsRequest } from '../scribe';
 
 const post = (reply: ToolsReply) => postMessage(reply);
 
 const tools: Record<ToolFunction, (...args: never[]) => unknown> = {
-  previewSvg, builtinFonts, lockTypes, lockPorts, chainTypes, runChain, readChain, valueKinds, rendererTypes, rendererPorts, renderPreview, rendererSource,
+  previewSvg, libraryFiles, usedLibrary, lockTypes, lockPorts, lockExamples, chainTypes, runChain, readChain, valueKinds,
+  illustrationTypes, illustrationPorts, illustrationPreview, layoutTypes, layoutPreview, styleTypes, stylePreview,
 };
 
 let ready: Promise<void> = Promise.reject(new Error('not started'));
@@ -28,8 +30,8 @@ addEventListener('message', ({ data }: MessageEvent<ToolsRequest>) => {
         },
       );
       break;
-    case 'workspace':
-      void ready.then(() => guard(() => setWorkspace(data.workspace.fonts, data.workspace.locks, data.workspace.renderers ?? {}, data.workspace.chains ?? {})), () => {});
+    case 'journal':
+      void ready.then(() => guard(() => setJournal(data.files)), () => {});
       break;
     case 'call':
       void ready.then(
@@ -41,7 +43,7 @@ addEventListener('message', ({ data }: MessageEvent<ToolsRequest>) => {
             post({ type: 'error', id: data.id, message: err instanceof Error ? err.message : String(err) });
           }
         }),
-        (err) => post({ type: 'error', id: data.id, message: `the renderer didn't load: ${String(err)}` }),
+        (err) => post({ type: 'error', id: data.id, message: `the engine didn't load: ${String(err)}` }),
       );
       break;
   }
@@ -52,7 +54,7 @@ function guard(f: () => void) {
   try {
     f();
   } catch (err) {
-    post({ type: 'crashed', message: `the renderer crashed: ${lastPanic() ?? String(err)}` });
+    post({ type: 'crashed', message: `the engine crashed: ${lastPanic() ?? String(err)}` });
     close();
   }
 }

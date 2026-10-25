@@ -1000,6 +1000,13 @@ doc += api("lock.attach(id, illustration), lock.attach(id, illustration, options
 	arg("illustration", "Which illustration file: illustrations/TYPE.rhai, the journal's or the library's.", "an illustration type's name (see Illustrations)."),
 	opt("options", "the illustration's defaults", "Its options.", "a map of names its options() gives to values like their defaults: a whole number is fine for a number."),
 ]);
+doc += api("lock.source(id, kind, name), lock.source(id, kind, name, options)", "Adds a source: a journal file the chain draws on, its value at port ID.value, which lock.connect wires as a lock's output is. Content is data, so it can feed a lock's input (its value fixed there) or an illustration's; a style, glyphset or layout only an illustration's, at an input typed TextStyle, Glyphset or Layout, made when the illustration draws (text_style(name, options), glyphset(name), layout(name, options)). Returns the chain.", [
+	arg("id", "Its name in the chain.", "a string, not empty, with no dot, that no lock, illustration or source in the chain has."),
+	arg("kind", "What it draws on.", "content, style, glyphset or layout."),
+	arg("name", "Which file.", "a content, text style, glyphset or layout name."),
+	opt("options.options", "the file's defaults", "A style's or layout's options.", "a map."),
+	opt("options.base", "none", "Content only: text content (.txt, .md) as symbols in this base, what doesn't fit dropped; without it, text is a String. A .json content file's symbols are in its own base.", "a whole number from 2 to 27."),
+]);
 doc += api("lock.illustrations()", "Every illustration attached, a chain file's included: #{ ID: illustration type }.");
 doc += api("lock.inputs()", "The inputs still needing a value when it's run: #{ NAME: type }.");
 doc += api("lock.outputs()", "The chain's final outputs: #{ NAME: type }.");
@@ -1100,6 +1107,7 @@ doc += listing("Illustrations: the files in illustrations/, with the options loc
 	arg("eye", "An eye stood on end, its corners top and bottom: one text's symbols round its iris as balanced-ternary glyphs, clockwise from the top, and another's filling its pupil, as large as they fit; each symbol shifted to sit round 0. One canvas, width across and length down. Draws outer, symbols in outer_base, round the iris, and inner, symbols in inner_base, in the pupil; Welcome Home's eye holds a substitution cipher's ordering and cipher text.", "options: outer_base and inner_base (27 and 27), whole numbers from 2 to 27; length and width (1640 and 717.2), the eye's size; top_ink and bottom_ink (#09603d and #0b2a1c), its lines' gradient, top to bottom; inner_ink (#000000), the pupil's glyphs."),
 	arg("maze_glyphs", "A Maze on a grid, cell by cell: its corridors in one ink and each cell's symbol (0 to 26) as its balanced-ternary glyph, shifted to sit round 0, in another. One canvas. Draws maze, a Maze.", "options: cell (70), a cell's size; corridors and glyphs (#9b2318 and #2b1d12), their inks."),
 	arg("star_pages", "A StarChart page by page, a canvas each, page-sized: its constellation's name over it, each star's mark, each link's digit in balanced-ternary marks, each star numbered on its page in balanced ternary at its label, and an index of the numbers to the names in the bottom right corner; leaves in red. Draws chart, a StarChart.", "options: width and height (1200 and 1600), the canvas; sky_x and sky_y (100 and 180), where the chart's sky starts; large_star (33), the size from which a star takes large_shape rather than small_shape; large_shape and small_shape (corona and rayed), each one of celestial, corona, orrery, rayed, sparkle or star (anything else a disc); digit (24), the link marks' size; index_x and index_y (600 and 1110), where the name index starts."),
+	arg("styled_text", "Text written in a text style, wrapped into a block: a chain's content in the hand a style source gives it. One canvas. Draws text, a String, in style, a TextStyle.", "options: width (900), the block's width."),
 	arg("trit_message", "Symbols in balanced-ternary marks, row after row under a heading, each shifted to sit round 0 and written in as many trits as its base needs. One canvas. Draws message, symbols in base.", "options: base (3), the symbols' base, a whole number from 2 to 27; title (MESSAGE), the heading; per_row (36), marks a row; width (1200), the canvas's width."),
 ]);
 doc += api("art::sketch(value)", "A value kind's default drawing as a parts map for canvas.add(parts, styles): each part a path (a StarChart's links and stars, a HuffmanCode's links and nodes, a Maze's corridors), plus labels, an array of #{ at, text } to write, and label_size, how big to write them, in the drawing's units.", [
@@ -1160,7 +1168,8 @@ doc += api("fn chain(o)", "In place of inputs, outputs, lock and unlock: a compo
 ]);
 doc += para("A chain file, chains/NAME.rhai, is a chain of lock types and the illustrations drawing its values, which chain(name) builds; the web editor's lock editor writes them. It runs in the lock files' engine, so it writes values as they do (symbols(27, TEXT) as an array); see the library's chains/README.md.");
 doc += api("fn options() in a chain file", "Optional: the chain's options, as a lock file's options() declares them, which chain(name, options) gives.");
-doc += api("fn chain(o) in a chain file", "The chain: #{ locks, connect, fixed, illustrations }.", [
+doc += api("fn chain(o) in a chain file", "The chain: #{ sources, locks, connect, fixed, illustrations }.", [
+	opt("sources", "none", "Journal files it draws on, as lock.source adds them; connect and illustrations' inputs take ID.value.", "a map of ids to #{ type, name, options, base }: type content, style, glyphset or layout."),
 	arg("o", "The options.", "a map."),
 	req("locks", "Each lock.", "a map of ids to #{ type, options }, options able to use o."),
 	opt("connect", "none", "The wiring.", "an array of [output, input] pairs, as lock.connect takes them."),
@@ -1200,7 +1209,7 @@ doc += api("random.pick(items)", "One of the items.", [
 ]);
 doc += para("An illustration file, illustrations/TYPE.rhai, runs in the journal's engine, so it can call everything a journal can, and draws lock values as canvases; see the library's illustrations/README.md. o, in each, is its options: its defaults with what lock.attach gave over them.");
 doc += api("fn options()", "Optional, in an illustration file: its options and their defaults, #{ NAME: value }; lock.attach can give only these, each like its default.");
-doc += api("fn inputs(o)", "In an illustration file: the values it draws and their types, #{ NAME: type }, as a lock file's inputs are written (Base27Symbol, Maze, StarChart, Any...).", [
+doc += api("fn inputs(o)", "In an illustration file: the values it draws and their types, #{ NAME: type }, as a lock file's inputs are written (Base27Symbol, Maze, StarChart, String, Any...), or TextStyle, Glyphset or Layout for what a chain's style, glyphset or layout source gives.", [
 	arg("o", "The options.", "a map."),
 ]);
 doc += api("fn render(o, i)", "In an illustration file: a canvas, or an array of canvases, drawing the values.", [

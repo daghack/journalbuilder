@@ -3,7 +3,7 @@
 
 import { rhaiKey, rhaiString, rhaiValue } from '../shared/rhai-literal';
 import type { LockOption } from '../scribe';
-import { openInputs, openOutputs, portType, rendererInputs, symbolBase, type ChainModel, type ChainNode, type ChainOption, type PortsByNode, type RendererNode, type TestValue } from './chain-model';
+import { openInputs, openOutputs, portType, rendererInputs, symbolBase, type ChainModel, type ChainNode, type ChainOption, type PortsByNode, type RendererNode, type SourceNode, type TestValue } from './chain-model';
 
 /** What a chain file's options() writes for an option: `integer(3)`, `one_of(["a", "b"], "a")`. */
 export function optionDeclaration(option: ChainOption): string {
@@ -63,6 +63,28 @@ function nodeOptions(node: ChainNode | RendererNode, kinds: Record<string, LockO
   ]));
 }
 
+/** A source's settings besides its type and name: a style's or layout's options, text content's base. */
+function sourceSettings(source: SourceNode): [string, string][] {
+  const entries: [string, string][] = [];
+  if ((source.kind === 'style' || source.kind === 'layout') && Object.keys(source.options).length) {
+    const options = Object.entries(source.options).sort(([a], [b]) => (a < b ? -1 : 1));
+    entries.push(['options', mapLiteral(options.map(([k, v]) => [rhaiKey(k), rhaiValue(v, typeof v === 'number' && !Number.isInteger(v))]))]);
+  }
+  if (source.kind === 'content' && source.base !== undefined) entries.push(['base', String(source.base)]);
+  return entries;
+}
+
+/** A source as a chain file's sources write it: #{ type, name, options or base }. */
+export function sourceLiteral(source: SourceNode): string {
+  return mapLiteral([['type', rhaiString(source.kind)], ['name', rhaiString(source.name)], ...sourceSettings(source)]);
+}
+
+/** A source's settings as lock.source takes them, after its name: `, #{ options, base }`, or nothing. */
+function sourceOptions(source: SourceNode): string {
+  const settings = sourceSettings(source);
+  return settings.length ? `, ${mapLiteral(settings)}` : '';
+}
+
 export interface SourceContext {
   /** Each lock's ports, as the renderer gives them. */
   ports: PortsByNode;
@@ -89,6 +111,12 @@ export function chainSource(model: ChainModel, context: SourceContext): string {
   out.push('');
   out.push('fn chain(o) {');
   out.push('\t#{');
+  const sources = [...model.sources].sort(byId);
+  if (sources.length) {
+    out.push('\t\tsources: #{');
+    for (const source of sources) out.push(`\t\t\t${rhaiKey(source.id)}: ${sourceLiteral(source)},`);
+    out.push('\t\t},');
+  }
   const nodes = [...model.nodes].sort(byId);
   out.push('\t\tlocks: #{');
   for (const node of nodes) {
@@ -119,7 +147,7 @@ export function chainSource(model: ChainModel, context: SourceContext): string {
   out.push('');
   out.push(renderers.length ? '// Where the web editor draws each lock and illustration.' : '// Where the web editor draws each lock.');
   out.push('fn layout() {');
-  out.push(`\t${mapLiteral([...nodes, ...renderers].map((node) => [rhaiKey(node.id), `[${Math.round(node.x)}, ${Math.round(node.y)}]`]))}`);
+  out.push(`\t${mapLiteral([...sources, ...nodes, ...renderers].map((node) => [rhaiKey(node.id), `[${Math.round(node.x)}, ${Math.round(node.y)}]`]))}`);
   out.push('}');
   const inputs = openInputs(model, ports).sort((a, b) => (a.port < b.port ? -1 : 1));
   if (inputs.length && hasExample(model, ports)) {
@@ -158,6 +186,9 @@ export function journalSnippet(model: ChainModel, ports: PortsByNode): string {
 /** A journal script building the same chain lock by lock with new_lock, with no chain file of its own. */
 export function journalChain(model: ChainModel, context: SourceContext): string {
   const lines = [`let lock = new_lock(${rhaiString(model.name)})`];
+  for (const source of model.sources) {
+    lines.push(`\t.source(${rhaiString(source.id)}, ${rhaiString(source.kind)}, ${rhaiString(source.name)}${sourceOptions(source)})`);
+  }
   const value = (name: string) => model.options.find((o) => o.name === name)?.default;
   const withDefaults = (node: ChainNode | RendererNode) => ({ ...node.options, ...Object.fromEntries(Object.entries(node.promoted).map(([k, v]) => [k, value(v)])) });
   for (const node of model.nodes) {

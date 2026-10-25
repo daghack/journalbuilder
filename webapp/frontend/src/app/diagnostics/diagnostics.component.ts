@@ -8,13 +8,13 @@ import { RenderService } from '../services/render.service';
   template: `
     <button type="button" class="summary" (click)="open.set(!open())" [attr.aria-expanded]="open()">
       @if (render.loadError(); as error) {
-        <span class="error">The renderer didn't load: {{ error }}</span>
+        <span class="error">The engine didn't load: {{ error }}</span>
       } @else if (journal.error()) {
         <span class="error">Error{{ journal.error()!.line ? ' on line ' + journal.error()!.line : '' }}</span>
       } @else if (evaluation(); as e) {
         <span class="ok">{{ e.pages.length }} page{{ e.pages.length === 1 ? '' : 's' }} in {{ e.millis.toFixed(0) }} ms</span>
       } @else {
-        <span class="muted">Loading the renderer…</span>
+        <span class="muted">Loading the engine…</span>
       }
       @if (count(); as n) { <span class="count">{{ n }} message{{ n === 1 ? '' : 's' }}</span> }
       <span class="chevron">{{ open() ? '▾' : '▸' }}</span>
@@ -59,16 +59,10 @@ export class DiagnosticsComponent {
   /** Asked to show a line of the script. */
   readonly goTo = output<number>();
 
-  /** What the workspace changes from the repository's files, which only this browser has. */
+  /** The journal's files standing in for the library's that the entry ran with. */
   protected readonly workspaceNote = computed(() => {
-    const workspace = this.evaluation()?.workspace;
-    const parts = [
-      workspace?.editedFonts ? 'the fonts as edited in the font editor' : '',
-      workspace?.locks.length ? `the workspace's lock files (${workspace.locks.join(', ')})` : '',
-      workspace?.renderers?.length ? `its renderers (${workspace.renderers.join(', ')})` : '',
-      workspace?.chains?.length ? `its chains (${workspace.chains.join(', ')})` : '',
-    ].filter(Boolean);
-    return parts.length ? `Ran with ${parts.join(' and ')}, which only this browser has.` : null;
+    const overrides = this.evaluation()?.overrides ?? [];
+    return overrides.length ? `Ran with the journal's ${overrides.join(', ')} in place of the library's.` : null;
   });
 
   protected readonly count = computed(() => {

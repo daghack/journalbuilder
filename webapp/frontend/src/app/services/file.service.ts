@@ -31,6 +31,12 @@ export const JSON_FILES: FileKind = {
   mime: 'application/json',
 };
 
+export const ZIP_FILES: FileKind = {
+  types: [{ description: 'Zipped journal', accept: { 'application/zip': ['.zip'] } }],
+  accept: '.zip,application/zip',
+  mime: 'application/zip',
+};
+
 /** A script opened or saved: its name, and where to save it back, if the browser can. */
 export interface OpenedFile {
   name: string;
@@ -59,6 +65,23 @@ export class FileService {
     }
     const file = await pickWithInput(kind.accept);
     return file ? { name: file.name, text: await file.text(), handle: null } : null;
+  }
+
+  /** Let the user pick a file, read as bytes; null if they don't pick one. */
+  async openBytes(kind: FileKind): Promise<{ name: string; bytes: Uint8Array } | null> {
+    let file: File | null;
+    if (this.picker.showOpenFilePicker) {
+      try {
+        const [handle] = await this.picker.showOpenFilePicker({ types: kind.types, multiple: false });
+        file = await handle.getFile();
+      } catch (err) {
+        if (isAbort(err)) return null;
+        throw err;
+      }
+    } else {
+      file = await pickWithInput(kind.accept);
+    }
+    return file ? { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) } : null;
   }
 
   /**

@@ -27,7 +27,7 @@ pub use sources::Sources;
 pub use resources::{Resources, DEFAULT_JOURNALS_DIR, DEFAULT_LIBRARY_DIR, KINDS};
 #[cfg(feature = "embedded-assets")]
 pub use resources::embedded;
-pub use locks::LockLibrary;
+pub use locks::{LockLibrary, SourceKind};
 pub use manifest::{valid_name, Journal, Manifest, MANIFEST, MANIFEST_VERSION};
 pub use illustrations::IllustrationLibrary;
 use text_styles::TextStyleLibrary;
@@ -184,8 +184,19 @@ pub struct IllustrationInfo {
 #[derive(serde::Serialize)]
 pub struct TextStyleInfo {
     pub name: String,
+    pub description: String,
     pub options: serde_json::Value,
     pub example: Option<String>,
+}
+
+/// A layout, as the editor lists it: its options' defaults, and whether
+/// its file gives an `example()` to preview it with.
+#[derive(serde::Serialize)]
+pub struct LayoutInfo {
+    pub name: String,
+    pub description: String,
+    pub options: serde_json::Value,
+    pub example: bool,
 }
 
 /// What a text style without an `example()` previews with.
@@ -349,7 +360,7 @@ impl JournalEngine {
         let illustration = self.illustrations.load(&self.engine, name)?;
         let options = illustration.options(&json_map(options, "options")?)?;
         let inputs = match inputs {
-            Some(inputs) => json_map(inputs, "inputs")?,
+            Some(inputs) => self.with_sources(json_map(inputs, "inputs")?)?,
             None => illustration.example(&self.engine)?.ok_or_else(|| format!("illustration '{}' has no example() to draw", name))?,
         };
         let mut entry = Entry::default();
@@ -369,6 +380,7 @@ impl JournalEngine {
         let file = self.text_styles.load(&self.engine, name)?;
         Ok(TextStyleInfo {
             name: name.to_string(),
+            description: file.description.clone(),
             options: locks::to_json(&Dynamic::from_map(file.defaults.clone())),
             example: file.example(&self.engine)?,
         })
@@ -398,6 +410,11 @@ impl JournalEngine {
     pub fn layout_names(&self) -> Vec<String> {
         self.resources.layouts.names().unwrap_or_default()
     }
+    /// What layout `name` takes, and whether it previews.
+    pub fn describe_layout(&self, name: &str) -> Result<LayoutInfo, String> {
+        let (defaults, description, example) = layout::layout_info(&self.engine, &self.resources.layouts, name)?;
+        Ok(LayoutInfo { name: name.to_string(), description, options: locks::to_json(&Dynamic::from_map(defaults)), example })
+    }
     /// Layout `name` with `options` (a JSON object) over its defaults,
     /// typesetting what its `example()` gives: its pages.
     pub fn preview_layout(&mut self, name: &str, options: &serde_json::Value) -> Result<Entry, String> {
@@ -413,6 +430,37 @@ impl JournalEngine {
     fn run_preview(&mut self, mut scope: Scope, script: &str) -> Result<Entry, String> {
         self.engine.run_with_scope(&mut scope, script).map_err(|err| ScriptError::new(&err).message)?;
         scope.get_value("journal_entry").ok_or_else(|| "the preview lost its entry".to_string())
+    }
+    /// `inputs` with each `#{ "$source": #{ type, name, ... } }` (a chain
+    /// source, as a chain file writes it) made into what it gives an
+    /// illustration: as the editor previews an illustration a source feeds.
+    fn with_sources(&self, inputs: rhai::Map) -> Result<rhai::Map, String> {
+        let library = LockLibrary::new(&self.resources);
+        inputs.into_iter().map(|(name, value)| {
+            let Some(spec) = value.clone().try_cast::<rhai::Map>().and_then(|map| map.get("$source").cloned()) else {
+                return Ok((name, value));
+            };
+            let mut sources = rhai::Map::new();
+            sources.insert(name.clone(), spec);
+            let mut chain = rhai::Map::new();
+            chain.insert("sources".into(), Dynamic::from_map(sources));
+            let source = locks::parse_sources(&chain)?.remove(0);
+            let made = match source.kind {
+                SourceKind::Content => library.source_value(&source)?.data,
+                kind => {
+                    let mut scope = Scope::new();
+                    scope.push_constant("NAME", source.name.clone());
+                    scope.push_constant("OPTIONS", source.options.clone());
+                    let script = match kind {
+                        SourceKind::Style => "text_style(NAME, OPTIONS)",
+                        SourceKind::Glyphset => "glyphset(NAME)",
+                        _ => "layout(NAME, OPTIONS)",
+                    };
+                    self.engine.eval_with_scope::<Dynamic>(&mut scope, script).map_err(|e| format!("input '{}': {}", name, ScriptError::new(&e).message))?
+                }
+            };
+            Ok((name, made))
+        }).collect()
     }
     /// Call `f` with what the script passes to `print` and `debug`.
     pub fn on_print(&mut self, f: impl Fn(&str) + 'static) {

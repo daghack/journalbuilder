@@ -32,8 +32,8 @@
               },
               {
                 "glob": "*",
-                "input": "generated/examples",
-                "output": "examples"
+                "input": "generated/journals",
+                "output": "journals"
               }
             ],
             "styles": [

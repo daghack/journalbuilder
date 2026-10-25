@@ -4,8 +4,20 @@
     {
       "name": "journal-editor",
       "runtimeExecutable": "bash",
-      "runtimeArgs": ["-c", "cd webapp/frontend && . \"${NVM_DIR:-$HOME/.nvm}/nvm.sh\" && nvm use >/dev/null && npm run serve"],
+      "runtimeArgs": [
+        "-c",
+        "cd webapp/frontend && . \"${NVM_DIR:-$HOME/.nvm}/nvm.sh\" && nvm use >/dev/null && npm run serve"
+      ],
       "port": 4200
+    },
+    {
+      "name": "journal-editor-4201",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "cd webapp/frontend && . \"${NVM_DIR:-$HOME/.nvm}/nvm.sh\" && nvm use >/dev/null && npm run examples && npx ng serve --port 4201"
+      ],
+      "port": 4201
     }
   ]
 }

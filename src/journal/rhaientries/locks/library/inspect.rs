@@ -525,9 +525,9 @@ mod tests {
     #[test]
     fn chain_files_name_their_mistakes() {
         let cases = [
-            ("unknown_key", SHIFTED.replace("fixed: #{},", "fixed: #{}, inputs: #{},"), "chains/unknown_key.rhai: chain(o): returned 'inputs'; it returns locks, connect, fixed, illustrations"),
+            ("unknown_key", SHIFTED.replace("fixed: #{},", "fixed: #{}, inputs: #{},"), "chains/unknown_key.rhai: chain(o): returned 'inputs'; it returns sources, locks, connect, fixed, illustrations"),
             ("lock_fns", format!("{}\nfn lock(o, i) {{ i }}", SHIFTED), "chains/lock_fns.rhai is a chain file, so it can't define lock: lock types go in locks/"),
-            ("bad_port", SHIFTED.replace("message: \"vig.cipher_text\"", "message: \"vig.nope\""), "chains/bad_port.rhai: illustrations: 'msg' draws 'vig.nope' at its input 'message', which isn't a port of the chain's locks"),
+            ("bad_port", SHIFTED.replace("message: \"vig.cipher_text\"", "message: \"vig.nope\""), "chains/bad_port.rhai: illustrations: 'msg' draws 'vig.nope' at its input 'message', which isn't a port of the chain's locks or sources"),
             ("bad_example", SHIFTED.replace("\"vig.plain_text\": symbols(27, \"ATTACK AT DAWN\")", "\"vig.nope\": 1"), "chains/bad_example.rhai: example(): 'vig.nope' isn't an open input of the chain; open: shift.plain_text, vig.plain_text"),
         ];
         for (name, source, expected) in &cases {

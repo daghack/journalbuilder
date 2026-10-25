@@ -1,8 +1,8 @@
 import { Injectable, inject, signal, untracked } from '@angular/core';
 import type {
-  ChainFile, ChainRun, ChainType, LockPorts, LockType, Preview, RenderPreview, RendererType, ToolError, ToolFunction, ToolsReply, ToolsRequest, ValueKind, WorkspacePayload,
+  ChainFile, ChainRun, ChainType, IllustrationType, JournalPayload, LayoutType, LockPorts, LockType, Preview, RenderPreview, ToolError, ToolFunction, ToolsReply, ToolsRequest, ValueKind,
 } from '../scribe';
-import { WorkspaceService } from './workspace.service';
+import { JournalStore } from './journal-store.service';
 
 /** How long a call may take before the worker is taken to be stuck. */
 const CALL_TIMEOUT_MS = 10_000;
@@ -23,29 +23,39 @@ export function failed<T>(answer: Answer<T>): answer is ToolError {
 }
 
 /**
- * The renderer, for the font and lock editors: a worker of its own, started
- * when first needed, with the workspace. A call that crashes the renderer
- * or runs too long fails, and the next starts a fresh worker.
+ * The engine, for the editors: a worker of its own, started when first
+ * needed, with the journal's files. A call that crashes the engine or runs
+ * too long fails, and the next starts a fresh worker.
  */
 @Injectable({ providedIn: 'root' })
 export class ToolsService {
-  private readonly workspace = inject(WorkspaceService);
-  /** Why the renderer couldn't load, if it couldn't. */
+  private readonly store = inject(JournalStore);
+  /** Why the engine couldn't load, if it couldn't. */
   readonly loadError = signal<string | null>(null);
 
   private worker: Worker | null = null;
   private nextId = 0;
   private pending = new Map<number, Pending>();
-  /** The workspace the worker was last sent; null for a new worker. */
-  private sent: WorkspacePayload | null = null;
+  /** The journal's files the worker was last sent; null for a new worker. */
+  private sent: JournalPayload | null = null;
 
-  /** `text` (a journal script) drawn: its first page as SVG. Runs with `fonts` if given. */
-  async preview(source: string, fonts: string | null): Promise<Preview> {
-    return JSON.parse(await this.call<string>('previewSvg', source, fonts));
+  /**
+   * `source` (an entry script) drawn: its first page as SVG. `files`
+   * (path -> text) stand in for the journal's, as an editor shows them
+   * before they're kept.
+   */
+  async preview(source: string, files: Record<string, string> | null = null): Promise<Preview> {
+    return JSON.parse(await this.call<string>('previewSvg', source, files === null ? null : JSON.stringify(files)));
   }
 
-  builtinFonts(): Promise<string> {
-    return this.call<string>('builtinFonts');
+  /** Every file of the library, by path. */
+  async libraryFiles(): Promise<Record<string, string>> {
+    return JSON.parse(await this.call<string>('libraryFiles'));
+  }
+
+  /** The library files `entries` (scripts) use, run with the journal's files: what an export bundles. */
+  async usedLibrary(entries: string[]): Promise<Answer<{ paths: string[] }>> {
+    return JSON.parse(await this.callWith<string>(60_000, 'usedLibrary', JSON.stringify(entries)));
   }
 
   async lockTypes(): Promise<Answer<LockType[]>> {
@@ -56,28 +66,48 @@ export class ToolsService {
     return JSON.parse(await this.call<string>('lockPorts', type, JSON.stringify(options)));
   }
 
-  /** Every renderer type: renderers/*.rhai, with the workspace's. */
-  async rendererTypes(): Promise<RendererType[]> {
-    return JSON.parse(await this.call<string>('rendererTypes'));
+  /** Run lock `type`'s examples, `source` standing in for its file if given: how many there are, or the first failure. */
+  async lockExamples(type: string, source: string | null): Promise<Answer<{ examples: number }>> {
+    return JSON.parse(await this.call<string>('lockExamples', type, source));
   }
 
-  /** Renderer `type`'s inputs with `options`. */
-  async rendererPorts(type: string, options: Record<string, unknown>): Promise<Answer<{ inputs: [string, string][] }>> {
-    return JSON.parse(await this.call<string>('rendererPorts', type, JSON.stringify(options)));
+  /** Every illustration type: the journal's illustrations/*.rhai over the library's. */
+  async illustrationTypes(): Promise<IllustrationType[]> {
+    return JSON.parse(await this.call<string>('illustrationTypes'));
+  }
+
+  /** Illustration `type`'s inputs with `options`. */
+  async illustrationPorts(type: string, options: Record<string, unknown>): Promise<Answer<{ inputs: [string, string][] }>> {
+    return JSON.parse(await this.call<string>('illustrationPorts', type, JSON.stringify(options)));
   }
 
   /**
-   * What renderer `type` draws of `inputs` (name -> value, as a run shows
-   * it), or of its own example() if null; `source` stands in for its file
-   * if given.
+   * What illustration `type` draws of `inputs` (name -> value, as a run
+   * shows it), or of its own example() if null; `source` stands in for its
+   * file if given.
    */
-  async renderPreview(type: string, source: string | null, options: Record<string, unknown>, inputs: Record<string, unknown> | null): Promise<Answer<RenderPreview>> {
-    return JSON.parse(await this.call<string>('renderPreview', type, source, JSON.stringify(options), inputs === null ? null : JSON.stringify(inputs)));
+  async illustrationPreview(type: string, source: string | null, options: Record<string, unknown>, inputs: Record<string, unknown> | null): Promise<Answer<RenderPreview>> {
+    return JSON.parse(await this.call<string>('illustrationPreview', type, source, JSON.stringify(options), inputs === null ? null : JSON.stringify(inputs)));
   }
 
-  /** Renderer `type`'s file, the workspace's if it has one. */
-  async rendererSource(type: string): Promise<Answer<{ source: string }>> {
-    return JSON.parse(await this.call<string>('rendererSource', type));
+  /** Every layout: the journal's layouts/*.rhai over the library's. */
+  async layoutTypes(): Promise<LayoutType[]> {
+    return JSON.parse(await this.call<string>('layoutTypes'));
+  }
+
+  /** Layout `name` typesetting its example(), `source` standing in for its file if given. */
+  async layoutPreview(name: string, source: string | null, options: Record<string, unknown>): Promise<Answer<RenderPreview>> {
+    return JSON.parse(await this.call<string>('layoutPreview', name, source, JSON.stringify(options)));
+  }
+
+  /** Every text style: the journal's styles/*.rhai over the library's. */
+  async styleTypes(): Promise<LayoutType[]> {
+    return JSON.parse(await this.call<string>('styleTypes'));
+  }
+
+  /** Text style `name` writing its example in a block `width` wide, `source` standing in for its file if given. */
+  async stylePreview(name: string, source: string | null, options: Record<string, unknown>, width: number): Promise<Answer<RenderPreview>> {
+    return JSON.parse(await this.call<string>('stylePreview', name, source, JSON.stringify(options), width));
   }
 
   /** Every value kind, and rhai that makes one. */
@@ -85,7 +115,7 @@ export class ToolsService {
     return JSON.parse(await this.call<string>('valueKinds'));
   }
 
-  /** Every chain file: chains/*.rhai, with the workspace's. */
+  /** Every chain file: the journal's chains/*.rhai over the library's. */
   async chainTypes(): Promise<Answer<ChainType[]>> {
     return JSON.parse(await this.call<string>('chainTypes'));
   }
@@ -101,16 +131,20 @@ export class ToolsService {
   }
 
   private call<T>(fn: ToolFunction, ...args: unknown[]): Promise<T> {
+    return this.callWith<T>(CALL_TIMEOUT_MS, fn, ...args);
+  }
+
+  private callWith<T>(timeout: number, fn: ToolFunction, ...args: unknown[]): Promise<T> {
     const worker = this.start();
-    // The workspace first, if it's changed, so the call is sure to use it.
-    const workspace = untracked(() => this.workspace.payload());
-    if (workspace !== this.sent) {
-      worker.postMessage({ type: 'workspace', workspace } satisfies ToolsRequest);
-      this.sent = workspace;
+    // The journal's files first, if they've changed, so the call is sure to use them.
+    const files = untracked(() => this.store.resources());
+    if (files !== this.sent) {
+      worker.postMessage({ type: 'journal', files } satisfies ToolsRequest);
+      this.sent = files;
     }
     const id = ++this.nextId;
     return new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => this.restart(`it took over ${CALL_TIMEOUT_MS / 1000} s and was stopped`), CALL_TIMEOUT_MS);
+      const timer = setTimeout(() => this.restart(`it took over ${timeout / 1000} s and was stopped`), timeout);
       this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject, timer });
       worker.postMessage({ type: 'call', id, fn, args } satisfies ToolsRequest);
     });
@@ -122,7 +156,7 @@ export class ToolsService {
     worker.onmessage = ({ data }: MessageEvent<ToolsReply>) => this.onReply(data);
     worker.onerror = (event) => {
       event.preventDefault();
-      this.restart(event.message || 'the renderer crashed');
+      this.restart(event.message || 'the engine crashed');
     };
     worker.postMessage({ type: 'init', wasmUrl: wasmUrl() } satisfies ToolsRequest);
     this.worker = worker;

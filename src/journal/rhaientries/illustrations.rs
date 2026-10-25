@@ -129,7 +129,7 @@ impl IllustrationType {
 
 /// The opening `//` comment of a file, joined into a line, without a
 /// leading "name: ".
-fn description(source: &str, name: &str) -> String {
+pub(super) fn description(source: &str, name: &str) -> String {
     let lines: Vec<&str> = source.lines().map(str::trim).take_while(|l| l.starts_with("//")).map(|l| l.trim_start_matches('/').trim()).collect();
     let text = lines.join(" ");
     text.strip_prefix(&format!("{}:", name)).map(str::trim).unwrap_or(&text).to_string()
@@ -195,7 +195,7 @@ mod tests {
             (r#"lock.attach("d", "nope");"#, "attach: no illustration named 'nope'; illustrations: "),
             (r#"lock.attach("d", "maze_glyphs", #{ size: 3 });"#, "attach: illustration 'maze_glyphs' has no option 'size'; its options: cell, corridors, glyphs"),
             (r#"lock.attach("d", "maze_glyphs", #{ cell: "big" });"#, "attach: illustration 'maze_glyphs': option 'cell' should be like its default, 70.0, got big"),
-            (r#"lock.attach("maze", "maze_glyphs");"#, "attach: there's a lock or illustration named 'maze' already"),
+            (r#"lock.attach("maze", "maze_glyphs");"#, "attach: there's a lock, illustration or source named 'maze' already"),
             (r#"lock.attach("d", "maze_glyphs").connect("maze.generated_maze", "d.grid");"#, "connect: illustration 'd' (maze_glyphs) has no input 'grid'; inputs: maze"),
             (r#"lock.attach("d", "maze_glyphs").connect("maze.text_length", "d.maze");"#, "connect: can't connect maze.text_length (LockProcessInfo) to d.maze (Maze)"),
             (r#"lock.attach("d", "maze_glyphs").connect("maze.nope", "d.maze");"#, "connect: 'maze.nope' isn't a port of the chain"),
@@ -245,6 +245,54 @@ mod tests {
             let mut engine = engine_with(&[("drawn_maze", DRAWN_MAZE), ("bad", &DRAWN_MAZE.replace("cell: o.cell", "size: 2"))], &[]);
             let err = engine.build_entry_str(script).expect_err(script).to_string();
             assert!(err.contains(want), "{}\n  wanted: {}\n  got: {}", script, want, err);
+        }
+    }
+
+    const SOURCED: &str = r#"
+        // sourced: content locked, and written in a style.
+        fn chain(o) {
+            #{
+                sources: #{
+                    secret: #{ type: "content", name: "lorem", base: 27 },
+                    words: #{ type: "content", name: "lorem" },
+                    hand: #{ type: "style", name: "plain_hand", options: #{ size: 20.0 } },
+                },
+                locks: #{ shift: #{ type: "shift_cipher", options: #{ base: 27, shift: 3 } } },
+                connect: [["secret.value", "shift.plain_text"]],
+                illustrations: #{ note: #{ type: "styled_text", options: #{ width: 600.0 }, inputs: #{ text: "words.value", style: "hand.value" } } },
+            }
+        }
+    "#;
+
+    #[test]
+    fn chains_draw_on_sources() {
+        let mut engine = engine_with(&[("sourced", SOURCED)], &[]);
+        let entry = engine.build_entry_str(r#"
+            let c = chain("sourced");
+            assert(c.inputs().len() == 0, "a source's value is the input it feeds");
+            let result = c.run();
+            assert(result.text("shift.cipher_text").starts_with("ORUHP"), "the content, locked: " + result.text("shift.cipher_text"));
+            let p = new_page();
+            p.add(result.canvases("note")[0]);
+            journal_entry.add(p);
+            // A script adds sources too.
+            let more = new_lock("m").source("hand", "style", "plain_hand", #{ options: #{ size: 18 } }).source("words", "content", "lorem")
+                .attach("note", "styled_text").connect("words.value", "note.text").connect("hand.value", "note.style");
+            journal_entry.add(new_page().add(more.run().canvases("note")[0]));
+        "#);
+        assert!(entry.is_ok(), "{:?}", entry.err());
+        assert!(entry.unwrap().empty_canvases().is_empty());
+        let library = std::rc::Rc::new(super::super::LockLibrary::new(engine.resources()));
+        assert_eq!(library.check_chain("sourced"), Ok(0));
+        for (chain, want) in [
+            (SOURCED.replace("\"lorem\", base: 27", "\"nope\""), "there's no content named 'nope'"),
+            (SOURCED.replace("type: \"style\"", "type: \"font\""), "has type 'font'; a source is content, style, glyphset or layout"),
+            (SOURCED.replace("[[\"secret.value\", \"shift.plain_text\"]]", "[[\"hand.value\", \"shift.plain_text\"]]"), "can't connect hand.value (TextStyle) to shift.plain_text (Base27Symbol)"),
+            (SOURCED.replace("base: 27 }", "base: 40 }"), "has base 40"),
+        ] {
+            let mut engine = engine_with(&[("sourced", &chain)], &[]);
+            let err = engine.build_entry_str(r#"chain("sourced");"#).expect_err(want);
+            assert!(err.contains(want), "wanted: {}\n  got: {}", want, err);
         }
     }
 
