@@ -1,9 +1,10 @@
 # syntax=docker/dockerfile:1.7
 #
-# The journal editor (webapp/) as a static site, served by nginx. Build it
-# from the repository root, since the renderer is the whole crate:
+# The journal editor (webapp/) as a static site, served by nginx. It sits
+# at the repository root, its build context, since the renderer is the
+# whole crate:
 #
-#   docker build -f webapp/Dockerfile -t journal-editor .
+#   docker build -t journal-editor .
 #   docker run --rm -p 8080:80 journal-editor
 #
 # then open http://localhost:8080. Darkly previews and exports use WebGPU,
