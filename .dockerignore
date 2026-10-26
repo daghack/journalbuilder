@@ -1,5 +1,5 @@
-# The build context is the repository root (see webapp/Dockerfile); leave
-# out builds, installs and renders.
+# The Dockerfile's build context is the repository root; leave out builds,
+# installs and renders.
 .git
 **/target
 **/node_modules

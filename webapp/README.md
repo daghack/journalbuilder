@@ -172,11 +172,12 @@ server can host. `npm test` runs the frontend's unit tests.
 
 ### In Docker
 
-`webapp/Dockerfile` builds the engine and the site and serves them with
-nginx; it needs only Docker. Build from the repository root:
+The `Dockerfile` at the repository root builds the engine and the site and
+serves them with nginx; it needs only Docker. Build from the repository
+root:
 
 ```bash
-docker build -f webapp/Dockerfile -t journal-editor .
+docker build -t journal-editor .
 ```
 
 ```bash
