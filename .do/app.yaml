@@ -1,0 +1,24 @@
+# DigitalOcean App Platform spec for the journal editor (webapp/).
+# Every push to `release` builds the Dockerfile at the repository root
+# and deploys it. Apply with:
+#   doctl apps update <app-id> --spec .do/app.yaml
+name: journal-editor
+# region: sfo        # keep whatever your app already uses
+
+services:
+  - name: journal-editor
+    github:
+      repo: daghack/journalbuilder
+      branch: release
+      deploy_on_push: true
+    # The renderer is the whole crate, so the build context is the repo
+    # root, as in `docker build .`
+    source_dir: /
+    dockerfile_path: Dockerfile
+    http_port: 80          # nginx (webapp/nginx.conf)
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-0.5gb   # static files only; smallest is plenty
+    health_check:
+      http_path: /index.html
+    routes:
+      - path: /
