@@ -1,6 +1,6 @@
-import { Component, computed, effect, inject, signal, untracked } from '@angular/core';
+import { Component, computed, effect, inject, signal } from '@angular/core';
 import { splitPath } from '../journal/journal-files';
-import { readSymbols, symbolHelp, symbolsOf, textOf, writeSymbols } from '../journal/symbols';
+import { readSymbols, symbolHelp, symbolsIn, textOf, typedText, writeSymbols } from '../journal/symbols';
 import type { Preview } from '../scribe';
 import { JournalStore } from '../services/journal-store.service';
 import { LibraryService } from '../services/library.service';
@@ -24,8 +24,8 @@ function previewScript(name: string, markdown: boolean): string {
 
 /**
  * A content file: plain or marked-up text, typed, and drawn as an entry
- * would write it; or symbols, typed as text in their base. Nobody edits
- * the JSON a symbols file is kept as.
+ * would write it; or symbols, typed as text and made to fit their base
+ * (unless strict). Nobody edits the JSON a symbols file is kept as.
  */
 @Component({
   selector: 'app-content-editor',
@@ -40,15 +40,19 @@ function previewScript(name: string, markdown: boolean): string {
           <select (change)="setBase(+$any($event.target).value)">
             @for (b of bases; track b) { <option [value]="b" [selected]="b === symbols()?.base">{{ b }}</option> }
           </select>
-          <span class="hint">{{ symbolHelp(symbols()?.base ?? 27) }}</span>
+          <span class="hint">{{ symbolHelp(base()) }}</span>
         </label>
-        <label class="column">The symbols, as text
-          <textarea class="mono" rows="6" spellcheck="false" [value]="typed() ?? symbolText()" (input)="setSymbolText($any($event.target).value)"></textarea>
+        <label class="row"><input type="checkbox" [checked]="strict()" (change)="setStrict($any($event.target).checked)" /> Strict
+          <span class="hint">{{ strict() ? 'the text must be written in the base already' : 'the text is made to fit: capitals, what the base cannot write dropped' }}</span>
+        </label>
+        <label class="column">The text
+          <textarea class="mono" rows="6" spellcheck="false" [value]="typed()" (input)="setSymbolText($any($event.target).value)"></textarea>
         </label>
         @if (problem(); as p) { <p class="error">{{ p }}</p> }
-        @if (symbols(); as s) {
-          <p class="hint">{{ s.symbols.length }} symbol{{ s.symbols.length === 1 ? '' : 's' }} in base {{ s.base }}: <code>{{ s.symbols.join(' ') }}</code></p>
-          <p class="hint">An entry reads it with content("{{ name() }}"): symbols, as symbols({{ s.base }}, text) gives them, for a lock.</p>
+        @if (fitted(); as s) {
+          <p class="hint">Reads as <code>{{ s.text }}</code></p>
+          <p class="hint">{{ s.symbols.length }} symbol{{ s.symbols.length === 1 ? '' : 's' }} in base {{ base() }}: <code>{{ s.symbols.join(' ') }}</code></p>
+          <p class="hint">An entry reads it with content("{{ name() }}"): symbols, for a lock.</p>
         }
       </div>
     } @else {
@@ -107,13 +111,37 @@ export class ContentEditorComponent {
       return null;
     }
   });
-  protected readonly symbolText = computed(() => {
+  protected readonly base = computed(() => this.symbols()?.base ?? 27);
+  protected readonly strict = computed(() => {
     const s = this.symbols();
-    return s ? textOf(s.base, s.symbols) : '';
+    return !!s && 'text' in s && !!s.strict;
   });
-  /** Text typed that isn't symbols in the base, kept as typed until it is. */
-  protected readonly typed = signal<string | null>(null);
-  protected readonly problem = signal<string | null>(null);
+  /** The text as typed: a file holding symbols shows them as text, and is kept as text once it's edited. */
+  protected readonly typed = computed(() => {
+    const s = this.symbols();
+    return s ? typedText(s) : '';
+  });
+  /** The symbols the file gives, and their text; null when the text doesn't fit (strict). */
+  protected readonly fitted = computed(() => {
+    const s = this.symbols();
+    if (!s) return null;
+    try {
+      const symbols = symbolsIn(s);
+      return { symbols, text: textOf(s.base, symbols) };
+    } catch {
+      return null;
+    }
+  });
+  protected readonly problem = computed(() => {
+    const s = this.symbols();
+    if (!s) return this.text() ? "the file isn't symbols: retype them below" : null;
+    try {
+      symbolsIn(s);
+      return null;
+    } catch (err) {
+      return (err as Error).message;
+    }
+  });
 
   // ---- text ----
 
@@ -127,13 +155,6 @@ export class ContentEditorComponent {
   private shownUrl: string | null = null;
 
   constructor() {
-    effect(() => {
-      this.path();
-      untracked(() => {
-        this.typed.set(null);
-        this.problem.set(this.text() && !this.symbols() && this.ext() === 'json' ? "the file isn't symbols: retype them below" : null);
-      });
-    });
     effect(() => {
       const path = this.path();
       const text = this.text();
@@ -165,30 +186,20 @@ export class ContentEditorComponent {
     this.write(text);
   }
 
+  private writeText(base: number, text: string, strict: boolean) {
+    this.write(writeSymbols(strict ? { base, text, strict } : { base, text }));
+  }
+
   protected setSymbolText(text: string) {
-    const base = this.symbols()?.base ?? 27;
-    try {
-      this.write(writeSymbols({ base, symbols: symbolsOf(base, text) }));
-      this.typed.set(null);
-      this.problem.set(null);
-    } catch (err) {
-      this.typed.set(text);
-      this.problem.set((err as Error).message);
-    }
+    this.writeText(this.base(), text, this.strict());
   }
 
   protected setBase(base: number) {
-    const text = this.typed() ?? this.symbolText();
-    try {
-      this.write(writeSymbols({ base, symbols: symbolsOf(base, text) }));
-      this.typed.set(null);
-      this.problem.set(null);
-    } catch (err) {
-      // The symbols don't fit the new base: keep them as typed, to fix.
-      this.write(writeSymbols({ base, symbols: [] }));
-      this.typed.set(text);
-      this.problem.set((err as Error).message);
-    }
+    this.writeText(base, this.typed(), this.strict());
+  }
+
+  protected setStrict(strict: boolean) {
+    this.writeText(this.base(), this.typed(), strict);
   }
 
   protected copyIn() {

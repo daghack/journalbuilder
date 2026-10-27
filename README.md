@@ -85,7 +85,7 @@ cd webapp/frontend && npm install && npm start
 | `webapp/library/illustrations/` | what chains draw their values with; see [webapp/library/illustrations/README.md](webapp/library/illustrations/README.md) |
 | `webapp/library/chains/` | locks wired together, for `chain(name)`; see [webapp/library/chains/README.md](webapp/library/chains/README.md) |
 | `webapp/library/styles/` | text styles, for `text_style(name)`: `options()` and `style(o)`, giving `#{ style, type, paragraph, spans }` |
-| `webapp/library/content/` | text (`.txt`, `.md`) and symbols (`.json`, `{ base, symbols }`), for `content(name)` |
+| `webapp/library/content/` | text (`.txt`, `.md`) and symbols (`.json`, `{ base, text }`, the text made to fit the base unless `strict`), for `content(name)` |
 | `webapp/library/lib/` | shared functions any script imports: `import "lib/NAME" as NAME;` |
 | `webapp/library/glyphsets/` | a `NAME.json` for each glyphset: its glyphs' SVG paths by character (a list for variants), `character_padding` (scripts' `glyph_outline_gap`), `space_width` and `fallback`; sets of symbols are glyphsets too |
 | `src/journal/` | canvases, paths, glyph placement, glyphsets, hatching, gradients, parchment, and Darkly and SVG rendering |

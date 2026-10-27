@@ -153,7 +153,7 @@ fn example() {
 }
 `;
     case 'content':
-      return ext === 'json' ? '{ "base": 27, "symbols": [] }\n' : '';
+      return ext === 'json' ? '{ "base": 27, "text": "" }\n' : '';
     case 'glyphsets':
       return '{\n\t"space_width": 0.5,\n\t"glyphs": {}\n}\n';
     case 'lib':

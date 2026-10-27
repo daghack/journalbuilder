@@ -11,7 +11,8 @@
 //! ```
 //!
 //! Content is data, so it can feed a lock's input as well as an
-//! illustration's: a `.json` file's symbols, in its own base; a `.txt` or
+//! illustration's: a `.json` file's symbols, in its own base (its text
+//! made to fit the base unless it's strict, as `content(name)` reads it); a `.txt` or
 //! `.md` file's text as symbols in `base` (what doesn't fit dropped), or as
 //! text (a String) without one. Styles, glyphsets and layouts are things to
 //! draw with, so only illustrations take them, at inputs typed TextStyle,
@@ -169,13 +170,11 @@ impl LockLibrary {
         match (ext, source.base) {
             ("json", Some(_)) => Err(at(format!("content/{}.json is symbols in its own base already: give text content a base", source.name))),
             ("json", None) => {
-                let file: serde_json::Value = serde_json::from_str(&text).map_err(|e| at(format!("content/{}.json: {}", source.name, e)))?;
-                let base = file["base"].as_u64().and_then(|b| u32::try_from(b).ok()).filter(|b| (2..=27).contains(b))
-                    .ok_or_else(|| at(format!("content/{}.json should be {{ \"base\": N, \"symbols\": [...] }}", source.name)))?;
-                let list = file["symbols"].as_array().ok_or_else(|| at(format!("content/{}.json has no symbols", source.name)))?;
-                let values = list.iter().map(|s| s.as_u64().and_then(|s| u32::try_from(s).ok()).filter(|s| *s < base))
-                    .collect::<Option<Vec<u32>>>()
-                    .ok_or_else(|| at(format!("content/{}.json has a symbol outside base {}'s 0-{}", source.name, base, base - 1)))?;
+                let (base, values) = crate::journal::rhaientries::content::read_symbols(&text)
+                    .map_err(|e| at(format!("content/{}.json: {}", source.name, e)))?;
+                if let Some((i, symbol)) = values.iter().enumerate().find(|(_, s)| **s >= base) {
+                    return Err(at(format!("content/{}.json: symbol {} (item {}) is outside base {}'s 0-{}", source.name, symbol, i, base, base - 1)));
+                }
                 Ok(symbols(base, values))
             }
             (_, Some(base)) => {

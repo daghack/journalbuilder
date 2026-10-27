@@ -81,8 +81,8 @@ illustrations: #{ note: #{ type: "styled_text", inputs: #{ text: "words.value", 
 ```
 
 Content is data, so it feeds a lock's input (fixing its value) or an
-illustration's: a `.json` file's symbols in its own base, a `.txt` or `.md`
-file's text as symbols in `base` (what doesn't fit dropped) or, without
+illustration's: a `.json` file's symbols in its own base (its text made to
+fit the base unless it's strict), a `.txt` or `.md` file's text as symbols in `base` (what doesn't fit dropped) or, without
 one, as text. Styles, glyphsets and layouts are things to draw with, so only
 illustrations take them, at inputs typed `TextStyle`, `Glyphset` and
 `Layout`; they're made in the journal's engine as the illustration draws.

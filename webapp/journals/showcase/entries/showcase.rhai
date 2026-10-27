@@ -1411,10 +1411,13 @@ let rows = [
 	// Helper types (helpers/): lock files that transform data between
 	// locks, added and wired as lock types are.
 	["helper merge_alpha", new_lock("merge").add("m", "merge_alpha", #{ base_n: 27, input_count: 2 }), #{ "m.input_0": symbols(27, "EVERY LOCK"), "m.input_1": symbols(27, " OPENS") }, "m.merged_output"],
-	// A string read as symbols; lenient makes any text fit the base.
-	["helper string_to_symbols", new_lock("read").add("r", "string_to_symbols", #{ base: 27, lenient: true }), #{ "r.text": "Every lock — opens!" }, "r.symbols"],
+	// A string read as symbols, made to fit the base unless strict.
+	["helper string_to_symbols", new_lock("read").add("r", "string_to_symbols", #{ base: 27 }), #{ "r.text": "Every lock — opens!" }, "r.symbols"],
 	["helper split_symbols", new_lock("split").add("s", "split_symbols", #{ base_n: 27, output_count: 2 }), #{ "s.plain_text": symbols(27, plain) }, "s.output_1"],
 ];
+// strict: the text must be written in the base already.
+let strict = new_lock("strict").add("r", "string_to_symbols", #{ base: 27, strict: true });
+assert(strict.run(#{ "r.text": plain }).text("r.symbols") == plain, "strict text written in the base reads as it is");
 locks.add(caption("new_lock(name).add(part, lock type, options), run: " + plain + " becomes", TOP));
 let y = TOP + 60;
 for row in rows {
@@ -1905,9 +1908,9 @@ files.add(write_line("nota bene: written in the margin", vec2(LEFT + 520, y + 80
 
 let y = y + 170;
 files.add(subhead("content", y));
-files.add(caption("content(name): a .txt or .md file's text; a .json file's symbols, #{ base, symbols }", y + 50));
+files.add(caption("content(name): a .txt or .md file's text; a .json file's text as symbols, #{ base, text }, made to fit unless strict", y + 50));
 let cipher = content("cipher");
-files.add(caption(`content("cipher"), the showcase's content/cipher.json: base ${cipher.base}, ${cipher.symbols().len()} symbols`, y + 100));
+files.add(caption(`content("cipher"), the showcase's content/cipher.json, "Lorem ipsum, dolor!": base ${cipher.base}, ${cipher.symbols().len()} symbols`, y + 100));
 files.add(write(cipher.text(), LEFT, y + 160, 36));
 files.add(caption("markdown(content(\"fragment\")): the showcase's content/fragment.md, marked up, opens the next page", y + 220));
 

@@ -143,9 +143,10 @@ files (`lib/`), shared functions, have only their code.
 ## Content
 
 Plain (`.txt`) and marked-up (`.md`) text, typed beside a page writing it
-in the library's plain hand. Symbols (`.json`) are typed as text in their
-base, which is picked beside them: nobody edits the JSON a symbols file is
-kept as.
+in the library's plain hand. Symbols (`.json`) are typed as text, kept as typed, and made to fit their
+base (picked beside them) as they're read: in capitals, what the base
+can't write dropped. Strict, the text must be written in the base
+already. Nobody edits the JSON a symbols file is kept as.
 
 ## Running it
 

@@ -1,10 +1,11 @@
-// string_to_symbols: a string as symbols in the base, as symbols(base,
-// text) reads it; with lenient, any text is made to fit the base first.
-// Unlocking writes the symbols back out as text, which for lenient text is
-// the text as it was fitted.
+// string_to_symbols: a string as symbols in the base, any text made to fit
+// the base first (uppercased, what the base can't write dropped); with
+// strict, the text must be written in the base already, as symbols(base,
+// text) reads it. Unlocking writes the symbols back out as text: the text
+// as it was fitted.
 
 fn options() {
-	#{ base: integer(), lenient: bool(false) }
+	#{ base: integer(), strict: bool(false) }
 }
 
 fn check(o) {
@@ -22,7 +23,7 @@ fn outputs(o) {
 }
 
 fn lock(o, i) {
-	#{ symbols: symbols(o.base, i.text, #{ lenient: o.lenient }) }
+	#{ symbols: symbols(o.base, i.text, #{ lenient: !o.strict }) }
 }
 
 fn unlock(o, out) {
@@ -42,12 +43,12 @@ fn examples() {
 			outputs: #{ symbols: [1, 0, 8, 4] },
 		},
 		#{
-			options: #{ base: 27, lenient: true },
+			options: #{ base: 27, strict: true },
 			inputs: #{ text: "EVERY LOCK OPENS" },
 			outputs: #{ symbols: symbols(27, "EVERY LOCK OPENS") },
 		},
 		#{
-			options: #{ base: 27 },
+			options: #{ base: 27, strict: true },
 			inputs: #{ text: "Hello, world" },
 			error: "symbols",
 		},

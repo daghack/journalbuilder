@@ -1093,7 +1093,7 @@ doc += listing("Lock types: the files in locks/, with the options lock.add gives
 doc += listing("Helper types: the files in helpers/, lock files that transform data between locks rather than lock it. They're written, added with lock.add and wired as lock types are; a name is looked up in locks/ first.", [
 	arg("merge_alpha", "Texts joined end to end. Takes input_0 to input_N, gives merged_output and location_info, which unlocking splits them by.", "options: base_n (required), a whole number from 2 to 27; input_count (required), a whole number of at least 1."),
 	arg("split_symbols", "A text cut into pieces each as long as the first, the last ones shorter or empty. Takes plain_text, gives output_0 to output_N.", "options: base_n (required), a whole number from 2 to 27; output_count (required), a whole number of at least 1."),
-	arg("string_to_symbols", "A string read as symbols in the base, as symbols(base, text) reads it. Takes text, a String; gives symbols, in the base. Unlocking writes the symbols back out as text, the text as it was fitted when lenient.", "options: base (required), a whole number from 2 to 27; lenient (optional, default false), true or false: makes any text fit the base first, as symbols' lenient option does; without it, text the base can't write is an error."),
+	arg("string_to_symbols", "A string read as symbols in the base, made to fit it first as symbols' lenient option makes it: in capitals, what the base can't write dropped. Takes text, a String; gives symbols, in the base. Unlocking writes the symbols back out as text, the text as it was fitted.", "options: base (required), a whole number from 2 to 27; strict (optional, default false), true or false: the text must be written in the base already, as symbols(base, text) reads it, and text the base can't write is an error."),
 ]);
 
 // ---- value kinds ----
@@ -1142,7 +1142,7 @@ doc += api("art::sketch(value)", "A value kind's default drawing as a parts map 
 // ---- journals ----
 
 doc += heading("Journals and Their Files");
-doc += para("A journal is a directory: its manifest, journal.json; its entries, entries/NAME.rhai, each a script building a journal_entry of pages; and files of its own, each kind in a directory of its own: locks/, helpers/, layouts/, illustrations/, chains/, styles/ and lib/ (rhai files), glyphsets/ (NAME.json), and content/ (NAME.txt, NAME.md or NAME.json). They stand in front of the built-in library's, webapp/library/, which has the same directories: a journal's file stands in for the library's of the same name. Each entry runs on its own, sharing the journal's files but not code with the other entries.");
+doc += para("A journal is a directory: its manifest, journal.json; its entries, entries/NAME.rhai, each a script building a journal_entry of pages; and files of its own, each kind in a directory of its own: locks/, helpers/, layouts/, illustrations/, chains/, styles/ and lib/ (rhai files), glyphsets/ (NAME.json), and content/ (NAME.txt, a String; NAME.md, Markdown; or NAME.json, Symbols: { base, text }, with strict: true or not, or { base, symbols }). They stand in front of the built-in library's, webapp/library/, which has the same directories: a journal's file stands in for the library's of the same name. Each entry runs on its own, sharing the journal's files but not code with the other entries.");
 doc += listing("journal.json: the journal's manifest, a JSON object.", [
 	req("version", "Which manifest format.", "1."),
 	req("title", "The journal's title.", "a string."),
@@ -1162,7 +1162,7 @@ doc += api("text_style(name), text_style(name, options)", "A text style file's b
 	arg("name", "Which style file.", "a style file's name without .rhai."),
 	opt("options", "the file's defaults", "Its options, which its style(o) sees as o.", "a map of names its options() gives to values like their defaults: a whole number is fine for a number."),
 ]);
-doc += api("content(name)", "A content file, content/NAME.txt, NAME.md or NAME.json, the journal's or the library's: a .txt or .md file's text, without the newline ending the file (markdown(content(name)) sets marked-up text), or a .json file's symbols, #{ base, symbols } in the file, as symbols(base, text) gives them.", [
+doc += api("content(name)", "A content file, content/NAME.txt, NAME.md or NAME.json, the journal's or the library's: a .txt or .md file's text, without the newline ending the file (markdown(content(name)) sets marked-up text), or a .json file's symbols: its text made to fit its base, as symbols(base, text, #{ lenient: true }) gives them, or with strict: true in the file, read as symbols(base, text) reads it, text the base can't write being an error; or the symbols the file holds, { base, symbols }.", [
 	arg("name", "Which content file; there mustn't be more than one of that name.", "a content file's name without its extension."),
 ]);
 doc += para("Any script, an entry or a lock, layout, illustration, chain or style file, imports shared functions from lib/: import \"lib/NAME\" as NAME; then NAME::f(x) calls lib/NAME.rhai's function f. A lib function runs in the engine of the script importing it: a lock file's lib functions can't draw.");
