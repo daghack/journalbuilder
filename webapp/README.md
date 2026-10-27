@@ -103,7 +103,9 @@ let pages = result.canvases("mg");
   into itself. One output can feed several inputs. A lock's ports follow
   its options (`merge_alpha`'s `input_count`, say). Lock
   types (ciphers and puzzles) and helper types (`helpers/`, which
-  transform data between them) are listed apart.
+  transform data between them) are listed apart. Ctrl/⌘ C copies the
+  picked node, options, fixed values and all; Ctrl/⌘ V pastes it where
+  the pointer is.
 - **Sources.** The journal's files a chain draws on: content, styles,
   glyphsets and layouts, each a node with one output, `value` (see
   library/chains/README.md). Content feeds locks (text as symbols in a base

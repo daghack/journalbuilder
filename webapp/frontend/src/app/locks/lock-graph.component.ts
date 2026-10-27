@@ -23,7 +23,8 @@ type Drag =
  * The middle: the chain's locks as boxes with their inputs on the left and
  * outputs on the right, wires between them. Drag a lock by its title; drag
  * from a port to another to wire them, or click one then the other (Escape
- * lets go); drag the background to pan.
+ * lets go); drag the background to pan. Ctrl/⌘ C copies the picked lock and
+ * Ctrl/⌘ V pastes it where the pointer is.
  */
 @Component({
   selector: 'app-lock-graph',
@@ -40,7 +41,7 @@ type Drag =
       <button type="button" (click)="fit()" title="Fit the chain">Fit</button>
       <button type="button" (click)="zoomBy(1.2)" aria-label="Zoom in" title="Zoom in">+</button>
     </div>
-    <div #area class="area" (pointerdown)="downBackground($event)" (pointermove)="move($event)" (pointerup)="up($event)"
+    <div #area class="area" (pointerdown)="downBackground($event)" (pointermove)="move($event)" (pointerup)="up($event)" (pointerleave)="pointer = null"
          (wheel)="wheel($event)" (dragover)="$event.preventDefault()" (drop)="drop($event)">
       <div class="world" [style.transform]="'translate(' + pan().x + 'px, ' + pan().y + 'px) scale(' + zoom() + ')'">
         <svg class="wires" width="1" height="1">
@@ -153,6 +154,8 @@ export class LockGraphComponent {
   protected readonly drag = signal<Drag | null>(null);
   protected readonly wireError = signal<string | null>(null);
   private errorTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Where the pointer is in the graph, while it's over it: where a paste goes. */
+  protected pointer: Point | null = null;
 
   constructor() {
     // A chain opened: show all of it, once its locks have their ports.
@@ -329,6 +332,7 @@ export class LockGraphComponent {
   }
 
   protected move(event: PointerEvent) {
+    this.pointer = this.at(event);
     const drag = this.drag();
     if (!drag) return;
     if (drag.kind === 'pan') {
@@ -419,7 +423,16 @@ export class LockGraphComponent {
 
   protected onKey(event: KeyboardEvent) {
     if ((event.target as HTMLElement).closest('input, textarea, select')) return;
-    if (event.key === 'Delete' || event.key === 'Backspace') {
+    const command = (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey;
+    if (command && event.key.toLowerCase() === 'c') {
+      const id = this.editor.selected();
+      if (id && this.editor.copy(id)) event.preventDefault();
+    } else if (command && event.key.toLowerCase() === 'v') {
+      event.preventDefault();
+      const rect = this.area().nativeElement.getBoundingClientRect();
+      const at = this.pointer ?? { x: (rect.width / 2 - this.pan().x) / this.zoom(), y: (rect.height / 2 - this.pan().y) / this.zoom() };
+      this.editor.paste(at.x - WIDTH / 2, at.y - HEAD / 2);
+    } else if (event.key === 'Delete' || event.key === 'Backspace') {
       event.preventDefault();
       this.deleteSelected();
     } else if (event.key === 'Escape') {

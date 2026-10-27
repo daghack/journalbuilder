@@ -7,7 +7,7 @@ import { LibraryService } from '../services/library.service';
 import { ToolsService, failed } from '../services/tools.service';
 import { ShellService } from '../shell/shell.service';
 import * as chain from './chain-model';
-import type { ChainModel, ChainNode, PortsByNode, RendererNode, SourceKind, SourceNode, TestValue } from './chain-model';
+import type { ChainModel, ChainNode, ChainOption, PortsByNode, RendererNode, SourceKind, SourceNode, TestValue } from './chain-model';
 import { chainSource, journalChain, journalSnippet } from './chain-source';
 
 const HISTORY = 200;
@@ -26,6 +26,19 @@ export interface Note {
  * file once the ports are known: a library chain edited gives the journal a
  * copy that stands in for it.
  */
+/** A lock, illustration or source copied (Ctrl/⌘ C), to paste into this chain or another. */
+interface CopiedNode {
+  kind: 'lock' | 'renderer' | 'source';
+  node: ChainNode | RendererNode | SourceNode;
+  /** Its fixed inputs' values, by port name. */
+  fixed: Record<string, TestValue>;
+  /** The chain's options its options took, for a chain without them. */
+  chainOptions: ChainOption[];
+}
+
+/** What was copied last: kept while the editor is open, whichever chain is. */
+const clipboard = signal<CopiedNode | null>(null);
+
 @Injectable()
 export class LockEditorService {
   private readonly tools = inject(ToolsService);
@@ -371,6 +384,64 @@ export class LockEditorService {
   removeNode(id: string) {
     this.update((m) => chain.removeNode(m, id));
     if (this.selected() === id) this.selected.set(null);
+  }
+
+  /** Copy lock, illustration or source `id`: its type, options and fixed values, not its wires. */
+  copy(id: string): boolean {
+    const model = this.model();
+    const lock = model.nodes.find((n) => n.id === id);
+    const renderer = model.renderers.find((r) => r.id === id);
+    const source = model.sources.find((s) => s.id === id);
+    const node = lock ?? renderer ?? source;
+    if (!node) return false;
+    const fixed = Object.fromEntries(Object.entries(model.fixed)
+      .filter(([port]) => chain.splitPort(port)[0] === id)
+      .map(([port, value]) => [chain.splitPort(port)[1], value]));
+    const promoted = Object.values((lock ?? renderer)?.promoted ?? {});
+    clipboard.set(structuredClone({
+      kind: lock ? 'lock' : renderer ? 'renderer' : 'source',
+      node,
+      fixed,
+      chainOptions: model.options.filter((o) => promoted.includes(o.name)),
+    }));
+    return true;
+  }
+
+  /**
+   * Paste what was copied at (x, y), under a name of its own, and pick it.
+   * Options the chain set keep taking its option, or, in a chain without
+   * that option, its default.
+   */
+  paste(x: number, y: number): boolean {
+    const copied = clipboard();
+    if (!copied) return false;
+    const model = this.model();
+    const node = structuredClone(copied.node);
+    node.id = chain.freshId(model, 'type' in node ? node.type : node.name);
+    node.x = Math.round(x);
+    node.y = Math.round(y);
+    if ('promoted' in node) {
+      const promoted: Record<string, string> = {};
+      for (const [option, chainOption] of Object.entries(node.promoted)) {
+        if (model.options.some((o) => o.name === chainOption)) promoted[option] = chainOption;
+        else {
+          const value = copied.chainOptions.find((o) => o.name === chainOption)?.default;
+          if (value !== undefined) node.options[option] = value;
+        }
+      }
+      node.promoted = promoted;
+    }
+    const fixed = Object.fromEntries(Object.entries(copied.fixed).map(([port, value]) => [`${node.id}.${port}`, structuredClone(value)]));
+    this.update((m) => ({
+      ...m,
+      fixed: { ...m.fixed, ...fixed },
+      nodes: copied.kind === 'lock' ? [...m.nodes, node as ChainNode] : m.nodes,
+      renderers: copied.kind === 'renderer' ? [...m.renderers, node as RendererNode] : m.renderers,
+      sources: copied.kind === 'source' ? [...m.sources, node as SourceNode] : m.sources,
+    }));
+    this.selected.set(node.id);
+    this.selectedWire.set(null);
+    return true;
   }
 
   renameNode(id: string, to: string): string | null {
