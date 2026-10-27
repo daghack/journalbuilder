@@ -23,8 +23,9 @@ type Drag =
  * The middle: the chain's locks as boxes with their inputs on the left and
  * outputs on the right, wires between them. Drag a lock by its title; drag
  * from a port to another to wire them, or click one then the other (Escape
- * lets go); drag the background to pan. Ctrl/⌘ C copies the picked lock and
- * Ctrl/⌘ V pastes it where the pointer is.
+ * lets go), holding Shift to keep wiring the same output on to more inputs;
+ * drag the background to pan. Ctrl/⌘ C copies the picked lock and Ctrl/⌘ V
+ * pastes it where the pointer is.
  */
 @Component({
   selector: 'app-lock-graph',
@@ -95,6 +96,7 @@ type Drag =
         <p class="empty">Drag lock types here from the Library tab, or click one, then wire outputs to inputs.</p>
       }
       @if (wireError(); as error) { <p class="wire-error">{{ error }}</p> }
+      @else if (armedFromOutput()) { <p class="wire-hint">Click an input to wire it; hold Shift to keep wiring this output on. Escape lets go.</p> }
     </div>
   `,
   styles: `
@@ -141,6 +143,7 @@ type Drag =
     .tag.out { transform: translate(0, -50%); }
     .tag.fixed { color: #f2c94c; }
     .empty { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; color: var(--stage-fg); font-size: 13px; pointer-events: none; }
+    .wire-hint { position: absolute; left: 12px; bottom: 12px; margin: 0; padding: 6px 8px; border-radius: 4px; font-size: 12px; color: var(--stage-fg); background: rgb(0 0 0 / 0.35); pointer-events: none; }
     .wire-error { position: absolute; left: 12px; bottom: 12px; margin: 0; padding: 6px 8px; border-radius: 4px; font-size: 12px; color: var(--danger); background: var(--danger-bg); }
   `,
 })
@@ -169,6 +172,12 @@ export class LockGraphComponent {
   private readonly trace = computed(() => {
     const result = this.editor.result();
     return result && !failed(result) ? new Map(result.trace) : new Map();
+  });
+
+  /** A wire from an output waiting for its input. */
+  protected readonly armedFromOutput = computed(() => {
+    const drag = this.drag();
+    return drag?.kind === 'wire' && drag.armed && drag.side === 'out';
   });
 
   protected readonly status = computed(() => {
@@ -318,7 +327,7 @@ export class LockGraphComponent {
     (this.area().nativeElement.parentElement as HTMLElement).focus({ preventScroll: true });
     const drag = this.drag();
     // The second click of a click-to-wire: wire to this port.
-    if (drag?.kind === 'wire' && drag.armed && drag.side !== side) return this.finishWire(drag, port);
+    if (drag?.kind === 'wire' && drag.armed && drag.side !== side) return this.finishWire(drag, port, event);
     if (drag?.kind === 'wire' && drag.armed && drag.port === port) return this.drag.set(null);
     this.area().nativeElement.setPointerCapture(event.pointerId);
     this.drag.set({ kind: 'wire', port, side, to: this.at(event), armed: false });
@@ -355,14 +364,19 @@ export class LockGraphComponent {
     const port = target.dataset['port']!;
     // Let go on the port it started from: a click, so the wire waits for the port it goes to.
     if (port === drag.port) return this.drag.set({ ...drag, to: this.at(event), armed: true });
-    if (target.dataset['side'] !== drag.side) this.finishWire(drag, port);
+    if (target.dataset['side'] !== drag.side) this.finishWire(drag, port, event);
   }
 
-  /** Wire `drag`'s port to `port`, on the other side. */
-  private finishWire(drag: Extract<Drag, { kind: 'wire' }>, port: string) {
+  /**
+   * Wire `drag`'s port to `port`, on the other side. With Shift held, a
+   * wire from an output stays in hand, to wire it on to more inputs.
+   */
+  private finishWire(drag: Extract<Drag, { kind: 'wire' }>, port: string, event: PointerEvent) {
     this.drag.set(null);
     const [from, to] = drag.side === 'out' ? [drag.port, port] : [port, drag.port];
-    this.showError(this.editor.connect(from, to));
+    const problem = this.editor.connect(from, to);
+    this.showError(problem);
+    if (!problem && event.shiftKey && drag.side === 'out') this.drag.set({ ...drag, to: this.at(event), armed: true });
   }
 
   private showError(problem: string | null) {

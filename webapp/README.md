@@ -100,8 +100,9 @@ let pages = result.canvases("mg");
 - **Building.** Drag a lock type into the middle (or click it). Drag from
   an output to an input to wire them: only ports of the same type (or
   `Any`) take a wire, an input takes one wire, and nothing can feed back
-  into itself. One output can feed several inputs. A lock's ports follow
-  its options (`merge_alpha`'s `input_count`, say). Lock
+  into itself. One output can feed several inputs: hold Shift as you wire
+  it and the wire stays in hand, to click on to the next input. A lock's
+  ports follow its options (`merge_alpha`'s `input_count`, say). Lock
   types (ciphers and puzzles) and helper types (`helpers/`, which
   transform data between them) are listed apart. Ctrl/⌘ C copies the
   picked node, options, fixed values and all; Ctrl/⌘ V pastes it where
