@@ -1,8 +1,9 @@
 import { Component, ElementRef, effect, inject, signal, viewChild } from '@angular/core';
 import { JournalIoService } from '../services/journal-io.service';
 import { JournalStore } from '../services/journal-store.service';
+import { ShellService } from './shell.service';
 
-/** Across the top: the journal's title (click it to change it), and new, open, import (a zip or a directory) and export. */
+/** Across the top: the journal's title (click it to change it), the last entry's preview, and new, open, import (a zip or a directory) and export. */
 @Component({
   selector: 'app-journal-bar',
   template: `
@@ -17,6 +18,7 @@ import { JournalStore } from '../services/journal-store.service';
     </span>
     <span class="spacer"></span>
     @if (message(); as m) { <span class="message" [class.error]="m.error">{{ m.text }}</span> }
+    <button type="button" (click)="shell.previewOpen.set(true)" title="The last entry opened, run with the files as they are (Ctrl/⌘+P)">Preview</button>
     <button type="button" (click)="newJournal()" title="Start a new journal: one blank entry, and the library">New</button>
     <div class="menu">
       <button type="button" aria-haspopup="true" title="Open one of the journals built in">Open ▾</button>
@@ -67,6 +69,7 @@ import { JournalStore } from '../services/journal-store.service';
 export class JournalBarComponent {
   protected readonly store = inject(JournalStore);
   protected readonly io = inject(JournalIoService);
+  protected readonly shell = inject(ShellService);
   protected readonly message = signal<{ text: string; error: boolean } | null>(null);
   private messageTimer: ReturnType<typeof setTimeout> | null = null;
   /** The title being edited, in place. */

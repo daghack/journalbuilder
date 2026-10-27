@@ -24,6 +24,8 @@ export class ShellService {
     const path = this.selected();
     return path !== null && path in this.store.files();
   });
+  /** Whether the last entry's pages show over whatever file is open (Ctrl/⌘+P). */
+  readonly previewOpen = signal(false);
 
   constructor() {
     addEventListener('hashchange', () => {

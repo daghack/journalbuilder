@@ -4,6 +4,7 @@ import { splitPath } from './journal/journal-files';
 import { JournalWorkspaceComponent } from './journal/journal-workspace.component';
 import { ThreePaneComponent } from './layout/three-pane.component';
 import { LocksWorkspaceComponent } from './locks/locks-workspace.component';
+import { EntryPreviewDialogComponent } from './preview/entry-preview-dialog.component';
 import { ContentEditorComponent } from './resources/content-editor.component';
 import { ResourceEditorComponent } from './resources/resource-editor.component';
 import { JournalStore } from './services/journal-store.service';
@@ -14,12 +15,13 @@ import { ShellService } from './shell/shell.service';
  * The editor: the journal across the top, and below it the file open in
  * the editor for its kind, each with the journal's files as a tab on its left. The entry, glyphset and
  * chain editors stay as they were while another file shows; the glyphset
- * and chain editors load when first opened.
+ * and chain editors load when first opened. The last entry's preview opens
+ * over any of them.
  */
 @Component({
   selector: 'app-root',
   imports: [JournalBarComponent, ThreePaneComponent, JournalWorkspaceComponent, FontsWorkspaceComponent, LocksWorkspaceComponent,
-    ResourceEditorComponent, ContentEditorComponent],
+    ResourceEditorComponent, ContentEditorComponent, EntryPreviewDialogComponent],
   template: `
     <app-journal-bar />
     <main class="editor">
@@ -45,6 +47,7 @@ import { ShellService } from './shell/shell.service';
         }
       }
     </main>
+    <app-entry-preview-dialog />
   `,
   styles: `
     :host { display: flex; flex-direction: column; height: 100dvh; }

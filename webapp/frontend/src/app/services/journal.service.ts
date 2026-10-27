@@ -1,5 +1,6 @@
 import { Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
 import { entryPath, splitPath } from '../journal/journal-files';
+import { keep, stored } from '../layout/pane-state';
 import type { Evaluation, PageView, ScriptError } from '../scribe';
 import { ShellService } from '../shell/shell.service';
 import { JournalStore } from './journal-store.service';
@@ -62,19 +63,30 @@ export class JournalService {
     effect(() => {
       const split = splitPath(this.shell.selected() ?? '');
       if (split?.kind !== 'entries' || split.name === untracked(() => this.entry())) return;
-      untracked(() => {
-        this.entry.set(split.name);
-        this.selectedIndex.set(0);
-        this.clearPages();
-      });
+      untracked(() => this.show(split.name));
+    });
+    // No entry opened yet (a reload on another file), or it's gone: the one
+    // last opened, else the first, for the preview.
+    effect(() => {
+      if (!this.store.restored()) return;
+      const entries = this.store.manifest().entries;
+      const entry = this.entry();
+      if (entry !== null && entries.includes(entry)) return;
+      const kept = stored<string | null>('entry', null);
+      const next = kept !== null && entries.includes(kept) ? kept : (entries[0] ?? null);
+      if (next !== entry) untracked(() => this.show(next));
+    });
+    effect(() => {
+      const entry = this.entry();
+      if (entry !== null) keep('entry', entry);
     });
     // Run the entry again when it or the journal's other files change,
-    // while it shows (no need to while another file is edited).
+    // while it shows (no need to while another file is edited, unless it's previewed).
     effect(() => {
       const source = this.source();
       const files = this.store.resources();
       const showing = splitPath(this.shell.selected() ?? '')?.kind === 'entries';
-      if (!showing || this.entry() === null) return;
+      if (!(showing || this.shell.previewOpen()) || this.entry() === null) return;
       untracked(() => {
         if (this.ran && this.ran.source === source && this.ran.files === files) return;
         if (this.debounce) clearTimeout(this.debounce);
@@ -103,6 +115,12 @@ export class JournalService {
     const journal = this.store.name();
     return journal === entry ? journal : `${journal}_${entry}`;
   });
+
+  private show(entry: string | null) {
+    this.entry.set(entry);
+    this.selectedIndex.set(0);
+    this.clearPages();
+  }
 
   private run() {
     this.debounce = null;
