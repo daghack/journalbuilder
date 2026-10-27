@@ -1,6 +1,6 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, ElementRef, computed, inject, signal, viewChild } from '@angular/core';
 import { showEditorTab } from '../layout/pane-state';
-import { KINDS, VALID_NAME, entryPath, nameOf, pathOf, splitPath, type KindInfo } from '../journal/journal-files';
+import { CONTENT_TYPES, KINDS, VALID_NAME, contentType, entryPath, nameOf, pathOf, splitPath, type KindInfo } from '../journal/journal-files';
 import { template } from '../journal/templates';
 import { JournalStore } from '../services/journal-store.service';
 import { LibraryService } from '../services/library.service';
@@ -12,6 +12,8 @@ const OPEN_KEY = 'journal-editor.sidebar-open';
 interface Item {
   path: string;
   label: string;
+  /** A content file's type: String, Markdown or Symbols. */
+  tag?: string;
   /** The journal's file stands in for the library's. */
   overrides: boolean;
   /** An entry file the manifest doesn't list. */
@@ -60,6 +62,7 @@ const open = signal<Record<string, boolean>>(readOpen());
               <li [class.selected]="shell.selected() === item.path" [class.unlisted]="item.unlisted">
                 <button type="button" class="file" (click)="openFile(item.path)" [title]="item.path">
                   {{ item.label }}
+                  @if (item.tag) { <span class="note">{{ item.tag }}</span> }
                   @if (item.overrides) { <span class="override" title="Stands in for the library's file of the same name">⚠</span> }
                   @if (item.unlisted) { <span class="note" title="Not in journal.json's entries, so not built">unlisted</span> }
                 </button>
@@ -88,7 +91,10 @@ const open = signal<Record<string, boolean>>(readOpen());
               <ul class="library">
                 @for (item of group.library; track item.path) {
                   <li [class.selected]="shell.selected() === item.path">
-                    <button type="button" class="file" (click)="openFile(item.path)" [title]="'The library\\'s ' + item.path">{{ item.label }}</button>
+                    <button type="button" class="file" (click)="openFile(item.path)" [title]="'The library\\'s ' + item.path">
+                      {{ item.label }}
+                      @if (item.tag) { <span class="note">{{ item.tag }}</span> }
+                    </button>
                   </li>
                 }
               </ul>
@@ -98,6 +104,23 @@ const open = signal<Record<string, boolean>>(readOpen());
       </section>
     }
     @if (message(); as m) { <p class="message">{{ m }}</p> }
+
+    <dialog #newContent (close)="contentProblem.set(null)">
+      <form method="dialog" (submit)="$event.preventDefault(); addContent(contentName.value, contentKind.value)">
+        <h2>New content</h2>
+        <label>Name <input #contentName type="text" spellcheck="false" placeholder="letters, digits and _" (input)="contentProblem.set(null)" /></label>
+        <label>Type
+          <select #contentKind>
+            @for (t of contentTypes; track t.ext) { <option [value]="t.ext">{{ t.label }}: {{ t.about }}</option> }
+          </select>
+        </label>
+        @if (contentProblem(); as p) { <p class="message">{{ p }}</p> }
+        <div class="dialog-actions">
+          <button type="button" (click)="newContent.close()">Cancel</button>
+          <button type="submit">Create</button>
+        </div>
+      </form>
+    </dialog>
   `,
   styles: `
     :host { display: flex; flex-direction: column; overflow: auto; background: var(--surface); font-size: 12px; padding-bottom: 12px; }
@@ -129,6 +152,12 @@ const open = signal<Record<string, boolean>>(readOpen());
     .library-toggle { background: transparent; border: 0; padding: 2px 8px 2px 24px; color: var(--muted); cursor: pointer; font-size: 11px; }
     .library .file { color: var(--muted); padding-left: 36px; }
     .message { margin: 8px; color: var(--danger); }
+    dialog { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--fg); padding: 20px; width: min(420px, calc(100vw - 32px)); }
+    dialog::backdrop { background: rgb(0 0 0 / 0.45); }
+    dialog h2 { margin: 0 0 12px; font-size: 16px; }
+    dialog label { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; font-size: 13px; }
+    dialog .message { margin: 0 0 8px; }
+    .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
   `,
 })
 export class FileSidebarComponent {
@@ -138,14 +167,19 @@ export class FileSidebarComponent {
   protected readonly message = signal<string | null>(null);
   private readonly open = open;
   protected readonly nameOf = nameOf;
+  protected readonly contentTypes = CONTENT_TYPES;
+  protected readonly contentProblem = signal<string | null>(null);
+  private readonly newContent = viewChild.required<ElementRef<HTMLDialogElement>>('newContent');
+  private readonly contentName = viewChild.required<ElementRef<HTMLInputElement>>('contentName');
 
   protected readonly groups = computed<Group[]>(() => {
     const files = this.store.files();
     const library = this.library.byKind();
     const libraryFiles = this.library.files();
-    const label = (path: string) => {
+    const label = (path: string) => splitPath(path)!.name;
+    const tag = (path: string) => {
       const split = splitPath(path)!;
-      return split.kind === 'content' ? `${split.name}.${split.ext}` : split.name;
+      return split.kind === 'content' ? contentType(split.ext) : undefined;
     };
     return KINDS.map((info) => {
       const paths = Object.keys(files).filter((path) => splitPath(path)?.kind === info.kind).sort();
@@ -157,9 +191,9 @@ export class FileSidebarComponent {
           ...paths.filter((path) => !listed.includes(path)).map((path) => ({ path, label: label(path), overrides: false, unlisted: true })),
         ];
       } else {
-        own = paths.map((path) => ({ path, label: label(path), overrides: path in libraryFiles }));
+        own = paths.map((path) => ({ path, label: label(path), tag: tag(path), overrides: path in libraryFiles }));
       }
-      const theirs = (library.get(info.kind) ?? []).filter((path) => !(path in files)).map((path) => ({ path, label: label(path), overrides: false }));
+      const theirs = (library.get(info.kind) ?? []).filter((path) => !(path in files)).map((path) => ({ path, label: label(path), tag: tag(path), overrides: false }));
       return { info, own, library: theirs };
     });
   });
@@ -196,16 +230,34 @@ export class FileSidebarComponent {
     this.store.setManifest({ description: description.trim() });
   }
 
-  /** A new file of `info`'s kind, named as the user says. */
+  /** A new file of `info`'s kind, named as the user says; content asks its type too. */
   protected add(info: KindInfo) {
-    const hint = info.kind === 'content' ? ' (with .txt, .md, or .json for symbols)' : '';
-    const typed = prompt(`New ${info.label.toLowerCase().replace(/s$/, '')} file's name${hint}:`)?.trim();
+    if (info.kind === 'content') {
+      const name = this.contentName().nativeElement;
+      name.value = '';
+      this.newContent().nativeElement.showModal();
+      name.focus();
+      return;
+    }
+    const typed = prompt(`New ${info.label.toLowerCase().replace(/s$/, '')} file's name:`)?.trim();
     if (!typed) return;
-    const match = /^(.*?)(?:\.([a-z]+))?$/.exec(typed)!;
-    const name = match[1];
-    const ext = match[2] ?? info.exts[0];
-    if (!VALID_NAME.test(name)) return this.say('A name is letters, digits and _ only.');
-    if (!info.exts.includes(ext)) return this.say(`${info.label} files end .${info.exts.join(', .')}.`);
+    if (!VALID_NAME.test(typed)) return this.say('A name is letters, digits and _ only.');
+    this.create(info, typed, info.exts[0]);
+  }
+
+  /** New content called `name`, of the type kept in files ending `ext`: none of another type may share its name. */
+  protected addContent(typed: string, ext: string) {
+    const name = typed.trim();
+    if (!VALID_NAME.test(name)) return this.contentProblem.set('A name is letters, digits and _ only.');
+    const files = { ...this.library.files(), ...this.store.files() };
+    const other = CONTENT_TYPES.find((t) => t.ext !== ext && pathOf('content', name, t.ext) in files);
+    if (other) return this.contentProblem.set(`There's ${other.label} content called ${name} already: content("${name}") would be ambiguous.`);
+    if (pathOf('content', name, ext) in this.store.files()) return this.contentProblem.set(`There's content called ${name} already.`);
+    this.newContent().nativeElement.close();
+    this.create(KINDS.find((k) => k.kind === 'content')!, name, ext);
+  }
+
+  private create(info: KindInfo, name: string, ext: string) {
     const path = pathOf(info.kind, name, ext);
     if (path in this.store.files()) return this.say(`There's a ${path} already.`);
     if (info.kind === 'entries') {
@@ -216,12 +268,12 @@ export class FileSidebarComponent {
     }
     this.open.update((open) => ({ ...open, [info.kind]: true }));
     this.shell.open(path);
-    if (this.library.has(path)) this.say(`${path} stands in for the library's file of that name.`);
+    if (this.library.has(path)) this.say(`${info.kind === 'content' ? `content ${name}` : path} stands in for the library's file of that name.`);
   }
 
   protected rename(path: string) {
     const split = splitPath(path)!;
-    const typed = prompt(`Rename ${path} to:`, split.name)?.trim();
+    const typed = prompt(`Rename ${split.kind === 'content' ? split.name : path} to:`, split.name)?.trim();
     if (!typed || typed === split.name) return;
     const to = pathOf(split.kind, typed, split.ext);
     const problem = this.store.renameFile(path, to);

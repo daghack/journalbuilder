@@ -142,8 +142,10 @@ files (`lib/`), shared functions, have only their code.
 
 ## Content
 
-Plain (`.txt`) and marked-up (`.md`) text, typed beside a page writing it
-in the library's plain hand. Symbols (`.json`) are typed as text, kept as typed, and made to fit their
+New content asks for its name and its type: String, Markdown or Symbols
+(kept as `.txt`, `.md` and `.json`; nobody types the extension). Strings
+and Markdown are typed beside a page writing them in the library's plain
+hand. Symbols are typed as text, kept as typed, and made to fit their
 base (picked beside them) as they're read: in capitals, what the base
 can't write dropped. Strict, the text must be written in the base
 already. Nobody edits the JSON a symbols file is kept as.

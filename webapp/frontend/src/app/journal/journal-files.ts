@@ -33,6 +33,18 @@ export const KINDS: KindInfo[] = [
 
 export const KIND_INFO = new Map(KINDS.map((k) => [k.kind, k]));
 
+/** The types of content, each kept in files of its own extension, which nobody types. */
+export const CONTENT_TYPES = [
+  { ext: 'txt', label: 'String', about: 'plain text, read as a string' },
+  { ext: 'md', label: 'Markdown', about: 'marked-up text: markdown(content(name)) styles it' },
+  { ext: 'json', label: 'Symbols', about: 'text read as symbols in a base, for a lock' },
+] as const;
+
+/** What a content file's extension makes it: String, Markdown or Symbols. */
+export function contentType(ext: string): string {
+  return CONTENT_TYPES.find((t) => t.ext === ext)?.label ?? ext;
+}
+
 /** A journal's `journal.json`. */
 export interface Manifest {
   version: number;
