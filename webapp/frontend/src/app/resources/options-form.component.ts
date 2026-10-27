@@ -1,34 +1,37 @@
 import { Component, input, output } from '@angular/core';
+import { ColourFieldComponent } from '../shared/colour-field.component';
+import { isColour } from '../shared/colour';
 
 /** An option a file declares, as the form shows it. */
 export interface OptionField {
   name: string;
-  kind: 'integer' | 'number' | 'string' | 'bool' | 'array' | 'one_of' | 'json';
+  kind: 'integer' | 'number' | 'string' | 'colour' | 'bool' | 'array' | 'one_of' | 'json';
   choices?: unknown[];
   /** What it is when left alone; undefined if it must be given. */
   default?: unknown;
 }
 
-/** Fields for a file's `options()` defaults, `#{ NAME: default }`, each typed as its default is. */
+/** Fields for a file's `options()` defaults, `#{ NAME: default }`, each typed as its default is (a colour if it's written as one). */
 export function fieldsOf(defaults: Record<string, unknown> | undefined): OptionField[] {
   return Object.entries(defaults ?? {}).map(([name, value]) => ({
     name,
     default: value,
     kind: typeof value === 'number' ? (Number.isInteger(value) ? 'integer' : 'number')
-      : typeof value === 'boolean' ? 'bool' : typeof value === 'string' ? 'string' : Array.isArray(value) ? 'array' : 'json',
+      : typeof value === 'boolean' ? 'bool' : isColour(value) ? 'colour' : typeof value === 'string' ? 'string' : Array.isArray(value) ? 'array' : 'json',
   }));
 }
 
 /** The options a file takes: a field each, its value or its default. */
 @Component({
   selector: 'app-options-form',
+  imports: [ColourFieldComponent],
   template: `
     @for (field of fields(); track field.name) {
       <label class="field">
         <span class="name">{{ field.name }}
           @if (field.name in values()) { <button type="button" class="reset" (click)="changed.emit({ name: field.name, value: undefined })" title="Back to its default">↺</button> }
         </span>
-        @switch (field.kind) {
+        @switch (kindOf(field)) {
           @case ('bool') {
             <input type="checkbox" [checked]="value(field) === true" (change)="set(field, $any($event.target).checked)" />
           }
@@ -42,6 +45,9 @@ export function fieldsOf(defaults: Record<string, unknown> | undefined): OptionF
           }
           @case ('number') {
             <input type="number" step="any" [value]="value(field) ?? ''" (change)="set(field, number($any($event.target).value, false))" />
+          }
+          @case ('colour') {
+            <app-colour-field [value]="show(value(field) ?? '')" [label]="field.name" (changed)="set(field, $event)" />
           }
           @case ('string') {
             <input type="text" [value]="value(field) ?? ''" (change)="set(field, $any($event.target).value)" spellcheck="false" />
@@ -69,6 +75,11 @@ export class OptionsFormComponent {
   /** The values given, by name; others are their defaults. */
   readonly values = input<Record<string, unknown>>({});
   readonly changed = output<{ name: string; value: unknown }>();
+
+  /** A string option whose default is a colour gets a colour's field. */
+  protected kindOf(field: OptionField): OptionField['kind'] {
+    return field.kind === 'string' && isColour(field.default) ? 'colour' : field.kind;
+  }
 
   protected value(field: OptionField): unknown {
     return field.name in this.values() ? this.values()[field.name] : field.default;

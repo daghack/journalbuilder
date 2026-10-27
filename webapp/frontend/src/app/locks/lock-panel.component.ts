@@ -7,6 +7,8 @@ import { symbolBase, testText, textSymbols, type TestValue } from './chain-model
 import { optionDeclaration } from './chain-source';
 import { LockEditorService } from './lock-editor.service';
 import { OptionsFormComponent, fieldsOf } from '../resources/options-form.component';
+import { ColourFieldComponent } from '../shared/colour-field.component';
+import { isColour } from '../shared/colour';
 import { RenderPagesComponent } from './render-pages.component';
 import { ValueViewComponent } from './value-view.component';
 
@@ -38,7 +40,7 @@ function parseValue(text: string, type: string): { value: TestValue; problem: st
 /** The right: the chain being made, the picked lock's options, the chain's ports, and the test. */
 @Component({
   selector: 'app-lock-panel',
-  imports: [ValueViewComponent, RenderPagesComponent, OptionsFormComponent],
+  imports: [ValueViewComponent, RenderPagesComponent, OptionsFormComponent, ColourFieldComponent],
   template: `
     <section class="panel-section">
       <h3>Chain</h3>
@@ -68,8 +70,12 @@ function parseValue(text: string, type: string): { value: TestValue; problem: st
         @for (option of editor.model().options; track option.name) {
           <div class="field">
             <input type="text" class="mono" [value]="option.name" aria-label="Option name" (change)="editor.setChainOption(option.name, { name: $any($event.target).value })" />
-            <input type="text" class="mono" [value]="show(option.default)" aria-label="Its default"
-                   (change)="editor.setChainOption(option.name, { default: read($any($event.target).value, option.kind) })" />
+            @if (isColour(option.default)) {
+              <app-colour-field [value]="show(option.default)" label="Its default" (changed)="editor.setChainOption(option.name, { default: read($event, option.kind) })" />
+            } @else {
+              <input type="text" class="mono" [value]="show(option.default)" aria-label="Its default"
+                     (change)="editor.setChainOption(option.name, { default: read($any($event.target).value, option.kind) })" />
+            }
             <span class="hint">{{ declaration(option) }}; used by {{ usedBy(option.name) }}</span>
           </div>
         }
@@ -95,9 +101,13 @@ function parseValue(text: string, type: string): { value: TestValue; problem: st
                 <button type="button" (click)="editor.demote(node.id, option.name)" title="Give this option a value of its own again">Own value</button></span>
             } @else {
               <span class="row">
-                @switch (option.kind) {
+                @switch (option.colour ? 'colour' : option.kind) {
                   @case ('bool') {
                     <input type="checkbox" [checked]="option.value === true" (change)="editor.setOption(node.id, option.name, $any($event.target).checked)" />
+                  }
+                  @case ('colour') {
+                    <app-colour-field [value]="show(option.value)" [placeholder]="show(option.default)" [label]="option.name"
+                                      (changed)="editor.setOption(node.id, option.name, read($event, option.kind))" />
                   }
                   @case ('one_of') {
                     <select (change)="editor.setOption(node.id, option.name, choice(option, $any($event.target).value))">
@@ -141,6 +151,9 @@ function parseValue(text: string, type: string): { value: TestValue; problem: st
               <span class="row">
                 @if (option.kind === 'bool') {
                   <input type="checkbox" [checked]="option.value === true" (change)="editor.setRendererOption(renderer.id, option.name, $any($event.target).checked)" />
+                } @else if (option.kind === 'colour') {
+                  <app-colour-field [value]="show(option.value)" [placeholder]="show(option.default)" [label]="option.name"
+                                    (changed)="editor.setRendererOption(renderer.id, option.name, readRendererOption($event, option.kind))" />
                 } @else {
                   <input [type]="option.kind === 'number' ? 'number' : 'text'" class="mono value" step="any" [value]="show(option.value)" [placeholder]="show(option.default)"
                          (change)="editor.setRendererOption(renderer.id, option.name, readRendererOption($any($event.target).value, option.kind))" />
@@ -222,7 +235,11 @@ function parseValue(text: string, type: string): { value: TestValue; problem: st
             <span class="mono">{{ fixed.port }}</span><span class="hint">fixed · {{ fixed.type }}</span>
           </div>
           <div class="row">
-            <input type="text" class="mono value" [value]="fixed.text" (input)="setFixed(fixed.port, fixed.type, $any($event.target).value)" (blur)="editor.settle()" />
+            @if (fixed.type === 'String' && isColour(fixed.text)) {
+              <app-colour-field [value]="fixed.text" [label]="fixed.port" (changed)="setFixed(fixed.port, fixed.type, $event); editor.settle()" />
+            } @else {
+              <input type="text" class="mono value" [value]="fixed.text" (input)="setFixed(fixed.port, fixed.type, $any($event.target).value)" (blur)="editor.settle()" />
+            }
             <button type="button" (click)="editor.setFixed(fixed.port, undefined)" title="Leave this input open, to be given where the chain is used">Unfix</button>
           </div>
         </div>
@@ -280,7 +297,11 @@ export class LockPanelComponent {
     const node = this.editor.node();
     if (!node) return [];
     const specs = this.editor.typeByName().get(node.type)?.options ?? [];
-    return specs.map((spec) => ({ ...spec, value: node.options[spec.name], promoted: node.promoted[spec.name] ?? null }));
+    return specs.map((spec) => ({
+      ...spec, value: node.options[spec.name], promoted: node.promoted[spec.name] ?? null,
+      // A string option is a colour's if its default is one (or, with none, what it's given).
+      colour: spec.kind === 'string' && (spec.default !== undefined ? isColour(spec.default) : isColour(node.options[spec.name])),
+    }));
   });
 
   protected readonly fixedPorts = computed(() => {
@@ -329,7 +350,7 @@ export class LockPanelComponent {
     const defaults = this.editor.rendererByName().get(renderer.type)?.options ?? {};
     return Object.entries(defaults).map(([name, value]) => ({
       name, default: value, value: renderer.options[name], promoted: renderer.promoted[name] ?? null,
-      kind: typeof value === 'number' ? 'number' : typeof value === 'boolean' ? 'bool' : 'text',
+      kind: typeof value === 'number' ? 'number' : typeof value === 'boolean' ? 'bool' : isColour(value) ? 'colour' : 'text',
     }));
   });
 
@@ -362,6 +383,8 @@ export class LockPanelComponent {
     this.editor.setFixed(port, this.editor.model().test[port] ?? { text: '' });
     this.editor.settle();
   }
+
+  protected readonly isColour = isColour;
 
   protected readonly nameError = signal<string | null>(null);
 

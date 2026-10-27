@@ -837,6 +837,14 @@ mod tests {
     }
 
     #[test]
+    fn parses_the_web_editors_colour_picker() {
+        // What its formatHsl writes: hsl when opaque, hsla when see-through.
+        assert_eq!(parse_color("hsl(240, 100%, 50%)"), Ok([0.0, 0.0, 1.0, 1.0]));
+        assert_eq!(parse_color("hsla(0, 100%, 50%, 0.46)"), Ok([1.0, 0.0, 0.0, 117.0 / 255.0]));
+        assert_eq!(parse_color("hsl(5, 73%, 35%)"), parse_color("hsla(5, 73%, 35%, 1)"));
+    }
+
+    #[test]
     fn rejects_invalid_colors() {
         assert!(parse_color("darkredd").is_err());
         assert!(parse_color("").is_err());
