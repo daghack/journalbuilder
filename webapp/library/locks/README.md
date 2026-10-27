@@ -5,6 +5,12 @@ in a journal loads `vigenere_cipher.rhai`. Adding a lock type means adding a
 file; nothing needs recompiling. A journal's own `locks/` stand in front
 of these, the library's.
 
+Locks are the ciphers and puzzles. Lock files that only transform data
+between them (split a text, join texts, read a string as symbols) are
+helper types, in `helpers/` beside this directory: written the same way,
+and added by name the same way, a name being looked up here first (see
+[helpers/README.md](../helpers/README.md)).
+
 ## What a lock file defines
 
 | function | runs at | returns |
@@ -172,7 +178,7 @@ Composite lock files are written by hand. A chain to use in a journal
 (with its illustrations) is a chain file instead, which the web editor's lock
 editor makes: see chains/README.md.
 
-## Shared helpers
+## Shared functions
 
 Functions several lock files need live in `lib/` (`webapp/library/lib/`,
 or a journal's own), beside the lock files' directory. Any script imports

@@ -79,13 +79,14 @@ cd webapp/frontend && npm install && npm start
 | `webapp/journals/showcase` | a page each of every brush, glyphset, glyph, art tool, text layout and lock type, with the calls that make them |
 | `webapp/journals/api_reference` | the API reference: an entry for every function scripts can call, with its arguments, options and defaults |
 | `webapp/library/` | the built-in library every journal stands in front of, a directory for each kind of file: |
-| `webapp/library/locks/` | lock types, one rhai file each; see [webapp/library/locks/README.md](webapp/library/locks/README.md) |
+| `webapp/library/locks/` | lock types (ciphers and puzzles), one rhai file each; see [webapp/library/locks/README.md](webapp/library/locks/README.md) |
+| `webapp/library/helpers/` | helper types, lock files that transform data between locks (split, join, read text as symbols); see [webapp/library/helpers/README.md](webapp/library/helpers/README.md) |
 | `webapp/library/layouts/` | page layouts, one rhai file each; see [webapp/library/layouts/README.md](webapp/library/layouts/README.md) |
 | `webapp/library/illustrations/` | what chains draw their values with; see [webapp/library/illustrations/README.md](webapp/library/illustrations/README.md) |
 | `webapp/library/chains/` | locks wired together, for `chain(name)`; see [webapp/library/chains/README.md](webapp/library/chains/README.md) |
 | `webapp/library/styles/` | text styles, for `text_style(name)`: `options()` and `style(o)`, giving `#{ style, type, paragraph, spans }` |
 | `webapp/library/content/` | text (`.txt`, `.md`) and symbols (`.json`, `{ base, symbols }`), for `content(name)` |
-| `webapp/library/lib/` | helpers any script imports: `import "lib/NAME" as NAME;` |
+| `webapp/library/lib/` | shared functions any script imports: `import "lib/NAME" as NAME;` |
 | `webapp/library/glyphsets/` | a `NAME.json` for each glyphset: its glyphs' SVG paths by character (a list for variants), `character_padding` (scripts' `glyph_outline_gap`), `space_width` and `fallback`; sets of symbols are glyphsets too |
 | `src/journal/` | canvases, paths, glyph placement, glyphsets, hatching, gradients, parchment, and Darkly and SVG rendering |
 | `src/journal/publish.rs` | writing an entry out: images per canvas or page, PDFs, SVGs |
@@ -112,9 +113,9 @@ A journal is a directory, `journals/<name>/`, with a manifest,
 
 Each entry is a script, `entries/<entry>.rhai`, run on its own. Beside
 them, a journal can have files of its own, each kind in a directory:
-`locks/`, `layouts/`, `illustrations/`, `chains/`, `styles/` (text
-styles, for `text_style(name)`), `lib/` (helpers, `import "lib/name" as
-name;`), `glyphsets/` and `content/` (text and symbols, for
+`locks/`, `helpers/`, `layouts/`, `illustrations/`, `chains/`, `styles/`
+(text styles, for `text_style(name)`), `lib/` (shared functions, `import
+"lib/name" as name;`), `glyphsets/` and `content/` (text and symbols, for
 `content(name)`). They stand in front of the built-in library,
 `webapp/library/`: a journal's file stands in for the library's of the
 same name, and journalbuild notes when one does. Entries share these

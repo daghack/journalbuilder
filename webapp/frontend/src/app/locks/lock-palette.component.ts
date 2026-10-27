@@ -1,13 +1,16 @@
+import { NgTemplateOutlet } from '@angular/common';
 import { Component, computed, inject, signal } from '@angular/core';
+import { pathOf } from '../journal/journal-files';
 import type { IllustrationType, LockType } from '../scribe';
 import { JournalStore } from '../services/journal-store.service';
 import { LibraryService } from '../services/library.service';
 import type { SourceKind } from './chain-model';
 import { LockEditorService } from './lock-editor.service';
 
-/** The left: the chains, to edit; every lock type and illustration, to drag into the chain (or click to add). */
+/** The left: the chains, to edit; every lock type, helper type and illustration, to drag into the chain (or click to add). */
 @Component({
   selector: 'app-lock-palette',
+  imports: [NgTemplateOutlet],
   template: `
     <div class="head">
       <input type="text" placeholder="Find a lock type or illustration" aria-label="Find a lock type" [value]="filter()" (input)="filter.set($any($event.target).value)" />
@@ -25,23 +28,31 @@ import { LockEditorService } from './lock-editor.service';
         </li>
       }
     </ul>
-    @for (group of groups(); track group.title) {
-      @if (group.types.length) {
-        <h3>{{ group.title }}</h3>
-        <ul>
-          @for (type of group.types; track type.name) {
-            <li class="type" draggable="true" [class.broken]="!!type.error" (dragstart)="drag($event, type)"
-                (click)="!type.error && add(type)" [title]="type.error ?? type.description ?? ''">
-              <span class="name">{{ type.name }}</span>
-              @if (type.composite) { <span class="tag" title="A composite lock file: other lock types wired together">composite</span> }
-              @if (type.own && type.builtin) { <span class="tag warn" title="The journal's stands in for the library's lock type of that name">⚠</span> }
-              <button type="button" class="open" (click)="$event.stopPropagation(); editor.openFile('locks/' + type.name + '.rhai')" title="Open this lock type's file">Open</button>
-              <span class="about">{{ type.error ?? type.description }}</span>
-            </li>
-          }
-        </ul>
+    <h3 class="renderers-head">Locks <button type="button" class="open" (click)="editor.newFile('locks')" title="Write a new lock type">New</button></h3>
+    <p class="note">Ciphers and puzzles.</p>
+    <ng-container *ngTemplateOutlet="typeGroups; context: { $implicit: groups().locks }" />
+    <h3 class="renderers-head">Helpers <button type="button" class="open" (click)="editor.newFile('helpers')" title="Write a new helper type">New</button></h3>
+    <p class="note">Transform data between locks: split, join, read text as symbols.</p>
+    <ng-container *ngTemplateOutlet="typeGroups; context: { $implicit: groups().helpers }" />
+    <ng-template #typeGroups let-groups>
+      @for (group of groups; track group.title) {
+        @if (group.types.length) {
+          <h3>{{ group.title }}</h3>
+          <ul>
+            @for (type of group.types; track type.name) {
+              <li class="type" [class.helper]="type.helper" draggable="true" [class.broken]="!!type.error" (dragstart)="drag($event, type)"
+                  (click)="!type.error && add(type)" [title]="type.error ?? type.description ?? ''">
+                <span class="name">{{ type.name }}</span>
+                @if (type.composite) { <span class="tag" title="A composite lock file: other lock types wired together">composite</span> }
+                @if (type.own && type.builtin) { <span class="tag warn" title="The journal's stands in for the library's file of that name">⚠</span> }
+                <button type="button" class="open" (click)="$event.stopPropagation(); editor.openFile(pathOf(type.helper ? 'helpers' : 'locks', type.name))" title="Open this type's file">Open</button>
+                <span class="about">{{ type.error ?? type.description }}</span>
+              </li>
+            }
+          </ul>
+        }
       }
-    }
+    </ng-template>
     <h3 class="renderers-head">Sources</h3>
     <p class="note">The journal's files a chain draws on: content feeds locks and illustrations; styles, glyphsets and layouts feed illustrations.</p>
     @for (group of sources(); track group.kind) {
@@ -89,6 +100,7 @@ import { LockEditorService } from './lock-editor.service';
     .renderers-head { display: flex; align-items: center; gap: 6px; margin-top: 14px; }
     .note { margin: 0 10px 4px; color: #a39b90; font-size: 11px; }
     .type.renderer { border-left: 2px dashed #8fc1e3; }
+    .type.helper { border-left: 2px dotted var(--rail-selected); }
     .type.source { border-left: 2px solid #c9a227; cursor: grab; }
     .type.chain { cursor: pointer; }
     .type.chain.current { border-color: var(--rail-selected); }
@@ -101,13 +113,24 @@ export class LockPaletteComponent {
   private readonly library = inject(LibraryService);
   protected readonly filter = signal('');
 
+  protected readonly pathOf = pathOf;
+
+  /** The lock types and the helper types, each the journal's own then the library's. */
   protected readonly groups = computed(() => {
     const filter = this.filter().trim().toLowerCase();
     const types = this.editor.types().filter((t) => !filter || t.name.includes(filter) || (t.description ?? '').toLowerCase().includes(filter));
-    return [
-      { title: "The journal's lock types", types: types.filter((t) => t.own) },
-      { title: 'Lock types', types: types.filter((t) => !t.own) },
-    ];
+    const locks = types.filter((t) => !t.helper);
+    const helpers = types.filter((t) => t.helper);
+    return {
+      locks: [
+        { title: "The journal's", types: locks.filter((t) => t.own) },
+        { title: 'Library', types: locks.filter((t) => !t.own) },
+      ],
+      helpers: [
+        { title: "The journal's", types: helpers.filter((t) => t.own) },
+        { title: 'Library', types: helpers.filter((t) => !t.own) },
+      ],
+    };
   });
 
   protected readonly chains = computed(() => {

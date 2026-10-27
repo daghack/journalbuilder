@@ -6,8 +6,9 @@ A journal is a directory in `journals/`, or in `webapp/journals/` for the
 two built into the web editor (`showcase` and `api_reference`; nothing
 else goes there): `journal.json` (title,
 description, its entries in order), its entries in `entries/NAME.rhai`,
-and files of its own in `locks/`, `layouts/`, `illustrations/`,
-`chains/`, `styles/`, `lib/`, `glyphsets/` and `content/`. These stand in
+and files of its own in `locks/`, `helpers/`, `layouts/`,
+`illustrations/`, `chains/`, `styles/`, `lib/`, `glyphsets/` and
+`content/`. These stand in
 front of the built-in library, `webapp/library/`, which has the same
 directories; a journal's file stands in for the library's of the same
 name. Anything any journal might use goes in the library; what only one
@@ -37,6 +38,8 @@ the same change:
   add examples only for new brush settings.
 - **A lock type** (`webapp/library/locks/*.rhai`): add a row to the
   locks page.
+- **A helper type** (`webapp/library/helpers/*.rhai`): add a row to the
+  locks page, among the helpers.
 - **An illustration** (`webapp/library/illustrations/*.rhai`): attach it
   on the locks pages and draw what it gives.
 - **A chain file** (`webapp/library/chains/*.rhai`): use it with
@@ -55,7 +58,7 @@ typeset pages go in with `book.add(section, pages)`. When a page fills
 up, bind it and start another sheet; the contents follow.
 
 `tests/showcase.rs` fails when a function scripts can call, or a
-built-in (a library lock type, illustration, chain, layout, text style,
+built-in (a library lock or helper type, illustration, chain, layout, text style,
 content file or glyphset of 20 glyphs or more), isn't in the showcase.
 Files of a journal's own needn't be. Don't
 silence it by adding to its `NOT_SHOWN` list unless the function truly

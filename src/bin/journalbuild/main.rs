@@ -358,7 +358,8 @@ fn check_locks(args: &Args) -> Result<(), String> {
         Some(name) => {
             let journal = open_journal(name, &args.journals_dirs)?;
             let resources = journal.resources(library);
-            let locks = resources.locks.own_names().map_err(|e| e.to_string())?;
+            let mut locks = resources.locks.own_names().map_err(|e| e.to_string())?;
+            locks.extend(resources.helpers.own_names().map_err(|e| e.to_string())?);
             let chains = resources.chains.own_names().map_err(|e| e.to_string())?;
             (resources, Some((journal.name(), locks, chains)))
         }

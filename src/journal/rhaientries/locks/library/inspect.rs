@@ -17,6 +17,8 @@ pub struct TypeInfo {
     /// The file's opening comment, without its "name: ".
     pub description: String,
     pub composite: bool,
+    /// Whether it's a helper type, from the helpers' directory.
+    pub helper: bool,
     pub options: Vec<OptionInfo>,
 }
 
@@ -121,12 +123,13 @@ impl LockLibrary {
     /// What a lock type is and which options it takes.
     pub fn describe(&self, type_name: &str) -> Result<TypeInfo, String> {
         let lock_type = self.lock_type(type_name)?;
-        let source = self.sources.read(type_name).map_err(|e| e.to_string())?;
+        let source = self.sources_of(type_name).read(type_name).map_err(|e| e.to_string())?;
         Ok(TypeInfo {
             name: lock_type.name.clone(),
             file: lock_type.file.clone(),
             description: description(&source, type_name),
             composite: lock_type.composite,
+            helper: self.is_helper(type_name),
             options: lock_type.options.iter().map(|(name, spec)| option_info(name, spec)).collect(),
         })
     }
@@ -392,7 +395,7 @@ mod tests {
     fn library(extra: &[(&str, &str)]) -> Rc<LockLibrary> {
         let overlay = extra.iter().map(|(name, source)| (name.to_string(), source.to_string()));
         let library = Resources::library();
-        Rc::new(LockLibrary::with_sources(library.locks.with_overlay(overlay), library.lib))
+        Rc::new(LockLibrary::with_sources(library.locks.with_overlay(overlay), library.lib).with_helpers(library.helpers))
     }
 
     fn view<'a>(values: &'a [(String, ValueView)], name: &str) -> &'a ValueView {
@@ -476,7 +479,7 @@ mod tests {
     fn with_chains(chains: &[(&str, &str)]) -> Rc<LockLibrary> {
         let chains = chains.iter().map(|(name, source)| (name.to_string(), source.to_string()));
         let library = Resources::library();
-        Rc::new(LockLibrary::with_sources(library.locks, library.lib).with_chains(Sources::none("chains").with_overlay(chains)))
+        Rc::new(LockLibrary::with_sources(library.locks, library.lib).with_helpers(library.helpers).with_chains(Sources::none("chains").with_overlay(chains)))
     }
 
     const SHIFTED: &str = r#"// shifted: a shift cipher's key into a Vigenere cipher.

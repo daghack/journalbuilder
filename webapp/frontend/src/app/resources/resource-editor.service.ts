@@ -20,7 +20,7 @@ export interface LockCheck {
 }
 
 /** The kinds this editor edits. */
-export type ResourceKind = Extract<Kind, 'locks' | 'illustrations' | 'layouts' | 'styles' | 'lib'>;
+export type ResourceKind = Extract<Kind, 'locks' | 'helpers' | 'illustrations' | 'layouts' | 'styles' | 'lib'>;
 
 /**
  * A lock, illustration, layout, style or helper file being edited: its
@@ -39,7 +39,7 @@ export class ResourceEditorService {
   readonly path = computed(() => {
     const path = this.shell.selected();
     const kind = path ? splitPath(path)?.kind : null;
-    return kind && ['locks', 'illustrations', 'layouts', 'styles', 'lib'].includes(kind) ? path : null;
+    return kind && ['locks', 'helpers', 'illustrations', 'layouts', 'styles', 'lib'].includes(kind) ? path : null;
   });
   readonly kind = computed(() => (splitPath(this.path() ?? '')?.kind ?? null) as ResourceKind | null);
   readonly name = computed(() => splitPath(this.path() ?? '')?.name ?? '');
@@ -139,7 +139,7 @@ export class ResourceEditorService {
     const name = splitPath(path)!.name;
     this.previewing.set(true);
     try {
-      if (kind === 'locks') {
+      if (kind === 'locks' || kind === 'helpers') {
         const types = await this.tools.lockTypes();
         const type: LockType | undefined = failed(types) ? undefined : types.find((t) => t.name === name);
         const fields: OptionField[] = (type?.options ?? []).map((o) => ({ name: o.name, kind: o.kind, choices: o.choices, default: o.default }));

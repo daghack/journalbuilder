@@ -49,9 +49,13 @@ const CHAIN_FNS: &[(&str, usize, &str)] = &[
 /// Each lock type's name, with its example count or its first failure.
 pub type ExampleResults = Vec<(String, Result<usize, String>)>;
 
-/// The lock types in a directory of lock files, each loaded when first used.
+/// The lock types in a directory of lock files, and the helper types in a
+/// directory of their own, each loaded when first used.
 pub struct LockLibrary {
     sources: Sources,
+    /// Helper types: lock files that transform data (`split_symbols`),
+    /// found by name as lock types are, after them.
+    helpers: Sources,
     /// The chain files, run in the same engine.
     chains: Sources,
     /// The content, styles, glyphsets and layouts chain files' sources
@@ -204,26 +208,36 @@ impl ScriptError {
 }
 
 impl LockLibrary {
-    /// The lock types and chain files in `resources`, with their helpers
-    /// in its `lib`.
+    /// The lock types, helper types and chain files in `resources`, with
+    /// the functions they import from its `lib`.
     pub fn new(resources: &Resources) -> Self {
-        let mut library = Self::with_sources(resources.locks.clone(), resources.lib.clone()).with_chains(resources.chains.clone());
+        let mut library = Self::with_sources(resources.locks.clone(), resources.lib.clone())
+            .with_helpers(resources.helpers.clone())
+            .with_chains(resources.chains.clone());
         library.resources = Some(resources.clone());
         library
     }
 
-    /// The lock types in `sources`, with their helpers in `lib`, and no
-    /// chain files.
+    /// The lock types in `sources`, with the functions they import from
+    /// `lib`, and no helper types or chain files.
     pub fn with_sources(sources: Sources, lib: Sources) -> Self {
         LockLibrary {
             engine: lock_engine(&lib),
             sources,
+            helpers: Sources::none("helpers"),
             chains: Sources::embedded("chains", &[]),
             resources: None,
             types: RefCell::default(),
             chain_files: RefCell::default(),
             building: RefCell::default(),
         }
+    }
+
+    /// The library with the helper types in `helpers`.
+    pub fn with_helpers(mut self, helpers: Sources) -> Self {
+        self.helpers = helpers;
+        self.types = RefCell::default();
+        self
     }
 
     /// The library with the chain files in `chains`.
@@ -233,16 +247,33 @@ impl LockLibrary {
         self
     }
 
-    /// The lock types in the directory, sorted.
+    /// The lock and helper types, sorted.
     pub fn available(&self) -> Result<Vec<String>, String> {
-        let names = self.sources.names()
-            .map_err(|e| format!("couldn't read the lock directory {}: {}", self.sources.root().display(), e))?;
+        let mut names = Vec::new();
+        for sources in [&self.sources, &self.helpers] {
+            names.extend(sources.names()
+                .map_err(|e| format!("couldn't read the lock directory {}: {}", sources.root().display(), e))?);
+        }
+        names.sort();
+        names.dedup();
         Ok(names.into_iter().filter(|name| valid_type_name(name)).collect())
     }
 
-    /// Whether the directory has a lock file for `type_name`.
+    /// Whether there's a lock or helper file for `type_name`.
     pub fn has(&self, type_name: &str) -> bool {
-        valid_type_name(type_name) && self.sources.has(type_name)
+        valid_type_name(type_name) && (self.sources.has(type_name) || self.helpers.has(type_name))
+    }
+
+    /// Whether `type_name` is a helper type: one in the helpers' directory
+    /// and not the locks'.
+    pub fn is_helper(&self, type_name: &str) -> bool {
+        !self.sources.has(type_name) && self.helpers.has(type_name)
+    }
+
+    /// The directory `type_name`'s file is in: the locks', or else the
+    /// helpers'.
+    fn sources_of(&self, type_name: &str) -> &Sources {
+        if self.is_helper(type_name) { &self.helpers } else { &self.sources }
     }
 
     /// A lock of type `type_name`, called `name` in error messages, with
@@ -393,7 +424,7 @@ impl LockLibrary {
 
     fn load(&self, type_name: &str) -> Result<LockType, String> {
         let file = format!("{}.rhai", type_name);
-        let ast = self.sources.compile(&self.engine, type_name).map_err(|e| format!("{}: {}", file, e))?;
+        let ast = self.sources_of(type_name).compile(&self.engine, type_name).map_err(|e| format!("{}: {}", file, e))?;
         let mut lock_type = LockType { name: type_name.to_string(), file, ast, options: BTreeMap::new(), composite: false };
         lock_type.composite = lock_type.defines("chain", 1);
         let defined = |fns: &[(&str, usize, &'static str)], wanted: bool| -> Vec<&'static str> {
@@ -473,7 +504,8 @@ impl LockLibrary {
         if in_chains != path {
             return format!("chains/{}", in_chains.to_string_lossy());
         }
-        let relative = self.sources.relative(path);
+        let in_helpers = self.helpers.relative(path);
+        let relative = if in_helpers != path { in_helpers } else { self.sources.relative(path) };
         let mut shown = relative.to_string_lossy().into_owned();
         if relative.extension().is_none() {
             shown.push_str(".rhai");

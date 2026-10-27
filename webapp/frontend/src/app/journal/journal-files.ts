@@ -5,7 +5,7 @@
 import { strFromU8, strToU8, unzipSync, zipSync, type Zippable } from 'fflate';
 
 /** The kinds of file a journal has, each in a directory of its own. */
-export type Kind = 'entries' | 'chains' | 'locks' | 'illustrations' | 'layouts' | 'styles' | 'content' | 'glyphsets' | 'lib';
+export type Kind = 'entries' | 'chains' | 'locks' | 'helpers' | 'illustrations' | 'layouts' | 'styles' | 'content' | 'glyphsets' | 'lib';
 
 export interface KindInfo {
   kind: Kind;
@@ -22,12 +22,13 @@ export const KINDS: KindInfo[] = [
   { kind: 'entries', label: 'Entries', exts: ['rhai'], library: false },
   { kind: 'chains', label: 'Chains', exts: ['rhai'], library: true },
   { kind: 'locks', label: 'Locks', exts: ['rhai'], library: true },
+  { kind: 'helpers', label: 'Helpers', exts: ['rhai'], library: true },
   { kind: 'illustrations', label: 'Illustrations', exts: ['rhai'], library: true },
   { kind: 'layouts', label: 'Layouts', exts: ['rhai'], library: true },
   { kind: 'styles', label: 'Styles', exts: ['rhai'], library: true },
   { kind: 'content', label: 'Content', exts: ['txt', 'md', 'json'], library: true },
   { kind: 'glyphsets', label: 'Glyphsets', exts: ['json'], library: true },
-  { kind: 'lib', label: 'Helpers', exts: ['rhai'], library: true },
+  { kind: 'lib', label: 'Lib', exts: ['rhai'], library: true },
 ];
 
 export const KIND_INFO = new Map(KINDS.map((k) => [k.kind, k]));

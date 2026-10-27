@@ -277,7 +277,7 @@ export class LockEditorService {
     }
     for (const node of model.nodes) {
       const options = chain.resolvedOptions(model, node);
-      const key = JSON.stringify([node.type, options, files[pathOf('locks', node.type)] ?? null]);
+      const key = JSON.stringify([node.type, options, files[pathOf('locks', node.type)] ?? files[pathOf('helpers', node.type)] ?? null]);
       if (this.portKeys.get(node.id) === key) continue;
       this.portKeys.set(node.id, key);
       void this.tools.lockPorts(node.type, options).then(
@@ -598,8 +598,8 @@ export class LockEditorService {
   // ---- illustration and chain files ----
 
   /** Make a new file of `kind` (asking its name), and open it. */
-  newFile(kind: 'illustrations' | 'chains' | 'locks') {
-    const what = kind === 'illustrations' ? 'illustration' : kind === 'chains' ? 'chain' : 'lock type';
+  newFile(kind: 'illustrations' | 'chains' | 'locks' | 'helpers') {
+    const what = kind === 'illustrations' ? 'illustration' : kind === 'chains' ? 'chain' : kind === 'helpers' ? 'helper type' : 'lock type';
     const name = prompt(`New ${what}'s name (letters, digits and _):`)?.trim();
     if (!name) return;
     if (!VALID_NAME.test(name)) return this.note.set({ kind: 'error', text: 'A name is letters, digits and _ only.' });

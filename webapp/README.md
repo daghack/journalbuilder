@@ -101,7 +101,9 @@ let pages = result.canvases("mg");
   an output to an input to wire them: only ports of the same type (or
   `Any`) take a wire, an input takes one wire, and nothing can feed back
   into itself. One output can feed several inputs. A lock's ports follow
-  its options (`merge_alpha`'s `input_count`, say).
+  its options (`merge_alpha`'s `input_count`, say). Lock
+  types (ciphers and puzzles) and helper types (`helpers/`, which
+  transform data between them) are listed apart.
 - **Sources.** The journal's files a chain draws on: content, styles,
   glyphsets and layouts, each a node with one output, `value` (see
   library/chains/README.md). Content feeds locks (text as symbols in a base
@@ -129,13 +131,14 @@ let pages = result.canvases("mg");
 - The snippets copy entry script: `chain("name")` in use, or the chain
   built node by node with `new_lock`.
 
-## Locks, illustrations, layouts, styles and helpers
+## Locks, helpers, illustrations, layouts, styles and lib
 
 Each opens in three panes: on the left the options its file declares, to
 give values to preview with; in the middle the preview (a lock's examples,
 run, and its ports; what an illustration draws of its `example()`; a
 layout typesetting its `example()`; a style writing its example text); on
-the right its code. Helpers (`lib/`) have only their code.
+the right its code. Helper types run their examples as locks do. Lib
+files (`lib/`), shared functions, have only their code.
 
 ## Content
 

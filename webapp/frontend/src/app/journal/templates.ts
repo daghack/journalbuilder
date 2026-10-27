@@ -48,6 +48,39 @@ fn examples() {
 \t]
 }
 `;
+    case 'helpers':
+      return `// ${name}: a text's symbols in reverse order.
+
+fn options() {
+\t#{ base: integer(27) }
+}
+
+fn inputs(o) {
+\t#{ text: symbol_type(o.base) }
+}
+
+fn outputs(o) {
+\t#{ reversed: symbol_type(o.base) }
+}
+
+fn lock(o, i) {
+\tlet reversed = i.text;
+\treversed.reverse();
+\t#{ reversed: reversed }
+}
+
+fn unlock(o, out) {
+\tlet text = out.reversed;
+\ttext.reverse();
+\t#{ text: text }
+}
+
+fn examples() {
+\t[
+\t\t#{ options: #{ base: 27 }, inputs: #{ text: symbols(27, "STOP") }, outputs: #{ reversed: symbols(27, "POTS") } },
+\t]
+}
+`;
     case 'illustrations':
       return `// ${name}: what it draws, and how.
 
@@ -124,7 +157,7 @@ fn example() {
     case 'glyphsets':
       return '{\n\t"space_width": 0.5,\n\t"glyphs": {}\n}\n';
     case 'lib':
-      return `// ${name}: helpers, for import "lib/${name}" as ${name};
+      return `// ${name}: shared functions, for import "lib/${name}" as ${name};
 
 fn twice(x) {
 \tx * 2

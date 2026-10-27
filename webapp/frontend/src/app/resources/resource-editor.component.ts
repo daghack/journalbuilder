@@ -45,7 +45,7 @@ const DEFINES: Record<string, string> = {
         </aside>
         <section center class="preview" aria-label="Preview">
           <app-library-banner [path]="editor.path()" [own]="editor.own()" [builtin]="editor.builtin()" (copy)="editor.copyIn()" (revert)="editor.revertToLibrary()" />
-          @if (editor.kind() === 'locks') {
+          @if (editor.kind() === 'locks' || editor.kind() === 'helpers') {
             @if (editor.lockCheck(); as check) {
               @if (examples(); as e) {
                 <p [class.ok]="e.ok" [class.error]="!e.ok">{{ e.text }}</p>

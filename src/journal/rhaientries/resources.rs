@@ -1,11 +1,12 @@
-//! A journal's resources: its lock, layout, illustration, chain, style and
-//! helper scripts, glyphsets and content, each kind in a directory of its
+//! A journal's resources: its lock, helper, layout, illustration, chain,
+//! style and lib scripts, glyphsets and content, each kind in a directory of its
 //! own, in front of the built-in library's (`webapp/library/`), which has
 //! the same directories. A journal's file stands in for a library file of
 //! the same name.
 //!
 //! ```text
-//! locks/NAME.rhai          lock types
+//! locks/NAME.rhai          lock types: ciphers and puzzles
+//! helpers/NAME.rhai        helper types: lock files that transform data
 //! layouts/NAME.rhai        page layouts, for layout(name)
 //! illustrations/NAME.rhai  what chains draw their values with
 //! chains/NAME.rhai         locks wired together, for chain(name)
@@ -39,8 +40,9 @@ pub const BUILT_IN_JOURNALS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/we
 pub const DEFAULT_JOURNALS_DIRS: [&str; 2] = [DEFAULT_JOURNALS_DIR, BUILT_IN_JOURNALS_DIR];
 
 /// Every kind of resource: its directory, and its files' extension.
-pub const KINDS: [(&str, &str); 10] = [
+pub const KINDS: [(&str, &str); 11] = [
     ("locks", "rhai"),
+    ("helpers", "rhai"),
     ("layouts", "rhai"),
     ("illustrations", "rhai"),
     ("chains", "rhai"),
@@ -56,6 +58,8 @@ pub const KINDS: [(&str, &str); 10] = [
 #[derive(Clone, Debug)]
 pub struct Resources {
     pub locks: Sources,
+    /// Helper types: lock files that transform data rather than lock it.
+    pub helpers: Sources,
     pub layouts: Sources,
     pub illustrations: Sources,
     pub chains: Sources,
@@ -95,6 +99,7 @@ impl Resources {
     fn from_kinds(sources: impl Fn(&str, &'static str) -> Sources) -> Self {
         Resources {
             locks: sources("locks", "rhai"),
+            helpers: sources("helpers", "rhai"),
             layouts: sources("layouts", "rhai"),
             illustrations: sources("illustrations", "rhai"),
             chains: sources("chains", "rhai"),
@@ -111,6 +116,7 @@ impl Resources {
     pub fn over(self, under: Resources) -> Self {
         Resources {
             locks: self.locks.over(under.locks),
+            helpers: self.helpers.over(under.helpers),
             layouts: self.layouts.over(under.layouts),
             illustrations: self.illustrations.over(under.illustrations),
             chains: self.chains.over(under.chains),
@@ -135,6 +141,7 @@ impl Resources {
         };
         let resources = Resources {
             locks: record(self.locks),
+            helpers: record(self.helpers),
             layouts: record(self.layouts),
             illustrations: record(self.illustrations),
             chains: record(self.chains),
@@ -149,9 +156,10 @@ impl Resources {
     }
 
     /// Every kind's files, in `KINDS`' order, with their directory's name.
-    pub fn kinds(&self) -> [(&'static str, &Sources); 10] {
+    pub fn kinds(&self) -> [(&'static str, &Sources); 11] {
         [
             ("locks", &self.locks),
+            ("helpers", &self.helpers),
             ("layouts", &self.layouts),
             ("illustrations", &self.illustrations),
             ("chains", &self.chains),

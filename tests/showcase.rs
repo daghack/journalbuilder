@@ -59,6 +59,7 @@ fn every_built_in_is_in_the_showcase() {
     };
     let names = |sources: &scribe::journal::rhaientries::Sources| sources.names().unwrap();
     check("lock type", names(&library.locks), &|n| format!("\"{}\"", n), "a row on the locks page");
+    check("helper type", names(&library.helpers), &|n| format!("\"{}\"", n), "a row under the locks page's helpers");
     check("illustration", names(&library.illustrations), &|n| format!("\"{}\"", n), "attach it on the illustrations page");
     check("chain", names(&library.chains), &|n| format!("chain(\"{}\"", n), "use it with chain(name)");
     check("layout", names(&library.layouts), &|n| format!("layout(\"{}\"", n), "typeset pages with it");

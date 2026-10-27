@@ -124,6 +124,7 @@ fn journal_files<'a>(files: impl IntoIterator<Item = (&'a str, &'a str)>) -> Res
         let Some((name, ext)) = file.rsplit_once('.') else { continue };
         let sources = match (kind, ext) {
             ("locks", "rhai") => &mut journal.locks,
+            ("helpers", "rhai") => &mut journal.helpers,
             ("layouts", "rhai") => &mut journal.layouts,
             ("illustrations", "rhai") => &mut journal.illustrations,
             ("chains", "rhai") => &mut journal.chains,
@@ -371,18 +372,21 @@ fn marked(mut value: Value, path: &str) -> Value {
     value
 }
 
-/// Every lock type, as JSON: `[{ name, file, description, composite,
-/// options: [{ name, kind, choices?, default? }], own, builtin }]`, or
-/// `{ name, error, own, builtin }` for one that doesn't load. `own` if the
-/// journal has the file, `builtin` if the library does.
+/// Every lock and helper type, as JSON: `[{ name, file, description,
+/// composite, helper, options: [{ name, kind, choices?, default? }], own,
+/// builtin }]`, or `{ name, error, helper, own, builtin }` for one that
+/// doesn't load. `own` if the journal has the file, `builtin` if the
+/// library does.
 #[wasm_bindgen(js_name = lockTypes)]
 pub fn lock_types() -> String {
-    answer(locks(&[]).describe_all().map(|types| {
+    let library = locks(&[]);
+    answer(library.describe_all().map(|types| {
         types.into_iter().map(|(name, info)| {
-            let path = format!("locks/{}.rhai", name);
+            let helper = library.is_helper(&name);
+            let path = format!("{}/{}.rhai", if helper { "helpers" } else { "locks" }, name);
             match info {
                 Ok(info) => marked(serde_json::to_value(info).unwrap_or(Value::Null), &path),
-                Err(error) => marked(json!({ "name": name, "error": error }), &path),
+                Err(error) => marked(json!({ "name": name, "error": error, "helper": helper }), &path),
             }
         }).collect::<Vec<Value>>()
     }))
@@ -395,12 +399,13 @@ pub fn lock_ports(type_name: &str, options: &str) -> String {
     answer(parse_json(options, "options").and_then(|options| locks(&[]).ports(type_name, &options)))
 }
 
-/// Run lock type `type_name`'s examples through lock and unlock, with
-/// `source` standing in for its file if given: `{ examples }`, how many
-/// passed, or `{ error }`, the first failure.
+/// Run lock or helper type `type_name`'s examples through lock and unlock,
+/// with `source` standing in for its file if given: `{ examples }`, how
+/// many passed, or `{ error }`, the first failure.
 #[wasm_bindgen(js_name = lockExamples)]
 pub fn lock_examples(type_name: &str, source: Option<String>) -> String {
-    let path = format!("locks/{}.rhai", type_name);
+    let helper = locks(&[]).is_helper(type_name);
+    let path = format!("{}/{}.rhai", if helper { "helpers" } else { "locks" }, type_name);
     let extra: Vec<(&str, &str)> = source.as_deref().map(|source| (path.as_str(), source)).into_iter().collect();
     let library = Rc::new(LockLibrary::new(&resources(&extra)));
     answer(library.check_examples(type_name).map(|examples| json!({ "examples": examples })))

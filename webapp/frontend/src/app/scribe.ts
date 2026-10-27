@@ -163,6 +163,8 @@ export interface LockType extends Whose {
   file?: string;
   description?: string;
   composite?: boolean;
+  /** A helper type, from helpers/: one that transforms data rather than locks it. */
+  helper?: boolean;
   options?: LockOption[];
   /** Why it doesn't load, if it doesn't. */
   error?: string;
