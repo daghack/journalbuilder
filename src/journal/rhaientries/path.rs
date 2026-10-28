@@ -98,7 +98,7 @@ pub(super) type TextSource = (Rc<FontBook>, random::SharedRng);
 fn place_text(symbols: Vec<Symbol>, path: &StrokePath, args: &SymbolPlacementArgs, mode: &TextBoxLineMode) -> (Vec<Symbol>, Vec<Symbol>) {
     match mode {
         TextBoxLineMode::Flat => place_along_path(symbols, path, args),
-        TextBoxLineMode::WordsByBlankSymbol(split) => place_words_along_path(symbols, path, args, *split),
+        TextBoxLineMode::WordsByBlankSymbol(rules) => place_words_along_path(symbols, path, args, *rules),
     }
 }
 
@@ -379,6 +379,20 @@ pub(super) fn spiral_text(msg: &str, center: Vec2, radius: &Dynamic, settings: M
             if inner.is_some() { "; make 'inner' smaller" } else { "" }).into());
     }
     Ok(set.draw(placed, &text.1))
+}
+
+/// How much a path's subpaths (each closed back to its start) enclose:
+/// each one's area, taken away where it's inside an odd number of the
+/// others, as a hole.
+fn enclosed_area(path: &StrokePath) -> f32 {
+    let rings: Vec<Vec<PVec>> = path.flattened(0.01).into_iter().map(|(points, _)| points).filter(|p| p.len() >= 3).collect();
+    let area = |ring: &[PVec]| ring.iter().enumerate().map(|(i, a)| a.perp_dot(ring[(i + 1) % ring.len()])).sum::<f32>().abs() / 2.0;
+    rings.iter().enumerate().map(|(k, ring)| {
+        let around = rings.iter().enumerate()
+            .filter(|&(m, other)| m != k && crate::journal::canvas::textbox::Region::new(vec![other.clone()]).contains(ring[0]))
+            .count();
+        if around % 2 == 0 { area(ring) } else { -area(ring) }
+    }).sum()
 }
 
 fn write_line(msg: &str, at: Vec2, settings: Map, text: &TextSource) -> RhaiResult<Canvas> {
@@ -782,6 +796,9 @@ pub(super) fn register(engine: &mut Engine, text: TextSource) {
             }
             bounds_map(b).ok_or_else(|| "bounds: the path is empty".into())
         })
+        // `path.area()`: how much its subpaths enclose, one inside an odd
+        // number of others a hole.
+        .register_fn("area", |path: &mut Path| -> f64 { enclosed_area(&path.borrow()) as f64 })
         .register_fn("close", |path: &mut Path| -> Path {
             update_path(path, |p| p.close_path())
         })

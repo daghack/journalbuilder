@@ -15,6 +15,7 @@ mod markdown;
 mod options;
 mod path;
 mod random;
+mod regions;
 mod resources;
 mod sources;
 mod style;
@@ -271,6 +272,7 @@ impl JournalEngine {
 
         art::register(&mut engine, (symdict.clone(), rng.clone()));
         avoid::register(&mut engine);
+        regions::register(&mut engine);
         layout::register(&mut engine, symdict.clone(), rng.clone(), resources.layouts.clone());
         markdown::register(&mut engine);
         text_settings::register(&mut engine);

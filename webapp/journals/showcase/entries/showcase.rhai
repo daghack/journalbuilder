@@ -19,9 +19,11 @@
 //   text      text boxes, text kept clear of drawings, text along paths
 //             (turned to them or held at an angle), text in a spiral,
 //             scattered notes,
-//             words split round drawings, shaped boxes, paragraph styles,
-//             and writing by hand: lines, blocks and glyphs set a little
-//             off true
+//             words split round drawings and broken at line ends, shaped
+//             boxes, paragraph styles,
+//             writing by hand: lines, blocks and glyphs set a little off
+//             true; text written inside paths, by hand, and the free
+//             regions of a drawing or a whole page to write it in
 //   locks     every lock type, Huffman codes between bases, a lock
 //             chain drawn as a maze, value kinds and their sketches, an
 //             art node: a lock keyed by a code drawn as a star chart, and
@@ -1261,6 +1263,31 @@ for (angle, i) in [(), 0, 0.3] {
 }
 book.bind("text", text);
 
+// Words cut where a line ends, the rest going on the next, with
+// break_words; break_words: n is the shortest piece allowed. Otherwise
+// words are kept whole, and only one longer than a line is broken.
+let text = sheet("text");
+text.add(subhead("breaking words", TOP));
+let words_body = #{ style: TEXT, type: new_type_style(PLAIN, 22) };
+text.add(caption("paragraph #{ layout: \"words\" }: whole words; then break_words: true; then break_words: 4", TOP + 50));
+for (options, i) in [#{}, #{ break_words: true }, #{ break_words: 4 }] {
+	let c = vec2(LEFT + 160 + i * 340, TOP + 340);
+	let box = new_rectangle(c, 300, 460);
+	text.add(box, CAPTION);
+	text.add(write_inside_path(LOREM + LOREM, box, words_body + #{ paragraph: #{ layout: "words", line_height: 1.4 } + options }).canvas);
+}
+let y = TOP + 640;
+text.add(caption("write_inside_path, whole words, then broken: a circle, and a star", y));
+y += 190;
+for (shape, i) in [new_circle(vec2(LEFT + 120, y), 120), new_circle(vec2(LEFT + 380, y), 120), new_star(vec2(LEFT + 640, y), 130, 70, 6), new_star(vec2(LEFT + 900, y), 130, 70, 6)] {
+	text.add(shape, CAPTION);
+	let settings = #{ style: TEXT, type: new_type_style(PLAIN, 20), paragraph: #{ layout: "words", line_height: 1.3, break_words: i % 2 == 1 } };
+	text.add(write_inside_path(LOREM, shape, settings).canvas);
+}
+y += 200;
+text.add(caption("in layouts too: a role's or a slot's paragraph #{ break_words } (see the inline layout's second column)", y));
+book.bind("text", text);
+
 // Text boxes of any closed shape: #{ shape: path } in place of center,
 // width and height. Each subpath is an outline, closed back to its start,
 // and one inside another is a hole. The paragraph's angle turns the lines
@@ -1390,6 +1417,133 @@ let loose_hand = pen(RED);
 loose_hand.baseline_wander = 5.5;
 let loose = write_block(LOREM, vec2(LEFT + 560, y + 60), 440, #{ style: loose_hand, type: new_type_style(LOCHE, 22), paragraph: #{ line_height: 1.4, layout: "flat", line_start_jitter: 9 } });
 text.add(loose.canvas);
+book.bind("text", text);
+
+// Text written inside any closed path, giving back what didn't fit, so it
+// can go on into the next; or, with the paragraph's fit, shrunk until it
+// all fits.
+let text = sheet("text");
+text.add(subhead("writing inside paths", TOP));
+text.add(caption("write_inside_path(text, path, settings): #{ canvas, rest }; a star, and its rest in a ring", TOP + 50));
+let y = TOP + 330;
+let star = new_star(vec2(LEFT + 230, y), 240, 120, 5);
+let ring = new_circle(vec2(LEFT + 720, y), 230).append(new_circle(vec2(LEFT + 720, y), 80));
+text.add(star, CAPTION);
+text.add(ring, CAPTION);
+let inside = write_inside_path(LOREM + LOREM, star, BODY + #{ paragraph: #{ layout: "words" } });
+text.add(inside.canvas);
+text.add(write_inside_path(inside.rest, ring, BODY + #{ paragraph: #{ layout: "words", align: "justify" } }).canvas);
+y += 320;
+text.add(caption("paragraph #{ fit: true }: as big as all of it fits, up to the glyph scale; at 60 in each", y));
+y += 230;
+let shapes = [new_ellipse(vec2(LEFT + 160, y), 160, 110), new_polygon(vec2(LEFT + 500, y), 170, 6), new_circle(vec2(LEFT + 840, y), 150)];
+for (shape, i) in shapes {
+	text.add(shape, CAPTION);
+	let fitted = #{ style: TEXT, type: new_type_style(PLAIN, 60), paragraph: #{ layout: "words", align: "center", valign: "center", fit: true } };
+	text.add(write_inside_path(["lorem ipsum", "lorem ipsum dolor sit amet", LOREM][i], shape, fitted).canvas);
+}
+y += 220;
+text.add(caption("path.area(): how much a path encloses, holes taken away; the ring's is " + ring.area().to_int(), y));
+book.bind("text", text);
+
+// A hand's wander and uneven lines inside a shape: lines bend by the
+// hand's baseline_wander, and a glyph the bend takes further past the edge
+// than the paragraph's overhang goes on the next line.
+let text = sheet("text");
+text.add(subhead("writing inside paths by hand", TOP));
+text.add(caption("the hand's #{ baseline_wander: 10 }: overhang 0 (left), and paragraph #{ overhang: 12 } (right)", TOP + 50));
+let y = TOP + 330;
+let wavy = TEXT;
+wavy.baseline_wander = 10;
+for (overhang, i) in [0, 12] {
+	let shape = new_circle(vec2(LEFT + 240 + i * 520, y), 230);
+	text.add(shape, CAPTION);
+	text.add(write_inside_path(LOREM + LOREM, shape, #{ style: wavy, type: new_type_style(PLAIN, 24), paragraph: #{ layout: "words", overhang: overhang } }).canvas);
+}
+y += 300;
+text.add(caption("paragraph #{ line_gap_jitter: 6, line_start_jitter: 12 } with the wander, and the glyph jitters too", y));
+y += 260;
+let jittery = wavy;
+jittery.glyph_position_jitter = 1.2;
+jittery.glyph_rotation_jitter = 0.06;
+jittery.glyph_scale_jitter = 0.06;
+let star = new_star(vec2(LEFT + 240, y), 240, 130, 7);
+let oval = new_ellipse(vec2(LEFT + 760, y), 240, 200);
+text.add(star, CAPTION);
+text.add(oval, CAPTION);
+text.add(write_inside_path(LOREM + LOREM, star, #{ style: wavy, type: new_type_style(PLAIN, 22), paragraph: #{ layout: "words", line_gap_jitter: 6 } }).canvas);
+text.add(write_inside_path(LOREM + LOREM, oval, #{ style: jittery, type: new_type_style(PLAIN, 22), paragraph: #{ layout: "words", line_gap_jitter: 6, line_start_jitter: 12, overhang: 6 } }).canvas);
+book.bind("text", text);
+
+// The stroke-free space of a page, as paths text can be written into:
+// the grid's free cells, clear of what's avoided, in regions joined side
+// to side, largest first, or smallest with #{ order: "smallest" }.
+// free_regions_in_canvas looks in a canvas's bounds, grown or shrunk by
+// a margin, avoiding the canvas (and free_regions_in_page, next, in a
+// page).
+let text = sheet("text");
+text.add(subhead("free regions", TOP));
+text.add(caption("free_regions(area, avoid, #{ clearance, min_width }): outlined, and written into in turn, the rest carried on", TOP + 50));
+fn scribble(at) {
+	let drawing = new_canvas();
+	drawing.add(new_circle(at + vec2(-240, -60), 90), global::LINE);
+	drawing.add(new_circle(at + vec2(210, 70), 120), global::LINE);
+	drawing.add(new_star(at + vec2(-20, 30), 80, 40, 6), global::LINE);
+	drawing.add(new_wave(at + vec2(-440, 150), at + vec2(440, -150), #{ amplitude: 40, waves: 4 }), global::LINE);
+	drawing
+}
+let area = new_rectangle(vec2(W / 2.0, TOP + 380), 1000, 560);
+let drawing = scribble(vec2(W / 2.0, TOP + 380));
+text.add(drawing);
+text.add(area, CAPTION);
+let rest = LOREM + LOREM + LOREM + LOREM + LOREM + LOREM + LOREM;
+for region in free_regions(area, drawing, #{ clearance: 10, min_width: 60 }) {
+	text.add(region, CAPTION);
+	let out = write_inside_path(rest, region, #{ style: TEXT, type: new_type_style(PLAIN, 20), paragraph: #{ layout: "words" } });
+	text.add(out.canvas);
+	rest = out.rest;
+}
+let y = TOP + 720;
+text.add(caption("#{ outline: \"polygon\" } (the default), and \"smooth\" with min_width 50: narrow necks part regions", y));
+text.add(caption("numbered in order: largest first (the default), and #{ order: \"smallest\" }", y + 34));
+text.add(caption("right: free_regions_in_canvas(drawing, #{ margin: vec2(30, 25), ... }), in its bounds and 30, 25 past them", y + 68));
+y += 320;
+for (options, i) in [#{ clearance: 8 }, #{ clearance: 8, min_width: 50, outline: "smooth", order: "smallest" }] {
+	let centre = vec2(LEFT + 240 + i * 520, y);
+	let drawing = scribble(centre).scale_by(0.45).translate_by(centre * 0.55);
+	text.add(drawing);
+	let regions = if i == 0 {
+		let area = new_rectangle(centre, 480, 280);
+		text.add(area, CAPTION);
+		free_regions(area, drawing, options + #{ min_area: 4000 })
+	} else {
+		let b = drawing.bounds();
+		text.add(new_rectangle(b.center, b.width + 60, b.height + 50), CAPTION);
+		free_regions_in_canvas(drawing, options + #{ margin: vec2(30, 25), min_area: 4000 })
+	};
+	for (region, k) in regions {
+		text.add(region, CAPTION);
+		text.add(write_inside_path(`${k + 1}`, region, #{ style: TEXT, type: new_type_style(PLAIN, 40), paragraph: #{ layout: "words", align: "center", valign: "center", fit: true } }).canvas);
+	}
+}
+book.bind("text", text);
+
+// A whole page's free space: free_regions_in_page looks over a page as
+// it's rendered (its size, here the sheet's), avoiding everything on it,
+// the running head included; a negative margin keeps in from its edges.
+let text = sheet("text");
+text.add(subhead("free regions in a page", TOP));
+text.add(caption("free_regions_in_page(new_page(#{ size: vec2(W, H) }).add(sheet), #{ margin: vec2(-100, -130), ... })", TOP + 50));
+text.add(scribble(vec2(W / 2.0, TOP + 600)).scale_by(1.1).translate_by(vec2(-W * 0.05, -(TOP + 600) * 0.1)));
+let page = new_page(#{ size: vec2(W, H) }).add(text);
+let rest = "";
+for i in 0..24 { rest += LOREM + " "; }
+for region in free_regions_in_page(page, #{ margin: vec2(-LEFT, -(H - BOTTOM)), clearance: 24, min_width: 50, min_area: 6000, outline: "smooth" }) {
+	text.add(region, CAPTION);
+	let out = write_inside_path(rest, region, #{ style: TEXT, type: new_type_style(PLAIN, 22), paragraph: #{ layout: "words", align: "justify", break_words: true } });
+	text.add(out.canvas);
+	rest = out.rest;
+}
 book.bind("text", text);
 
 // ---- locks ----
@@ -1688,7 +1842,8 @@ book.add("spread", tiles);
 // wraps around, a body flowing down one column and on down the next (and
 // on to a second page), a band of ornaments between them, a figure fitted
 // to its box and outlined, a rule, a spacer and a page label. Words beside
-// the drop cap may break round it (split_words, split_padding). Every box
+// the drop cap may break round it (split_words, split_padding), and those
+// in the second column at its line ends (break_words). Every box
 // takes #{ flex }, its flex style; slots take a role, and a style, type,
 // paragraph or spans of their own over the role's, whole or as a map.
 // Layouts usually live in layouts/ (see the files used below, and
@@ -1706,7 +1861,7 @@ fn sample_page(n, info) {
 			band("diamond", #{ flex: #{ width: 14 } }),
 			column([
 				if n == 0 { figure("plant", #{ flex: #{ height: 360, border: global::CAPTION } }) } else { spacer() },
-				flow("body", #{ flex: grow }),
+				flow("body", #{ flex: grow, paragraph: #{ break_words: true } }),
 			], #{ flex: grow }),
 		], #{ flex: #{ grow: 1, gap: 30 } }),
 		// roman(n) for folios: i, ii, iii.

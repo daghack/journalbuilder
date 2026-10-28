@@ -705,6 +705,10 @@ pub struct SymbolPlacementArgs<'a> {
     /// How much bigger or smaller than `symbol_scale` a glyph is set, by
     /// how far along the walk its room starts.
     pub scale_at: Option<ScaleField<'a>>,
+    /// The longest any line the text goes on can be, if longer than this
+    /// path (a text box's line in pieces): words kept whole are broken
+    /// only if they're longer than this.
+    pub longest_line: Option<f32>,
 }
 
 /// Glyphs' scale by how far along the walk they're set, a factor of the
@@ -720,7 +724,7 @@ impl std::fmt::Debug for ScaleField<'_> {
 
 impl SymbolPlacementArgs<'_> {
     pub fn new(symbol_scale: f32) -> Self {
-        SymbolPlacementArgs { avoid: None, padding: 0.0, symbol_scale, spacing: 0.0, baseline_shift: 0.0, angle: None, within: None, scale_at: None }
+        SymbolPlacementArgs { avoid: None, padding: 0.0, symbol_scale, spacing: 0.0, baseline_shift: 0.0, angle: None, within: None, scale_at: None, longest_line: None }
     }
 }
 
@@ -733,6 +737,16 @@ impl SymbolPlacementArgs<'_> {
 pub struct WordSplit {
     pub min_piece: usize,
     pub padding: f32,
+}
+
+/// How words go on lines. They're kept whole unless `split` breaks them
+/// round what they avoid, or `break_at_end` cuts one that doesn't fit at
+/// the end of a line (or a piece of one), the rest going on the next: in
+/// pieces of at least that many glyphs.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct WordRules {
+    pub split: Option<WordSplit>,
+    pub break_at_end: Option<usize>,
 }
 
 /// The angle that turns an upright glyph to a path whose normal (its
@@ -1022,9 +1036,9 @@ pub fn place_along_path(symbols: Vec<Symbol>, path: &StrokePath, args: &SymbolPl
 
 /// Like `place_along_path`, but word by word: a word (the glyphs up to a
 /// blank, which goes with it) is kept together on one subpath, the subpaths
-/// being lines. A word longer than a whole line is split over lines, and
-/// with `split`, a word is broken round what it avoids (see `WordSplit`).
-pub fn place_words_along_path(symbols: Vec<Symbol>, path: &StrokePath, args: &SymbolPlacementArgs, split: Option<WordSplit>) -> (Vec<Symbol>, Vec<Symbol>) {
+/// being lines. A word longer than a whole line is split over lines; the
+/// rules may break others (see `WordRules`).
+pub fn place_words_along_path(symbols: Vec<Symbol>, path: &StrokePath, args: &SymbolPlacementArgs, rules: WordRules) -> (Vec<Symbol>, Vec<Symbol>) {
     let mut placer = Placer::new(args);
     let mut words: VecDeque<Vec<Piece>> = VecDeque::new();
     let mut word = Vec::new();
@@ -1054,7 +1068,7 @@ pub fn place_words_along_path(symbols: Vec<Symbol>, path: &StrokePath, args: &Sy
             let fitted = if letters == 0 {
                 Some(Run { glyphs: Vec::new(), spans: Vec::new(), spacing: placer.spacing.clone() })
             } else {
-                placer.fit_word(&walk, cursor, &word[..letters], &placer.spacing, split, 0.0)
+                placer.fit_word(&walk, cursor, &word[..letters], &placer.spacing, rules.split, 0.0)
             };
             match fitted {
                 Some(run) => {
@@ -1071,7 +1085,7 @@ pub fn place_words_along_path(symbols: Vec<Symbol>, path: &StrokePath, args: &Sy
                 }
                 None => {
                     let width: f32 = word[..letters].iter().map(|p| p.outline.width() + placer.gap()).sum::<f32>() - placer.gap();
-                    if !line_used && width > walk.length() {
+                    if !line_used && width > args.longest_line.unwrap_or(0.0).max(walk.length()) {
                         // Too long for any line: as much as fits here, and
                         // the rest on the next.
                         let mut fitted = 0;
@@ -1082,6 +1096,14 @@ pub fn place_words_along_path(symbols: Vec<Symbol>, path: &StrokePath, args: &Sy
                             fitted += 1;
                         }
                         word.drain(..fitted);
+                    } else if let Some(min) = rules.break_at_end.map(|min| min.max(1)).filter(|&min| letters >= 2 * min) {
+                        // Cut at the end of the line: the longest head
+                        // that fits, leaving enough for the next.
+                        if let Some(run) = (min..=letters - min).rev().find_map(|k| placer.fit_run(&walk, cursor, &word[..k], &placer.spacing, 0.0)) {
+                            let head = run.glyphs.len();
+                            placed.extend(placer.commit(run));
+                            word.drain(..head);
+                        }
                     }
                     break;
                 }

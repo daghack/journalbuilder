@@ -8,6 +8,7 @@ use rand::{RngCore, SeedableRng};
 use parry2d::bounding_volume;
 
 pub mod textbox;
+pub mod wander;
 pub mod artistic;
 pub mod color_jitter;
 

@@ -49,7 +49,7 @@ pub type Avoid = Shared<AvoidanceTree>;
 
 /// A tree of what `item` covers, items `clearance` away. Trees given keep
 /// their own clearances.
-fn tree_of(caller: &str, item: Dynamic, clearance: f32) -> RhaiResult<AvoidanceTree> {
+pub(super) fn tree_of(caller: &str, item: Dynamic, clearance: f32) -> RhaiResult<AvoidanceTree> {
     let mut tree = AvoidanceTree::new();
     add_to(caller, &mut tree, item, clearance)?;
     Ok(tree)

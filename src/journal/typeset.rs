@@ -74,6 +74,10 @@ pub struct TextStyle {
     /// may break round it, going on past it on the same line (see
     /// `WordSplit`; its padding is in sizes too).
     pub split: Option<WordSplit>,
+    /// Whether a word that doesn't fit at the end of a line (or a clear
+    /// stretch of one) is cut, the rest going on after: in pieces of at
+    /// least this many glyphs.
+    pub break_words: Option<usize>,
 }
 
 impl TextStyle {
@@ -89,6 +93,7 @@ impl TextStyle {
             jagged: 0.0,
             line_jitter: 0.0,
             split: None,
+            break_words: None,
         }
     }
 }
@@ -320,6 +325,19 @@ pub fn set_text(rect: Aabb, style: &TextStyle, glyphs: &[Symbol], chars: &[char]
                             items.extend(word.into_iter().take(head));
                             i += head;
                             broke_word = true;
+                            break;
+                        }
+                    }
+                    // With broken words, as much as fits here, the rest
+                    // after.
+                    if let Some(min) = style.break_words.map(|min| min.max(1)) {
+                        let head = word.iter()
+                            .take((j - i).saturating_sub(min))
+                            .take_while(|item| item.end() <= end + 1e-3)
+                            .count();
+                        if head >= min {
+                            items.extend(word.into_iter().take(head));
+                            i += head;
                         }
                     }
                     break;
@@ -710,6 +728,19 @@ mod tests {
         assert!(before(&padded) < before(&split) && padded.placed.len() == 16, "padding keeps pieces further off");
         let long = set(Some(WordSplit { min_piece: 20, padding: 0.0 }));
         assert!(long.placed[0].position().x > 70.0, "too short to split");
+    }
+
+    #[test]
+    fn broken_words_fill_a_line_and_go_on_the_next() {
+        let (g, c) = text("abcdefgh abcdefgh abcdefgh");
+        let set = |break_words| set_text(rect(65.0, 400.0), &TextStyle { break_words, ..TextStyle::new(10.0) }, &g, &c, false, None, &mut rng());
+        let (whole, broken) = (set(None), set(Some(2)));
+        assert_eq!((whole.consumed, broken.consumed), (g.len(), g.len()));
+        assert!(lines(&broken).len() < lines(&whole).len(), "{:?} {:?}", lines(&broken), lines(&whole));
+        // The first line holds the first word and the head of the second.
+        let first = broken.placed.iter().filter(|p| (p.position().y - broken.placed[0].position().y).abs() < 1.0).count();
+        assert!(first > 9, "{}", first);
+        assert_eq!(lines(&set(Some(5))).len(), lines(&whole).len(), "pieces too short to cut");
     }
 
     #[test]

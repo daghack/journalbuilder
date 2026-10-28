@@ -668,6 +668,7 @@ impl Content {
                 text.jagged = paragraph.line_start_jitter() / size;
                 text.line_jitter = paragraph.line_gap_jitter() / size;
                 text.split = paragraph.word_split();
+                text.break_words = paragraph.break_words();
                 text.align = paragraph.align();
                 Some(text)
             }

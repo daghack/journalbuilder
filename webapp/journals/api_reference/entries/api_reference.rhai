@@ -338,6 +338,7 @@ doc += api("new_wave(start, end), new_wave(start, end, options)", "A wavy line f
 	opt("options.amplitude", "a twentieth of its length", "How far it rises and falls; negative falls first.", "a number."),
 	opt("options.waves", "3", "How many waves.", "a whole number from 1 to 10000."),
 ]);
+doc += api("path.area()", "How much the path encloses: each subpath's area, closed back to its start, taken away where it's inside an odd number of the others, as a hole is. 0 for open lines.");
 doc += api("path.bounds()", "What the path's lines cover: #{ min, max, center, width, height }. Fails for an empty path.");
 doc += api("path.translate_by(offset)", "Moves the path.", [
 	offset_arg(),
@@ -454,7 +455,7 @@ doc += api("handwriting_style.glyph_rotation_jitter = number", "How far each pla
 doc += api("handwriting_style.glyph_scale_jitter = number", "How much each placed glyph's size changes, at most, either way.", [
 	arg("number", "How much, as a fraction. Default 0.", "a number from 0 up to, not including, 1."),
 ]);
-doc += api("handwriting_style.baseline_wander = number", "How far the lines write_line and write_block write along wander up and down from straight: smoothly, at random, starting where they're put and bending every few glyph scales. Glyphs follow them.", [
+doc += api("handwriting_style.baseline_wander = number", "How far the lines write_line, write_block, text boxes and write_inside_path write along wander up and down from straight: smoothly, at random, starting where they're put and bending every few glyph scales. Glyphs follow them; in a text box, a glyph a line's wander takes past the shape's edge (further than the paragraph's overhang) goes on the next line.", [
 	arg("number", "How far, at most, either way, in canvas units. Default 0.", "a number of at least 0."),
 ]);
 doc += api("style.SETTING = value", "Any brush style or handwriting style setting, read and set on the style: style.color, style.brush_size, style.passes, style.glyph_rotation_jitter and the rest, each taking what it takes above.", [
@@ -625,7 +626,7 @@ doc += api("paragraph_style.align = name", "Where each line's glyphs go along it
 doc += api("paragraph_style.valign = name", "Where text sits down a text box or slot: from as high as its glyphs fit, or set again lower by half, or all, of the room left under its last line.", [
 	arg("name", "Default top.", "top, center or bottom."),
 ]);
-doc += api("paragraph_style.fit = on", "Shrinks the text until all of it fits its slot. Typeset text.", [
+doc += api("paragraph_style.fit = on", "Shrinks the text until all of it fits its slot. Typeset text, and write_inside_path (all of it inside the path).", [
 	arg("on", "Default false.", "true or false."),
 ]);
 doc += api("paragraph_style.layout = name", "How glyphs are placed: glyph by glyph, or words kept whole, wrapping at spaces.", [
@@ -638,13 +639,19 @@ doc += api("paragraph_style.split_words = setting, paragraph_style.split_padding
 	arg("setting", "Default false.", "true, false, or the fewest glyphs a piece may have (a whole number of at least 1; true is 2)."),
 	arg("number", "The extra room, in glyph scales. Default 0. Needs split_words.", "a number of at least 0."),
 ]);
+doc += api("paragraph_style.break_words = setting", "With layout: words, cuts a word that doesn't fit at the end of a line (or of a piece of one, beside what's avoided or a shape's edge), as much of it as fits going there and the rest on the next. Otherwise words are kept whole, and only a word longer than a whole line is broken. In text boxes, write_inside_path, fill_with_text and layouts.", [
+	arg("setting", "Default false.", "true, false, or the fewest glyphs a piece may have, either side of the cut (a whole number of at least 1; true is 2)."),
+]);
 doc += api("paragraph_style.clearance = number", "How far glyphs keep from what they avoid, on top of any margin a tree was built with.", [
 	arg("number", "In canvas units. Default 3.", "a number of at least 0."),
 ]);
-doc += api("paragraph_style.line_start_jitter = number, paragraph_style.line_gap_jitter = number", "How much further each line starts, at most, at random; and how much each line's distance from the last varies, at most, either way (write_block and typeset text).", [
+doc += api("paragraph_style.line_start_jitter = number, paragraph_style.line_gap_jitter = number", "How much further each line starts, at most, at random; and how much each line's distance from the last varies, at most, either way (write_block, text boxes, write_inside_path and typeset text).", [
 	arg("number", "In canvas units. Default 0.", "a number of at least 0."),
 ]);
-doc += api("new_textbox(settings)", "A box, or any closed shape, glyphs flow into, line by line, each glyph's own ink wholly inside the shape: lines run from where the first glyph fits to where the last does, so ink meets the shape's edges, and the first line starts as near its top as glyphs fit. Takes the type's glyph_scale and glyph_tracking, the paragraph's layout (default flat), align, valign, angle, line_start_jitter, clearance and splitting, and the style's glyph jitters.", [
+doc += api("paragraph_style.overhang = number", "How far glyphs' ink may reach past a text box's edge (new_textbox and write_inside_path): a glyph reaching further goes on the next line. Lines may start that far above the shape's top.", [
+	arg("number", "In canvas units. Default 0: ink wholly inside.", "a number of at least 0."),
+]);
+doc += api("new_textbox(settings)", "A box, or any closed shape, glyphs flow into, line by line, each glyph's own ink wholly inside the shape: lines run from where the first glyph fits to where the last does, so ink meets the shape's edges, and the first line starts as near its top as glyphs fit. Takes the type's glyph_scale and glyph_tracking, the paragraph's layout (default flat), align, valign, angle, line_start_jitter, line_gap_jitter, overhang, clearance, splitting and breaking words, and the style's glyph jitters and baseline_wander.", [
 	opt("settings.center", "none: give center, width and height, or shape", "The box's centre.", "a vec."),
 	opt("settings.width", "none: needed with center", "Its width.", "a positive number."),
 	opt("settings.height", "none: needed with center", "Its height.", "a positive number."),
@@ -657,7 +664,7 @@ doc += api("textbox.fill(glyphs)", "Places what fits: #{ placed, unplaced }, arr
 doc += api("textbox.place_all(glyphs)", "Fills the box again and again until every glyph is placed: an array of arrays of placed glyphs, one per box. Fails if a glyph won't fit even an empty box.", [
 	arg("glyphs", "The glyphs to place, in order.", "an array of glyphs."),
 ]);
-doc += api("path.fill_with_text(text, settings)", "The text along the path, each glyph turned to it (or held at the paragraph's angle), over as many copies of the path as it takes: an array of canvases, one per copy. Takes the type's glyphset, glyph_scale and glyph_tracking, the paragraph's layout (default flat; words aren't split between subpaths), angle, clearance and splitting, and the style. Fails if a glyph won't fit the path at all.", [
+doc += api("path.fill_with_text(text, settings)", "The text along the path, each glyph turned to it (or held at the paragraph's angle), over as many copies of the path as it takes: an array of canvases, one per copy. Takes the type's glyphset, glyph_scale and glyph_tracking, the paragraph's layout (default flat; words aren't split between subpaths unless it has break_words), angle, clearance, splitting and breaking words, and the style. Fails if a glyph won't fit the path at all.", [
 	arg("text", "The text to write.", "a string."),
 	avoid_opt(""),
 ]);
@@ -670,10 +677,15 @@ doc += api("write_line(text, at, settings)", "The text written from at to the ri
 	vec_arg("at", "Where the line starts."),
 	avoid_opt(""),
 ]);
-doc += api("write_block(text, at, width, settings)", "The text wrapped into lines width long, the first from at (on its line, as write_line sets it) and each line_height glyph scales below the last (give or take line_gap_jitter), each wandering by the hand's baseline_wander, the left edges ragged by line_start_jitter, words kept whole unless the paragraph's layout is flat. Gives #{ canvas, bottom }: the text, and where a line after it would go, for stacking blocks.", [
+doc += api("write_block(text, at, width, settings)", "The text wrapped into lines width long, the first from at (on its line, as write_line sets it) and each line_height glyph scales below the last (give or take line_gap_jitter), each wandering by the hand's baseline_wander, the left edges ragged by line_start_jitter, words kept whole unless the paragraph's layout is flat or it has break_words. Gives #{ canvas, bottom }: the text, and where a line after it would go, for stacking blocks.", [
 	arg("text", "The text to write.", "a string."),
 	vec_arg("at", "Where the first line starts."),
 	arg("width", "How long lines are.", "a positive number."),
+	avoid_opt(""),
+]);
+doc += api("write_inside_path(text, path, settings)", "The text written inside a closed path, as a text box of that shape writes it: line by line, each glyph's ink wholly inside, with the type's glyph_scale and glyph_tracking, the paragraph's layout (default flat), align, valign, angle, line_start_jitter, line_gap_jitter, overhang, clearance, splitting and breaking words, and the style's glyph jitters and baseline_wander. Each subpath of the path is an outline, closed back to its start; one inside another is a hole. Gives #{ canvas, rest }: the text written, and the text that didn't fit (blanks it starts with left off), or an empty string, so what's left can go on into the next path. With the paragraph's fit, the glyphs are set as big as they can be, up to the glyph_scale, and still all fit, so rest is always empty; that fails if the text fits at no size.", [
+	arg("text", "The text to write.", "a string."),
+	arg("path", "Where it goes: the inside of its subpaths.", "a path enclosing something: a subpath of at least three points."),
 	avoid_opt(""),
 ]);
 doc += api("canvas.scatter_notes(messages, width_range, height_range, settings)", "Scatters messages over the canvas in random boxes, clear of its strokes and of each other; gives a canvas of just the messages. Each note's glyphs turn and scale by the hand's glyph_rotation_jitter and glyph_scale_jitter before notes are placed, and stray by its glyph_position_jitter after. Fails for an empty canvas.", [
@@ -706,6 +718,27 @@ doc += api("tree.blocks(point), tree.blocks(glyph)", "Whether something is too c
 ]);
 doc += api("tree.is_empty", "Read only: whether the tree holds nothing.");
 doc += api("tree.copy()", "An independent copy of the tree.");
+doc += api("free_regions(area, avoid), free_regions(area, avoid, options)", "The stroke-free space inside an area, as paths to write text into, largest first (see order): write_inside_path(text, region, settings) fills one, its rest going on into the next. The area is cut into a grid of square cells; a cell is free where its middle is inside the area and clear of what's avoided, and free cells joined side to side are one region. Each region is one path: its outline, then a subpath for each hole, outlines running half a cell from free cells' middles, so they keep inside the area and the clearance from what's avoided. Fails for a grid of more than four million cells.", [
+	arg("area", "Where to look.", "a path enclosing something, such as the page's rectangle."),
+	arg("avoid", "What isn't free.", "anything a text call's avoid takes: a path (its lines), a canvas (its marks' edges), a glyph, an avoidance tree, or an array of any of these."),
+	opt("options.clearance", "one resolution", "How far outlines keep from what's avoided, in canvas units.", "a number of at least 0."),
+	opt("options.resolution", "the area's longer side over 400", "The cells' size: smaller follows strokes more closely, and takes longer.", "a positive number."),
+	opt("options.min_width", "0", "Free space narrower than this is left out, and narrow necks part regions: each region grows from a core further than half this from anything, the nearer core taking what two could reach.", "a number of at least 0."),
+	opt("options.min_area", "four cells square", "Regions with less room than this, holes taken away, are left out.", "a number of at least 0."),
+	opt("options.outline", "polygon", "polygon: straight edges, the grid's outline thinned to the points it needs; smooth: curves through it, rounding the corners.", "polygon or smooth."),
+	opt("options.tolerance", "half a resolution", "How far a polygon's edges may stray from the grid's outline.", "a number of at least 0."),
+	opt("options.order", "largest", "Which regions come first, by the room they enclose (path.area()): largest or smallest. For any other order, sort the array with regions.sort(f), f taking two regions and giving true when the first goes first: comparing their bounds().min.y puts the highest first.", "largest or smallest."),
+]);
+doc += api("free_regions_in_canvas(canvas), free_regions_in_canvas(canvas, options)", "free_regions in the canvas's bounds (its marks, strokes' widths included), avoiding the canvas: free_regions(rectangle, canvas, options), the rectangle being the bounds grown by the margin. Fails for an empty canvas, or a margin that shrinks the bounds to nothing.", [
+	arg("canvas", "What to look round, and in.", "a canvas with something on it."),
+	opt("options.margin", "vec2(0, 0)", "How much further than the bounds to look, on each side: x left and right, y above and below. Negative looks only inside them, that far in.", "a vec2."),
+	opt("options.clearance, resolution, min_width, min_area, outline, tolerance, order", "as free_regions", "As free_regions takes them.", "as free_regions takes them."),
+]);
+doc += api("free_regions_in_page(page), free_regions_in_page(page, options)", "free_regions over the page as it's rendered, avoiding all its canvases: a page with a set size is the region from the origin to it; otherwise each canvas's bounds and margin, all of them together; a tile is its own part of the page. Fails for an empty page, or a margin that shrinks it to nothing.", [
+	arg("page", "What to look over, and round.", "a page with something on it, or a set size."),
+	opt("options.margin", "vec2(0, 0)", "How much further than the page's edges to look, on each side: x left and right, y above and below. Negative keeps that far in from them.", "a vec2."),
+	opt("options.clearance, resolution, min_width, min_area, outline, tolerance, order", "as free_regions", "As free_regions takes them.", "as free_regions takes them."),
+]);
 
 // ---- randomness and messages ----
 
@@ -819,7 +852,7 @@ doc += api("art::eye(center, length), art::eye(center, length, options)", "An ey
 	opt("options.openness", "0.32", "Its height over its length.", "a number above 0.05 and at most 1."),
 	opt("options.flat", "false", "Lids of straight lines from each corner to a point above and below the middle, as the symbols glyphset's eye has, rather than arcs.", "true or false."),
 ]);
-doc += api("art::spiral_text(text, center, radius, settings)", "The text written in a spiral out from the middle of a circle, clockwise from the top, each glyph turned to the spiral (or held at the paragraph's angle), as large as all of it fits, as a canvas. Glyphs keep one size until they'd come nearer the circle than the paragraph's clearance; from there each fills the room left between the circle and the glyphs on the turn inside it, corners and all, shrinking as that narrows, and the spiral ends where they'd be smaller than minimum_scale of the rest. Turns are the paragraph's line height apart, measured in the height of the text's tallest glyph rather than in glyph scales, so 1 sets turns touching. Takes the type's glyphset, glyph_scale and glyph_tracking, the paragraph's layout (default flat), angle, line_height, clearance and splitting, and the style. Fails if the text doesn't fit at any size.", [
+doc += api("art::spiral_text(text, center, radius, settings)", "The text written in a spiral out from the middle of a circle, clockwise from the top, each glyph turned to the spiral (or held at the paragraph's angle), as large as all of it fits, as a canvas. Glyphs keep one size until they'd come nearer the circle than the paragraph's clearance; from there each fills the room left between the circle and the glyphs on the turn inside it, corners and all, shrinking as that narrows, and the spiral ends where they'd be smaller than minimum_scale of the rest. Turns are the paragraph's line height apart, measured in the height of the text's tallest glyph rather than in glyph scales, so 1 sets turns touching. Takes the type's glyphset, glyph_scale and glyph_tracking, the paragraph's layout (default flat), angle, line_height, clearance, splitting and breaking words, and the style. Fails if the text doesn't fit at any size.", [
 	arg("text", "The text to write.", "a string."),
 	vec_arg("center", "The circle's centre."),
 	arg("radius", "The circle's radius: glyphs keep the clearance inside it.", "a number bigger than the clearance."),
@@ -976,7 +1009,7 @@ doc += listing("Slots: the keys of a slot's options, besides flex.", [
 doc += listing("Roles: the keys of each role in typeset's roles. Flows and labels need a type with a glyphset and glyph scale; initials a glyphset; rules, borders and art draw in the style.", [
 	opt("style", "default_style()", "What the role's text and strokes are drawn in, and the hand that sets its glyphs.", "a style, or a map of style settings over default_style()."),
 	opt("type", "none", "The role's glyphset, glyph scale and shaping (see Text).", "a type style, or a map of type settings."),
-	opt("paragraph", "the defaults", "How the role's lines are built and set (see Text): line_height, align, valign, indent, paragraph_gap, fit, clearance, line_start_jitter, line_gap_jitter, split_words and split_padding.", "a paragraph style, or a map of paragraph settings."),
+	opt("paragraph", "the defaults", "How the role's lines are built and set (see Text): line_height, align, valign, indent, paragraph_gap, fit, clearance, line_start_jitter, line_gap_jitter, split_words, split_padding and break_words.", "a paragraph style, or a map of paragraph settings."),
 	opt("spans", "em and strong as Marked-Up Text says", "The role's named spans.", "a map of names to spans."),
 ]);
 

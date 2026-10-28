@@ -1,7 +1,8 @@
 use parry2d::bounding_volume;
 use parry2d::math::Vec2;
-use crate::journal::avoid::AvoidanceTree;
-use crate::journal::symbol::{Symbol, SymbolPlacementArgs, WordSplit, place_along_path, place_words_along_path};
+use crate::journal::avoid::{shapes_within, AvoidanceTree};
+use crate::journal::canvas::wander::Wander;
+use crate::journal::symbol::{Symbol, SymbolPlacementArgs, WordRules, place_along_path, place_words_along_path};
 use crate::journal::paths::StrokePath;
 use crate::journal::typeset::Align;
 use rand::{Rng, RngCore};
@@ -40,6 +41,14 @@ pub struct TextBoxOptions<'a> {
     /// top, 1 at the bottom, or between, the room left under it shared out
     /// above it.
     pub valign: f32,
+    /// How far glyphs' ink may reach past the shape's edge, in a box that
+    /// keeps them inside: past that, they go on the next line.
+    pub overhang: f32,
+    /// How far each line strays up and down from straight, as a hand's
+    /// wanders, in a box that keeps glyphs inside.
+    pub wander: f32,
+    /// How far each line's gap from the last may be off, either way.
+    pub line_gap_jitter: f32,
 }
 
 /// A rectangle as a shape for `TextBoxOptions`.
@@ -53,7 +62,7 @@ pub enum TextBoxLineMode {
     Flat,
     /// Words kept whole, wrapping at blanks, unless broken round what they
     /// avoid.
-    WordsByBlankSymbol(Option<WordSplit>),
+    WordsByBlankSymbol(WordRules),
 }
 
 /// Glyphs sit a quarter of their height below each line.
@@ -67,6 +76,18 @@ const BAND_SAMPLES: usize = 9;
 /// any glyph takes up, as each glyph's own ink is what's checked.
 const BAND_ABOVE: f32 = 0.5;
 const BAND_BELOW: f32 = 1.5;
+
+/// How near, in symbol scales, a line's spans are joined: nearer than a
+/// glyph could go between.
+const SPAN_JOIN: f32 = 0.05;
+
+/// How far apart uneven lines' glyphs keep, in symbol scales: their
+/// outlines don't take in the pen's width.
+const LINE_GAP: f32 = 0.12;
+
+/// How long the straight pieces of a wandering line are, in symbol
+/// scales.
+const WANDER_PIECE: f32 = 0.25;
 
 /// How far down to try the next line when one holds nothing, in symbol
 /// scales: little, so the first line starts as near the shape's top as
@@ -83,11 +104,18 @@ const LOOSE_BAND_SAMPLES: usize = 5;
 #[derive(Debug)]
 pub struct Region {
     rings: Vec<Vec<Vec2>>,
+    /// How far what it holds may reach past its edge.
+    overhang: f32,
 }
 
 impl Region {
     pub fn new(rings: Vec<Vec<Vec2>>) -> Region {
-        Region { rings: rings.into_iter().filter(|ring| ring.len() >= 3).collect() }
+        Region { rings: rings.into_iter().filter(|ring| ring.len() >= 3).collect(), overhang: 0.0 }
+    }
+
+    /// The region holding what reaches up to `overhang` past its edge.
+    pub fn with_overhang(self, overhang: f32) -> Region {
+        Region { overhang: overhang.max(0.0), ..self }
     }
 
     fn edges(ring: &[Vec2]) -> impl Iterator<Item = (Vec2, Vec2)> + '_ {
@@ -111,10 +139,16 @@ impl Region {
         rings_inside % 2 == 1
     }
 
-    /// Whether a closed outline (a placed glyph's footprint) is wholly
-    /// inside: none of its edges crosses the shape's, it starts inside, and
-    /// no outline of the shape (a hole) is inside it.
+    /// Whether a closed outline (a placed glyph's footprint) is inside,
+    /// or reaches no further past the edge than the overhang.
     pub fn holds(&self, outline: &[Vec2]) -> bool {
+        self.holds_wholly(outline) || (self.overhang > 0.0 && self.holds_near(outline))
+    }
+
+    /// Whether a closed outline is wholly inside: none of its edges
+    /// crosses the shape's, it starts inside, and no outline of the shape
+    /// (a hole) is inside it.
+    fn holds_wholly(&self, outline: &[Vec2]) -> bool {
         let Some(&first) = outline.first() else { return true };
         let (lo, hi) = outline.iter().fold((first, first), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
         let crosses = |(a, b): (Vec2, Vec2), (c, d): (Vec2, Vec2)| {
@@ -134,8 +168,41 @@ impl Region {
                 }
             }
         }
-        let around = Region { rings: vec![outline.to_vec()] };
+        let around = Region::new(vec![outline.to_vec()]);
         self.contains(first) && !self.rings.iter().any(|ring| around.contains(ring[0]))
+    }
+
+    /// Whether a closed outline reaches no further than the overhang past
+    /// the edge: every point along its edges is inside or that near the
+    /// edge, and no corner of the shape's edge is further than that inside
+    /// it.
+    fn holds_near(&self, outline: &[Vec2]) -> bool {
+        let reach = self.overhang;
+        let step = (reach / 2.0).max(1e-3);
+        for (a, b) in Region::edges(outline) {
+            let pieces = ((a.distance(b) / step).ceil() as usize).max(1);
+            for k in 0..pieces {
+                let p = a.lerp(b, k as f32 / pieces as f32);
+                if !self.contains(p) && !Region::near_edge(&self.rings, p, reach) {
+                    return false;
+                }
+            }
+        }
+        let around = Region::new(vec![outline.to_vec()]);
+        let outlines = [outline.to_vec()];
+        self.rings.iter().flatten().all(|&corner| !around.contains(corner) || Region::near_edge(&outlines, corner, reach))
+    }
+
+    /// Whether `p` is within `reach` of an edge of `rings`.
+    fn near_edge(rings: &[Vec<Vec2>], p: Vec2, reach: f32) -> bool {
+        rings.iter().any(|ring| Region::edges(ring).any(|(a, b)| {
+            if a.x.min(b.x) > p.x + reach || a.x.max(b.x) < p.x - reach || a.y.min(b.y) > p.y + reach || a.y.max(b.y) < p.y - reach {
+                return false;
+            }
+            let ab = b - a;
+            let t = if ab.length_squared() > 0.0 { ((p - a).dot(ab) / ab.length_squared()).clamp(0.0, 1.0) } else { 0.0 };
+            p.distance(a + ab * t) <= reach
+        }))
     }
 }
 
@@ -156,6 +223,9 @@ pub struct TextBox<'a> {
     spacing: f32,
     align: Align,
     valign: f32,
+    overhang: f32,
+    wander: f32,
+    line_gap_jitter: f32,
 }
 
 /// How many halvings close in on how far down text can be set and still
@@ -173,7 +243,7 @@ impl<'a> TextBox<'a> {
             .map(|ring| ring.iter().map(|p| Vec2::new(p.dot(along), p.dot(across))).collect())
             .collect();
         TextBox {
-            region: options.contain.then(|| Region::new(options.shape.clone())),
+            region: options.contain.then(|| Region::new(options.shape.clone()).with_overhang(options.overhang)),
             jagged_edge: options.jagged_edge,
             layout: options.layout,
             avoid: options.avoid,
@@ -185,7 +255,23 @@ impl<'a> TextBox<'a> {
             spacing: options.spacing,
             align: options.align,
             valign: options.valign,
+            overhang: options.overhang,
+            wander: options.wander,
+            line_gap_jitter: options.line_gap_jitter,
         }
+    }
+
+    /// The longest a line can surely be: as wide as the turned shape, run
+    /// on past its edges, less as far in as a jagged line may start. A
+    /// word no longer than that waits for a line it fits (one piece of a
+    /// line broken round a hole or a notch can be shorter), and a longer
+    /// one is broken.
+    fn longest_line(&self) -> f32 {
+        let (lo, hi) = self.shape.iter().flatten().fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), p| (lo.min(p.x), hi.max(p.x)));
+        let past = self.symbol_scale + self.overhang;
+        // A jagged line starts in from the edge rather than before it.
+        let start = if self.jagged_edge > 0.0 { -self.jagged_edge * self.symbol_scale } else { past };
+        hi - lo + past + start
     }
 
     /// The turned shape's top and bottom.
@@ -234,13 +320,23 @@ impl<'a> TextBox<'a> {
         let (top, bottom) = self.extent();
         let inset = (bottom - top) * 1e-4;
         let (top, bottom) = (top + inset, bottom - inset);
-        let (above, below) = (y - BAND_ABOVE * self.symbol_scale, y + BAND_BELOW * self.symbol_scale);
+        let (above, below) = (y - BAND_ABOVE * self.symbol_scale - self.wander, y + BAND_BELOW * self.symbol_scale + self.wander);
         let mut spans: Vec<(f32, f32)> = Vec::new();
         for i in 0..BAND_SAMPLES {
             let at = (above + (below - above) * i as f32 / (BAND_SAMPLES - 1) as f32).clamp(top, bottom);
             spans = union(&spans, &self.spans_at(at));
         }
-        spans
+        // Spans a hair apart are one: an outline drawn on past its start
+        // (a circle's) leaves slivers by it, which glyphs reaching past the
+        // edge could otherwise start a line in, a word broken to fit.
+        let mut joined: Vec<(f32, f32)> = Vec::new();
+        for (left, right) in spans {
+            match joined.last_mut() {
+                Some(last) if left - last.1 < SPAN_JOIN * self.symbol_scale => last.1 = last.1.max(right),
+                _ => joined.push((left, right)),
+            }
+        }
+        joined
     }
 
     /// For boxes that don't keep glyphs inside: where a line at `y` can
@@ -286,10 +382,11 @@ impl<'a> TextBox<'a> {
             angle: None,
             within: None,
             scale_at: None,
+            longest_line: None,
         };
         match self.layout {
             TextBoxLineMode::Flat => place_along_path(symbols, &stroke, &args),
-            TextBoxLineMode::WordsByBlankSymbol(split) => place_words_along_path(symbols, &stroke, &args, split),
+            TextBoxLineMode::WordsByBlankSymbol(rules) => place_words_along_path(symbols, &stroke, &args, rules),
         }
     }
 
@@ -305,35 +402,62 @@ impl<'a> TextBox<'a> {
             angle: None,
             within: Some(region),
             scale_at: None,
+            longest_line: Some(self.longest_line()),
         };
         let mut placed = Vec::new();
         let mut to_place = symbols;
+        // Each line runs on a little past the shape's edges (though not
+        // into the next span's room), so glyphs' padding can hang over and
+        // their ink meet the edge, or reach as far past it as they may.
+        let past = self.symbol_scale + self.overhang;
+        // A wandering line strays the same way across all its spans, from
+        // where its first starts.
+        let wander = match (spans.first(), spans.last()) {
+            (Some(first), Some(last)) if self.wander > 0.0 => {
+                let origin = first.0 - past;
+                Some((Wander::new(self.wander, self.symbol_scale, last.1 + past - origin, rng), origin))
+            }
+            _ => None,
+        };
         for (i, &(left, right)) in spans.iter().enumerate() {
             if to_place.is_empty() {
                 break;
             }
-            // Each line runs on a little past the shape's edges (though not
-            // into the next span's room), so glyphs' padding can hang over
-            // and their ink meet the edge. Jagged lines start in from it.
+            // Jagged lines start in from the edge.
             let room = |gap: f32| (gap / 2.0).min(self.symbol_scale);
-            let before = if i == 0 { self.symbol_scale } else { room(left - spans[i - 1].1) };
-            let after = if i + 1 == spans.len() { self.symbol_scale } else { room(spans[i + 1].0 - right) };
+            let before = if i == 0 { past } else { room(left - spans[i - 1].1) };
+            let after = if i + 1 == spans.len() { past } else { room(spans[i + 1].0 - right) };
             let offset_x = rng.random::<f32>() * self.jagged_edge * self.symbol_scale;
             let from = if offset_x > 0.0 { left + offset_x } else { left - before };
             let to = right + after;
             if to <= from {
                 continue;
             }
-            let (start, end) = (self.place(from, y_pos), self.place(to, y_pos));
-            let stroke = StrokePath::new().move_to(start.x, start.y).line_to(end.x, end.y);
+            let stroke = match &wander {
+                None => {
+                    let (start, end) = (self.place(from, y_pos), self.place(to, y_pos));
+                    StrokePath::new().move_to(start.x, start.y).line_to(end.x, end.y)
+                }
+                Some((w, origin)) => {
+                    // Finely enough that glyphs follow its curve.
+                    let pieces = ((to - from) / (self.symbol_scale * WANDER_PIECE)).ceil().max(1.0) as usize;
+                    let mut stroke = StrokePath::new();
+                    for k in 0..=pieces {
+                        let x = from + (to - from) * k as f32 / pieces as f32;
+                        let p = self.place(x, y_pos + w.offset(x - origin));
+                        stroke = if k == 0 { stroke.move_to(p.x, p.y) } else { stroke.line_to(p.x, p.y) };
+                    }
+                    stroke
+                }
+            };
             let (mut run, rest) = match self.layout {
                 TextBoxLineMode::Flat => place_along_path(to_place, &stroke, &args),
-                TextBoxLineMode::WordsByBlankSymbol(split) => place_words_along_path(to_place, &stroke, &args, split),
+                TextBoxLineMode::WordsByBlankSymbol(rules) => place_words_along_path(to_place, &stroke, &args, rules),
             };
             to_place = rest;
             // A jagged line keeps the edge it was given.
             if offset_x == 0.0 {
-                self.align_run(&mut run, to_place.is_empty());
+                self.align_run(&mut run, to_place.is_empty(), wander.as_ref());
             }
             placed.extend(run);
         }
@@ -353,6 +477,7 @@ impl<'a> TextBox<'a> {
             angle: None,
             within: Some(region),
             scale_at: None,
+            longest_line: None,
         };
         self.line_spans(y_pos).iter().any(|&(left, right)| {
             let (start, end) = (self.place(left - self.symbol_scale, y_pos), self.place(right + self.symbol_scale, y_pos));
@@ -374,8 +499,9 @@ impl<'a> TextBox<'a> {
     /// as far as they still fit, all of them (right) or half that
     /// (centre), or each further than the last so the last goes as far as
     /// it can (justify; not the text's last line). In words, justified
-    /// lines spread at the blanks.
-    fn align_run(&self, run: &mut [Symbol], last: bool) {
+    /// lines spread at the blanks. On a wandering line (the wander, and
+    /// where it starts along the line), they keep to its curve.
+    fn align_run(&self, run: &mut [Symbol], last: bool, wander: Option<&(Wander, f32)>) {
         let shares: Vec<f32> = match self.align {
             Align::Left => return,
             Align::Justify if last => return,
@@ -397,7 +523,14 @@ impl<'a> TextBox<'a> {
         let moved = |d: f32| -> Vec<Symbol> {
             run.iter().zip(&shares).map(|(g, share)| {
                 let mut g = g.clone();
-                g.set_position(g.position() + self.along * (d * share));
+                let step = d * share;
+                let x = g.position().dot(self.along);
+                g.set_position(g.position() + self.along * step);
+                if let Some((w, origin)) = wander {
+                    let x = x - origin;
+                    g.translate_by(self.across * (w.offset(x + step) - w.offset(x)));
+                    g.rotate_rad_by(w.angle(x + step) - w.angle(x));
+                }
                 g
             }).collect()
         };
@@ -424,14 +557,16 @@ impl<'a> TextBox<'a> {
 
     pub fn fill_bounds_with(&self, to_place: Vec<Symbol>, rng: &mut dyn RngCore) -> (Vec<Symbol>, Vec<Symbol>) {
         let (min_y, max_y) = self.extent();
+        // Glyphs reaching past the edge may start above the top.
+        let top = min_y - self.overhang;
         if self.region.is_none() || self.valign <= 0.0 {
-            let (placed, rest, _, _) = self.fill_from(min_y, to_place, rng);
+            let (placed, rest, _, _) = self.fill_from(top, to_place, rng);
             return (placed, rest);
         }
         // Set from the top, then again lower by the share of the room left
         // under the last line valign gives, unless that loses text that
         // fitted from the top.
-        let (placed, rest, first, last) = self.fill_from(min_y, to_place.clone(), rng);
+        let (placed, rest, first, last) = self.fill_from(top, to_place.clone(), rng);
         // A hair short of all of it, so the last line isn't pushed out by
         // rounding.
         let room = self.room_below(&last, max_y - min_y) - 0.01 * self.symbol_scale;
@@ -481,13 +616,21 @@ impl<'a> TextBox<'a> {
     fn fill_from(&self, top: f32, mut to_place: Vec<Symbol>, rng: &mut dyn RngCore) -> (Vec<Symbol>, Vec<Symbol>, f32, Vec<Symbol>) {
         let (min_y, max_y) = self.extent();
         let mut current_y = top;
-        let height = max_y - min_y;
+        let height = max_y - min_y + self.overhang;
         let mut placed_symbols = Vec::new();
         let mut last = Vec::new();
         let mut first = top;
         let empty_step = if self.region.is_some() { EMPTY_LINE_STEP * self.symbol_scale } else { self.symbol_scale };
-        // How far the current line has moved down for its glyphs to fit.
+        // How far the current line has moved down for its glyphs to fit,
+        // and to keep clear of the last line.
         let mut lowered = 0.0;
+        let mut cleared = 0.0;
+        // Uneven lines (wandering, or their gaps jittered) can come onto
+        // the last: how far one goes lower, a step at a time, to clear it.
+        let uneven = self.wander > 0.0 || self.line_gap_jitter > 0.0;
+        let clear_step = (self.wander.max(self.line_gap_jitter) / 4.0).max(empty_step);
+        let clear_reach = 2.0 * self.wander + self.line_gap_jitter + self.symbol_scale;
+        let mut last_ink: Vec<Vec<Vec2>> = Vec::new();
         while current_y - min_y < height {
             let (placed_line, not_placed) = self.fill_line_with(to_place.clone(), current_y, rng);
             // A line that stops at a glyph too tall for it, where it would
@@ -500,7 +643,16 @@ impl<'a> TextBox<'a> {
                 lowered += empty_step;
                 continue;
             }
-            lowered = 0.0;
+            if uneven && !last_ink.is_empty() && cleared < clear_reach && current_y + clear_step - min_y < height
+                && placed_line.iter().filter(|g| !g.is_blank()).any(|g| {
+                    let ink = g.footprint();
+                    last_ink.iter().any(|other| shapes_within(&ink, other, LINE_GAP * self.symbol_scale))
+                }) {
+                current_y += clear_step;
+                cleared += clear_step;
+                continue;
+            }
+            (lowered, cleared) = (0.0, 0.0);
             to_place = not_placed;
             let max_height = placed_line.iter()
                 .map(|symbol| symbol.hull_aabb().extents().y * self.symbol_scale / 2.0)
@@ -509,10 +661,19 @@ impl<'a> TextBox<'a> {
                 if last.is_empty() {
                     first = current_y;
                 }
+                if uneven {
+                    last_ink = placed_line.iter().filter(|g| !g.is_blank()).map(|g| g.footprint()).collect();
+                }
                 last = placed_line.clone();
             }
             placed_symbols.extend(placed_line);
-            current_y += if max_height > 0.0 { max_height } else { empty_step };
+            current_y += if max_height > 0.0 {
+                // Each line's gap from the last a little off, if it may be.
+                let off = if self.line_gap_jitter > 0.0 { rng.random_range(-self.line_gap_jitter..self.line_gap_jitter) } else { 0.0 };
+                (max_height + off).max(empty_step)
+            } else {
+                empty_step
+            };
             if to_place.is_empty() {
                break;
             }
@@ -569,6 +730,9 @@ mod tests {
             align: Align::Left,
             contain: true,
             valign: 0.0,
+            overhang: 0.0,
+            wander: 0.0,
+            line_gap_jitter: 0.0,
         }
     }
 
@@ -691,6 +855,75 @@ mod tests {
         assert!(bottom > 49.0, "bottom {}", bottom);
         let (top, bottom) = ink(0.5);
         assert!(((top + 50.0) - (50.0 - bottom)).abs() < 1.0, "{}..{}", top, bottom);
+    }
+
+    #[test]
+    fn a_region_with_an_overhang_holds_what_reaches_that_far_past_it() {
+        let square = |c: Vec2, h: f32| vec![c + Vec2::new(-h, -h), c + Vec2::new(h, -h), c + Vec2::new(h, h), c + Vec2::new(-h, h)];
+        let region = Region::new(vec![square(Vec2::ZERO, 50.0), square(Vec2::ZERO, 10.0)]).with_overhang(5.0);
+        assert!(region.holds(&square(Vec2::new(30.0, 0.0), 5.0)), "inside");
+        assert!(region.holds(&square(Vec2::new(48.0, 0.0), 5.0)), "3 past the edge");
+        assert!(!region.holds(&square(Vec2::new(53.0, 0.0), 5.0)), "8 past the edge");
+        assert!(region.holds(&square(Vec2::new(0.0, 13.0), 5.0)), "2 into the hole");
+        assert!(!region.holds(&square(Vec2::ZERO, 4.0)), "6 into the hole, all round");
+        assert!(!region.holds(&square(Vec2::ZERO, 20.0)), "round the hole");
+    }
+
+    #[test]
+    fn overhanging_glyphs_reach_past_the_edge_no_further() {
+        let circle: Vec<Vec<Vec2>> = StrokePath::circle(Vec2::ZERO, 80.0).flattened(0.1).into_iter().map(|(ring, _)| ring).collect();
+        let reach = |overhang: f32| {
+            let tb = TextBox::new(TextBoxOptions { overhang, ..options(circle.clone()) });
+            let (placed, _) = tb.fill_bounds_with(boxes(400), &mut <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(1));
+            placed.iter().flat_map(|g| g.footprint()).map(|p| p.length()).fold(0.0, f32::max)
+        };
+        assert!(reach(0.0) <= 80.01, "{}", reach(0.0));
+        let far = reach(6.0);
+        assert!(far > 83.0 && far <= 86.01, "{}", far);
+    }
+
+    /// How many glyphs overlap others not next to them (on other lines):
+    /// footprints shrunk a little about their middles, so glyphs that only
+    /// touch don't count.
+    fn overlapping(placed: &[Symbol]) -> usize {
+        let shrunk: Vec<Vec<Vec2>> = placed.iter().map(|g| {
+            let ink = g.footprint();
+            let mid = ink.iter().fold(Vec2::ZERO, |a, p| a + *p) / ink.len() as f32;
+            ink.iter().map(|p| mid + (*p - mid) * 0.9).collect()
+        }).collect();
+        (0..shrunk.len()).flat_map(|i| (i + 2..shrunk.len()).map(move |j| (i, j)))
+            .filter(|&(i, j)| crate::journal::avoid::shapes_within(&shrunk[i], &shrunk[j], 0.0))
+            .count()
+    }
+
+    #[test]
+    fn wandering_lines_bend_inside_the_shape_clear_of_each_other() {
+        let circle: Vec<Vec<Vec2>> = StrokePath::circle(Vec2::ZERO, 80.0).flattened(0.1).into_iter().map(|(ring, _)| ring).collect();
+        let tb = TextBox::new(TextBoxOptions { wander: 6.0, ..options(circle.clone()) });
+        let (placed, _) = tb.fill_bounds_with(boxes(400), &mut <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(2));
+        assert!(placed.len() > 20);
+        let region = Region::new(circle);
+        assert!(placed.iter().all(|g| region.holds(&g.footprint())), "a glyph left the circle");
+        assert!(placed.iter().any(|g| g.rotation_rad().abs() > 0.05), "the lines should bend");
+        assert_eq!(overlapping(&placed), 0);
+    }
+
+    #[test]
+    fn line_gap_jitter_spaces_lines_unevenly_without_overlap() {
+        let square = vec![Vec2::new(-50.0, -50.0), Vec2::new(50.0, -50.0), Vec2::new(50.0, 50.0), Vec2::new(-50.0, 50.0)];
+        let rows = |line_gap_jitter: f32| {
+            let tb = TextBox::new(TextBoxOptions { line_gap_jitter, ..options(vec![square.clone()]) });
+            let (placed, _) = tb.fill_bounds_with(boxes(200), &mut <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(3));
+            assert_eq!(overlapping(&placed), 0);
+            let mut ys: Vec<f32> = placed.iter().map(|g| g.position().y).collect();
+            ys.sort_by(f32::total_cmp);
+            ys.dedup_by(|a, b| (*a - *b).abs() < 0.5);
+            ys.windows(2).map(|w| w[1] - w[0]).collect::<Vec<f32>>()
+        };
+        let even = rows(0.0);
+        assert!(even.windows(2).all(|w| (w[0] - w[1]).abs() < 1e-3), "{:?}", even);
+        let uneven = rows(4.0);
+        assert!(uneven.windows(2).any(|w| (w[0] - w[1]).abs() > 0.5), "{:?}", uneven);
     }
 
     #[test]

@@ -89,6 +89,13 @@ pub struct TextBox {
     /// line boxes, which glyphs overhang.
     contain: bool,
     valign: f32,
+    /// How far glyphs' ink may reach past the shape's edge.
+    overhang: f32,
+    /// The hand's baseline_wander, and the paragraph's line_gap_jitter:
+    /// not for write_block's line boxes, as it wanders and spaces its
+    /// lines itself.
+    wander: f32,
+    line_gap_jitter: f32,
     jitter: Jitter,
 }
 
@@ -110,15 +117,7 @@ impl TextBox {
             Some(shape) => {
                 let path = shape.clone().try_cast::<Path>()
                     .ok_or_else(|| format!("{}: 'shape' should be a path, got {}", caller, shape.type_name()))?;
-                // Curves flattened finely next to the glyphs.
-                let rings: Vec<Vec<PVec>> = path.borrow().flattened(symbol_scale * 0.01).into_iter()
-                    .map(|(points, _)| points)
-                    .filter(|points| points.len() >= 3)
-                    .collect();
-                if rings.is_empty() {
-                    return Err(format!("{}: 'shape' encloses nothing: it needs a subpath of at least three points", caller).into());
-                }
-                rings
+                shape_rings(caller, "'shape'", &path, symbol_scale)?
             }
             None => {
                 let center: PVec = options.get("center")
@@ -130,6 +129,12 @@ impl TextBox {
                 rectangle(Aabb::new(center - half, center + half))
             }
         };
+        TextBox::with_shape(caller, text, shape)
+    }
+    /// A box of `shape`'s outlines, set as `text` says.
+    fn with_shape(caller: &str, text: &TextSettings, shape: Vec<Vec<PVec>>) -> RhaiResult<TextBox> {
+        let options = &text.options;
+        let symbol_scale = text.type_.size(caller)?;
         let paragraph = &text.paragraph;
         let avoid = AvoidOption::parse(caller, options, paragraph.clearance())?;
         Ok(TextBox {
@@ -145,8 +150,16 @@ impl TextBox {
             align: paragraph.align(),
             contain: true,
             valign: paragraph.valign(),
+            overhang: paragraph.overhang(),
+            wander: text.style.handwriting().baseline_wander(),
+            line_gap_jitter: paragraph.line_gap_jitter(),
             jitter: text.jitter(),
         })
+    }
+    /// The box with its glyphs set at `symbol_scale`, its jagged edge
+    /// as far in, in canvas units, as before.
+    fn at_scale(&self, symbol_scale: f32) -> TextBox {
+        TextBox { symbol_scale, jagged_edge: self.jagged_edge * self.symbol_scale / symbol_scale, ..self.clone() }
     }
     /// Fill the box with what fits, jittering what's placed.
     fn fill(&self, glyphs: Vec<Symbol>, rng: &mut dyn rand::RngCore) -> (Vec<Symbol>, Vec<Symbol>) {
@@ -189,9 +202,25 @@ impl TextBox {
             align: self.align,
             contain: self.contain,
             valign: self.valign,
+            overhang: self.overhang,
+            wander: self.wander,
+            line_gap_jitter: self.line_gap_jitter,
         });
         f(&core)
     }
+}
+
+/// A path's subpaths as a text box's outlines, curves flattened finely
+/// next to glyphs `symbol_scale` big; `what` names the path in errors.
+fn shape_rings(caller: &str, what: &str, path: &Path, symbol_scale: f32) -> RhaiResult<Vec<Vec<PVec>>> {
+    let rings: Vec<Vec<PVec>> = path.borrow().flattened(symbol_scale * 0.01).into_iter()
+        .map(|(points, _)| points)
+        .filter(|points| points.len() >= 3)
+        .collect();
+    if rings.is_empty() {
+        return Err(format!("{}: {} encloses nothing: it needs a subpath of at least three points", caller, what).into());
+    }
+    Ok(rings)
 }
 
 fn symbols(caller: &str, glyphs: Array) -> RhaiResult<Vec<Symbol>> {
@@ -303,6 +332,7 @@ fn write_block(msg: &str, at: Vec2, width: Dynamic, settings: Map, symdict: &Fon
         let line_text = TextSettings { style: text.style.clone(), type_: text.type_.clone(), paragraph: line_paragraph.clone(), options };
         let mut line = TextBox::from_settings(CALLER, &line_text)?;
         line.contain = false;
+        (line.wander, line.line_gap_jitter) = (0.0, 0.0);
         Ok(line)
     };
     let mut r = rng.borrow_mut();
@@ -337,6 +367,64 @@ fn write_block(msg: &str, at: Vec2, width: Dynamic, settings: Map, symdict: &Fon
     Ok(out)
 }
 
+/// What `write_inside_path` takes, besides a style, a type and a paragraph.
+const INSIDE_KEYS: [&str; 1] = ["avoid"];
+
+/// How many halvings close in on the largest glyph scale that fits, for
+/// `write_inside_path` with the paragraph's `fit`.
+const FIT_STEPS: usize = 20;
+
+/// `write_inside_path(text, path, settings)`: the text written inside a
+/// closed path, as a text box of that shape writes it, giving
+/// `#{ canvas, rest }`, `rest` being the text that didn't fit (blanks it
+/// starts with trimmed). With the paragraph's `fit`, the glyphs are as big
+/// as they can be, up to the type's glyph_scale, and still all fit, so
+/// `rest` is empty.
+fn write_inside_path(msg: &str, path: &Path, settings: Map, symdict: &FontBook, rng: &SharedRng) -> RhaiResult<Map> {
+    const CALLER: &str = "write_inside_path";
+    let text = TextSettings::read(CALLER, settings, &INSIDE_KEYS)?;
+    let fit = text.paragraph.fit();
+    let font = text.type_.glyphset(CALLER)?;
+    let size = text.type_.size(CALLER)?;
+    let shape = shape_rings(CALLER, "the path", path, size)?;
+    let mut tb = TextBox::with_shape(CALLER, &text, shape)?;
+    let mut r = rng.borrow_mut();
+    let symbols = font.build(msg, symdict, &mut *r);
+    let set = |tb: &TextBox, r: &mut dyn rand::RngCore| tb.with_core(|core| core.fill_bounds_with(symbols.clone(), r));
+    let (mut placed, unplaced) = set(&tb, &mut *r);
+    if fit && !unplaced.is_empty() {
+        // The largest scale at which everything fits, closed in on by
+        // halving.
+        let (mut low, mut high, mut best) = (0.0, size, None);
+        for _ in 0..FIT_STEPS {
+            let mid = (low + high) / 2.0;
+            let scaled = tb.at_scale(mid);
+            let (at, rest) = set(&scaled, &mut *r);
+            if rest.is_empty() {
+                (low, best) = (mid, Some((scaled, at)));
+            } else {
+                high = mid;
+            }
+        }
+        let Some((scaled, at)) = best else {
+            return Err(format!("{}: the text doesn't fit inside the path at any glyph scale", CALLER).into());
+        };
+        tb = scaled;
+        placed = at;
+    }
+    let rest: String = if fit { String::new() } else {
+        let chars: Vec<char> = msg.chars().collect();
+        chars[chars.len() - unplaced.len().min(chars.len())..].iter().collect::<String>().trim_start().to_string()
+    };
+    tb.jitter.apply(&mut placed, &mut *r);
+    let mut canvas = CanvasData::default();
+    add_glyphs(&mut canvas, &placed, |_| false, &text.style, &mut *r)?;
+    let mut out = Map::new();
+    out.insert("canvas".into(), Dynamic::from(Canvas::new(canvas)));
+    out.insert("rest".into(), rest.into());
+    Ok(out)
+}
+
 pub fn register(engine: &mut Engine, symdict: Rc<FontBook>, rng: SharedRng) {
     engine.register_type_with_name::<TextBox>("TextBox");
     engine.register_fn("new_textbox", TextBox::new);
@@ -363,8 +451,13 @@ pub fn register(engine: &mut Engine, symdict: Rc<FontBook>, rng: SharedRng) {
         splat(canvas, msgs, width_range, height_range, settings, &book, &r)
     });
     let r = rng.clone();
+    let book = symdict.clone();
     engine.register_fn("write_block", move |text: &str, at: Vec2, width: Dynamic, settings: Map| -> RhaiResult<Map> {
-        write_block(text, at, width, settings, &symdict, &r)
+        write_block(text, at, width, settings, &book, &r)
+    });
+    let r = rng.clone();
+    engine.register_fn("write_inside_path", move |text: &str, path: Path, settings: Map| -> RhaiResult<Map> {
+        write_inside_path(text, &path, settings, &symdict, &r)
     });
 
 }
@@ -527,6 +620,30 @@ mod tests {
         assert!(xs[5] == 16.0 && xs[6] == 16.0, "every glyph placed: {:?}", xs);
     }
 
+    #[test]
+    fn break_words_cut_words_at_line_ends() {
+        let counts: rhai::Array = eval(r#"
+            // Lines of about twelve glyphs, words of eight.
+            let opts = #{ center: vec2(0.0, 0.0), width: 65, height: 400, type: #{ glyph_scale: 10.0 }, paragraph: #{ layout: "words" } };
+            let text = "abcdefgh abcdefgh abcdefgh abcdefgh";
+            let whole = new_textbox(opts).fill(font.glyphs(text)).placed;
+            opts.paragraph.break_words = true;
+            let broken = new_textbox(opts).fill(font.glyphs(text)).placed;
+            opts.paragraph.break_words = 5;   // no piece of a word of eight fits
+            let long_pieces = new_textbox(opts).fill(font.glyphs(text)).placed;
+            fn lines(glyphs) { let ys = []; for g in glyphs { let y = g.position.y.round(); if !ys.contains(y) { ys.push(y); } } ys.len() }
+            fn first_line(glyphs) { let y = glyphs[0].position.y; glyphs.filter(|g| (g.position.y - y).abs() < 1.0).len() }
+            [lines(whole), lines(broken), lines(long_pieces), first_line(whole), first_line(broken), whole.len(), broken.len()]
+        "#);
+        let n: Vec<i64> = counts.into_iter().map(|c| c.as_int().unwrap()).collect();
+        assert!(n[1] < n[0], "cut words take fewer lines: {:?}", n);
+        assert_eq!(n[2], n[0], "pieces too short to cut: {:?}", n);
+        assert!(n[4] > n[3], "a cut word's head fills the first line: {:?}", n);
+        assert!(n[5] == 35 && n[6] == 35, "every glyph placed: {:?}", n);
+        let err = engine().engine.run("new_textbox(#{ center: vec2(0, 0), width: 10, height: 10, type: #{ glyph_scale: 10 }, paragraph: #{ layout: \"flat\", break_words: true } });").expect_err("flat").to_string();
+        assert!(err.contains("'break_words' needs layout: \"words\""), "{}", err);
+    }
+
     const SPLAT_SETUP: &str = r#"
         let style = new_style(new_brush_style("black", "Ink Pen", 1.0), new_handwriting_style());
         let base = new_canvas();
@@ -664,6 +781,51 @@ mod tests {
             same
         "#);
         assert!(same);
+    }
+
+    #[test]
+    fn write_inside_path_gives_back_what_doesnt_fit() {
+        let ok: bool = eval(r#"
+            let hand = #{ style: style, type: new_type_style(font, 10.0), paragraph: #{ layout: "words" } };
+            let star = new_star(vec2(0.0, 0.0), 60.0, 30.0, 5);
+            let out = write_inside_path(text, star, hand);
+            if out.rest == "" || out.rest.len() >= text.len() { throw "expected some of the text left: " + out.rest.len(); }
+            if !text.ends_with(out.rest) { throw "rest should be the end of the text"; }
+            let b = out.canvas.bounds();
+            if b.min.x < -62.0 || b.max.x > 62.0 || b.min.y < -62.0 || b.max.y > 62.0 { throw "outside the star: " + b.min + " " + b.max; }
+            let all = write_inside_path("a short line", new_circle(vec2(0.0, 0.0), 80.0), hand);
+            if all.rest != "" { throw "all of it should fit"; }
+            true
+        "#);
+        assert!(ok);
+    }
+
+    #[test]
+    fn write_inside_path_fit_shrinks_text_to_fit() {
+        let ok: bool = eval(r#"
+            let hand = #{ style: style, type: new_type_style(font, 10.0), paragraph: #{ fit: true } };
+            let circle = new_circle(vec2(0.0, 0.0), 50.0);
+            let out = write_inside_path(text, circle, hand);
+            if out.rest != "" { throw "fit should leave nothing over"; }
+            let b = out.canvas.bounds();
+            if b.max.x > 52.0 || b.min.x < -52.0 { throw "outside the circle"; }
+            // Text that fits as it is stays its size.
+            let line = write_inside_path("ab", circle, hand).canvas.bounds();
+            let plain = write_inside_path("ab", circle, hand + #{ paragraph: #{ fit: false } }).canvas.bounds();
+            (line.width - plain.width).abs() < 1.0
+        "#);
+        assert!(ok);
+        for (settings, want) in [
+            ("#{ type: new_type_style(glyphset(\"loche_upper\"), 10.0), paragraph: #{ fit: 1 } }", "'fit' should be true or false"),
+            ("#{ type: new_type_style(glyphset(\"loche_upper\"), 10.0), colour: 1 }", "unknown option 'colour'"),
+            ("#{ type: new_type_style(glyphset(\"loche_upper\"), 10.0), paragraph: #{ overhang: -1 } }", "'overhang' can't be negative"),
+            ("#{ type: #{ glyph_scale: 10.0 } }", "the type has no 'glyphset'"),
+        ] {
+            let err = fails(&format!("let ok = 1;\nwrite_inside_path(\"ab\", new_circle(vec2(0.0, 0.0), 50.0), {});", settings));
+            assert!(err.contains(want) && err.contains("line 2"), "{}: {}", want, err);
+        }
+        let err = fails(r#"write_inside_path("ab", new_line(vec2(0.0, 0.0), vec2(1.0, 1.0)), #{ type: new_type_style(glyphset("loche_upper"), 10.0) })"#);
+        assert!(err.contains("the path encloses nothing"), "{}", err);
     }
 
     #[test]
