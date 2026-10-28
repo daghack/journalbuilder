@@ -1809,6 +1809,28 @@ let restyled = new_lock("restyled")
 sourced.add(restyled.run().canvases("message")[0].translate_by(vec2(LEFT - 100, TOP + 780)));
 book.bind("locks", sourced);
 
+// symbol_ring: a base's symbols round a ring, each joined by dashes to the
+// one step on, and the step's symbol in the middle; it draws no lock
+// value, only its options. With steps, only the first lines of the walk
+// from the top, and half the next with an arrow.
+let rings = sheet("locks");
+rings.add(caption("symbol_ring (base, step, steps, bordered, size, center_scale, dash, gap, glyph_ink, line_ink)", TOP));
+for (o, k) in [
+	#{ base: 27, step: 5, size: 450.0 },
+	#{ base: 27, step: 13, bordered: false, size: 450.0 },
+	#{ base: 12, step: 5, steps: 6, size: 450.0, dash: 10.0, gap: 6.0 },
+	#{ base: 9, step: 2, steps: 5, bordered: false, size: 450.0, center_scale: 2.0 },
+] {
+	let x = LEFT + (k % 2) * 520;
+	let y = TOP + 80 + (k / 2) * 580;
+	let bordered = if "bordered" in o { o.bordered } else { true };
+	let steps = if "steps" in o { `, steps: ${o.steps}` } else { "" };
+	rings.add(write_in(`base ${o.base}, step ${o.step}${steps}${if bordered { "" } else { ", bordered: false" }}`, x, y, 22, CAPTION, PLAIN));
+	let ring = new_lock("ring").attach("ring", "symbol_ring", o).run().canvases("ring")[0];
+	rings.add(ring.translate_by(vec2(x, y + 30)));
+}
+book.bind("locks", rings);
+
 // ---- a spread: one drawing over two pages ----
 //
 // A page twice as wide, split into two tiles side by side: each a page of
