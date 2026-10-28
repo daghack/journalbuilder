@@ -3,10 +3,11 @@
 // most_stars stars, a page each: the pages are the key. Give
 // enc.plain_text, the text, and msg.plain_text, the message, in base 27;
 // pages draws the sky, message the message's cipher text in
-// balanced-ternary marks.
+// balanced-ternary marks. digit_size is the size the stars' numbers are
+// written at, and the room star_chart leaves them.
 
 fn options() {
-	#{ most_stars: integer(9), name_seed: integer(11), output_base: integer(3), seed: integer(7), size_seed: integer(29) }
+	#{ digit_size: number(24.0), most_stars: integer(9), name_seed: integer(11), output_base: integer(3), seed: integer(7), size_seed: integer(29) }
 }
 
 fn chain(o) {
@@ -14,7 +15,7 @@ fn chain(o) {
 		locks: #{
 			enc: #{ type: "huffman_encode", options: #{ input_base: 27, output_base: o.output_base } },
 			msg: #{ type: "huffman_apply", options: #{ input_base: 27, output_base: o.output_base } },
-			sky: #{ type: "star_chart", options: #{ input_base: 27, most_stars: o.most_stars, name_seed: o.name_seed, output_base: o.output_base, seed: o.seed, size_seed: o.size_seed } },
+			sky: #{ type: "star_chart", options: #{ input_base: 27, label_size: o.digit_size, most_stars: o.most_stars, name_seed: o.name_seed, output_base: o.output_base, seed: o.seed, size_seed: o.size_seed } },
 		},
 		connect: [
 			["enc.code", "msg.code"],
@@ -23,7 +24,7 @@ fn chain(o) {
 		fixed: #{},
 		illustrations: #{
 			message: #{ type: "trit_message", options: #{ base: o.output_base }, inputs: #{ message: "msg.cipher_text" } },
-			pages: #{ type: "star_pages", options: #{}, inputs: #{ chart: "sky.chart" } },
+			pages: #{ type: "star_pages", options: #{ digit_size: o.digit_size }, inputs: #{ chart: "sky.chart" } },
 		},
 	}
 }

@@ -187,6 +187,20 @@ impl TypeStyle {
     pub(super) fn strike(&self) -> Option<&RuleStyle> {
         self.strike.as_ref()
     }
+    /// This type, with what it leaves to the glyphset or doesn't give (the
+    /// glyphset, the glyph scale, the outline gap, space width, skew and
+    /// joining) taken from `other`.
+    pub(super) fn or(&self, other: &TypeStyle) -> TypeStyle {
+        TypeStyle {
+            glyphset: self.glyphset.clone().or_else(|| other.glyphset.clone()),
+            glyph_scale: self.glyph_scale.or(other.glyph_scale),
+            glyph_outline_gap: self.glyph_outline_gap.or(other.glyph_outline_gap),
+            space_width: self.space_width.or(other.space_width),
+            skew: self.skew.or(other.skew),
+            joined: self.joined.or(other.joined),
+            ..self.clone()
+        }
+    }
 }
 
 impl Settings for TypeStyle {
@@ -247,7 +261,8 @@ impl Settings for TypeStyle {
 /// Paragraphs: how lines of text are built and set.
 #[derive(Clone, Debug)]
 pub struct ParagraphStyle {
-    line_height: f64,
+    /// None until set: text boxes then space lines by their ink.
+    line_height: Option<f64>,
     paragraph_gap: f64,
     indent: f64,
     align: String,
@@ -267,7 +282,7 @@ pub struct ParagraphStyle {
 impl Default for ParagraphStyle {
     fn default() -> Self {
         ParagraphStyle {
-            line_height: 1.25,
+            line_height: None,
             paragraph_gap: 0.5,
             indent: 0.0,
             align: "left".into(),
@@ -288,7 +303,12 @@ impl Default for ParagraphStyle {
 
 impl ParagraphStyle {
     pub(super) fn line_height(&self) -> f32 {
-        self.line_height as f32
+        self.line_height.unwrap_or(1.25) as f32
+    }
+    /// The line height, if it's been set: text boxes space lines by it,
+    /// or by their ink where that's taller, and otherwise by ink alone.
+    pub(super) fn set_line_height(&self) -> Option<f32> {
+        self.line_height.map(|h| h as f32)
     }
     pub(super) fn paragraph_gap(&self) -> f32 {
         self.paragraph_gap as f32
@@ -357,7 +377,7 @@ impl Settings for ParagraphStyle {
     ];
     fn get(&self, key: &str) -> Dynamic {
         match key {
-            "line_height" => self.line_height.into(),
+            "line_height" => (self.line_height() as f64).into(),
             "paragraph_gap" => self.paragraph_gap.into(),
             "indent" => self.indent.into(),
             "align" => self.align.clone().into(),
@@ -377,7 +397,7 @@ impl Settings for ParagraphStyle {
     }
     fn set(&mut self, caller: &str, key: &str, value: &Dynamic) -> RhaiResult<()> {
         match key {
-            "line_height" => self.line_height = above_zero(caller, key, value)?,
+            "line_height" => self.line_height = Some(above_zero(caller, key, value)?),
             "paragraph_gap" => self.paragraph_gap = at_least_zero(caller, key, value)?,
             "indent" => self.indent = at_least_zero(caller, key, value)?,
             "align" => self.align = one_of(caller, key, value, &Align::NAMES)?,

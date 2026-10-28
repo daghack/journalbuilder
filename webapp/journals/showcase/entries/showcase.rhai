@@ -432,7 +432,7 @@ let samples = [
 	#{ label: "glyphset(\"loche_upper\"): capitals, lowercase text set in them", glyphs: LOCHE, lines: [alphabet, lorem + ".", "punctuation . , ; : ' \" ? - —"] },
 	#{ label: "glyphset(\"loche_lower\"): falling back to loche_upper for capitals and stops", glyphs: glyphset("loche_lower"), lines: [alphabet, "Lorem ipsum dolor sit amet, consectetur."] },
 	#{ label: "glyphset(\"nivelia\"): traced from her letter, falling back to loche_upper for the capitals she never wrote", glyphs: glyphset("nivelia"), size: 46, lines: [alphabet, alphabet.to_upper(), "Lorem ipsum dolor sit amet, consectetur.", "A iq ixoias rx jrg, ibs A srb'z Kibz zr nc."] },
-	#{ label: "glyphset(\"ayan\"): a cursive traced from the US Declaration typeface, here with pressure_profile: \"pointed\"", glyphs: glyphset("ayan"), size: 90, style: new_style(new_brush_style(INK, "Ink Pen", 1.1, #{ min_pressure: 0.45, max_pressure: 0.9, pressure_profile: "pointed" }), new_handwriting_style()), lines: [alphabet, "ABCDEFGHIJKLM", "NOPQRSTUVWXYZ", "Lorem ipsum dolor sit amet, consectetur."] },
+	#{ label: "glyphset(\"ayan\"): a cursive traced from the US Declaration typeface, here with pressure_profile: \"pointed\"", glyphs: glyphset("ayan"), size: 45, style: new_style(new_brush_style(INK, "Ink Pen", 1.1, #{ min_pressure: 0.45, max_pressure: 0.9, pressure_profile: "pointed" }), new_handwriting_style()), lines: [alphabet, "ABCDEFGHIJKLM", "NOPQRSTUVWXYZ", "Lorem ipsum dolor sit amet, consectetur."] },
 	#{ label: "glyphset(\"lang\")", glyphs: glyphset("lang"), lines: [alphabet.to_upper(), alphabet, "Lorem ipsum dolor sit amet."] },
 	#{ label: "glyphset(\"eldritch\")", glyphs: glyphset("eldritch"), lines: [alphabet, "lorem ipsum dolor sit amet"] },
 	#{ label: "glyphset(\"sharp_lower\")", glyphs: glyphset("sharp_lower"), lines: [alphabet, "lorem ipsum dolor sit amet"] },
@@ -475,11 +475,11 @@ for row in [
 	["glyphset(\"ayan\", #{ joined: false }), or a type's joined: false: each glyph on its own", glyphset("ayan", #{ joined: false })],
 ] {
 	sets.add(caption(row[0], y));
-	sets.add(write_in("Lorem ipsum dolor, border robe.", LEFT, y + 110, 90, pointed, row[1]));
+	sets.add(write_in("Lorem ipsum dolor, border robe.", LEFT, y + 110, 45, pointed, row[1]));
 	y += 190;
 }
 sets.add(caption("canvas.add(textbox.fill(glyphset(\"ayan\").glyphs(text)).placed, style): placed glyphs join too", y));
-let joined_box = new_textbox(#{ center: vec2((LEFT + RIGHT) / 2, y + 120), width: RIGHT - LEFT, height: 140, type: #{ glyph_scale: 90 } });
+let joined_box = new_textbox(#{ center: vec2((LEFT + RIGHT) / 2, y + 120), width: RIGHT - LEFT, height: 140, type: #{ glyph_scale: 45 } });
 sets.add(joined_box.fill(cursive.glyphs("minimum lorem cursive")).placed, pointed);
 y += 210;
 
@@ -1274,18 +1274,27 @@ for (options, i) in [#{}, #{ break_words: true }, #{ break_words: 4 }] {
 	let c = vec2(LEFT + 160 + i * 340, TOP + 340);
 	let box = new_rectangle(c, 300, 460);
 	text.add(box, CAPTION);
-	text.add(write_inside_path(LOREM + LOREM, box, words_body + #{ paragraph: #{ layout: "words", line_height: 1.4 } + options }).canvas);
+	text.add(write_inside_path(LOREM + LOREM, box, words_body + #{ paragraph: #{ layout: "words" } + options }).canvas);
 }
 let y = TOP + 640;
 text.add(caption("write_inside_path, whole words, then broken: a circle, and a star", y));
 y += 190;
 for (shape, i) in [new_circle(vec2(LEFT + 120, y), 120), new_circle(vec2(LEFT + 380, y), 120), new_star(vec2(LEFT + 640, y), 130, 70, 6), new_star(vec2(LEFT + 900, y), 130, 70, 6)] {
 	text.add(shape, CAPTION);
-	let settings = #{ style: TEXT, type: new_type_style(PLAIN, 20), paragraph: #{ layout: "words", line_height: 1.3, break_words: i % 2 == 1 } };
+	let settings = #{ style: TEXT, type: new_type_style(PLAIN, 20), paragraph: #{ layout: "words", break_words: i % 2 == 1 } };
 	text.add(write_inside_path(LOREM, shape, settings).canvas);
 }
 y += 200;
 text.add(caption("in layouts too: a role's or a slot's paragraph #{ break_words } (see the inline layout's second column)", y));
+// Text boxes space lines by their ink unless the paragraph sets a
+// line_height: then lines are that far apart, or further for taller ink.
+y += 40;
+text.add(caption("write_inside_path, paragraph #{ line_height }: unset, lines spaced by their ink; then 1.8", y));
+for (paragraph, i) in [#{ layout: "words" }, #{ layout: "words", line_height: 1.8 }] {
+	let box = new_rectangle(vec2(LEFT + 245 + i * 510, y + 105), 490, 150);
+	text.add(box, CAPTION);
+	text.add(write_inside_path(LOREM, box, words_body + #{ paragraph: paragraph }).canvas);
+}
 book.bind("text", text);
 
 // Text boxes of any closed shape: #{ shape: path } in place of center,
@@ -1709,7 +1718,7 @@ let art_lock = sheet("locks");
 let sky = new_lock("sky")
 	.add("enc", "huffman_encode", #{ input_base: 27, output_base: 3 })
 	.add("msg", "huffman_apply", #{ input_base: 27, output_base: 3 })
-	.add("sky", "star_chart", #{ input_base: 27, output_base: 3, most_stars: 12, width: 480, height: 420, star_size: 14, label_width: 16, label_height: 16, label_gap: 6 })
+	.add("sky", "star_chart", #{ input_base: 27, output_base: 3, most_stars: 12, width: 480, height: 420, star_size: 14, label_size: 12, label_gap: 6 })
 	.connect("enc.code", "msg.code")
 	.connect("enc.code", "sky.code");
 let locked = sky.run(#{ "enc.plain_text": symbols(27, corpus), "msg.plain_text": symbols(27, "EVERY LOCK OPENS") });
@@ -1759,20 +1768,21 @@ let watched = new_lock("watched")
 	.connect("sub.cipher_text", "eye.inner")
 	.run(#{ "sub.plain_text": symbols(27, "EVERY LOCK OPENS") });
 drawn.add(watched.canvases("eye")[0].scale_by(0.22).translate_by(vec2(LEFT + 20, TOP + 890)));
-// The same eye with its pupil's text in a spiral, the last turn shrinking
-// to fill the room left, down to a tenth.
+// The same eye with its pupil's text in a spiral, at most pupil_size 30,
+// the last turn shrinking to fill the room left, down to a tenth.
 let spiralled = new_lock("spiralled")
 	.add("sub", "substitution_cipher", #{ base_n: 27 })
 	.set_input("sub.ordering", symbols(27, "MQ ZEHWBRKYDTXOAJGNLUFCVISP"))
-	.attach("eye", "eye", #{ top_ink: RED, bottom_ink: INK, inner_ink: INK, pupil: "spiral", pupil_minimum_scale: 0.1 })
+	.attach("eye", "eye", #{ top_ink: RED, bottom_ink: INK, inner_ink: INK, pupil: "spiral", pupil_size: 30.0, pupil_minimum_scale: 0.1 })
 	.connect("sub.ordering", "eye.outer")
 	.connect("sub.cipher_text", "eye.inner")
 	.run(#{ "sub.plain_text": symbols(27, "EVERY LOCK OPENS ONCE ITS KEY IS FOUND") });
 drawn.add(spiralled.canvases("eye")[0].scale_by(0.22).translate_by(vec2(LEFT + 200, TOP + 890)));
 drawn.add(write_in("eye (outer_base, inner_base, length, width, top_ink,", LEFT + 400, TOP + 980, 22, CAPTION, PLAIN));
-drawn.add(write_in("bottom_ink, inner_ink, pupil, pupil_minimum_scale): a", LEFT + 400, TOP + 1014, 22, CAPTION, PLAIN));
-drawn.add(write_in("substitution cipher's ordering round the iris, its cipher", LEFT + 400, TOP + 1048, 22, CAPTION, PLAIN));
-drawn.add(write_in("text in the pupil: in lines, and pupil: spiral, minimum 0.1", LEFT + 400, TOP + 1082, 22, CAPTION, PLAIN));
+drawn.add(write_in("bottom_ink, inner_ink, pupil, pupil_size, pupil_minimum_", LEFT + 400, TOP + 1014, 22, CAPTION, PLAIN));
+drawn.add(write_in("scale): a substitution cipher's ordering round the iris, its", LEFT + 400, TOP + 1048, 22, CAPTION, PLAIN));
+drawn.add(write_in("cipher text in the pupil: in lines, and pupil: spiral, size", LEFT + 400, TOP + 1082, 22, CAPTION, PLAIN));
+drawn.add(write_in("30, minimum 0.1", LEFT + 400, TOP + 1116, 22, CAPTION, PLAIN));
 book.bind("locks", drawn);
 
 // Sources: a chain drawing on the journal's files, each a node with one
@@ -1792,22 +1802,52 @@ let scripted = new_lock("scripted")
 	.connect("words.value", "note.text")
 	.connect("hand.value", "note.style");
 sourced.add(scripted.run().canvases("note")[0].translate_by(vec2(LEFT, TOP + 430)));
-// An illustration's styles and glyphsets are inputs too: wire a style or
-// glyphset source in, or leave them to its fallbacks(o). Here
-// trit_message's heading is in margin_note and the plain glyphset, its
-// marks as it draws them unwired.
-sourced.add(caption("an illustration's TextStyle and Glyphset inputs, wired from sources; unwired, its fallbacks(o)", TOP + 800));
+// An illustration's styles are inputs too, each drawn whole: wire a style
+// source in, or leave them to its fallbacks(o), made from its options.
+// Here trit_message's heading is in margin_note, at its size, italic, and
+// its marks as it draws them unwired, at mark_size.
+sourced.add(caption("an illustration's TextStyle inputs, drawn whole (pen, glyphs, size, paragraph), wired from sources;", TOP + 800));
+sourced.add(caption("unwired, its fallbacks(o): here the heading in margin_note at 26, the marks at mark_size 22", TOP + 834));
 let restyled = new_lock("restyled")
 	.add("shift", "shift_cipher", #{ base: 3, shift: 1 })
 	.set_input("shift.plain_text", symbols(3, "CABBACCABBACABCA"))
 	.source("hand", "style", "margin_note", #{ options: #{ size: 26 } })
-	.source("letters", "glyphset", "plain")
-	.attach("message", "trit_message", #{ title: "Restyled", per_row: 24, width: 1000.0 })
+	.attach("message", "trit_message", #{ title: "Restyled", per_row: 24, width: 1000.0, mark_size: 22.0 })
 	.connect("shift.cipher_text", "message.message")
-	.connect("hand.value", "message.heading_style")
-	.connect("letters.value", "message.heading_glyphs");
+	.connect("hand.value", "message.heading_style");
 sourced.add(restyled.run().canvases("message")[0].translate_by(vec2(LEFT - 100, TOP + 780)));
 book.bind("locks", sourced);
+
+// Sizes: each kind of text an illustration writes has a ROLE_size option,
+// the size of its fallback style, and a wired style writes at its own
+// size (smaller only where there's no room, as in a maze's cells). Glyphs
+// come from the style's glyphset: where balanced-ternary digits are
+// drawn by default, letters or decimal numbers in any other.
+let sized = sheet("locks");
+sized.add(caption("ROLE_size options size an illustration's unwired text: star_pages' heading_size, digit_size, name_size", TOP));
+let resized = chain("raven_sky", #{ most_stars: 12 })
+	.source("plain", "style", "plain_hand", #{ options: #{ size: 40, color: RED } })
+	.attach("larger", "star_pages", #{ heading_size: 64.0, digit_size: 32.0, name_size: 30.0 })
+	.connect("sky.chart", "larger.chart")
+	.attach("decimal", "star_pages", #{})
+	.connect("sky.chart", "decimal.chart")
+	.connect("plain.value", "decimal.digit_style")
+	.add("maze", "maze_lock", #{ input_base: 27 })
+	.attach("letters", "maze_glyphs", #{ cell: 60.0 })
+	.connect("maze.generated_maze", "letters.maze")
+	.connect("plain.value", "letters.glyph_style")
+	.run(#{
+		"enc.plain_text": symbols(27, corpus), "msg.plain_text": symbols(27, "EVERY LOCK OPENS"),
+		"maze.maze_text": symbols(27, "HELLO WORLD"), "maze.random_seed": symbols(10, "4"),
+	});
+sized.add(resized.canvases("pages")[0].scale_by(0.4).translate_by(vec2(LEFT, TOP + 80)));
+sized.add(resized.canvases("larger")[0].scale_by(0.4).translate_by(vec2(LEFT + 520, TOP + 80)));
+sized.add(caption("unwired, at 44, 24 and 22", TOP + 730));
+sized.add(write_in("#{ heading_size: 64, digit_size: 32, name_size: 30 }", LEFT + 520, TOP + 730, 22, CAPTION, PLAIN));
+sized.add(caption("wired a plain_hand source: maze_glyphs' cells in letters, star_pages' numbers in decimal", TOP + 800));
+sized.add(resized.canvases("letters")[0].translate_by(vec2(LEFT + 40, TOP + 880)));
+sized.add(resized.canvases("decimal")[0].scale_by(0.28).translate_by(vec2(LEFT + 520, TOP + 840)));
+book.bind("locks", sized);
 
 // ---- a spread: one drawing over two pages ----
 //

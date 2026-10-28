@@ -65,12 +65,15 @@ fn example() {
 	let body = text_style("plain_hand");
 	let heading = text_style("copper_heading", #{ size: 90.0 });
 	let red = text_style("plain_hand", #{ size: 22.0, color: "#9b2318" });
+	// Its paragraph's line height kept, and centred.
+	let caption = red;
+	caption.paragraph.align = "center";
 	#{
 		flows: #{ title: "Dolor Sit Amet", body: content("lorem") + "\n\n" + content("lorem") + "\n\n" + content("lorem"), caption: "consectetur adipiscing" },
 		roles: #{
 			body: body,
 			heading: heading,
-			caption: red + #{ paragraph: #{ align: "center" } },
+			caption: caption,
 			initial: #{ style: heading.style, type: #{ glyphset: glyphset("copper") } },
 			folio: red,
 			rule: #{ style: red.style },

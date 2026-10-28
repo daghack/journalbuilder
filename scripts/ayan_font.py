@@ -14,18 +14,22 @@ lead-in) and ends where it's left (its exit); dots and crossbars come after.
 
 The strokes were traced from the typeface's outlines: their skeletons, cut
 into pieces at junctions and routed by hand in writing order, then
-simplified to these points. Every glyph keeps the typeface's proportions:
-ASCENT units above the baseline map to the top of the glyph box (-1) and
-DESCENT below it to the bottom (1), and each glyph is centred on its
-advance."""
+simplified to these points. Every glyph keeps the typeface's proportions,
+each centred on its advance, at SCALE times the size that would fit ASCENT
+units above the baseline and DESCENT below it into the glyph box: so its
+ascenders reach as high as plain's at the same glyph scale, and it reads
+about as large (its x-height 0.7 of plain's, as a copperplate's is small),
+though its capitals' flourishes and descenders' loops reach past the box,
+as a cursive's do into the lines above and below."""
 
 import json, os
 
 ASCENT = 3100
 DESCENT = 1850
 XHEIGHT = 942
-K = 2.0 / (ASCENT + DESCENT)
-BASELINE = -1.0 + ASCENT * K
+SCALE = 2.0
+K = SCALE * 2.0 / (ASCENT + DESCENT)
+BASELINE = SCALE * (-1.0 + ASCENT * 2.0 / (ASCENT + DESCENT))
 
 GLYPHS = {
 	'a': (1360, [
@@ -374,7 +378,7 @@ if __name__ == "__main__":
 	# Every lowercase letter joins up but f, whose first stroke ends at the
 	# foot of its descender. b and o are left high, on the x-height.
 	joins = {"enter": LOWER, "leave": LOWER.replace("f", ""), "leave_high": "bo", "x_height": round(BASELINE - XHEIGHT * K, 4), "baseline": round(BASELINE, 4)}
-	font = {"character_padding": 0.0, "space_width": 0.26, "fallback": "plain", "glyph_padding": {".": 0.1}, "joins": joins, "glyphs": glyphs}
+	font = {"character_padding": 0.0, "space_width": 0.26 * SCALE, "fallback": "plain", "glyph_padding": {".": 0.1 * SCALE}, "joins": joins, "glyphs": glyphs}
 	# As the web editor writes glyphset files: a line for each setting and
 	# each glyph, its variants on it.
 	settings = [f"\t{json.dumps(k)}: {json.dumps(v)}," for k, v in font.items() if k != "glyphs"]

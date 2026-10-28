@@ -27,13 +27,15 @@ pub struct SymbolBase {
 /// How a glyph of a joined-up glyphset joins its neighbours (see
 /// `fonts`): whether it joins the glyph before and the glyph after, whether
 /// its first stroke starts high (nearer the x-height than the baseline),
-/// and whether it's left high.
+/// and whether it's left high; and its glyphset's x-height, from the
+/// baseline up, in glyph units, which joins are measured in.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Joins {
     pub enters: bool,
     pub leaves: bool,
     pub entry_high: bool,
     pub exit_high: bool,
+    pub x_height: f32,
 }
 
 impl SymbolBase {
@@ -237,17 +239,25 @@ impl Symbol {
     }
 }
 
-/// How far apart, in glyph scales, a glyph's end and the next's start can
-/// be and still be joined. Further, they've been set apart (at a line's
-/// end, round something text avoids, by hand) and are written apart.
-const JOIN_REACH: f32 = 0.5;
+/// How far apart, in x-heights, a glyph's end and the next's start can be
+/// and still be joined. Further, they've been set apart (at a line's end,
+/// round something text avoids, by hand) and are written apart. Joins are
+/// measured in the glyphset's x-height, not glyph scales, so they're the
+/// same however large its glyphs are drawn in their box.
+const JOIN_REACH: f32 = 2.6;
+
+/// The x-height `a` and `b` are joined by, as drawn: the larger's.
+fn join_unit(a: &Symbol, b: &Symbol) -> Option<f32> {
+    let (ja, jb) = (a.joins()?, b.joins()?);
+    // A font size is 2 glyph units.
+    Some((a.scale * ja.x_height).max(b.scale * jb.x_height) / 2.0)
+}
 
 /// Whether `a` joins on to `b`, written after it: both join, `a` leaves
 /// and `b` enters, and they're close enough.
 fn join(a: &Symbol, b: &Symbol, from: Vec2, to: Vec2) -> bool {
-    let (Some(ja), Some(jb)) = (a.joins(), b.joins()) else { return false };
-    a.joined && b.joined && ja.leaves && jb.enters
-        && from.distance(to) < JOIN_REACH * a.scale.max(b.scale)
+    let (Some(ja), Some(jb), Some(unit)) = (a.joins(), b.joins(), join_unit(a, b)) else { return false };
+    a.joined && b.joined && ja.leaves && jb.enters && from.distance(to) < JOIN_REACH * unit
 }
 
 /// A subpath's first and last points.
@@ -389,13 +399,13 @@ fn connector(from: &At, to: &At) -> PathCmd {
 }
 
 /// How far back a join may take the stroke before it, and into the one
-/// after, in glyph scales: along an exit's tail and an entry's lead-in
+/// after, in x-heights: along an exit's tail and an entry's lead-in
 /// (where they don't head down), and a little more, into a downstroke.
-const JOIN_TRIM_BACK: f32 = 0.3;
-const JOIN_TRIM_IN: f32 = 0.3;
-const JOIN_TRIM_DOWN: (f32, f32) = (0.12, 0.03);
-/// What trimming costs, in radians of turning per glyph scale trimmed.
-const JOIN_TRIM_COST: f32 = 2.0;
+const JOIN_TRIM_BACK: f32 = 1.6;
+const JOIN_TRIM_IN: f32 = 1.6;
+const JOIN_TRIM_DOWN: (f32, f32) = (0.63, 0.16);
+/// What trimming costs, in radians of turning per x-height trimmed.
+const JOIN_TRIM_COST: f32 = 0.38;
 
 /// Where to join `stroke` (as far as written) to `next`, the next glyph's
 /// first stroke: the place on each to join at, and the join between them.
@@ -405,7 +415,7 @@ const JOIN_TRIM_COST: f32 = 2.0;
 /// So each may be trimmed a little, wherever the join turns least
 /// smoothly (its turns squared, so a sharp turn costs more than a long
 /// one), and a little for what's trimmed.
-fn best_join(stroke: &[PathCmd], next: &[PathCmd], scale: f32, down: Vec2) -> Option<(At, At, PathCmd)> {
+fn best_join(stroke: &[PathCmd], next: &[PathCmd], unit: f32, down: Vec2) -> Option<(At, At, PathCmd)> {
     let (tail, head) = (places(stroke), places(next));
     let (end, len) = (tail.last()?.run, head.last()?.run);
     // Places from an end inwards, given with how far in they are, within
@@ -415,7 +425,7 @@ fn best_join(stroke: &[PathCmd], next: &[PathCmd], scale: f32, down: Vec2) -> Op
         let mut downstroke: Option<f32> = None;
         let mut out = Vec::new();
         for (d, a) in inwards {
-            if d > reach || downstroke.is_some_and(|from| d - from > past_down * scale) {
+            if d > reach || downstroke.is_some_and(|from| d - from > past_down * unit) {
                 break;
             }
             if downstroke.is_none() && a.heading.dot(down) > 0.3 {
@@ -425,14 +435,14 @@ fn best_join(stroke: &[PathCmd], next: &[PathCmd], scale: f32, down: Vec2) -> Op
         }
         out
     };
-    let back = window(tail.iter().rev().map(|a| (end - a.run, *a)).collect(), (JOIN_TRIM_BACK * scale).min(end / 2.0), JOIN_TRIM_DOWN.0);
-    let ahead = window(head.iter().map(|a| (a.run, *a)).collect(), (JOIN_TRIM_IN * scale).min(len / 2.0), JOIN_TRIM_DOWN.1);
+    let back = window(tail.iter().rev().map(|a| (end - a.run, *a)).collect(), (JOIN_TRIM_BACK * unit).min(end / 2.0), JOIN_TRIM_DOWN.0);
+    let ahead = window(head.iter().map(|a| (a.run, *a)).collect(), (JOIN_TRIM_IN * unit).min(len / 2.0), JOIN_TRIM_DOWN.1);
     let mut best: Option<(f32, usize, usize)> = None;
     for (i, (cut, from)) in back.iter().enumerate() {
         for (j, (into, to)) in ahead.iter().enumerate() {
             let join = connector(from, to);
             let turns = turning((0..=SAMPLES_PER_CMD).map(|k| point_on(from.point, &join, k as f32 / SAMPLES_PER_CMD as f32)), from.heading, to.heading);
-            let cost = turns + JOIN_TRIM_COST * (cut + into) / scale;
+            let cost = turns + JOIN_TRIM_COST * (cut + into) / unit;
             if best.is_none_or(|(b, ..)| cost < b - 1e-4) {
                 best = Some((cost, i, j));
             }
@@ -468,9 +478,9 @@ pub fn joined_paths(glyphs: &[Symbol], breaks: impl Fn(usize) -> bool) -> Vec<(R
             if !join(&glyphs[i], &glyphs[i + 1], from, to) {
                 break;
             }
-            let scale = glyphs[i].scale.max(glyphs[i + 1].scale);
+            let Some(unit) = join_unit(&glyphs[i], &glyphs[i + 1]) else { break };
             let down = Vec2::new(-glyphs[i].rotation_rad.sin(), glyphs[i].rotation_rad.cos());
-            let Some((cut, into, join)) = best_join(&stroke, &next[0], scale, down) else { break };
+            let Some((cut, into, join)) = best_join(&stroke, &next[0], unit, down) else { break };
             stroke = up_to_place(&stroke, &cut);
             stroke.push(join);
             stroke.extend_from_slice(&from_place(&next[0], &into)[1..]);
@@ -1122,6 +1132,9 @@ mod tests {
         Outline::new(&points.iter().map(|&(x, y)| Vec2::new(x, y)).collect::<Vec<_>>(), pad, 0.0)
     }
 
+    /// An x-height that joins as the glyph scale: half a glyph scale apart.
+    const X_HEIGHT: f32 = 2.0 * 0.5 / JOIN_REACH;
+
     fn glyph(svg: &str) -> Symbol {
         Symbol::new_default_from_base_rc(Rc::new(SymbolBase::new(SymbolType::Pathed(svg.parse().unwrap()))))
     }
@@ -1129,7 +1142,7 @@ mod tests {
     /// A joining glyph two units wide: a stroke across, entered and left,
     /// and a dot above it, at `x`.
     fn joining(x: f32) -> Symbol {
-        let joins = Joins { enters: true, leaves: true, entry_high: false, exit_high: false };
+        let joins = Joins { enters: true, leaves: true, entry_high: false, exit_high: false, x_height: X_HEIGHT };
         let base = SymbolBase::new(SymbolType::Pathed("M -1 0 L 1 0 M 0 -1 L 0 -0.9".parse().unwrap())).with_joins(Some(joins));
         let mut glyph = Symbol::new_default_from_base_rc(Rc::new(base)).with_joined(true);
         glyph.set_position(Vec2::new(x, 0.0));
@@ -1172,7 +1185,7 @@ mod tests {
         // The second's lead-in starts a little behind where the first
         // ends, below it: joined as it is, the pen would double back over
         // itself there. The join trims the lead-in, and the word runs on.
-        let joins = Joins { enters: true, leaves: true, entry_high: false, exit_high: false };
+        let joins = Joins { enters: true, leaves: true, entry_high: false, exit_high: false, x_height: X_HEIGHT };
         let base = SymbolBase::new(SymbolType::Pathed("M -1 0.1 L 1 -0.1".parse().unwrap())).with_joins(Some(joins));
         let mut second = Symbol::new_default_from_base_rc(Rc::new(base)).with_joined(true);
         second.set_position(Vec2::new(0.95, 0.0));
@@ -1186,7 +1199,7 @@ mod tests {
     fn joins_turn_sharply_rather_than_loop() {
         // The second glyph sets off back the way the join came: the join
         // runs straight in, its last handle on the line across.
-        let back = Joins { enters: true, leaves: true, entry_high: false, exit_high: false };
+        let back = Joins { enters: true, leaves: true, entry_high: false, exit_high: false, x_height: X_HEIGHT };
         let base = SymbolBase::new(SymbolType::Pathed("M 1 0 L -1 0".parse().unwrap())).with_joins(Some(back));
         let mut second = Symbol::new_default_from_base_rc(Rc::new(base)).with_joined(true);
         second.set_position(Vec2::new(0.2, 0.0));

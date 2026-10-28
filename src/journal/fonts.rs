@@ -383,6 +383,7 @@ impl FontBook {
                             leaves: joins.leave.contains(key.as_str()),
                             entry_high: high(points.first()?.y),
                             exit_high: joins.leave_high.contains(key.as_str()),
+                            x_height: joins.baseline - joins.x_height,
                         })
                     }));
                     Ok(Rc::new(SymbolBase::new(SymbolType::Pathed(path)).with_joins(ends)))
@@ -482,6 +483,9 @@ impl FontBook {
         ))
     }
 }
+
+#[cfg(test)]
+mod cursive_tests;
 
 #[cfg(test)]
 mod tests {

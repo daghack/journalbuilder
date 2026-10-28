@@ -110,8 +110,27 @@ impl TextStyleFile {
     }
 }
 
+/// A bundle, `given` (a map of some of its keys), with what it doesn't
+/// give taken from `under`'s, a bundle's too: the keys it hasn't, and in
+/// its type, what `TypeStyle::or` fills in.
+pub(super) fn bundle_over(caller: &str, given: Map, under: &Map) -> RhaiResult<Map> {
+    let mut out = under.clone();
+    for (key, value) in given {
+        let value = match (key.as_str(), under.get("type")) {
+            ("type", Some(below)) => {
+                let what = format!("{} 'type'", caller);
+                let over = TypeStyle::given(&what, &value, &TypeStyle::empty())?;
+                Dynamic::from(over.or(&TypeStyle::given(&what, below, &TypeStyle::empty())?))
+            }
+            _ => value,
+        };
+        out.insert(key, value);
+    }
+    Ok(out)
+}
+
 /// A bundle with its style, type and paragraph made whole.
-fn whole(caller: &str, mut map: Map) -> RhaiResult<Map> {
+pub(super) fn whole(caller: &str, mut map: Map) -> RhaiResult<Map> {
     check_keys(caller, &map, &KEYS)?;
     let style = match map.remove("style") {
         None => Style::default_style(),

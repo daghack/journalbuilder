@@ -1,6 +1,8 @@
 // styled_text: text written in a text style, wrapped into a block: a
-// chain's content in the hand a style source gives it. One canvas, width
-// across. Draws text, a String (text content, say), in style, a TextStyle.
+// chain's content in the hand a style source gives it, drawn whole (its
+// pen and hand, its glyphs at its size, its paragraph). One canvas, width
+// across, the first line a glyph scale down. Draws text, a String (text
+// content, say), in style, a TextStyle.
 
 fn options() {
 	#{ width: 900.0 }
@@ -11,8 +13,8 @@ fn inputs(o) {
 }
 
 fn render(o, i) {
-	let size = i.style.type.glyph_scale ?? 30.0;
-	new_canvas().add(write_block(i.text, vec2(0, size), o.width, i.style).canvas)
+	let t = i.style.type;
+	new_canvas().add(write_block(i.text, vec2(0, (t.glyph_scale ?? 0.0) * t.glyph_scale_factor), o.width, i.style).canvas)
 }
 
 // What the editor previews it with.

@@ -49,6 +49,9 @@ pub struct TextBoxOptions<'a> {
     pub wander: f32,
     /// How far each line's gap from the last may be off, either way.
     pub line_gap_jitter: f32,
+    /// How far apart lines are, in symbol scales, at least: further where
+    /// a line's ink is taller. None spaces them by their ink alone.
+    pub line_height: Option<f32>,
 }
 
 /// A rectangle as a shape for `TextBoxOptions`.
@@ -226,6 +229,7 @@ pub struct TextBox<'a> {
     overhang: f32,
     wander: f32,
     line_gap_jitter: f32,
+    line_height: Option<f32>,
 }
 
 /// How many halvings close in on how far down text can be set and still
@@ -258,6 +262,7 @@ impl<'a> TextBox<'a> {
             overhang: options.overhang,
             wander: options.wander,
             line_gap_jitter: options.line_gap_jitter,
+            line_height: options.line_height,
         }
     }
 
@@ -657,6 +662,8 @@ impl<'a> TextBox<'a> {
             let max_height = placed_line.iter()
                 .map(|symbol| symbol.hull_aabb().extents().y * self.symbol_scale / 2.0)
                 .fold(0.0, f32::max);
+            // A line height, if set, keeps lines that far apart at least.
+            let pitch = self.line_height.map_or(0.0, |h| h * self.symbol_scale);
             if !placed_line.is_empty() {
                 if last.is_empty() {
                     first = current_y;
@@ -670,7 +677,7 @@ impl<'a> TextBox<'a> {
             current_y += if max_height > 0.0 {
                 // Each line's gap from the last a little off, if it may be.
                 let off = if self.line_gap_jitter > 0.0 { rng.random_range(-self.line_gap_jitter..self.line_gap_jitter) } else { 0.0 };
-                (max_height + off).max(empty_step)
+                (max_height.max(pitch) + off).max(empty_step)
             } else {
                 empty_step
             };
@@ -733,6 +740,7 @@ mod tests {
             overhang: 0.0,
             wander: 0.0,
             line_gap_jitter: 0.0,
+            line_height: None,
         }
     }
 
@@ -924,6 +932,27 @@ mod tests {
         assert!(even.windows(2).all(|w| (w[0] - w[1]).abs() < 1e-3), "{:?}", even);
         let uneven = rows(4.0);
         assert!(uneven.windows(2).any(|w| (w[0] - w[1]).abs() > 0.5), "{:?}", uneven);
+    }
+
+    #[test]
+    fn a_line_height_spaces_lines_that_far_apart_but_no_closer_than_their_ink() {
+        let square = vec![Vec2::new(-50.0, -50.0), Vec2::new(50.0, -50.0), Vec2::new(50.0, 50.0), Vec2::new(-50.0, 50.0)];
+        let gaps = |line_height: Option<f32>| {
+            let tb = TextBox::new(TextBoxOptions { line_height, ..options(vec![square.clone()]) });
+            let (placed, _) = tb.fill_bounds_with(boxes(200), &mut <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(3));
+            assert_eq!(overlapping(&placed), 0);
+            let mut ys: Vec<f32> = placed.iter().map(|g| g.position().y).collect();
+            ys.sort_by(f32::total_cmp);
+            ys.dedup_by(|a, b| (*a - *b).abs() < 0.5);
+            ys.windows(2).map(|w| w[1] - w[0]).collect::<Vec<f32>>()
+        };
+        let ink = gaps(None);
+        assert!(!ink.is_empty());
+        // Set wider than the ink: that far apart, symbol scales of 10.
+        let wide = gaps(Some(2.0));
+        assert!(wide.len() > 1 && wide.iter().all(|g| (g - 20.0).abs() < 1e-3), "{:?}", wide);
+        // Set closer than the ink: as the ink spaces them.
+        assert_eq!(gaps(Some(0.1)), ink);
     }
 
     #[test]

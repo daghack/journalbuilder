@@ -576,22 +576,21 @@ impl LockResult {
         let fail = |e: String| -> Box<EvalAltResult> { format!("canvases: {}", e).into() };
         let loaded = self.illustration_library.load(ctx.engine(), &attachment.illustration).map_err(fail)?;
         let options = loaded.options(&attachment.options).map_err(fail)?;
-        let mut inputs = Map::new();
-        let mut fallbacks = loaded.fallbacks(ctx.engine(), &options).map_err(fail)?;
-        for (input, _) in loaded.inputs(ctx.engine(), &options).map_err(fail)? {
-            let Some(port) = attachment.wires.iter().find(|(name, _)| *name == input).map(|(_, port)| port) else {
-                let fallback = fallbacks.remove(input.as_str())
-                    .ok_or_else(|| fail(format!("illustration '{}' has nothing connected to its input '{}'", id, input)))?;
-                inputs.insert(input.into(), fallback);
-                continue;
+        let mut wired = Map::new();
+        let names = loaded.inputs(ctx.engine(), &options).map_err(fail)?;
+        for (input, _) in &names {
+            let Some(port) = attachment.wires.iter().find(|(name, _)| name == input).map(|(_, port)| port) else { continue };
+            let value = match port.strip_suffix(".value").and_then(|id| self.sources.iter().find(|s| s.id == id)) {
+                Some(source) => source_value(ctx, &self.library, source).map_err(fail)?,
+                None => self.trace.get(port).or_else(|| self.values.get(port))
+                    .ok_or_else(|| fail(format!("illustration '{}' draws '{}', which this result has no value for", id, port)))?
+                    .data.clone(),
             };
-            if let Some(source) = port.strip_suffix(".value").and_then(|id| self.sources.iter().find(|s| s.id == id)) {
-                inputs.insert(input.into(), source_value(ctx, &self.library, source).map_err(fail)?);
-                continue;
-            }
-            let value = self.trace.get(port).or_else(|| self.values.get(port))
-                .ok_or_else(|| fail(format!("illustration '{}' draws '{}', which this result has no value for", id, port)))?;
-            inputs.insert(input.into(), value.data.clone());
+            wired.insert(input.into(), value);
+        }
+        let inputs = loaded.with_fallbacks(ctx.engine(), &options, wired).map_err(fail)?;
+        if let Some((input, _)) = names.iter().find(|(input, _)| !inputs.contains_key(input.as_str())) {
+            return Err(fail(format!("illustration '{}' has nothing connected to its input '{}'", id, input)));
         }
         let canvases = loaded.render(ctx.engine(), &options, inputs).map_err(fail)?;
         Ok(canvases.into_iter().map(Dynamic::from).collect())

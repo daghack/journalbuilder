@@ -13,25 +13,25 @@ const CODE = 'huffman::code(symbols(27, "THE QUICK BROWN FOX"), 27, 3)';
 
 /** webapp/library/chains/raven_sky.rhai, as the editor holds it. */
 function ravenModel(): { model: ChainModel; ports: PortsByNode } {
-  const option = (name: string, value: number) => ({ name, kind: 'integer' as const, default: value });
+  const option = (name: string, value: number, kind: 'integer' | 'number' = 'integer') => ({ name, kind, default: value });
   return {
     model: {
       name: 'raven_sky',
-      description: ravenSky.split('\n').filter((l) => l.startsWith('//')).slice(0, 6).map((l) => l.replace(/^\/\/ ?/, '')).join(' ').replace(/^raven_sky: /, ''),
-      options: [option('most_stars', 9), option('name_seed', 11), option('output_base', 3), option('seed', 7), option('size_seed', 29)],
+      description: ravenSky.split('\n').filter((l) => l.startsWith('//')).slice(0, 7).map((l) => l.replace(/^\/\/ ?/, '')).join(' ').replace(/^raven_sky: /, ''),
+      options: [option('digit_size', 24, 'number'), option('most_stars', 9), option('name_seed', 11), option('output_base', 3), option('seed', 7), option('size_seed', 29)],
       nodes: [
         { id: 'enc', type: 'huffman_encode', options: { input_base: 27 }, promoted: { output_base: 'output_base' }, x: 120, y: 60 },
         { id: 'msg', type: 'huffman_apply', options: { input_base: 27 }, promoted: { output_base: 'output_base' }, x: 480, y: 300 },
         {
           id: 'sky', type: 'star_chart', options: { input_base: 27 },
-          promoted: { most_stars: 'most_stars', name_seed: 'name_seed', output_base: 'output_base', seed: 'seed', size_seed: 'size_seed' }, x: 480, y: 60,
+          promoted: { label_size: 'digit_size', most_stars: 'most_stars', name_seed: 'name_seed', output_base: 'output_base', seed: 'seed', size_seed: 'size_seed' }, x: 480, y: 60,
         },
       ],
       sources: [],
       wires: [{ from: 'enc.code', to: 'sky.code' }, { from: 'enc.code', to: 'msg.code' }],
       renderers: [
         { id: 'message', type: 'trit_message', options: {}, promoted: { base: 'output_base' }, x: 840, y: 300 },
-        { id: 'pages', type: 'star_pages', options: {}, promoted: {}, x: 840, y: 60 },
+        { id: 'pages', type: 'star_pages', options: {}, promoted: { digit_size: 'digit_size' }, x: 840, y: 60 },
       ],
       renderWires: [{ from: 'msg.cipher_text', to: 'message.message' }, { from: 'sky.chart', to: 'pages.chart' }],
       fixed: {},
@@ -79,7 +79,7 @@ describe('chain files', () => {
   it('writes journal script using the chain, or building it lock by lock', () => {
     const { model, ports } = ravenModel();
     expect(journalSnippet(model, ports)).toBe([
-      'let c = chain("raven_sky", #{ most_stars: 9, name_seed: 11, output_base: 3, seed: 7, size_seed: 29 });',
+      'let c = chain("raven_sky", #{ digit_size: 24.0, most_stars: 9, name_seed: 11, output_base: 3, seed: 7, size_seed: 29 });',
       `let result = c.run(#{ "enc.plain_text": symbols(27, "${TEXT}"), "msg.plain_text": symbols(27, "NEVERMORE") });`,
       '// result.get("enc.cipher_text"): Base3Symbol',
       '// result.get("msg.cipher_text"): Base3Symbol',

@@ -9,8 +9,9 @@
 // space's, in base 27, is Vacii); every other name, the constellations'
 // too, comes from name_seed. The sky's shape comes from seed, its stars'
 // sizes (how far their marks reach) from size_seed. width and height are
-// each page's sky, label_width and label_height the room a star's label
-// needs.
+// each page's sky. label_size is the size of the number each star is
+// labelled with (star_pages' digit_style's): its label gets room 1.1 of
+// that across and 1.4 down, label_gap from the star's mark.
 //
 // Unlocking reads only what the pages show: it joins them on their shared
 // names, takes the root as the star no link points to, a leaf's symbol
@@ -24,7 +25,7 @@ fn options() {
 		input_base: integer(), output_base: integer(), most_stars: integer(9),
 		seed: integer(7), name_seed: integer(11), size_seed: integer(29), star_size: number(22.0),
 		width: number(1000.0), height: number(860.0),
-		label_width: number(26.4), label_height: number(33.6), label_gap: number(14.0),
+		label_size: number(24.0), label_gap: number(14.0),
 	}
 }
 
@@ -64,7 +65,7 @@ fn lock(o, i) {
 	}
 	let pieces = stars::split(laid.points, edges, sizes, #{
 		most_stars: o.most_stars, width: o.width, height: o.height,
-		label_width: o.label_width, label_height: o.label_height, label_gap: o.label_gap,
+		label_width: o.label_size * 1.1, label_height: o.label_size * 1.4, label_gap: o.label_gap,
 	});
 	let named = names::sky(code, new_random(o.name_seed), pieces.len());
 	let pages = [];

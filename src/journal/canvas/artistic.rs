@@ -80,6 +80,7 @@ fn scatter_one(bounds: &Canvas, avoid: &AvoidanceTree, symbols: &[Symbol], opts:
             overhang: 0.0,
             wander: 0.0,
             line_gap_jitter: 0.0,
+            line_height: None,
         });
         // Place copies, so a failed attempt leaves the symbols untouched.
         let (placed, unplaced) = textbox.fill_bounds_with(symbols.to_vec(), rng);
