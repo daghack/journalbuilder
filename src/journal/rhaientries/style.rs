@@ -53,7 +53,7 @@ use crate::journal::paths::StrokePath;
 pub(super) const MAX_PASSES: i64 = 64;
 
 /// Darkly's brushes, by name, sorted.
-fn brush_names() -> &'static [String] {
+pub fn brush_names() -> &'static [String] {
     static NAMES: OnceLock<Vec<String>> = OnceLock::new();
     NAMES.get_or_init(|| {
         let mut names: Vec<String> = ::darkly::brush::builtin_brushes::all().into_iter().map(|b| b.metadata.name).collect();

@@ -15,13 +15,14 @@
 //! `lockPorts`, `lockExamples`, `chainTypes`, `runChain`, `readChain` and
 //! `valueKinds`; and the illustration, layout and style editors have
 //! `illustrationTypes`, `illustrationPorts`, `illustrationPreview`,
-//! `layoutTypes`, `layoutPreview`, `styleTypes` and `stylePreview`.
+//! `layoutTypes`, `layoutPreview`, `styleTypes`, `stylePreview` and
+//! `styleChoices`.
 
 use scribe::journal::darkly;
 use scribe::journal::fonts::FontBook;
 use scribe::journal::pdf::PdfWriter;
 use scribe::journal::publish::{self, Render};
-use scribe::journal::rhaientries::{Entry, JournalEngine, LockLibrary, Resources};
+use scribe::journal::rhaientries::{brush_names, Entry, JournalEngine, LockLibrary, Resources};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::cell::RefCell;
@@ -563,6 +564,15 @@ pub fn style_preview(name: &str, source: Option<String>, options: &str, width: f
         let entry = engine(&extra).preview_text_style(name, &options, width)?;
         Ok(pages_json(&entry))
     })())
+}
+
+/// What a style can be made of, for the style builder: `{ brushes,
+/// glyphsets }`, every Darkly brush's name and every glyphset's (the
+/// journal's and the library's), sorted.
+#[wasm_bindgen(js_name = styleChoices)]
+pub fn style_choices() -> String {
+    let (book, _) = glyphsets(&resources(&[]));
+    json!({ "brushes": brush_names(), "glyphsets": book.names() }).to_string()
 }
 
 /// Every value kind, as JSON: `[{ name, example }]`, example a rhai

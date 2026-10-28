@@ -110,6 +110,11 @@ export class ToolsService {
     return JSON.parse(await this.call<string>('stylePreview', name, source, JSON.stringify(options), width));
   }
 
+  /** What a style can be made of: every Darkly brush's name and every glyphset's, sorted. */
+  async styleChoices(): Promise<{ brushes: string[]; glyphsets: string[] }> {
+    return JSON.parse(await this.call<string>('styleChoices'));
+  }
+
   /** Every value kind, and rhai that makes one. */
   async valueKinds(): Promise<ValueKind[]> {
     return JSON.parse(await this.call<string>('valueKinds'));

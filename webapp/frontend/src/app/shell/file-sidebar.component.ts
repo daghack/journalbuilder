@@ -2,6 +2,7 @@ import { Component, ElementRef, computed, inject, signal, viewChild } from '@ang
 import { showEditorTab } from '../layout/pane-state';
 import { CONTENT_TYPES, KINDS, VALID_NAME, contentType, entryPath, nameOf, pathOf, splitPath, type KindInfo } from '../journal/journal-files';
 import { template } from '../journal/templates';
+import { StyleBuilderComponent } from '../resources/style-builder.component';
 import { JournalStore } from '../services/journal-store.service';
 import { LibraryService } from '../services/library.service';
 import { ShellService } from './shell.service';
@@ -41,6 +42,7 @@ const open = signal<Record<string, boolean>>(readOpen());
 /** The Files tab: the journal's title and its files, kind by kind, with the library's beside them. */
 @Component({
   selector: 'app-file-sidebar',
+  imports: [StyleBuilderComponent],
   template: `
     <header>
       <input class="title" aria-label="The journal's title" [value]="store.manifest().title" (change)="setTitle($any($event.target).value)" />
@@ -121,6 +123,8 @@ const open = signal<Record<string, boolean>>(readOpen());
         </div>
       </form>
     </dialog>
+
+    <app-style-builder (created)="create(styleKind, $event.name, 'rhai', $event.source)" />
   `,
   styles: `
     :host { display: flex; flex-direction: column; overflow: auto; background: var(--surface); font-size: 12px; padding-bottom: 12px; }
@@ -171,6 +175,8 @@ export class FileSidebarComponent {
   protected readonly contentProblem = signal<string | null>(null);
   private readonly newContent = viewChild.required<ElementRef<HTMLDialogElement>>('newContent');
   private readonly contentName = viewChild.required<ElementRef<HTMLInputElement>>('contentName');
+  private readonly styleBuilder = viewChild.required(StyleBuilderComponent);
+  protected readonly styleKind = KINDS.find((k) => k.kind === 'styles')!;
 
   protected readonly groups = computed<Group[]>(() => {
     const files = this.store.files();
@@ -230,8 +236,9 @@ export class FileSidebarComponent {
     this.store.setManifest({ description: description.trim() });
   }
 
-  /** A new file of `info`'s kind, named as the user says; content asks its type too. */
+  /** A new file of `info`'s kind, named as the user says; content asks its type too, and a style is built. */
   protected add(info: KindInfo) {
+    if (info.kind === 'styles') return this.styleBuilder().open();
     if (info.kind === 'content') {
       const name = this.contentName().nativeElement;
       name.value = '';
@@ -257,14 +264,15 @@ export class FileSidebarComponent {
     this.create(KINDS.find((k) => k.kind === 'content')!, name, ext);
   }
 
-  private create(info: KindInfo, name: string, ext: string) {
+  /** Make file `name` of `info`'s kind: `text`, or the kind's template. */
+  protected create(info: KindInfo, name: string, ext: string, text?: string) {
     const path = pathOf(info.kind, name, ext);
     if (path in this.store.files()) return this.say(`There's a ${path} already.`);
     if (info.kind === 'entries') {
       const problem = this.store.addEntry(name);
       if (problem) return this.say(problem);
     } else {
-      this.store.setFile(path, template(info.kind, name, ext));
+      this.store.setFile(path, text ?? template(info.kind, name, ext));
     }
     this.open.update((open) => ({ ...open, [info.kind]: true }));
     this.shell.open(path);

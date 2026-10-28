@@ -31,6 +31,7 @@ pub use resources::embedded;
 pub use locks::{LockLibrary, SourceKind};
 pub use manifest::{valid_name, Journal, Manifest, MANIFEST, MANIFEST_VERSION};
 pub use illustrations::IllustrationLibrary;
+pub use style::brush_names;
 use text_styles::TextStyleLibrary;
 /// What the web editor's lock editor asks of lock types.
 pub mod lock_inspection {
