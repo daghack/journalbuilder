@@ -96,6 +96,8 @@ pub struct TextBox {
     /// lines itself.
     wander: f32,
     line_gap_jitter: f32,
+    /// The paragraph's line_height, if it's set.
+    line_height: Option<f32>,
     jitter: Jitter,
 }
 
@@ -153,6 +155,7 @@ impl TextBox {
             overhang: paragraph.overhang(),
             wander: text.style.handwriting().baseline_wander(),
             line_gap_jitter: paragraph.line_gap_jitter(),
+            line_height: paragraph.set_line_height(),
             jitter: text.jitter(),
         })
     }
@@ -205,6 +208,7 @@ impl TextBox {
             overhang: self.overhang,
             wander: self.wander,
             line_gap_jitter: self.line_gap_jitter,
+            line_height: self.line_height,
         });
         f(&core)
     }

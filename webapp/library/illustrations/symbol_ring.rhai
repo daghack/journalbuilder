@@ -2,8 +2,7 @@
 // joined by a dashed line to the symbol step on from it, round and round:
 // base 5 and step 2 is a five-pointed star; where base and step share a
 // factor, a figure for each cycle. In the middle, larger, is the symbol
-// for the step. Symbols are letters, 0 a space (a gap in the ring), 1 to
-// 26 A to Z, in any base. With bordered, each symbol, the middle's too,
+// for the step. With bordered, each symbol, the middle's too,
 // is ringed, and the dashes run from border to border.
 //
 // steps, if not 0, draws only the first that many lines of the walk from
@@ -12,10 +11,16 @@
 // drawn closed, without the arrow.
 //
 // The canvas is size across and down, the ring's centre in its middle.
-// Its styles are TextStyles, a style source's, drawn with their pen and
-// hand: glyph_style for the symbols and their borders, line_style for the
-// dashed lines. The symbols are glyphs, a Glyphset. Unwired, they're
-// near-black and red ink pens and loche_upper.
+// Its styles are TextStyles, a style source's: glyph_style for the
+// symbols and their borders, line_style for the dashed lines.
+// glyph_style's glyphs are its type's, at its size, or smaller if the
+// ring hasn't room, leant as it leans them; the middle's are center_scale
+// times that, up to half the ring's radius. In balanced-ternary digits
+// (balanced_ternary's), a symbol is its digit, shifted to sit round 0 (1
+// to 13 as they are, 14 to 26 as -13 to -1); in any other glyphset, its
+// letter (0 a space, a gap in the ring, 1 to 26 A to Z). Unwired, they're
+// near-black and red ink pens, the glyphs loche_upper, as big as the ring
+// holds.
 
 fn options() {
 	#{
@@ -25,15 +30,17 @@ fn options() {
 }
 
 fn inputs(o) {
-	#{ glyph_style: "TextStyle", line_style: "TextStyle", glyphs: "Glyphset" }
+	#{ glyph_style: "TextStyle", line_style: "TextStyle" }
 }
 
 fn fallbacks(o) {
 	let hand = new_handwriting_style();
 	#{
-		glyph_style: #{ style: new_style(new_brush_style(o.glyph_ink, "Ink Pen", 2.2, #{ min_pressure: 0.4, max_pressure: 0.8 }), hand) },
+		glyph_style: #{
+			style: new_style(new_brush_style(o.glyph_ink, "Ink Pen", 2.2, #{ min_pressure: 0.4, max_pressure: 0.8 }), hand),
+			type: new_type_style(glyphset("loche_upper"), room(o)),
+		},
 		line_style: #{ style: new_style(new_brush_style(o.line_ink, "Ink Pen", 1.4), hand) },
-		glyphs: glyphset("loche_upper"),
 	}
 }
 
@@ -43,12 +50,12 @@ fn render(o, i) {
 	if o.steps < 0 { throw `steps should be 0 (every line) or more, got ${o.steps}`; }
 	let centre = vec2(o.size / 2.0, o.size / 2.0);
 	let n = o.base;
-	// The glyphs as large as fit side by side round the ring, at most a
-	// fifth of its radius; the middle's center_scale times that, at most
-	// half the radius.
-	let glyph = o.size * 0.4 * 2.0 * (PI() / n).sin() * 0.55;
-	glyph = min(glyph, o.size * 0.4 * 0.2);
-	let radius = o.size / 2.0 - glyph;
+	// The ring leaves room round its edge for glyphs as large as fit; they're
+	// the style's size, up to that, and the middle's center_scale times
+	// theirs, up to half the radius.
+	let t = i.glyph_style.type;
+	let radius = o.size / 2.0 - room(o);
+	let glyph = min(t.glyph_scale * t.glyph_scale_factor, room(o));
 	let big = min(glyph * o.center_scale, radius * 0.5);
 	// How far from a symbol's middle its lines stop: past its border, or
 	// clear of its glyph.
@@ -97,9 +104,9 @@ fn render(o, i) {
 
 	let style = i.glyph_style.style;
 	for k in 0..n {
-		draw_symbol(c, i.glyphs, k, at[k], glyph, o.bordered, style);
+		draw_symbol(c, t, k, at[k], glyph, o.bordered, style);
 	}
-	draw_symbol(c, i.glyphs, o.step, centre, big, o.bordered, style);
+	draw_symbol(c, t, o.step, centre, big, o.bordered, style);
 	c
 }
 
@@ -107,14 +114,26 @@ fn example() {
 	#{}
 }
 
-// Symbol s (0 a space, 1 to 26 A to Z) drawn at `at`, `size` across, in a
-// circle if bordered.
-fn draw_symbol(c, glyphs, s, at, size, bordered, style) {
+// How big the ring's glyphs can be: as large as fit side by side round
+// it, at most a fifth of its radius.
+fn room(o) {
+	min(o.size * 0.4 * 2.0 * (PI() / o.base).sin() * 0.55, o.size * 0.4 * 0.2)
+}
+
+// Symbol s drawn at `at`, `size` across, in the type's glyphset (its
+// digit shifted to sit round 0, or its letter, 0 a space), in a circle if
+// bordered.
+fn draw_symbol(c, t, s, at, size, bordered, style) {
 	if bordered { c.add(new_circle(at, size * 0.75), style); }
-	if s == 0 { return; }
-	let g = glyphs.glyphs(`${"ABCDEFGHIJKLMNOPQRSTUVWXYZ"[s - 1]}`)[0];
+	let g = if "-13" in t.glyphset.characters() {
+		t.glyphset.glyph(if s <= 13 { s } else { s - 27 })
+	} else {
+		if s == 0 { return; }
+		t.glyphset.glyphs(`${" ABCDEFGHIJKLMNOPQRSTUVWXYZ"[s]}`)[0]
+	};
 	g.scale = size;
 	g.position = at;
+	g.skew = t.skew ?? t.glyphset.skew;
 	c.add(g, style);
 }
 

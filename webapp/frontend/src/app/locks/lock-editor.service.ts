@@ -157,8 +157,9 @@ export class LockEditorService {
   private runTimer: ReturnType<typeof setTimeout> | null = null;
   private writeTimer: ReturnType<typeof setTimeout> | null = null;
   private previewTimer: ReturnType<typeof setTimeout> | null = null;
-  /** The model as last read from the file, and the text it was read from or last written as. */
+  /** The model as last read from the file, the file, and the text it was read from or last written as. */
   private untouched: ChainModel | null = null;
+  private modelPath: string | null = null;
   private known: string | null = null;
   private previewAsked = 0;
   private asked = 0;
@@ -656,11 +657,13 @@ export class LockEditorService {
    * Write the chain into its file, as it is: a journal using
    * chain("name") runs it as it's edited, mistakes and all. A chain only
    * read isn't written, so a library chain isn't copied unless it's changed.
+   * Nor is a model into another chain's file: until a newly opened chain
+   * is read, the model is the last one's (or, first, an empty chain).
    */
   private write(model: ChainModel, ports: PortsByNode) {
     const path = this.path();
     // Its values are written by their ports' types, so wait for the ports.
-    if (!path || model === this.untouched || !model.nodes.every((n) => ports[n.id])) return;
+    if (!path || path !== this.modelPath || model === this.untouched || !model.nodes.every((n) => ports[n.id])) return;
     const source = chainSource(model, { ports, optionKinds: (t) => this.optionKinds(t) });
     this.known = source;
     if (source !== this.text()) this.store.setFile(path, source);
@@ -730,6 +733,7 @@ export class LockEditorService {
     if (reading !== this.reading) return false;
     const reopened = this.model().name === model.name;
     this.untouched = model;
+    this.modelPath = path;
     this.model.set(model);
     if (!reopened) {
       this.undoStack = [];
@@ -801,6 +805,7 @@ export class LockEditorService {
     if (problem) return problem;
     this.model.update((m) => ({ ...m, name }));
     this.untouched = this.model();
+    this.modelPath = to;
     this.path.set(to);
     this.shell.open(to);
     return null;

@@ -497,6 +497,8 @@ impl JournalEngine {
 
 #[cfg(test)]
 mod api_shape_tests;
+#[cfg(test)]
+mod illustration_style_tests;
 
 #[cfg(test)]
 mod tests {

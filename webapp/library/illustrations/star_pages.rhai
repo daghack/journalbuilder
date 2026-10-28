@@ -8,27 +8,34 @@
 //
 // The canvases are page-sized, width by height; the chart's own sky (the
 // box star_chart fitted each constellation to) starts at sky_x, sky_y.
+// The star_chart's label_size should be digit_style's size, so the
+// numbers fit the room it left them.
 //
-// Its styles are TextStyles, a style source's, drawn with their pen and
-// hand: line_style for links and stars, leaf_style for headings and
-// leaves, and fine_style and fine_leaf_style for the numbers and the
-// index. Headings are in heading_glyphs, the index's names in name_glyphs
-// and the numbers in digit_glyphs. Unwired, they're near-black and red
-// ink pens, loche_upper, plain and balanced_ternary.
+// Its styles are TextStyles, a style source's, each drawn whole:
+// heading_style writes the constellation's name and the index's heading
+// (at 0.64 of its size) and draws the rule under the name; line_style
+// draws the links and stars, the links' marks reaching its glyph scale
+// out from them, and leaf_style the leaves; digit_style writes the
+// numbers (in the index at 0.9 of its size; in balanced-ternary digits,
+// a glyph to three trits, or else in decimal), name_style the index's
+// names, and leaf_name_style the leaves'. The index's rows and columns are
+// spaced by the numbers' and names' sizes. Unwired, they're near-black and
+// red ink pens, the heading in loche_upper at heading_size, the numbers in
+// balanced_ternary at digit_size and the names in plain at name_size.
 
 fn options() {
 	#{
 		width: 1200.0, height: 1600.0, sky_x: 100.0, sky_y: 180.0,
 		large_star: 33.0, large_shape: "corona", small_shape: "rayed",
-		digit: 24.0, index_x: 600.0, index_y: 1110.0,
+		heading_size: 44.0, digit_size: 24.0, name_size: 22.0, index_x: 600.0, index_y: 1110.0,
 	}
 }
 
 fn inputs(o) {
 	#{
 		chart: "StarChart",
-		line_style: "TextStyle", leaf_style: "TextStyle", fine_style: "TextStyle", fine_leaf_style: "TextStyle",
-		heading_glyphs: "Glyphset", name_glyphs: "Glyphset", digit_glyphs: "Glyphset",
+		heading_style: "TextStyle", line_style: "TextStyle", leaf_style: "TextStyle",
+		digit_style: "TextStyle", name_style: "TextStyle", leaf_name_style: "TextStyle",
 	}
 }
 
@@ -36,24 +43,34 @@ fn fallbacks(o) {
 	let ink = "#2b1d12";
 	let red = "#9b2318";
 	let hand = new_handwriting_style();
+	let pen = |color, width| new_style(new_brush_style(color, "Ink Pen", width), hand);
+	let names = glyphset("plain");
 	#{
-		line_style: #{ style: new_style(new_brush_style(ink, "Ink Pen", 1.6), hand) },
-		leaf_style: #{ style: new_style(new_brush_style(red, "Ink Pen", 1.6), hand) },
-		fine_style: #{ style: new_style(new_brush_style(ink, "Ink Pen", 1.2), hand) },
-		fine_leaf_style: #{ style: new_style(new_brush_style(red, "Ink Pen", 1.2), hand) },
-		heading_glyphs: glyphset("loche_upper"),
-		name_glyphs: glyphset("plain"),
-		digit_glyphs: glyphset("balanced_ternary"),
+		heading_style: #{ style: pen.call(red, 1.6), type: new_type_style(glyphset("loche_upper"), o.heading_size) },
+		line_style: #{ style: pen.call(ink, 1.6), type: #{ glyph_scale: 22.0 } },
+		leaf_style: #{ style: pen.call(red, 1.6) },
+		digit_style: #{ style: pen.call(ink, 1.2), type: new_type_style(glyphset("balanced_ternary"), o.digit_size) },
+		name_style: #{ style: pen.call(ink, 1.2), type: new_type_style(names, o.name_size) },
+		leaf_name_style: #{ style: pen.call(red, 1.2), type: new_type_style(names, o.name_size) },
 	}
 }
 
 fn render(o, i) {
 	let chart = i.chart;
 	let line_style = i.line_style.style;
-	let mark_style = i.leaf_style.style;
-	let fine = i.fine_style.style;
-	let fine_red = i.fine_leaf_style.style;
+	let leaf_style = i.leaf_style.style;
 	let corner = vec2(o.sky_x, o.sky_y);
+	let heading = size_of(i.heading_style.type);
+	let index_heading = i.heading_style;
+	index_heading.type.glyph_scale_factor *= 0.64;
+	let reach = size_of(i.line_style.type);
+	let digit = size_of(i.digit_style.type);
+	let name = size_of(i.name_style.type);
+	// The index: a row a star, its number and then its name, the rows
+	// as far apart as the larger of them needs.
+	let pitch = max(digit, name) * (5.0 / 3.0);
+	let name_x = digit * 2.25;
+	let column = name_x + name * 9.4;
 	// A star is a letter's if it's no link's parent on any page.
 	let parents = #{};
 	for page in chart.pages {
@@ -62,8 +79,9 @@ fn render(o, i) {
 	let canvases = [];
 	for page in chart.pages {
 		let c = new_canvas();
-		c.add(write_line(page.name.to_upper(), vec2(100, 100), #{ style: mark_style, type: new_type_style(i.heading_glyphs, 44) }));
-		c.add(new_line(vec2(100, 132), vec2(o.width - 100, 132)), mark_style);
+		c.add(write_line(page.name.to_upper(), vec2(100, 100), i.heading_style));
+		let rule = 100 + heading * 0.73;
+		c.add(new_line(vec2(100, rule), vec2(o.width - 100, rule)), i.heading_style.style);
 		for link in page.links {
 			let from = page.stars[link[0]];
 			let to = page.stars[link[1]];
@@ -73,23 +91,23 @@ fn render(o, i) {
 			let edge = new_line(a + along * (from.size + 8), b - along * (to.size + 8));
 			c.add(edge, line_style);
 			// The link's own digit, in trits down it from parent to child.
-			c.add(edge.fit_text(trits(link[2], chart.output_base), #{ style: line_style, width: 22 }));
+			c.add(edge.fit_text(trits(link[2], chart.output_base), #{ style: line_style, width: reach }));
 		}
 		for (star, k) in page.stars {
 			let shape = if star.size >= o.large_star { o.large_shape } else { o.small_shape };
-			let style = if star.name in parents { line_style } else { mark_style };
+			let style = if star.name in parents { line_style } else { leaf_style };
 			c.add(star_mark(shape, vec2(star.point[0], star.point[1]) + corner, star.size / reach_of(shape)), style);
-			for g in index_glyphs(i.digit_glyphs, k, vec2(star.label[0], star.label[1]) + corner, o.digit) { c.add(g, fine); }
+			c.add(index_glyphs(i.digit_style, k, vec2(star.label[0], star.label[1]) + corner, 1.0));
 		}
 		// The index: each star's number on this page, and its name.
-		c.add(write_line("INDEX", vec2(o.index_x, o.index_y), #{ style: mark_style, type: new_type_style(i.heading_glyphs, 28) }));
+		c.add(write_line("INDEX", vec2(o.index_x, o.index_y), index_heading));
 		let rows = (page.stars.len() + 1) / 2;
 		for (star, k) in page.stars {
-			let cx = o.index_x + (k / rows) * 260;
-			let row_y = o.index_y + 52 + (k % rows) * 40;
-			for g in index_glyphs(i.digit_glyphs, k, vec2(cx + 16, row_y), o.digit * 0.9) { c.add(g, fine); }
-			let style = if star.name in parents { fine } else { fine_red };
-			c.add(write_line(star.name, vec2(cx + 54, row_y), #{ style: style, type: new_type_style(i.name_glyphs, 22) }));
+			let cx = o.index_x + (k / rows) * column;
+			let row_y = o.index_y + pitch * 1.3 + (k % rows) * pitch;
+			c.add(index_glyphs(i.digit_style, k, vec2(cx + digit * (2.0 / 3.0), row_y), 0.9));
+			let names = if star.name in parents { i.name_style } else { i.leaf_name_style };
+			c.add(write_line(star.name, vec2(cx + name_x, row_y), names));
 		}
 		canvases.push(c);
 	}
@@ -173,16 +191,32 @@ fn reach_of(shape) {
 }
 
 
-// n in balanced ternary, a glyph of `glyphs` to every three digits, centred on `at`.
-fn index_glyphs(glyphs, n, at, size) {
+// The size a type sets glyphs at.
+fn size_of(t) {
+	t.glyph_scale * t.glyph_scale_factor
+}
+
+// n, centred on `at`, in a TextStyle's glyphs at `share` of its size,
+// drawn in its pen: in balanced-ternary digits (balanced_ternary's), n in
+// balanced ternary, a glyph to every three digits; in any other glyphset,
+// n's decimal digits, written as the style writes.
+fn index_glyphs(text, n, at, share) {
+	let t = text.type;
+	let size = size_of(t) * share;
+	if !("-13" in t.glyphset.characters()) {
+		let style = text;
+		style.type.glyph_scale_factor *= share;
+		let line = write_line(`${n}`, at, style);
+		return line.translate_by(vec2(at.x - line.bounds().center.x, 0));
+	}
 	let chunks = balanced_ternary(n).digits(3);
 	let step = size * 0.8;
-	let out = [];
+	let c = new_canvas();
 	for (chunk, k) in chunks {
 		let x = (k - (chunks.len() - 1) / 2.0) * step;
-		out.push(glyphs.glyph(balanced_ternary(chunk), #{ scale: size, position: at + vec2(x, 0) }));
+		c.add(t.glyphset.glyph(balanced_ternary(chunk), #{ scale: size, position: at + vec2(x, 0), skew: t.skew ?? t.glyphset.skew }), text.style);
 	}
-	out
+	c
 }
 
 // A digit d of a base's code as balanced ternary: shifted to sit round 0

@@ -37,7 +37,7 @@ Adding an illustration means adding a file; nothing needs recompiling.
 | `options()` *(optional)* | `#{ NAME: default }`: its options. `lock.attach` can give only these, each like its default (a whole number is fine for a number, and comes as one). |
 | `inputs(o)` | `#{ NAME: type }`: the values it draws, typed as lock files type them (`Base27Symbol`, `HuffmanCode`, `Maze`, `StarChart`, `Any`). They can follow the options: `trit_message`'s input is `` `Base${o.base}Symbol` ``. |
 | `render(o, i)` | a canvas, or an array of canvases |
-| `fallbacks(o)` *(optional)* | `#{ NAME: value }`: what inputs nothing's wired to draw with. The library's illustrations take the styles and glyphsets they draw in as inputs (`TextStyle`, `Glyphset`), so a chain can wire in a style or glyphset source, and give fallbacks for them made from their options. An input with no fallback must be wired. |
+| `fallbacks(o)` *(optional)* | `#{ NAME: value }`: what inputs nothing's wired to draw with. The library's illustrations take each kind of text they write as a `TextStyle` input, so a chain can wire in a style source, and give fallbacks for them made from their options (a `<role>_size` option for each one's size). A `TextStyle` input comes whole, `#{ style, type, paragraph }`, and what a wired style leaves out (a pen-only style's glyphset and size, say) is taken from the fallback's. An input with no fallback must be wired. |
 | `example()` *(optional)* | `#{ NAME: value }`: values to draw when nothing's wired, which the web editor previews and `cargo test` checks it draws |
 
 `o` is the options, its defaults with what `lock.attach` gave over them.
@@ -55,23 +55,28 @@ fn options() {
 }
 
 fn inputs(o) {
-	#{ maze: "Maze", corridor_style: "TextStyle", glyph_style: "TextStyle", glyphs: "Glyphset" }
+	#{ maze: "Maze", corridor_style: "TextStyle", glyph_style: "TextStyle" }
 }
 
-// A style source gives a text style's bundle, #{ style, type, ... }: these
-// give just the style, which is all render uses.
+// A style source gives a text style's bundle, #{ style, type, paragraph }:
+// these give what render uses, and fill in what a wired style leaves out.
 fn fallbacks(o) {
+	let hand = new_handwriting_style();
 	#{
-		corridor_style: #{ style: new_style(new_brush_style(o.corridors, "Ink Pen", 1.6), new_handwriting_style()) },
-		// ... glyph_style likewise, in o.glyphs
-		glyphs: glyphset("balanced_ternary"),
+		corridor_style: #{ style: new_style(new_brush_style(o.corridors, "Ink Pen", 1.6), hand) },
+		glyph_style: #{
+			style: new_style(new_brush_style(o.glyphs, "Ink Pen", 2.2), hand),
+			type: new_type_style(glyphset("balanced_ternary"), o.cell * 0.8),
+		},
 	}
 }
 
 fn render(o, i) {
 	let c = new_canvas();
 	c.add(i.maze.path().scale_by(o.cell), i.corridor_style.style);
-	// ... a glyph of i.glyphs in each of i.maze.cells(), in i.glyph_style.style
+	let t = i.glyph_style.type;
+	// ... a glyph of t.glyphset in each of i.maze.cells(), at its size (no
+	// bigger than a cell holds), in i.glyph_style.style
 	c
 }
 

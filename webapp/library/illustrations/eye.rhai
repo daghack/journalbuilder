@@ -9,14 +9,16 @@
 // The canvas is width across and length down, the eye's corners at the
 // middle of its top and bottom edges.
 //
-// Its styles are TextStyles, a style source's, drawn with their pen and
-// hand: lid_style for the lids, ring_style for the iris's rings,
-// iris_style for the iris's glyphs and pupil_style for the pupil's. The
-// iris's glyphs are iris_glyphs and the pupil's pupil_glyphs, each a
-// glyphset whose letters A to M and N to Z are 1 to 13 and -13 to -1.
-// Unwired, the styles are rough ink pens, the lids, rings and iris inked
-// from top_ink down to bottom_ink and the pupil in inner_ink, and the
-// glyphsets balanced ternary.
+// Its styles are TextStyles, a style source's, each drawn whole:
+// lid_style draws the lids and ring_style the iris's rings; iris_style
+// writes the iris's glyphs and pupil_style the pupil's, in their types'
+// glyphsets (whose letters A to M and N to Z are 1 to 13 and -13 to -1),
+// each glyph set off true by its hand's glyph jitter. The iris's glyphs are
+// iris_style's size, or smaller if the ring hasn't room; the pupil's text
+// is as large as all of it fits, up to pupil_style's size, its lines
+// justified and centred. Unwired, the styles are rough ink pens, the lids,
+// rings and iris inked from top_ink down to bottom_ink and the pupil in
+// inner_ink, at pupil_size, the glyphs balanced ternary.
 //
 // pupil is how the pupil's text goes: "lines", across it line under line,
 // or "spiral", round and round out from its middle (art::spiral_text),
@@ -25,7 +27,7 @@
 
 fn options() {
 	#{
-		outer_base: 27, inner_base: 27, pupil: "lines", pupil_minimum_scale: 0.33,
+		outer_base: 27, inner_base: 27, pupil: "lines", pupil_minimum_scale: 0.33, pupil_size: 40.0,
 		length: 1640.0, width: 717.2,
 		top_ink: "#09603d", bottom_ink: "#0b2a1c", inner_ink: "#000000",
 	}
@@ -35,7 +37,6 @@ fn inputs(o) {
 	#{
 		outer: `Base${o.outer_base}Symbol`, inner: `Base${o.inner_base}Symbol`,
 		lid_style: "TextStyle", ring_style: "TextStyle", iris_style: "TextStyle", pupil_style: "TextStyle",
-		iris_glyphs: "Glyphset", pupil_glyphs: "Glyphset",
 	}
 }
 
@@ -46,13 +47,19 @@ fn fallbacks(o) {
 	let key_pen = new_brush_style(ink, "Rough Ink", 2.0, #{ max_pressure: 0.6, pressure_profile: "taper", pressure_wander: 0.15 });
 	// A finer nib for the pupil's small glyphs, pooled at their ends.
 	let pupil_pen = new_brush_style(o.inner_ink, "Rough Ink", 1.2, #{ max_pressure: 0.6, pressure_profile: "taper", pressure_wander: 0.15, pool: 0.85, pool_depth: 0.6 });
+	let ring = eye_shape(vec2(o.width / 2.0, o.length / 2.0), o.length, o.width);
 	#{
 		lid_style: #{ style: new_style(pen, new_handwriting_style(#{ passes: 2, pass_end_jitter: 2.5 })) },
 		ring_style: #{ style: new_style(pen, new_handwriting_style(#{ passes: 3, pass_end_jitter: 4.0 })) },
-		iris_style: #{ style: new_style(key_pen, new_handwriting_style(#{ passes: 3, pass_end_jitter: 2.0 })) },
-		pupil_style: #{ style: new_style(pupil_pen, new_handwriting_style(#{ pass_end_jitter: 0.8 })) },
-		iris_glyphs: ternary_glyphset("balanced_ternary", #{ glyph_outline_gap: 0.32 }),
-		pupil_glyphs: ternary_glyphset("balanced_ternary", #{ glyph_outline_gap: 0.08 }),
+		iris_style: #{
+			style: new_style(key_pen, new_handwriting_style(#{ passes: 3, pass_end_jitter: 2.0, glyph_position_jitter: [0.24, 0.36], glyph_rotation_jitter: 0.07, glyph_scale_jitter: 0.07 })),
+			type: new_type_style(ternary_glyphset("balanced_ternary"), iris_room(ring)),
+		},
+		pupil_style: #{
+			style: new_style(pupil_pen, new_handwriting_style(#{ pass_end_jitter: 0.8, glyph_position_jitter: [0.03 * o.pupil_size, 0.04 * o.pupil_size], glyph_rotation_jitter: 0.05 })),
+			type: new_type_style(ternary_glyphset("balanced_ternary"), o.pupil_size, #{ glyph_outline_gap: 0.08 }),
+			paragraph: #{ line_height: 1.05, clearance: 4.0 },
+		},
 	}
 }
 
@@ -99,63 +106,62 @@ fn eye_shape(centre, length, width) {
 	#{ left: left, right: right, outer: outer, inner: inner }
 }
 
+// How big the iris's glyphs can be: 0.8 of the ring's breadth.
+fn iris_room(shape) {
+	(shape.outer - shape.inner) * 0.8
+}
+
 // The eye drawn, in i's styles: lids and rings gone over, and the ring of
-// i's iris glyphs, clockwise from the top, each turned to the ring and a
-// little off true.
+// iris_style's glyphs, clockwise from the top, each turned to the ring
+// and set off true by its hand.
 fn draw_eye(canvas, centre, shape, i, key_text) {
 	let lids = i.lid_style.style;
 	let rings = i.ring_style.style;
-	let key = i.iris_style.style;
 	canvas.add(shape.left, lids);
 	canvas.add(shape.right, lids);
 	canvas.add(new_circle(centre, shape.outer), rings);
 	canvas.add(new_circle(centre, shape.inner), rings);
-	let glyphs = i.iris_glyphs.glyphs(key_text);
+	let t = i.iris_style.type;
+	let glyphs = t.glyphset.glyphs(key_text);
 	let count = glyphs.len();
 	if count == 0 { return; }
+	let hand = i.iris_style.style;
+	let across = hand.glyph_position_jitter;
+	let down = across;
+	if type_of(across) == "array" { down = across[1]; across = across[0]; }
+	let size = min(t.glyph_scale * t.glyph_scale_factor, iris_room(shape));
 	for (at, k) in new_circle(centre, (shape.outer + shape.inner) / 2.0).points_along(count, #{ start: 0.75 }) {
 		let g = glyphs[k];
-		g.scale = (shape.outer - shape.inner) * 0.8;
-		g.position = at.position + vec2(random_range(-0.24, 0.24), random_range(-0.36, 0.36));
-		g.rotation = at.angle + random_range(-0.07, 0.07);
-		canvas.add(g.scale_by(random_range(0.93, 1.07)), key);
+		g.scale = size;
+		g.position = at.position + vec2(either_way(across), either_way(down));
+		g.rotation = at.angle + either_way(hand.glyph_rotation_jitter);
+		canvas.add(g.scale_by(1.0 + either_way(hand.glyph_scale_jitter)), hand);
 	}
 }
 
-// The pupil filled with the text in i's pupil glyphs and style, written
-// round and round out from the middle to the inner ring, at the largest
-// size, up to 40, that holds all of it, the last turn's glyphs shrinking
-// to fill the room left, down to minimum_scale of that size.
+// Up to `amount` either way, at random; nothing drawn for 0.
+fn either_way(amount) {
+	if amount > 0.0 { random_range(-amount, amount) } else { 0.0 }
+}
+
+// The pupil filled with the text in pupil_style, written round and round
+// out from the middle to the inner ring, at the largest size, up to its
+// glyph scale, that holds all of it, the last turn's glyphs shrinking to
+// fill the room left, down to minimum_scale of that size.
 fn spiral_pupil(canvas, centre, shape, i, text, minimum_scale) {
 	if text == "" { return; }
-	canvas.add(art::spiral_text(text, centre, shape.inner - 7.0, #{
-		style: i.pupil_style.style,
-		type: #{ glyphset: i.pupil_glyphs, glyph_scale: 40.0 },
-		paragraph: #{ line_height: 1.05, clearance: 4.0 },
-		minimum_scale: minimum_scale,
-	}));
+	canvas.add(art::spiral_text(text, centre, shape.inner - 7.0, i.pupil_style + #{ minimum_scale: minimum_scale }));
 }
 
-// The pupil filled with the text in i's pupil glyphs and style, glyph by
-// glyph, as close to the inner ring as the ring's wandering passes allow,
-// top to bottom and side to side: at the largest size, from 40 down, that
-// holds all of it.
+// The pupil filled with the text in pupil_style, glyph by glyph, as close
+// to the inner ring as the ring's wandering passes allow, top to bottom
+// and side to side, its lines justified and centred: at the largest size,
+// up to its glyph scale, that holds all of it.
 fn fill_pupil(canvas, centre, shape, i, text) {
 	if text == "" { return; }
-	let size = 40.0;
-	loop {
-		let pupil = new_textbox(#{
-			shape: new_circle(centre, shape.inner - 7.0),
-			type: #{ glyph_scale: size },
-			paragraph: #{ layout: "flat", align: "justify", valign: "center" },
-			style: #{ glyph_position_jitter: [0.03 * size, 0.04 * size], glyph_rotation_jitter: 0.05 },
-		});
-		let filled = pupil.fill(i.pupil_glyphs.glyphs(text));
-		if filled.unplaced.is_empty() {
-			canvas.add(filled.placed, i.pupil_style.style);
-			return;
-		}
-		size -= 0.5;
-		if size <= 0.0 { throw "the pupil's text doesn't fit at any size"; }
-	}
+	let pupil = i.pupil_style;
+	pupil.paragraph.align = "justify";
+	pupil.paragraph.valign = "center";
+	pupil.paragraph.fit = true;
+	canvas.add(write_inside_path(text, new_circle(centre, shape.inner - 7.0), pupil).canvas);
 }

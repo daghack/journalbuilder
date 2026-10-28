@@ -27,7 +27,7 @@ use std::rc::Rc;
 use rhai::{Array, Dynamic, Engine, Map, Scope, AST};
 
 use super::sources::Sources;
-use super::Canvas;
+use super::{text_styles, Canvas};
 
 /// The illustration types: the files in a directory, loaded on first use.
 pub struct IllustrationLibrary {
@@ -122,11 +122,34 @@ impl IllustrationType {
     }
 
     /// `inputs` with what's missing from them taken from `fallbacks(o)`.
+    /// A TextStyle is made a whole bundle, as `text_style` gives (its
+    /// style, type and paragraph whole), with what it doesn't give (a
+    /// glyphset, a glyph scale, ...) its fallback's (see
+    /// `text_styles::bundle_over`).
     pub fn with_fallbacks(&self, engine: &Engine, o: &Map, mut inputs: Map) -> Result<Map, String> {
-        for (name, value) in self.fallbacks(engine, o)? {
-            inputs.entry(name).or_insert(value);
+        let mut fallbacks = self.fallbacks(engine, o)?;
+        for (name, t) in self.inputs(engine, o)? {
+            let value = match (inputs.remove(name.as_str()), fallbacks.remove(name.as_str())) {
+                (None, None) => continue,
+                (Some(value), None) | (None, Some(value)) => value,
+                (Some(given), Some(fallback)) if t == "TextStyle" => match (given.clone().try_cast::<Map>(), fallback.try_cast::<Map>()) {
+                    (Some(given), Some(fallback)) => self.bundle(&name, |what| text_styles::bundle_over(what, given, &fallback))?.into(),
+                    _ => given,
+                },
+                (Some(given), Some(_)) => given,
+            };
+            let value = match value.clone().try_cast::<Map>() {
+                Some(bundle) if t == "TextStyle" => self.bundle(&name, |what| text_styles::whole(what, bundle))?.into(),
+                _ => value,
+            };
+            inputs.insert(name.into(), value);
         }
         Ok(inputs)
+    }
+
+    /// `make` a TextStyle input `name`'s bundle, its errors naming it.
+    fn bundle(&self, name: &str, make: impl FnOnce(&str) -> super::RhaiResult<Map>) -> Result<Map, String> {
+        make(&format!("illustration '{}' input '{}'", self.name, name)).map_err(|e| super::options::unwrap_runtime(&e))
     }
 
     /// The canvases it draws `inputs` (name -> value) as, with `o`.
@@ -225,7 +248,7 @@ mod tests {
             (r#"lock.attach("d", "maze_glyphs", #{ size: 3 });"#, "attach: illustration 'maze_glyphs' has no option 'size'; its options: cell, corridors, glyphs"),
             (r#"lock.attach("d", "maze_glyphs", #{ cell: "big" });"#, "attach: illustration 'maze_glyphs': option 'cell' should be like its default, 70.0, got big"),
             (r#"lock.attach("maze", "maze_glyphs");"#, "attach: there's a lock, illustration or source named 'maze' already"),
-            (r#"lock.attach("d", "maze_glyphs").connect("maze.generated_maze", "d.grid");"#, "connect: illustration 'd' (maze_glyphs) has no input 'grid'; inputs: corridor_style, glyph_style, glyphs, maze"),
+            (r#"lock.attach("d", "maze_glyphs").connect("maze.generated_maze", "d.grid");"#, "connect: illustration 'd' (maze_glyphs) has no input 'grid'; inputs: corridor_style, glyph_style, maze"),
             (r#"lock.attach("d", "maze_glyphs").connect("maze.text_length", "d.maze");"#, "connect: can't connect maze.text_length (LockProcessInfo) to d.maze (Maze)"),
             (r#"lock.attach("d", "maze_glyphs").connect("maze.nope", "d.maze");"#, "connect: 'maze.nope' isn't a port of the chain"),
             (r#"lock.attach("d", "maze_glyphs").run(#{ "maze.maze_text": symbols(27, "HI"), "maze.random_seed": symbols(10, "1") }).canvases("d");"#, "canvases: illustration 'd' has nothing connected to its input 'maze'"),
