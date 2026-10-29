@@ -58,6 +58,12 @@ export interface OpenedFile {
   handle: FileHandle | null;
 }
 
+/** Where the user picked to save a file: the name it's saved as, and how to write it there. */
+export interface SaveTarget {
+  name: string;
+  write(blob: Blob): Promise<void>;
+}
+
 /** Reading and writing local files: scripts, journals' directories, and exports to download. */
 @Injectable({ providedIn: 'root' })
 export class FileService {
@@ -142,15 +148,14 @@ export class FileService {
   }
 
   /**
-   * Save `blob` where the user picks, named `name` to begin with. Returns
-   * the name it was saved as, or null if the user didn't pick anywhere.
-   * Without the File System Access API it downloads, as `name`.
+   * Let the user pick where to save a file, named `name` to begin with, to
+   * write to later; null if they don't pick anywhere. Ask before working
+   * out what to save: the browser shows the picker only while the click
+   * that asked for it is recent. Without the File System Access API,
+   * writing downloads it, as `name`.
    */
-  async saveBlob(blob: Blob, name: string, kind: FileKind): Promise<string | null> {
-    if (!this.picker.showSaveFilePicker) {
-      this.download(blob, name);
-      return name;
-    }
+  async saveTarget(name: string, kind: FileKind): Promise<SaveTarget | null> {
+    if (!this.picker.showSaveFilePicker) return { name, write: async (blob) => this.download(blob, name) };
     let handle: FileHandle;
     try {
       handle = await this.picker.showSaveFilePicker({ suggestedName: name, types: kind.types });
@@ -158,10 +163,14 @@ export class FileService {
       if (isAbort(err)) return null;
       throw err;
     }
-    const writable = await handle.createWritable();
-    await writable.write(blob);
-    await writable.close();
-    return handle.name;
+    return {
+      name: handle.name,
+      async write(blob) {
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+      },
+    };
   }
 
   /** Hand `blob` to the browser to save as `name`. */

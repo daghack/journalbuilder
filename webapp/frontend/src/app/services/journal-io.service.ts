@@ -79,17 +79,18 @@ export class JournalIoService {
     this.exporting.set(true);
     try {
       const journal = this.store.journal();
+      // Where it goes first, while the click is recent enough for the browser to show its picker: finding the library files takes a while.
+      const target = await this.files.saveTarget(`${snakeCase(journal.manifest.title, journal.name)}.zip`, ZIP_FILES);
+      if (!target) return null;
       const entries = journal.manifest.entries.map((entry) => journal.files[entryPath(entry)] ?? '');
       const used = await this.tools.usedLibrary(entries);
       if (failed(used)) throw new Error(`couldn't tell which library files the journal uses: ${used.error}`);
       const library = this.library.files();
       const bundled = Object.fromEntries(used.paths.filter((path) => path in library).map((path) => [path, library[path]]));
       const zip = packZip(journal, bundled);
-      const name = `${snakeCase(journal.manifest.title, journal.name)}.zip`;
-      const saved = await this.files.saveBlob(new Blob([zip as BlobPart], { type: 'application/zip' }), name, ZIP_FILES);
-      if (!saved) return null;
+      await target.write(new Blob([zip as BlobPart], { type: 'application/zip' }));
       this.store.markSaved();
-      return { saved, bundled: Object.keys(bundled).filter((path) => !(path in journal.files)) };
+      return { saved: target.name, bundled: Object.keys(bundled).filter((path) => !(path in journal.files)) };
     } finally {
       this.exporting.set(false);
     }
