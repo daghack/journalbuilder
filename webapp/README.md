@@ -8,6 +8,13 @@ kind, each kind with the library's files beside the journal's; picking one
 opens it in the editor for its kind. The address keeps the file open
 (`#entries/letter_1.rhai`).
 
+Tabs above the middle pane hold the files opened lately, to switch between
+them, one tab to a file. They stay in the order they were opened; past
+eight, the one used longest ago drops off. Closing a tab (its ✕, or a middle
+click) leaves the file as it is. Each file's editor comes back as it was
+left: its cursor and scroll, its undo history, the page shown. A reload keeps
+the tabs; another journal starts them over.
+
 ## The journal
 
 - **New** starts a journal of one blank entry, with the library. **Open**

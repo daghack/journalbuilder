@@ -1,18 +1,25 @@
-import { Component, ElementRef, effect, inject, untracked, viewChild, type OnDestroy } from '@angular/core';
+import { Component, DestroyRef, ElementRef, effect, inject, untracked, viewChild, type OnDestroy } from '@angular/core';
 import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete';
-import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
+import { defaultKeymap, history, historyField, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { HighlightStyle, bracketMatching, indentOnInput, syntaxHighlighting } from '@codemirror/language';
 import { lintGutter, setDiagnostics, type Diagnostic } from '@codemirror/lint';
 import { highlightSelectionMatches, searchKeymap } from '@codemirror/search';
-import { Compartment, EditorState, type Text } from '@codemirror/state';
+import { Compartment, EditorState, type StateEffect, type Text } from '@codemirror/state';
 import {
   EditorView, crosshairCursor, drawSelection, dropCursor, highlightActiveLine, highlightActiveLineGutter,
   highlightSpecialChars, keymap, lineNumbers, rectangularSelection,
 } from '@codemirror/view';
 import { tags as t } from '@lezer/highlight';
 import { EDITOR_DOCUMENT } from './editor-document';
+import { JournalStore } from '../services/journal-store.service';
 import { RenderService } from '../services/render.service';
 import { rhai, rhaiCompletions } from './rhai-language';
+
+/** What's kept of an editor's state: its text, cursor and undo history. */
+const KEPT_FIELDS = { history: historyField };
+
+/** Each file's editor as it was left, while another shows, for any editor of it (a file's kind can change editors). */
+const left = new Map<string, { state: { doc: string }; scroll: StateEffect<unknown> }>();
 
 /** Colours come from the page's CSS tokens, so the editor follows light and dark. */
 const highlight = HighlightStyle.define([
@@ -55,10 +62,38 @@ const theme = EditorView.theme({
 export class EditorComponent implements OnDestroy {
   private readonly doc = inject(EDITOR_DOCUMENT);
   private readonly render = inject(RenderService);
+  private readonly store = inject(JournalStore);
   private readonly host = viewChild.required<ElementRef<HTMLElement>>('host');
   private view: EditorView | null = null;
+  /** The file the editor has. */
+  private shown: string | null = null;
   private readonly language = new Compartment();
   private builtins: ReadonlySet<string> = new Set();
+  private readonly extensions = [
+    lineNumbers(),
+    highlightActiveLineGutter(),
+    highlightSpecialChars(),
+    history(),
+    drawSelection(),
+    dropCursor(),
+    EditorState.allowMultipleSelections.of(true),
+    indentOnInput(),
+    bracketMatching(),
+    closeBrackets(),
+    autocompletion({ override: [rhaiCompletions(() => this.render.apiNames())] }),
+    rectangularSelection(),
+    crosshairCursor(),
+    highlightActiveLine(),
+    highlightSelectionMatches(),
+    lintGutter(),
+    keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap, ...completionKeymap, indentWithTab]),
+    this.language.of(rhai(() => this.builtins)),
+    syntaxHighlighting(highlight),
+    theme,
+    EditorView.updateListener.of((update) => {
+      if (update.docChanged) this.doc.setSource(update.state.doc.toString());
+    }),
+  ];
 
   constructor() {
     // Create the editor once its element is there.
@@ -66,68 +101,85 @@ export class EditorComponent implements OnDestroy {
       const host = this.host().nativeElement;
       untracked(() => this.create(host));
     });
-    // A new document (opened, or an example) replaces the editor's.
+    // Another journal: what's kept of the last one's files isn't undone into it.
+    const loads = this.store.loads();
     effect(() => {
+      if (this.store.loads() === loads) return;
+      untracked(() => {
+        left.clear();
+        this.shown = null;
+        if (this.view) this.show(this.doc.path(), this.doc.source());
+      });
+    });
+    // Another file: the editor as it was left on it. A new text for this
+    // file (changed elsewhere) replaces the editor's.
+    effect(() => {
+      const path = this.doc.path();
       const source = this.doc.source();
       const view = this.view;
-      if (view && source !== view.state.doc.toString()) {
+      if (!view) return;
+      if (path !== this.shown) {
+        untracked(() => this.show(path, source));
+      } else if (source !== view.state.doc.toString()) {
         view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: source }, selection: { anchor: 0 } });
         view.scrollDOM.scrollTo({ top: 0, left: 0 });
       }
     });
+    // A file renamed is the same file.
+    inject(DestroyRef).onDestroy(this.store.onRename((from, to) => {
+      const kept = left.get(from);
+      if (kept) left.set(to, kept);
+      left.delete(from);
+      if (this.shown === from) this.shown = to;
+    }));
     // The API's names, once the renderer loads, are highlighted.
     effect(() => {
       this.builtins = new Set(this.render.apiNames());
       this.view?.dispatch({ effects: this.language.reconfigure(rhai(() => this.builtins)) });
     });
     // Mark the last run's error and warnings.
-    effect(() => {
-      const error = this.doc.error();
-      const warnings = this.doc.warnings();
-      const view = this.view;
-      if (!view) return;
-      const doc = view.state.doc;
-      const diagnostics: Diagnostic[] = [];
-      if (error?.line) diagnostics.push(at(doc, error.line, error.column ?? null, 'error', error.message));
-      for (const warning of warnings) {
-        const line = warning.match(/\(line (\d+)\)$/);
-        if (line) diagnostics.push(at(doc, Number(line[1]), null, 'warning', warning));
-      }
-      view.dispatch(setDiagnostics(view.state, diagnostics));
-    });
+    effect(() => this.mark());
+  }
+
+  private mark() {
+    const error = this.doc.error();
+    const warnings = this.doc.warnings();
+    const view = this.view;
+    if (!view) return;
+    const doc = view.state.doc;
+    const diagnostics: Diagnostic[] = [];
+    if (error?.line) diagnostics.push(at(doc, error.line, error.column ?? null, 'error', error.message));
+    for (const warning of warnings) {
+      const line = warning.match(/\(line (\d+)\)$/);
+      if (line) diagnostics.push(at(doc, Number(line[1]), null, 'warning', warning));
+    }
+    view.dispatch(setDiagnostics(view.state, diagnostics));
   }
 
   private create(parent: HTMLElement) {
     if (this.view) return;
-    const state = EditorState.create({
-      doc: this.doc.source(),
-      extensions: [
-        lineNumbers(),
-        highlightActiveLineGutter(),
-        highlightSpecialChars(),
-        history(),
-        drawSelection(),
-        dropCursor(),
-        EditorState.allowMultipleSelections.of(true),
-        indentOnInput(),
-        bracketMatching(),
-        closeBrackets(),
-        autocompletion({ override: [rhaiCompletions(() => this.render.apiNames())] }),
-        rectangularSelection(),
-        crosshairCursor(),
-        highlightActiveLine(),
-        highlightSelectionMatches(),
-        lintGutter(),
-        keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap, ...completionKeymap, indentWithTab]),
-        this.language.of(rhai(() => this.builtins)),
-        syntaxHighlighting(highlight),
-        theme,
-        EditorView.updateListener.of((update) => {
-          if (update.docChanged) this.doc.setSource(update.state.doc.toString());
-        }),
-      ],
-    });
-    this.view = new EditorView({ state, parent });
+    this.view = new EditorView({ state: EditorState.create({ extensions: this.extensions }), parent });
+    this.show(this.doc.path(), this.doc.source());
+  }
+
+  /** Have file `path`, its text `source`: as the editor was left on it, unless its text has changed since. */
+  private show(path: string | null, source: string) {
+    const view = this.view!;
+    this.leave();
+    this.shown = path;
+    const kept = path === null ? undefined : left.get(path);
+    if (kept?.state.doc === source) {
+      view.setState(EditorState.fromJSON(kept.state, { extensions: this.extensions }, KEPT_FIELDS));
+      view.dispatch({ effects: kept.scroll });
+    } else {
+      view.setState(EditorState.create({ doc: source, extensions: this.extensions }));
+    }
+    this.mark();
+  }
+
+  /** Keep the editor as it is on the file it has. */
+  private leave() {
+    if (this.view && this.shown !== null) left.set(this.shown, { state: this.view.state.toJSON(KEPT_FIELDS), scroll: this.view.scrollSnapshot() });
   }
 
   /** Put the cursor on `line` and show it. */
@@ -140,6 +192,7 @@ export class EditorComponent implements OnDestroy {
   }
 
   ngOnDestroy() {
+    this.leave();
     this.view?.destroy();
   }
 }

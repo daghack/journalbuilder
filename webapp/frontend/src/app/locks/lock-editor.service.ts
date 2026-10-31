@@ -174,12 +174,18 @@ export class LockEditorService {
         void this.loadChains();
       });
     });
-    // The chain the sidebar opens.
+    // The chain the sidebar opens; an edit not yet written goes into the last one's file first.
     effect(() => {
       const path = this.shell.selected();
       if (!path || kindOf(path) !== 'chains') return;
       untracked(() => {
-        if (path !== this.path()) this.path.set(path);
+        if (path === this.path()) return;
+        if (this.writeTimer) {
+          clearTimeout(this.writeTimer);
+          this.writeTimer = null;
+          this.write(this.model(), this.ports());
+        }
+        this.path.set(path);
       });
     });
     // Its file, read when it's opened, and again when it changes other than by the editor.
@@ -203,7 +209,10 @@ export class LockEditorService {
       const model = this.model();
       const ports = this.ports();
       if (this.writeTimer) clearTimeout(this.writeTimer);
-      this.writeTimer = setTimeout(() => untracked(() => this.write(model, ports)), 400);
+      this.writeTimer = setTimeout(() => {
+        this.writeTimer = null;
+        untracked(() => this.write(model, ports));
+      }, 400);
     });
     // What each illustration draws of the last run.
     effect(() => {
@@ -723,14 +732,15 @@ export class LockEditorService {
     } catch (err) {
       file = { error: (err as Error).message };
     }
-    if (reading !== this.reading) return false;
+    // Another chain opened since, or back on the one that shows.
+    if (reading !== this.reading || path !== this.path()) return false;
     this.known = source;
     if (failed(file)) {
       this.note.set({ kind: 'error', text: `Couldn't read ${path}: ${file.error}. Fix it in a text editor, or remove it.` });
       return false;
     }
     const model = await this.modelOf(file);
-    if (reading !== this.reading) return false;
+    if (reading !== this.reading || path !== this.path()) return false;
     const reopened = this.model().name === model.name;
     this.untouched = model;
     this.modelPath = path;

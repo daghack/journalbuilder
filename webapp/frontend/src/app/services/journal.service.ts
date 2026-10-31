@@ -53,11 +53,17 @@ export class JournalService {
   private debounce: ReturnType<typeof setTimeout> | null = null;
   /** The script and journal files the last run had. */
   private ran: { source: string; files: unknown } | null = null;
+  /** The page each entry last showed, to come back to. */
+  private readonly pageShown = new Map<string, number>();
 
   constructor() {
     this.render.connect({
       evaluated: (generation, evaluation) => this.onEvaluated(generation, evaluation),
       svg: (generation, index, svg) => this.onSvg(generation, index, svg),
+    });
+    effect(() => {
+      this.store.loads();
+      this.pageShown.clear();
     });
     // The entry the sidebar opens.
     effect(() => {
@@ -117,8 +123,10 @@ export class JournalService {
   });
 
   private show(entry: string | null) {
+    const last = this.entry();
+    if (last !== null) this.pageShown.set(last, this.selectedIndex());
     this.entry.set(entry);
-    this.selectedIndex.set(0);
+    this.selectedIndex.set((entry !== null && this.pageShown.get(entry)) || 0);
     this.clearPages();
   }
 

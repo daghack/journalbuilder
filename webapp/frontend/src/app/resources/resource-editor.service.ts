@@ -1,6 +1,6 @@
 import { Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
 import { problemAt, type DocumentProblem, type EditorDocument } from '../editor/editor-document';
-import { splitPath, type Kind } from '../journal/journal-files';
+import { RESOURCE_KINDS, splitPath, type Kind } from '../journal/journal-files';
 import type { LockPorts, LockType, RenderPreview } from '../scribe';
 import { JournalStore } from '../services/journal-store.service';
 import { LibraryService } from '../services/library.service';
@@ -26,7 +26,8 @@ export type ResourceKind = Extract<Kind, 'locks' | 'helpers' | 'illustrations' |
  * A lock, illustration, layout, style or helper file being edited: its
  * text (the journal's, or the library's until it's changed, when the
  * journal gets a copy that stands in for it), the options it declares,
- * values for them to preview with, and the preview.
+ * values for them to preview with, and the preview. It stays the file
+ * edited while another kind's shows, and is drawn only while it shows.
  */
 @Injectable()
 export class ResourceEditorService {
@@ -36,11 +37,7 @@ export class ResourceEditorService {
   private readonly shell = inject(ShellService);
 
   /** The file edited. */
-  readonly path = computed(() => {
-    const path = this.shell.selected();
-    const kind = path ? splitPath(path)?.kind : null;
-    return kind && ['locks', 'helpers', 'illustrations', 'layouts', 'styles', 'lib'].includes(kind) ? path : null;
-  });
+  readonly path = this.shell.lastOpened(RESOURCE_KINDS);
   readonly kind = computed(() => (splitPath(this.path() ?? '')?.kind ?? null) as ResourceKind | null);
   readonly name = computed(() => splitPath(this.path() ?? '')?.name ?? '');
   /** Whether the journal has the file (else it's the library's). */
@@ -74,6 +71,7 @@ export class ResourceEditorService {
 
   /** The code, as the script editor edits it. */
   readonly document: EditorDocument = {
+    path: this.path,
     source: this.text,
     setSource: (source: string) => this.setSource(source),
     error: this.problem,
@@ -82,16 +80,25 @@ export class ResourceEditorService {
 
   private timer: ReturnType<typeof setTimeout> | null = null;
   private asked = 0;
+  /** What the preview was last asked to draw. */
+  private drawn: { path: string; text: string; values: unknown; resources: unknown } | null = null;
 
   constructor() {
+    // Another journal's files: what was given for this one's isn't for them.
+    effect(() => {
+      this.store.loads();
+      this.given.set({});
+    });
     effect(() => {
       const path = this.path();
       const kind = this.kind();
       const text = this.text();
       const values = this.values();
       const resources = this.store.resources();
+      const showing = this.shell.selected() === path;
       if (this.timer) clearTimeout(this.timer);
       if (!path || !kind || kind === 'lib') {
+        this.drawn = null;
         untracked(() => {
           this.info.set(null);
           this.preview.set(null);
@@ -99,7 +106,12 @@ export class ResourceEditorService {
         });
         return;
       }
-      this.timer = setTimeout(() => void this.refresh(path, kind, text, values, resources), PREVIEW_DELAY_MS);
+      const drawn = this.drawn;
+      if (!showing || (drawn?.path === path && drawn.text === text && drawn.values === values && drawn.resources === resources)) return;
+      this.timer = setTimeout(() => {
+        this.drawn = { path, text, values, resources };
+        void this.refresh(path, kind, text, values, resources);
+      }, PREVIEW_DELAY_MS);
     });
   }
 
