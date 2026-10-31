@@ -27,7 +27,8 @@
 //   locks     every lock type, Huffman codes between bases, a lock
 //             chain drawn as a maze, value kinds and their sketches, an
 //             art node: a lock keyed by a code drawn as a star chart, and
-//             illustrations drawing a chain's values as canvases
+//             illustrations drawing a chain's values as canvases, or run
+//             on their own
 //   spread    one drawing across two pages: a page split into tiles
 //   layouts   pages typeset from layouts: an inline one, flex styles, the
 //             layout files (the title page is one too), and marked-up
@@ -1870,6 +1871,30 @@ for (o, k) in [
 	rings.add(ring.translate_by(vec2(x, y + 30)));
 }
 book.bind("locks", rings);
+
+// An illustration on its own: illustration(name, options) fetches a file,
+// the journal's or the library's, as chain(name) fetches a chain file, and
+// illustration.run(inputs, options) draws it with no chain, the options
+// given there over the fetched ones for that run: an array of canvases, as
+// result.canvases(id) gives. Its inputs take lock values, as symbols(base,
+// text) or result.get(name) gives them, strings, value kinds' data and
+// text_style(name)'s bundle, each checked against its type; an input left
+// out takes its fallbacks(o).
+let alone = sheet("locks");
+alone.add(caption("illustration(name, options).run(inputs): an illustration drawn on its own, with no chain", TOP));
+let marks = illustration("trit_message", #{ title: "ON ITS OWN", per_row: 24, width: 1000.0, mark_size: 22.0 });
+assert(marks.inputs()["message"] == "Base3Symbol", "illustration.inputs() gives what it draws, following its options");
+alone.add(marks.run(#{ message: symbols(3, "CABBACCABBACABCA") })[0].translate_by(vec2(LEFT - 100, TOP - 20)));
+alone.add(caption("illustration.run(inputs, options): options over the fetched ones, for that run: base 27 and a new title", TOP + 270));
+alone.add(marks.run(#{ message: symbols(27, "A LOCK") }, #{ base: 27, title: "OVERRIDDEN" })[0].translate_by(vec2(LEFT - 100, TOP + 250)));
+alone.add(caption("a value from a run, result.get(name), as an input: a maze lock's maze in maze_glyphs, no wires", TOP + 540));
+let lone_maze = new_lock("lone_maze").add("maze", "maze_lock", #{ input_base: 27 })
+	.run(#{ "maze.maze_text": symbols(27, "HELLO WORLD"), "maze.random_seed": symbols(10, "4") });
+alone.add(illustration("maze_glyphs", #{ cell: 46.0 }).run(#{ maze: lone_maze.get("maze.generated_maze") })[0].translate_by(vec2(LEFT + 40, TOP + 620)));
+alone.add(caption("the journal's files as inputs: content(name) and text_style(name, options) in styled_text", TOP + 980));
+let lone_note = illustration("styled_text", #{ width: 960.0 }).run(#{ text: content("lorem"), style: text_style("margin_note", #{ size: 26 }) });
+alone.add(lone_note[0].translate_by(vec2(LEFT, TOP + 1030)));
+book.bind("locks", alone);
 
 // ---- a spread: one drawing over two pages ----
 //

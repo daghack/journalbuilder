@@ -622,6 +622,20 @@ pub(super) fn source_value(ctx: &rhai::NativeCallContext, library: &LockLibrary,
     made.map_err(|e| format!("source '{}': {}", source.id, super::options::unwrap_runtime(&e)))
 }
 
+/// `value` as an illustration's input typed `expected` sees it: a lock
+/// value's data, its type checked as `connect` checks a wire's, or a value
+/// as lock files write it, checked as a chain's fixed values are.
+pub(super) fn illustration_value(value: Dynamic, expected: &str) -> Result<Dynamic, String> {
+    let expected = parse_type(expected);
+    if let Some(value) = value.clone().try_cast::<LockValue>() {
+        if !compatible(&value.var.var_type, &expected) {
+            return Err(format!("expects {}, got {}", expected, value.var.var_type));
+        }
+        return Ok(value.var.data);
+    }
+    library::value_from_script(value, &expected).map(|var| var.data)
+}
+
 /// `symbols(base, text)`: text as symbols in `base`. Base 10 takes digits,
 /// base 27 takes letters and spaces, other bases up to 26 take the first
 /// `base` letters (case-insensitive). Anything else is an error.
