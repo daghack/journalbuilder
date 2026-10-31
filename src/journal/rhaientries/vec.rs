@@ -25,6 +25,7 @@
 //! on as it was. Angles are plain numbers of radians: `degrees(d)` converts,
 //! `radians(r)` says which a number is.
 
+use crate::journal::art::hypot;
 use parry2d::math::Vec2 as PVec;
 use rhai::{CustomType, Dynamic, Engine, TypeBuilder, INT};
 
@@ -54,7 +55,7 @@ impl Vec2 {
         Vec2::new(self.x * k, self.y * k)
     }
     fn length(&mut self) -> f64 {
-        self.x.hypot(self.y)
+        hypot(self.x, self.y)
     }
     fn build_extra(builder: &mut TypeBuilder<Self>) {
         builder
@@ -83,7 +84,7 @@ impl Vec2 {
             .with_fn("==", |a: Self, b: Self| a == b)
             .with_fn("!=", |a: Self, b: Self| a != b)
             .with_fn("length", Self::length)
-            .with_fn("distance", |a: &mut Self, b: Self| (a.x - b.x).hypot(a.y - b.y))
+            .with_fn("distance", |a: &mut Self, b: Self| hypot(a.x - b.x, a.y - b.y))
             .with_fn("dot", |a: &mut Self, b: Self| a.x * b.x + a.y * b.y)
             .with_fn("angle", |a: &mut Self| a.y.atan2(a.x))
             .with_fn("normalized", |a: &mut Self| -> RhaiResult<Self> {

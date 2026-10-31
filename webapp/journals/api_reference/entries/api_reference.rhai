@@ -1311,7 +1311,7 @@ doc += api("journalbuild NAME [flags]", "Runs a journal's entries, each on its o
 	opt("--page P,...", "every page", "Renders only these pages of each entry built; other pages' existing output is kept.", "page indices (from 0) or names, separated by commas, as --page 0,maze."),
 	opt("--scale S", "1", "Scales output images, brushes included; Darkly work scales with output size, so 0.25 renders much faster.", "a positive number."),
 	opt("--supersample K", "1.2", "Renders Darkly output K times larger and filters it back down, smoothing thin, aliased strokes; render time grows with K squared.", "a number of at least 1; 1 turns it off."),
-	opt("--svg", "off", "Also renders each canvas as an SVG, PAGE_CANVAS.svg, and that SVG as a PNG.", "a flag."),
+	opt("--svg", "off", "Renders each canvas as an SVG, PAGE_CANVAS.svg, and that SVG as a PNG, on the CPU, instead of with Darkly: it needs no GPU, and so takes no --parchment, --pdf, --stitch or --supersample.", "a flag."),
 	opt("--strict-glyphs", "off", "Fails before rendering if any character had no glyph, rather than drawing it as X and warning.", "a flag."),
 	opt("--parchment", "off", "Renders each page as one image, darkly_PAGE.png, its canvases layered on procedural parchment; light inks are drawn dark, and ink soaks in a little unevenly, very slightly thinner in places.", "a flag."),
 	opt("--pdf", "off", "Puts each entry's pages in one PDF, ENTRY.pdf, a page each at 150 canvas units to the inch, rather than writing images; on parchment with --parchment; with --stitch N, N pages side by side to a PDF page.", "a flag."),

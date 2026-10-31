@@ -114,6 +114,10 @@ render() {
 }
 
 echo "== renders"
+# SVG renders need no GPU.
+render fixture-svg smoke/page_0_0.png smoke/page_1_0.png smoke/page_1_1.png smoke/lock_maze.png smoke/art_0.png smoke/art_0_1_0.png \
+	smoke/page_0_0.svg smoke/page_1_0.svg smoke/page_1_1.svg smoke/lock_maze.svg smoke/art_0.svg \
+	-- smoke --journals-dir tests/smoke_journals --strict-glyphs --svg
 if ! gpu_output=$("$BIN" --check-gpu 2>&1); then
 	echo "skip Darkly renders: no GPU ($(tail -n 1 <<<"$gpu_output" | cut -c1-120))"
 	echo "     SVG renders were still compared with tests/svg_renders/ by cargo test"
@@ -122,9 +126,7 @@ else
 # fixture's one entry.
 render fixture smoke/darkly_page_0_0.png smoke/darkly_page_1_0.png smoke/darkly_page_1_1.png smoke/darkly_lock_maze.png smoke/darkly_art_0.png \
 	smoke/darkly_art_0_0_0.png smoke/darkly_art_1_1_0.png smoke/darkly_book_0_0.png smoke/darkly_book_1_0.png \
-	smoke/page_0_0.png smoke/page_1_0.png smoke/page_1_1.png smoke/lock_maze.png smoke/art_0.png smoke/art_0_1_0.png \
-	smoke/page_0_0.svg smoke/page_1_0.svg smoke/page_1_1.svg smoke/lock_maze.svg smoke/art_0.svg \
-	-- smoke --journals-dir tests/smoke_journals --strict-glyphs --svg
+	-- smoke --journals-dir tests/smoke_journals --strict-glyphs
 render fixture-supersampled smoke/darkly_page_0_0.png \
 	-- smoke --journals-dir tests/smoke_journals --page 0 --supersample 2
 # Pages on parchment: one image per page, split and typeset pages included.

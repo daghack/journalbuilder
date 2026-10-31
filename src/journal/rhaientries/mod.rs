@@ -330,7 +330,7 @@ impl JournalEngine {
         let mut scope = Scope::new();
         scope.push("journal_entry", Entry::default());
         self.engine.run_with_scope(&mut scope, script_str).map_err(|err| ScriptError::new(&err))?;
-        scope.get_value("journal_entry")
+        scope.remove("journal_entry")
             .ok_or_else(|| ScriptError { message: "the script replaced journal_entry with something that isn't an entry".to_string(), line: None, column: None })
     }
     /// The illustration types' names.
@@ -441,7 +441,7 @@ impl JournalEngine {
     }
     fn run_preview(&mut self, mut scope: Scope, script: &str) -> Result<Entry, String> {
         self.engine.run_with_scope(&mut scope, script).map_err(|err| ScriptError::new(&err).message)?;
-        scope.get_value("journal_entry").ok_or_else(|| "the preview lost its entry".to_string())
+        scope.remove("journal_entry").ok_or_else(|| "the preview lost its entry".to_string())
     }
     /// `inputs` with each `#{ "$source": #{ type, name, ... } }` (a chain
     /// source, as a chain file writes it) made into what it gives an
@@ -590,6 +590,9 @@ brush.color = \"darkredd\";", BRUSH)).expect_err("bad color should fail").to_str
         let names: Vec<String> = names.into_iter().map(|n| n.into_string().unwrap()).collect();
         assert!(names.contains(&"Calligraphy".to_string()) && names.contains(&"Ink Pen".to_string()), "{:?}", names);
         assert!(names.windows(2).all(|w| w[0] < w[1]));
+        let mut darklys: Vec<String> = ::darkly::brush::builtin_brushes::all().into_iter().map(|b| b.metadata.name).collect();
+        darklys.sort();
+        assert_eq!(names, darklys, "brush_names() should list Darkly's brushes");
         for name in &names {
             engine().engine.run(&format!("new_brush_style(\"black\", {:?}, 1.0);", name)).unwrap();
         }

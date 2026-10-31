@@ -345,7 +345,7 @@ fn lay_out(_piece: &[usize], points: &[Vec2], radii: &[f64], edges: Vec<(usize, 
 fn box_to_point(c: V, hw: f64, hh: f64, p: V) -> f64 {
     let dx = ((p.x - c.x).abs() - hw).max(0.0);
     let dy = ((p.y - c.y).abs() - hh).max(0.0);
-    dx.hypot(dy)
+    super::hypot(dx, dy)
 }
 
 /// How far the segment ab is from the box about `c` (0 where they meet).

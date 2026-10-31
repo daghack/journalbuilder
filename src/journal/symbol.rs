@@ -3,6 +3,7 @@ use super::canvas::textbox::Region;
 use super::paths::{PathCmd, StrokePath, Walk};
 use parry2d::math::Vec2;
 
+use std::cell::{Cell, OnceCell, RefCell};
 use std::rc::Rc;
 use std::collections::VecDeque;
 use std::ops::Range;
@@ -16,13 +17,32 @@ pub enum SymbolType {
 #[derive(Debug, Clone)]
 pub struct SymbolBase {
     symbol_type: SymbolType,
-    /// The hull's bounding box, which text layout reads for every glyph.
-    hull_aabb: parry2d::bounding_volume::Aabb,
-    /// The convex hull of its strokes, unplaced: what text keeps clear of.
-    hull: Vec<Vec2>,
+    /// The convex hull of its strokes, worked out when it's first needed:
+    /// most of a glyphset's glyphs never are.
+    hull: OnceCell<Hull>,
+    /// Outlines as it's been set, by what they're worked out from: text
+    /// sets the same glyph the same way again and again.
+    outlines: RefCell<Vec<(OutlineKey, Rc<Outline>)>>,
     /// How it joins its neighbours, in a glyphset that joins up.
     joins: Option<Joins>,
 }
+
+/// A glyph's convex hull.
+#[derive(Debug, Clone)]
+struct Hull {
+    /// Its points, unplaced: what text keeps clear of.
+    points: Vec<Vec2>,
+    /// Their bounding box, which text layout reads for every glyph.
+    aabb: parry2d::bounding_volume::Aabb,
+}
+
+/// The bits of a glyph's scale in text, padding, lean and turn: what its
+/// outline is worked out from.
+type OutlineKey = [u32; 4];
+
+/// How many outlines a glyph remembers. Text in one size and lean needs one;
+/// text whose size keeps changing has no use for any.
+const REMEMBERED_OUTLINES: usize = 8;
 
 /// How a glyph of a joined-up glyphset joins its neighbours (see
 /// `fonts`): whether it joins the glyph before and the glyph after, whether
@@ -40,13 +60,13 @@ pub struct Joins {
 
 impl SymbolBase {
     pub fn new(symbol_type: SymbolType) -> SymbolBase {
-        let hull = SymbolBase::generate_hull(&symbol_type);
-        SymbolBase {
-            hull_aabb: hull.local_aabb(),
-            hull: hull.points().to_vec(),
-            symbol_type,
-            joins: None,
-        }
+        SymbolBase { symbol_type, hull: OnceCell::new(), outlines: RefCell::default(), joins: None }
+    }
+    fn hull(&self) -> &Hull {
+        self.hull.get_or_init(|| {
+            let hull = SymbolBase::generate_hull(&self.symbol_type);
+            Hull { aabb: hull.local_aabb(), points: hull.points().to_vec() }
+        })
     }
     pub fn with_joins(mut self, joins: Option<Joins>) -> SymbolBase {
         self.joins = joins;
@@ -178,7 +198,7 @@ impl Symbol {
     /// or moved: in glyph units, about its centre.
     fn shaped_hull(&self) -> impl Iterator<Item = Vec2> + '_ {
         let (shear, rotation) = (self.skew_rad.tan(), parry2d::math::Rot2::new(self.rotation_rad));
-        self.base.hull.iter().map(move |p| rotation * Vec2::new(p.x - shear * p.y, p.y))
+        self.base.hull().points.iter().map(move |p| rotation * Vec2::new(p.x - shear * p.y, p.y))
     }
     pub fn placed_strokepath(&self) -> StrokePath {
         let symbol_base = self.base.as_ref();
@@ -194,7 +214,7 @@ impl Symbol {
     /// size is 2 glyph units, so each side gains `padding` units.
     pub fn hull_aabb(&self) -> parry2d::bounding_volume::Aabb {
         let mut b = if self.skew_rad == 0.0 && self.rotation_rad == 0.0 {
-            self.base.hull_aabb
+            self.base.hull().aabb
         } else {
             let (min, max) = self.shaped_hull().fold((Vec2::splat(f32::MAX), Vec2::splat(f32::MIN)), |(min, max), p| (min.min(p), max.max(p)));
             parry2d::bounding_volume::Aabb::new(min, max)
@@ -209,10 +229,20 @@ impl Symbol {
     }
     /// The glyph's outline as it would be drawn scaled up by `size` (as text
     /// layout scales glyphs), for setting it beside others.
-    pub fn outline(&self, size: f32) -> Outline {
+    pub fn outline(&self, size: f32) -> Rc<Outline> {
         let s = self.scale * size / 2.0;
+        let key = [s, self.padding, self.skew_rad, self.rotation_rad].map(f32::to_bits);
+        let mut known = self.base.outlines.borrow_mut();
+        if let Some((_, outline)) = known.iter().find(|(k, _)| *k == key) {
+            return outline.clone();
+        }
         let points: Vec<Vec2> = self.shaped_hull().map(|p| p * s).collect();
-        Outline::new(&points, self.padding * s, self.skew_rad.tan())
+        let outline = Rc::new(Outline::new(&points, self.padding * s, self.skew_rad.tan()));
+        if known.len() == REMEMBERED_OUTLINES {
+            known.remove(0);
+        }
+        known.push((key, outline.clone()));
+        outline
     }
 
     pub fn rotation_rad(&self) -> f32 {
@@ -542,6 +572,23 @@ pub struct Outline {
     pad: f32,
     /// How far across the glyph leans for each unit up (see `TUCK`).
     lean: f32,
+    /// Told apart from other outlines by this, in `advances`.
+    id: u64,
+    /// Its advance to outlines it's been set beside, by their ids: text
+    /// sets the same few pairs of glyphs again and again.
+    advances: RefCell<Vec<(u64, f32)>>,
+}
+
+/// How many other outlines an outline remembers its advance to: more than
+/// an alphabet.
+const REMEMBERED_ADVANCES: usize = 128;
+
+thread_local! {
+    static NEXT_OUTLINE_ID: Cell<u64> = const { Cell::new(0) };
+}
+
+fn new_outline_id() -> u64 {
+    NEXT_OUTLINE_ID.with(|next| next.replace(next.get() + 1))
 }
 
 impl Outline {
@@ -557,6 +604,8 @@ impl Outline {
             max,
             pad,
             lean,
+            id: new_outline_id(),
+            advances: RefCell::default(),
         }
     }
     /// Where its room starts across the line, from its position.
@@ -588,6 +637,8 @@ impl Outline {
             max: self.max + Vec2::new(0.0, dy),
             pad: self.pad,
             lean: self.lean,
+            id: new_outline_id(),
+            advances: RefCell::default(),
         }
     }
     /// How far right it reaches at height `y`: its right edge, or the
@@ -607,12 +658,31 @@ impl Outline {
     /// How far past this glyph's position `next`'s must be for `next` to
     /// clear it across, at every height, by both their paddings.
     pub fn advance(&self, next: &Outline) -> f32 {
+        let mut known = self.advances.borrow_mut();
+        if let Some((_, advance)) = known.iter().find(|(id, _)| *id == next.id) {
+            return *advance;
+        }
         // The reaches are made of straight pieces that bend only at the
         // corners' heights, so the closest they come is at one of those.
         let closest = self.right_edge.iter().chain(&next.left_edge)
             .map(|c| self.reach_right(c.y) - next.reach_left(c.y))
             .fold(f32::MIN, f32::max);
-        closest + self.pad + next.pad
+        let advance = closest + self.pad + next.pad;
+        if known.len() == REMEMBERED_ADVANCES {
+            known.clear();
+        }
+        known.push((next.id, advance));
+        advance
+    }
+    /// At least `advance(next)`, from their bounding boxes alone, if that
+    /// says anything: past the bounding boxes only leaning cones reach. The
+    /// margin covers rounding, which can put an edge's reach a little past
+    /// its corners.
+    fn most_advance(&self, next: &Outline) -> Option<f32> {
+        (self.lean.abs() <= TUCK && next.lean.abs() <= TUCK).then(|| {
+            let (right, left) = (self.max.x, next.min.x);
+            right - left + self.pad + next.pad + (right.abs() + left.abs()) * 1e-3
+        })
     }
 }
 
@@ -676,8 +746,12 @@ impl Spacing {
     pub fn start(&self, next: &Outline, cursor: f32, gap: f32) -> f32 {
         let Some(((last, _), earlier)) = self.set.split_last() else { return cursor };
         let mut start = cursor + last.advance(next) - (last.right() - next.left());
-        for (glyph, at) in earlier {
-            start = start.max(at + glyph.advance(next) + gap + next.left());
+        // Nearest first: earlier glyphs seldom reach, and a glyph that can't
+        // needn't be looked at closely.
+        for (glyph, at) in earlier.iter().rev() {
+            if glyph.most_advance(next).is_none_or(|most| at + most + gap + next.left() > start) {
+                start = start.max(at + glyph.advance(next) + gap + next.left());
+            }
         }
         start
     }
@@ -813,7 +887,7 @@ impl<'a> Placer<'a> {
     }
 
     fn piece(&self, symbol: Symbol) -> Piece {
-        Piece { outline: Rc::new(symbol.outline(self.args.symbol_scale)), symbol, scale: self.args.symbol_scale }
+        Piece { outline: symbol.outline(self.args.symbol_scale), symbol, scale: self.args.symbol_scale }
     }
 
     fn gap(&self) -> f32 {
@@ -833,7 +907,7 @@ impl<'a> Placer<'a> {
         if let Some(angle) = self.args.angle {
             turned.rotate_rad_by(angle - path_turn(here.normal));
         }
-        Piece { outline: Rc::new(turned.outline(scale)), symbol: piece.symbol.clone(), scale }
+        Piece { outline: turned.outline(scale), symbol: piece.symbol.clone(), scale }
     }
 
     /// Where `piece` starts set after `spacing`, `cursor` being where it

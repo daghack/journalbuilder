@@ -106,14 +106,87 @@ const LOOSE_BAND_SAMPLES: usize = 5;
 /// winds round at all, and a place inside an even number of them outside.
 #[derive(Debug)]
 pub struct Region {
-    rings: Vec<Vec<Vec2>>,
+    rings: Vec<Ring>,
     /// How far what it holds may reach past its edge.
     overhang: f32,
 }
 
+/// The most bands a ring's edges are sorted into.
+const MOST_BANDS: usize = 4096;
+
+/// A closed outline, its edges sorted into bands of y, so that what's going
+/// on at one place needn't look at the edges far from it. Shapes for text
+/// can have thousands, and every glyph tried in them looks.
+#[derive(Debug)]
+struct Ring {
+    points: Vec<Vec2>,
+    /// The top of the first band, and how many bands there are to a unit.
+    top: f32,
+    density: f32,
+    /// Where each band's edges start in `edges`, then where the last ends.
+    starts: Vec<u32>,
+    /// Edges that reach into each band, by their first point.
+    edges: Vec<u32>,
+}
+
+impl Ring {
+    fn new(points: Vec<Vec2>) -> Ring {
+        let (top, bottom) = points.iter().fold((f32::INFINITY, f32::NEG_INFINITY), |(top, bottom), p| (top.min(p.y), bottom.max(p.y)));
+        let climb: f32 = Region::edges(&points).map(|(a, b)| (a.y - b.y).abs()).sum();
+        // Bands twice as tall as the average edge, so that edges reach into
+        // a band or two.
+        let bands = if points.iter().all(|p| p.y.is_finite()) && climb > 0.0 {
+            ((bottom - top) * points.len() as f32 / (2.0 * climb)) as usize
+        } else {
+            1
+        }.clamp(1, MOST_BANDS);
+        let density = if bands > 1 { bands as f32 / (bottom - top) } else { 0.0 };
+        let mut ring = Ring { points, top, density, starts: vec![0; bands + 1], edges: Vec::new() };
+        for (a, b) in Region::edges(&ring.points) {
+            for k in ring.band(a.y.min(b.y))..=ring.band(a.y.max(b.y)) {
+                ring.starts[k + 1] += 1;
+            }
+        }
+        for k in 0..bands {
+            ring.starts[k + 1] += ring.starts[k];
+        }
+        let mut next = ring.starts.clone();
+        let mut edges = vec![0; ring.starts[bands] as usize];
+        for (i, (a, b)) in Region::edges(&ring.points).enumerate() {
+            for k in ring.band(a.y.min(b.y))..=ring.band(a.y.max(b.y)) {
+                edges[next[k] as usize] = i as u32;
+                next[k] += 1;
+            }
+        }
+        ring.edges = edges;
+        ring
+    }
+
+    fn band(&self, y: f32) -> usize {
+        // Casting takes what's above the first band to it, and what's not a
+        // number too.
+        (((y - self.top) * self.density) as usize).min(self.starts.len() - 2)
+    }
+
+    /// The edges reaching anywhere from `lo` to `hi` in y, and maybe others.
+    /// An edge reaching into more than one band comes up once for each, but
+    /// where `lo` is `hi` just once.
+    fn edges_between(&self, lo: f32, hi: f32) -> impl Iterator<Item = (Vec2, Vec2)> + '_ {
+        let (first, last) = (self.band(lo), if hi.is_nan() { self.starts.len() - 2 } else { self.band(hi) });
+        self.edges[self.starts[first] as usize..self.starts[last.max(first) + 1] as usize].iter().map(|&i| {
+            let i = i as usize;
+            (self.points[i], self.points[if i + 1 == self.points.len() { 0 } else { i + 1 }])
+        })
+    }
+
+    fn winds_round(&self, p: Vec2) -> bool {
+        Region::winds_round(self.edges_between(p.y, p.y), p)
+    }
+}
+
 impl Region {
     pub fn new(rings: Vec<Vec<Vec2>>) -> Region {
-        Region { rings: rings.into_iter().filter(|ring| ring.len() >= 3).collect(), overhang: 0.0 }
+        Region { rings: rings.into_iter().filter(|ring| ring.len() >= 3).map(Ring::new).collect(), overhang: 0.0 }
     }
 
     /// The region holding what reaches up to `overhang` past its edge.
@@ -122,24 +195,26 @@ impl Region {
     }
 
     fn edges(ring: &[Vec2]) -> impl Iterator<Item = (Vec2, Vec2)> + '_ {
-        ring.iter().enumerate().map(move |(i, &a)| (a, ring[(i + 1) % ring.len()]))
+        ring.iter().copied().zip(ring.iter().skip(1).chain(ring.first()).copied())
+    }
+
+    /// Whether closed edges (all those at the height of `p`) wind round `p`.
+    fn winds_round(edges: impl Iterator<Item = (Vec2, Vec2)>, p: Vec2) -> bool {
+        let mut winding = 0;
+        for (a, b) in edges {
+            if (a.y > p.y) != (b.y > p.y) {
+                let x = a.x + (p.y - a.y) * (b.x - a.x) / (b.y - a.y);
+                if x > p.x {
+                    winding += if b.y > a.y { 1 } else { -1 };
+                }
+            }
+        }
+        winding != 0
     }
 
     /// Whether a point is inside.
     pub fn contains(&self, p: Vec2) -> bool {
-        let rings_inside = self.rings.iter().filter(|ring| {
-            let mut winding = 0;
-            for (a, b) in Region::edges(ring) {
-                if (a.y > p.y) != (b.y > p.y) {
-                    let x = a.x + (p.y - a.y) * (b.x - a.x) / (b.y - a.y);
-                    if x > p.x {
-                        winding += if b.y > a.y { 1 } else { -1 };
-                    }
-                }
-            }
-            winding != 0
-        }).count();
-        rings_inside % 2 == 1
+        self.rings.iter().filter(|ring| ring.winds_round(p)).count() % 2 == 1
     }
 
     /// Whether a closed outline (a placed glyph's footprint) is inside,
@@ -153,6 +228,9 @@ impl Region {
     /// (a hole) is inside it.
     fn holds_wholly(&self, outline: &[Vec2]) -> bool {
         let Some(&first) = outline.first() else { return true };
+        if !self.contains(first) || self.rings.iter().any(|ring| Region::winds_round(Region::edges(outline), ring.points[0])) {
+            return false;
+        }
         let (lo, hi) = outline.iter().fold((first, first), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
         let crosses = |(a, b): (Vec2, Vec2), (c, d): (Vec2, Vec2)| {
             let side = |p: Vec2, q: Vec2, r: Vec2| (q - p).perp_dot(r - p);
@@ -160,19 +238,11 @@ impl Region {
             let (d3, d4) = (side(a, b, c), side(a, b, d));
             (d1 > 0.0) != (d2 > 0.0) && (d3 > 0.0) != (d4 > 0.0)
         };
-        for ring in &self.rings {
-            for edge in Region::edges(ring) {
-                let (a, b) = edge;
-                if a.x.max(b.x) < lo.x || a.x.min(b.x) > hi.x || a.y.max(b.y) < lo.y || a.y.min(b.y) > hi.y {
-                    continue;
-                }
-                if Region::edges(outline).any(|side| crosses(side, edge)) {
-                    return false;
-                }
-            }
-        }
-        let around = Region::new(vec![outline.to_vec()]);
-        self.contains(first) && !self.rings.iter().any(|ring| around.contains(ring[0]))
+        !self.rings.iter().any(|ring| ring.edges_between(lo.y, hi.y).any(|edge| {
+            let (a, b) = edge;
+            !(a.x.max(b.x) < lo.x || a.x.min(b.x) > hi.x || a.y.max(b.y) < lo.y || a.y.min(b.y) > hi.y)
+                && Region::edges(outline).any(|side| crosses(side, edge))
+        }))
     }
 
     /// Whether a closed outline reaches no further than the overhang past
@@ -186,26 +256,26 @@ impl Region {
             let pieces = ((a.distance(b) / step).ceil() as usize).max(1);
             for k in 0..pieces {
                 let p = a.lerp(b, k as f32 / pieces as f32);
-                if !self.contains(p) && !Region::near_edge(&self.rings, p, reach) {
+                if !self.contains(p) && !self.rings.iter().any(|ring| Region::near_edge(ring.edges_between(p.y - reach, p.y + reach), p, reach)) {
                     return false;
                 }
             }
         }
-        let around = Region::new(vec![outline.to_vec()]);
-        let outlines = [outline.to_vec()];
-        self.rings.iter().flatten().all(|&corner| !around.contains(corner) || Region::near_edge(&outlines, corner, reach))
+        self.rings.iter().flat_map(|ring| &ring.points).all(|&corner| {
+            !Region::winds_round(Region::edges(outline), corner) || Region::near_edge(Region::edges(outline), corner, reach)
+        })
     }
 
-    /// Whether `p` is within `reach` of an edge of `rings`.
-    fn near_edge(rings: &[Vec<Vec2>], p: Vec2, reach: f32) -> bool {
-        rings.iter().any(|ring| Region::edges(ring).any(|(a, b)| {
+    /// Whether `p` is within `reach` of one of `edges`.
+    fn near_edge(mut edges: impl Iterator<Item = (Vec2, Vec2)>, p: Vec2, reach: f32) -> bool {
+        edges.any(|(a, b)| {
             if a.x.min(b.x) > p.x + reach || a.x.max(b.x) < p.x - reach || a.y.min(b.y) > p.y + reach || a.y.max(b.y) < p.y - reach {
                 return false;
             }
             let ab = b - a;
             let t = if ab.length_squared() > 0.0 { ((p - a).dot(ab) / ab.length_squared()).clamp(0.0, 1.0) } else { 0.0 };
             p.distance(a + ab * t) <= reach
-        }))
+        })
     }
 }
 

@@ -7,6 +7,7 @@ mod constellation;
 mod eye;
 mod flower;
 mod geom;
+pub(crate) use geom::hypot;
 mod hydra;
 mod leaf;
 mod moon;

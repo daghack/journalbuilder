@@ -58,10 +58,12 @@ const USAGE: &str = "Usage: journalbuild <journal> [--entry E[,E...]] [--page N[
   --page P,...        Render only these pages of each entry built, by index
                       (0-based) or by name. Other pages' existing output is
                       kept.
-  --svg               Also render each canvas as an SVG ({page}_{canvas}.svg)
-                      and that SVG as a PNG; by default only Darkly renders.
-                      Stroke widths are geometric widths there, while in
-                      Darkly they scale brush pressure.
+  --svg               Render each canvas as an SVG ({page}_{canvas}.svg) and
+                      that SVG as a PNG, on the CPU, instead of with Darkly:
+                      it needs no GPU, and so takes no --parchment, --pdf,
+                      --stitch or --supersample. Stroke widths are geometric
+                      widths there, while in Darkly they scale brush
+                      pressure.
   --parchment         Render each page as one image on parchment,
                       darkly_{page}.png, its canvases layered in order: a
                       mottled scroll browning toward its edges. Pages get
@@ -149,7 +151,7 @@ fn parse_args() -> Result<Args, String> {
     // a pixel into ragged edges. Measured on journal_entry_17, 1.2x costs
     // about 1.6x the render time (1.5x about 2.6x, 2x about 3.3x: mark area
     // grows with K²).
-    let mut supersample = DEFAULT_SUPERSAMPLE;
+    let mut supersample = None;
     // Defaults are found from the repository, not the working directory.
     let mut journals_dirs: Vec<String> = DEFAULT_JOURNALS_DIRS.iter().map(|dir| dir.to_string()).collect();
     let mut library_dir = DEFAULT_LIBRARY_DIR.to_string();
@@ -171,8 +173,8 @@ fn parse_args() -> Result<Args, String> {
             }
             "--supersample" => {
                 let value = args.next().ok_or("--supersample needs a value, e.g. --supersample 2")?;
-                supersample = value.parse::<f32>().ok().filter(|k| *k >= 1.0)
-                    .ok_or(format!("invalid supersample '{}'; expected a number >= 1, e.g. 1.5", value))?;
+                supersample = Some(value.parse::<f32>().ok().filter(|k| *k >= 1.0)
+                    .ok_or(format!("invalid supersample '{}'; expected a number >= 1, e.g. 1.5", value))?);
             }
             "--parchment" => parchment = true,
             "--stitch" => {
@@ -211,6 +213,10 @@ fn parse_args() -> Result<Args, String> {
     if check_locks && (entries.is_some() || pages.is_some()) {
         return Err("--check-locks checks lock and chain files, so it takes no --entry or --page".to_string());
     }
+    if svg && (parchment || pdf || stitch.is_some() || supersample.is_some()) {
+        return Err("--svg renders without Darkly, so it takes no --parchment, --pdf, --stitch or --supersample".to_string());
+    }
+    let supersample = supersample.unwrap_or(DEFAULT_SUPERSAMPLE);
     Ok(Args { strict_glyphs, check_locks, check_gpu, journal, journals_dirs, library_dir, entries, pages, svg, scale, supersample, output_dir, parchment, pdf, stitch })
 }
 
@@ -276,19 +282,30 @@ fn run(args: &Args) -> Result<(), String> {
     // directory emptied first.
     let default_output = args.output_dir.is_none();
     let output_dir = args.output_dir.clone().unwrap_or_else(|| format!("{}_output", journal_name));
-    // One Darkly engine for the whole run; canvases resize it as needed.
-    let mut darkly_engine = darkly::new_engine(1, 1);
+    let mut renderer = if args.svg {
+        Renderer::Svg
+    } else {
+        // One Darkly engine for the whole run; canvases resize it as needed.
+        Renderer::Darkly(darkly::new_engine(1, 1))
+    };
     let mut rendered = 0;
     for entry_name in &entries {
-        rendered += build_entry(args, &journal, &library, entry_name, &format!("{}/{}", output_dir, entry_name), default_output, &mut darkly_engine)?;
+        rendered += build_entry(args, &journal, &library, entry_name, &format!("{}/{}", output_dir, entry_name), default_output, &mut renderer)?;
     }
     eprintln!("Rendered {} page{} of {} ({}) to {} in {}", rendered, if rendered == 1 { "" } else { "s" }, journal_name, entries.join(", "), output_dir, clock(started.elapsed()));
     Ok(())
 }
 
+/// What a run renders with: SVG on the CPU, which never touches Darkly or
+/// the GPU, or Darkly.
+enum Renderer {
+    Svg,
+    Darkly(darkly::DarklyEngine),
+}
+
 /// Build entry `entry_name` and render it into `output_dir`, returning how
 /// many pages it rendered.
-fn build_entry(args: &Args, journal: &Journal, library: &Resources, entry_name: &str, output_dir: &str, default_output: bool, darkly_engine: &mut darkly::DarklyEngine) -> Result<usize, String> {
+fn build_entry(args: &Args, journal: &Journal, library: &Resources, entry_name: &str, output_dir: &str, default_output: bool, renderer: &mut Renderer) -> Result<usize, String> {
     // Each entry runs in an engine of its own: entries share resources,
     // not code.
     let mut engine = journal.engine(library.clone())?;
@@ -332,19 +349,21 @@ fn build_entry(args: &Args, journal: &Journal, library: &Resources, entry_name: 
         prepare_output_dir(output_dir)?;
     }
     let only = pages.as_deref();
-    if args.svg {
-        publish::svgs(&entry, output_dir, args.scale, only)?;
-    }
-    let render = publish::Render { scale: args.scale, supersample: args.supersample, parchment: args.parchment };
-    if args.pdf {
-        let path = format!("{}/{}.pdf", output_dir, entry_name);
-        let title = format!("{}: {}", journal.manifest.title, entry_name);
-        publish::pdf(&entry, darkly_engine, &path, &title, &render, only, args.stitch)?;
-        println!("Wrote {}", path);
-    } else if render.parchment || args.stitch.is_some() {
-        publish::page_images(&entry, darkly_engine, output_dir, &render, only, args.stitch)?;
-    } else {
-        publish::canvas_images(&entry, darkly_engine, output_dir, &render, only)?;
+    match renderer {
+        Renderer::Svg => publish::svgs(&entry, output_dir, args.scale, only)?,
+        Renderer::Darkly(engine) => {
+            let render = publish::Render { scale: args.scale, supersample: args.supersample, parchment: args.parchment };
+            if args.pdf {
+                let path = format!("{}/{}.pdf", output_dir, entry_name);
+                let title = format!("{}: {}", journal.manifest.title, entry_name);
+                publish::pdf(&entry, engine, &path, &title, &render, only, args.stitch)?;
+                println!("Wrote {}", path);
+            } else if render.parchment || args.stitch.is_some() {
+                publish::page_images(&entry, engine, output_dir, &render, only, args.stitch)?;
+            } else {
+                publish::canvas_images(&entry, engine, output_dir, &render, only)?;
+            }
+        }
     }
     Ok(only.map_or(entry.page_count(), |pages| pages.len()))
 }

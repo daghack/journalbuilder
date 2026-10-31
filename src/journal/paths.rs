@@ -197,11 +197,28 @@ impl StrokePath {
             .collect()
     }
     pub fn points_within(&self) -> Vec<Vec2> {
-        let mut points = Vec::new();
-        for cmd in &self.commands {
-            points.extend(cmd.points_within());
-        }
+        let mut points = Vec::with_capacity(self.commands.len());
+        self.for_each_point(|p| points.push(p));
         points
+    }
+    /// `f` of each of `points_within`, in order.
+    pub fn for_each_point(&self, mut f: impl FnMut(Vec2)) {
+        let mut point = |x: f32, y: f32| f(Vec2::new(x, y));
+        for cmd in &self.commands {
+            match *cmd {
+                PathCmd::MoveTo(x, y) | PathCmd::LineTo(x, y) => point(x, y),
+                PathCmd::CubicCurveTo(x1, y1, x2, y2, x, y) => {
+                    point(x1, y1);
+                    point(x2, y2);
+                    point(x, y);
+                }
+                PathCmd::QuadraticCurveTo(x1, y1, x, y) => {
+                    point(x1, y1);
+                    point(x, y);
+                }
+                PathCmd::ClosePath => {}
+            }
+        }
     }
     /// A hash of the path's points, the same every run (FNV-1a over their
     /// bits).
@@ -331,14 +348,19 @@ impl StrokePath {
         })).collect();
         StrokePath { commands }
     }
+    /// How many subpaths `to_substrokes` makes of it.
+    pub fn substroke_count(&self) -> usize {
+        let moves = self.commands.iter().filter(|cmd| matches!(cmd, PathCmd::MoveTo(..))).count();
+        // Commands before the first move are a subpath too.
+        moves + usize::from(self.commands.first().is_some_and(|cmd| !matches!(cmd, PathCmd::MoveTo(..))))
+    }
     pub fn to_substrokes(&self) -> Vec<SubstrokePath> {
         let mut substrokes = Vec::new();
         let mut current_substroke = SubstrokePath::new(Vec::new());
         for cmd in &self.commands {
             if let PathCmd::MoveTo(_, _) = cmd
                 && !current_substroke.commands.is_empty() {
-                    substrokes.push(current_substroke.clone());
-                    current_substroke.commands.clear();
+                    substrokes.push(SubstrokePath::new(std::mem::take(&mut current_substroke.commands)));
                 }
             current_substroke.commands.push(*cmd);
         }
@@ -720,6 +742,93 @@ impl PathParser<'_> {
 }
 
 /// SVG path data, one command at a time.
+/// `value` written as `{}` writes it, only faster: SVG is mostly numbers.
+pub fn push_number(out: &mut Vec<u8>, value: f32) {
+    let mut buffer = ryu::Buffer::new();
+    if value.is_finite() {
+        let text = buffer.format_finite(value);
+        let text = text.strip_suffix(".0").unwrap_or(text);
+        let dot = text.bytes().position(|b| b == b'.').unwrap_or(text.len() - 1);
+        // Ryu writes very large and small numbers in scientific notation,
+        // and rounds a number exactly between two shortest spellings to the
+        // even one, neither of which `{}` does.
+        if !text.as_bytes().contains(&b'e') && fraction_bits(value) != (text.len() - dot) as i32 {
+            out.extend_from_slice(text.as_bytes());
+            return;
+        }
+    }
+    out.extend_from_slice(value.to_string().as_bytes());
+}
+
+/// `value` as `push_number` writes it and `trim_decimals` cuts it to two
+/// places, only faster, as the web editor's SVGs are nothing but those.
+pub fn push_cut_number(out: &mut Vec<u8>, value: f32) {
+    // Exactly: 24 bits by 7.
+    let hundredths = value.abs() as f64 * 100.0;
+    let whole = hundredths.floor();
+    let fraction = hundredths - whole;
+    // At least half of the number's last place: however `{}` writes it,
+    // it's that near. If no hundredth's that near, it's written with more
+    // than two places, cut to `whole`.
+    let near = hundredths * f64::from_bits((1023 - 24) << 52);
+    if fraction > near && 1.0 - fraction > near {
+        if value < 0.0 {
+            out.push(b'-');
+        }
+        let whole = whole as u32;
+        let mut digits = [0u8; 13];
+        let mut start = digits.len() - 3;
+        digits[start] = b'.';
+        digits[start + 1] = b'0' + (whole / 10 % 10) as u8;
+        digits[start + 2] = b'0' + (whole % 10) as u8;
+        let mut left = whole / 100;
+        loop {
+            start -= 1;
+            digits[start] = b'0' + (left % 10) as u8;
+            left /= 10;
+            if left == 0 {
+                break;
+            }
+        }
+        out.extend_from_slice(&digits[start..]);
+    } else {
+        out.extend_from_slice(trim_decimals(&value.to_string(), 2).as_bytes());
+    }
+}
+
+/// `text` with every decimal number cut to at most `places` places.
+pub fn trim_decimals(text: &str, places: usize) -> String {
+    let bytes = text.as_bytes();
+    let mut out = String::with_capacity(bytes.len());
+    // What's before this has been copied or cut.
+    let mut copied = 0;
+    let mut i = 1;
+    while i < bytes.len() {
+        if bytes[i] == b'.' && bytes[i - 1].is_ascii_digit() {
+            let start = i + 1;
+            let mut end = start;
+            while bytes.get(end).is_some_and(u8::is_ascii_digit) {
+                end += 1;
+            }
+            out.push_str(&text[copied..(start + places).min(end)]);
+            copied = end;
+            i = end;
+        }
+        i += 1;
+    }
+    out.push_str(&text[copied..]);
+    out
+}
+
+/// How many binary places a finite number has after its point, which is how
+/// many decimal places it takes to write it exactly.
+fn fraction_bits(value: f32) -> i32 {
+    let bits = value.to_bits();
+    let exponent = (bits >> 23 & 0xff) as i32;
+    let mantissa = bits & 0x7f_ffff | if exponent > 0 { 0x80_0000 } else { 0 };
+    150 - exponent.max(1) - mantissa.trailing_zeros() as i32
+}
+
 impl std::fmt::Display for PathCmd {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -772,10 +881,25 @@ pub type CurveLength = f32;
 pub type PriorDistance = f32;
 pub type CurveSampleInfo = (Vec<CurveSample>, CurveLength);
 pub fn curve_samples(cmd: &PathCmd, start: Vec2, current: Vec2, sample_count: usize) -> CurveSampleInfo {
-    let mut samples = Vec::new();
     let delta_t = 1.0 / (sample_count + 2) as f32;
     let mut distance = 0.0;
-    let curve = |t| cmd.interpolate(start, current, t).unwrap();
+    // A sample's neighbours are often just the samples next to it, so the
+    // last few points are kept: most of a path's samples are worked out here.
+    let mut known = [(f32::NAN.to_bits(), Vec2::ZERO); 4];
+    let mut oldest = 0;
+    let mut curve = |t: f32| {
+        if let Some((_, point)) = known.iter().find(|(key, _)| *key == t.to_bits()) {
+            return *point;
+        }
+        let point = cmd.interpolate(start, current, t).unwrap();
+        known[oldest] = (t.to_bits(), point);
+        oldest = (oldest + 1) % known.len();
+        point
+    };
+    // The first sample takes its normal from those after it, so it's put in
+    // at the end.
+    let mut samples = Vec::with_capacity(sample_count + 3);
+    samples.push(CurveSample { point: Vec2::ZERO, normal: Vec2::ZERO, distance: 0.0, t: 0.0 });
     for i in 1..(sample_count+2) {
         let t = i as f32 * delta_t;
         let point = curve(t);
@@ -799,9 +923,9 @@ pub fn curve_samples(cmd: &PathCmd, start: Vec2, current: Vec2, sample_count: us
         });
     }
     // add the sample for 0 and 1, extrapolating the normals from the first and second sample for 0 and the last and second to last for 1
-    let first_sample = CurveSample {
+    samples[0] = CurveSample {
         point: curve(0.0),
-        normal: samples[0].normal - (samples[1].normal - samples[0].normal),
+        normal: samples[1].normal - (samples[2].normal - samples[1].normal),
         distance: 0.0,
         t: 0.0,
     };
@@ -817,7 +941,6 @@ pub fn curve_samples(cmd: &PathCmd, start: Vec2, current: Vec2, sample_count: us
         distance: length,
         t: 1.0,
     };
-    samples.insert(0, first_sample);
     samples.push(last_sample);
     (samples, length)
 }
@@ -1050,6 +1173,45 @@ fn l_interp(p0: Vec2, p1: Vec2, t: f32) -> Vec2 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn numbers_are_cut_as_trim_decimals_cuts_them() {
+        let mut numbers = vec![0.0, -0.0, 0.3, 0.29999998, 1.3, 12.5, 12.503, 0.01, 0.009999999, -0.001, 99.99, 99.999, 1e-7, 1e-45, 8388607.5, 1e7, 1e30, f32::MAX, f32::INFINITY, f32::NAN];
+        let mut bits = 1u32;
+        for _ in 0..1_000_000 {
+            bits = bits.wrapping_mul(2891336453).wrapping_add(1);
+            numbers.push(f32::from_bits(bits));
+            // Those the size of canvases' coordinates.
+            numbers.push(f32::from_bits(bits % 0x0100_0000 + 0x4300_0000));
+        }
+        for value in numbers {
+            let mut written = Vec::new();
+            push_cut_number(&mut written, value);
+            assert_eq!(String::from_utf8(written).unwrap(), trim_decimals(&value.to_string(), 2), "{:08x}", value.to_bits());
+        }
+    }
+
+    #[test]
+    fn numbers_are_written_as_display_writes_them() {
+        let mut numbers = vec![
+            0.0, -0.0, 1.0, -1.0, 0.5, 2.5, 100.0, 1200.0, 0.1, 0.3, 1e-5, 1e-7, 1e7, 1e13, 1e16, 1e30,
+            f32::MIN, f32::MAX, f32::MIN_POSITIVE, 1e-45, f32::INFINITY, f32::NEG_INFINITY, f32::NAN,
+            // Exactly between two shortest spellings.
+            53.0390625, -53.0390625, 3.0517578e-5, 8388607.5,
+        ];
+        // Across all sizes, and all that land on few binary places.
+        let mut bits = 1u32;
+        for _ in 0..1_000_000 {
+            bits = bits.wrapping_mul(2891336453).wrapping_add(1);
+            numbers.push(f32::from_bits(bits));
+            numbers.push(f32::from_bits(bits & 0xffff_f000));
+        }
+        for value in numbers {
+            let mut written = Vec::new();
+            push_number(&mut written, value);
+            assert_eq!(String::from_utf8(written).unwrap(), value.to_string(), "{:08x}", value.to_bits());
+        }
+    }
 
     fn cubic_ends(path: &StrokePath) -> Vec<Vec2> {
         path.commands.iter().filter_map(|cmd| match cmd {

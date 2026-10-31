@@ -4,8 +4,10 @@
 
 use ::darkly::engine::DarklyEngine;
 use image::RgbaImage;
+use rayon::prelude::*;
 
 use super::parchment::{self, Sheet};
+use super::paths::trim_decimals;
 use super::canvas::StrokeColor;
 use super::compose::{self, Placed};
 use super::darkly;
@@ -272,16 +274,17 @@ pub fn page_svg(page: &Page, label: &str) -> Option<(String, [f32; 4])> {
         let seed = canvas_svg_seed(&canvas, &format!("{}_{}", label, canvas_label));
         let (group, view) = canvas.to_svg_view(page.svg_style(), seed, PAGE_SVG_SCALE);
         let [x, y, w, h] = view;
-        layers.push_str(&format!(
-            "<svg x=\"{x}\" y=\"{y}\" width=\"{w}\" height=\"{h}\" viewBox=\"{x} {y} {w} {h}\">{group}</svg>"
-        ));
+        layers.push_str(&trim_decimals(&format!("<svg x=\"{x}\" y=\"{y}\" width=\"{w}\" height=\"{h}\" viewBox=\"{x} {y} {w} {h}\">"), 2));
+        layers.push_str(&group);
+        layers.push_str("</svg>");
         page_view = Some(union(page_view, view));
     }
     let [x, y, w, h] = page_view?;
-    let svg = format!(
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\" viewBox=\"{x} {y} {w} {h}\">{layers}</svg>"
-    );
-    Some((trim_decimals(&svg, 2), [x, y, w, h]))
+    let header = format!("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\" viewBox=\"{x} {y} {w} {h}\">");
+    let mut svg = trim_decimals(&header, 2);
+    svg.push_str(&layers);
+    svg.push_str("</svg>");
+    Some((svg, [x, y, w, h]))
 }
 
 /// The box of canvas units `page_svg` shows, without drawing it.
@@ -301,27 +304,6 @@ fn union(a: Option<[f32; 4]>, b: [f32; 4]) -> [f32; 4] {
     }
 }
 
-/// `text` with every decimal number cut to at most `places` places.
-fn trim_decimals(text: &str, places: usize) -> String {
-    let bytes = text.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        let b = bytes[i];
-        out.push(b);
-        i += 1;
-        let after_digit = b == b'.' && out.len() >= 2 && out[out.len() - 2].is_ascii_digit();
-        if after_digit && bytes.get(i).is_some_and(u8::is_ascii_digit) {
-            let start = i;
-            while bytes.get(i).is_some_and(u8::is_ascii_digit) {
-                i += 1;
-            }
-            out.extend_from_slice(&bytes[start..(start + places).min(i)]);
-        }
-    }
-    String::from_utf8(out).expect("only ASCII digits were removed")
-}
-
 /// The seed a canvas's SVG is roughened with, `name` being its file's name
 /// (`{page}_{canvas}`): the same every run, but each canvas roughened
 /// differently. Tiles use the whole page's.
@@ -335,28 +317,50 @@ fn canvas_svg_seed(canvas: &super::canvas::Canvas, name: &str) -> u64 {
 /// brush's pressure instead (see `new_style`).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn svgs(entry: &Entry, dir: &str, scale: f32, only: Option<&[usize]>) -> Result<(), String> {
-    let mut progress = pages_progress(entry, "SVGs", only);
-    for (i, page) in entry.selected_pages(only) {
-        progress.start(&page.label(i));
-        for (name, svg, png) in page_svg_renders(page, i, scale) {
-            let (svg_file, png_file) = (format!("{}/{}.svg", dir, name), format!("{}/{}.png", dir, name));
-            std::fs::write(&svg_file, svg).map_err(|e| write_error(&svg_file, e))?;
-            std::fs::write(&png_file, png).map_err(|e| write_error(&png_file, e))?;
-        }
+    let progress = std::sync::Mutex::new(pages_progress(entry, "SVGs", only));
+    let renders: Vec<SvgRender> = entry.selected_pages(only).flat_map(|(i, page)| SvgRender::of_page(page, i, scale)).collect();
+    // Canvases don't depend on each other, so they're rendered at once. The
+    // bar counts canvases rather than pages then.
+    progress.lock().expect("no render panics holding it").resize(renders.len());
+    renders.into_par_iter().try_for_each(|render| {
+        let (svg, png) = render.canvas.to_svg_and_png(render.scale, render.style.as_ref(), render.seed);
+        let (svg_file, png_file) = (format!("{}/{}.svg", dir, render.name), format!("{}/{}.png", dir, render.name));
+        std::fs::write(&svg_file, svg).map_err(|e| write_error(&svg_file, e))?;
+        std::fs::write(&png_file, png).map_err(|e| write_error(&png_file, e))?;
+        let mut progress = progress.lock().expect("no render panics holding it");
+        progress.start(&render.name);
         progress.step();
+        Ok(())
+    })
+}
+
+/// A canvas's SVG render to make: all it takes, none of it the script's.
+struct SvgRender {
+    name: String,
+    canvas: super::canvas::Canvas,
+    scale: f32,
+    style: Option<super::canvas::SvgStyle>,
+    seed: u64,
+}
+
+impl SvgRender {
+    /// The canvases of page `index`, as `svgs` renders them.
+    fn of_page(page: &Page, index: usize, scale: f32) -> Vec<SvgRender> {
+        page.rendered_canvases().map(|(label, canvas)| {
+            let name = format!("{}_{}", page.label(index), label);
+            let seed = canvas_svg_seed(&canvas, &name);
+            SvgRender { name, canvas, scale: 2.0 * scale, style: page.svg_style().cloned(), seed }
+        }).collect()
     }
-    Ok(())
 }
 
 /// The SVG renders of page `index`'s canvases as `svgs` writes them: each
 /// one's file name (`{page}_{canvas}`), SVG and PNG. Needs no GPU, so
 /// tests compare these (tests/svg_renders.rs).
 pub fn page_svg_renders(page: &Page, index: usize, scale: f32) -> Vec<(String, String, Vec<u8>)> {
-    page.rendered_canvases().map(|(label, canvas)| {
-        let name = format!("{}_{}", page.label(index), label);
-        let seed = canvas_svg_seed(&canvas, &name);
-        let (svg, png) = canvas.to_svg_and_png(2.0 * scale, page.svg_style(), seed);
-        (name, svg, png)
+    SvgRender::of_page(page, index, scale).into_par_iter().map(|render| {
+        let (svg, png) = render.canvas.to_svg_and_png(render.scale, render.style.as_ref(), render.seed);
+        (render.name, svg, png)
     }).collect()
 }
 

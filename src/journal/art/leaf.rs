@@ -14,7 +14,7 @@ use rand::rngs::StdRng;
 use rand::Rng;
 
 use super::geom::V;
-use super::solid::{Model, Run, Surface, P3};
+use super::solid::{AlongU, Later, Model, Surface, P3};
 
 /// Where a leaflet grows from on the page, which way, and how big.
 pub(super) struct Placement {
@@ -24,21 +24,23 @@ pub(super) struct Placement {
     pub width: f64,
 }
 
-/// A leaf as drawn: its leaflets' surfaces on the page, its visible lines,
-/// and the room each leaflet takes up, as a disc.
+/// A leaf: the room each leaflet takes up, as a disc, and what's left to
+/// work out of it, if it fits.
 pub(super) struct Drawn {
-    pub triangles: Vec<[V; 3]>,
-    pub lines: Vec<Run>,
+    pub later: Later,
     pub room: Vec<(V, f64)>,
 }
 
 pub(super) fn leaf(leaflets: &[Placement], rng: &mut StdRng) -> Drawn {
     let scale = leaflets.iter().map(|l| l.length).fold(0.0, f64::max);
     let (surfaces, room): (Vec<Surface>, Vec<(V, f64)>) = leaflets.iter().map(|placement| leaflet(placement, rng)).unzip();
-    let model = Model::new(surfaces, scale);
-    let mut lines = Vec::new();
-    model.draw(&mut lines);
-    Drawn { triangles: model.triangles(), lines, room }
+    let later = Box::new(move || {
+        let model = Model::new(surfaces, scale);
+        let mut lines = Vec::new();
+        model.draw(&mut lines);
+        (model.triangles(), lines)
+    });
+    Drawn { later, room }
 }
 
 /// The half width `u` along a leaflet (from its base to its tip), teeth and
@@ -101,12 +103,17 @@ fn leaflet(placement: &Placement, rng: &mut StdRng) -> (Surface, (V, f64)) {
     let teeth = rng.random_range(13..19);
     let (half, edges) = margin(length, width, teeth);
     let start = P3::on_page(base);
+    let (fold_sin, fold_cos) = (fold.sin(), fold.cos());
+    let along_u = AlongU::new();
     let point = move |u: f64, v: f64| {
-        let (sin, cos) = (twist * u).sin_cos();
-        let (side, up) = (across * cos + normal * sin, normal * cos - across * sin);
-        let midrib = start + along * (u * length) - up * (droop * length * u * u) + side * (swing * length * u * u);
-        let out = v.abs() * half(u);
-        midrib + side * (v.signum() * out * fold.cos()) + up * (out * fold.sin() + ripple * v * v * (ripples * PI * u + phase).sin())
+        let (side, up, midrib, half, ripple_along) = along_u.at(u, || {
+            let (sin, cos) = (twist * u).sin_cos();
+            let (side, up) = (across * cos + normal * sin, normal * cos - across * sin);
+            let midrib = start + along * (u * length) - up * (droop * length * u * u) + side * (swing * length * u * u);
+            (side, up, midrib, half(u), (ripples * PI * u + phase).sin())
+        });
+        let out = v.abs() * half;
+        midrib + side * (v.signum() * out * fold_cos) + up * (out * fold_sin + ripple * v * v * ripple_along)
     };
 
     // The midrib, and veins from it towards the teeth.
@@ -164,9 +171,10 @@ mod tests {
         }).collect();
         let drawn = leaf(&leaflets, &mut StdRng::seed_from_u64(2));
         assert_eq!(drawn.room.len(), 3);
-        assert!(drawn.lines.len() >= 3, "{} lines", drawn.lines.len());
-        assert!(drawn.lines.iter().flatten().all(|(p, _)| p.is_finite()));
+        let (_, lines) = (drawn.later)();
+        assert!(lines.len() >= 3, "{} lines", lines.len());
+        assert!(lines.iter().flatten().all(|(p, _)| p.is_finite()));
         // Teeth are drawn as corners.
-        assert!(drawn.lines.iter().flatten().filter(|(_, corner)| *corner).count() > 30);
+        assert!(lines.iter().flatten().filter(|(_, corner)| *corner).count() > 30);
     }
 }

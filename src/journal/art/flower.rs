@@ -15,14 +15,12 @@ use rand::rngs::StdRng;
 use rand::Rng;
 
 use super::geom::V;
-use super::solid::{mix, Line, Model, Run, Surface, P3};
+use super::solid::{mix, AlongU, Later, Line, Model, Surface, P3};
 
-/// A flower as drawn: its surfaces on the page, which hide whatever is
-/// behind it, its visible lines, and the middle of what it covers and how
-/// far it reaches from there.
+/// A flower: the middle of what it covers, how far it reaches from there,
+/// and what's left to work out of it.
 pub(super) struct Bloom {
-    pub triangles: Vec<[V; 3]>,
-    pub lines: Vec<Run>,
+    pub later: Later,
     pub middle: V,
     pub reach: f64,
 }
@@ -79,7 +77,7 @@ struct Organ {
     /// How far it twists about its length by its tip.
     twist: f64,
     widest: f64,
-    width: Box<dyn Fn(f64) -> f64 + Send + Sync>,
+    width: Box<dyn Fn(f64) -> f64 + Send>,
 }
 
 impl Organ {
@@ -98,16 +96,19 @@ impl Organ {
             midline.push(last + (radial * theta.cos() + up * theta.sin()) * (self.length / STEPS as f64));
         }
         let Organ { curl, curl_power, cup, twist, widest, width, elevation, .. } = self;
+        let along_u = AlongU::new();
         let point = move |u: f64, v: f64| {
-            let k = (u * STEPS as f64).clamp(0.0, STEPS as f64 - 1e-9);
-            let (i, t) = (k as usize, k.fract());
-            let at = midline[i].lerp(midline[i + 1], t);
-            let theta = elevation + curl * u.powf(curl_power);
-            let normal = radial * -theta.sin() + up * theta.cos();
-            let (sin, cos) = (twist * u).sin_cos();
-            let (side, normal) = (across * cos + normal * sin, normal * cos - across * sin);
+            let (at, side, normal, half) = along_u.at(u, || {
+                let k = (u * STEPS as f64).clamp(0.0, STEPS as f64 - 1e-9);
+                let (i, t) = (k as usize, k.fract());
+                let at = midline[i].lerp(midline[i + 1], t);
+                let theta = elevation + curl * u.powf(curl_power);
+                let normal = radial * -theta.sin() + up * theta.cos();
+                let (sin, cos) = (twist * u).sin_cos();
+                (at, across * cos + normal * sin, normal * cos - across * sin, width(u))
+            });
             // Cupped across as an arc, so the width doesn't stretch.
-            let a = v * width(u);
+            let a = v * half;
             let k = cup / widest;
             let (out, rise) = if k.abs() < 1e-9 { (a, 0.0) } else { ((k * a).sin() / k, (1.0 - (k * a).cos()) / k) };
             at + side * out + normal * rise
@@ -221,12 +222,9 @@ pub(super) fn bloom(pose: &Pose, rng: &mut StdRng) -> Bloom {
     let receptacle = surfaces.len() - 1;
 
     let model = Model::new(surfaces, radius);
-    let mut lines = Vec::new();
-    model.draw(&mut lines);
-    // The receptacle's rim, and stamens rising from it, once it's open.
+    // Stamens rising from the receptacle, once it's open.
+    let mut stamens: Vec<Line> = Vec::new();
     if open > 0.25 {
-        let rim: Line = (0..=32).map(|k| (model.on(receptacle, 1.0, -1.0 + 2.0 * k as f64 / 32.0), false)).collect();
-        model.visible(&rim, &mut lines);
         let count = rng.random_range(22..32);
         for k in 0..count {
             let angle = TAU * k as f64 / count as f64 + rng.random_range(-0.08..0.08);
@@ -234,29 +232,42 @@ pub(super) fn bloom(pose: &Pose, rng: &mut StdRng) -> Bloom {
             let length = radius * mix(0.2, 0.34, open) * rng.random_range(0.85..1.15);
             let base = frame.center + frame.radial(angle) * (0.1 * radius) + frame.axis * (0.02 * radius);
             let out = frame.radial(angle);
-            let stamen: Line = (0..=4).map(|j| {
+            stamens.push((0..=4).map(|j| {
                 let t = j as f64 / 4.0;
                 let theta = rise - 0.3 * t;
                 ((base + (out * theta.cos() + frame.axis * theta.sin()) * (length * t), None), false)
-            }).collect();
-            let tip = stamen[stamen.len() - 1].0;
-            model.visible(&stamen, &mut lines);
-            if !model.hidden(tip) {
-                let anther = tip.0.flat();
-                lines.push((0..=8).map(|j| (anther + V::angle(TAU * j as f64 / 8.0) * (0.022 * radius), false)).collect());
-            }
+            }).collect());
         }
     }
     let triangles = model.triangles();
     let count = 3.0 * triangles.len() as f64;
     let middle = triangles.iter().flatten().fold(V::default(), |sum, &p| sum + p) * (1.0 / count);
     let reach = triangles.iter().flatten().map(|&p| (p - middle).len()).fold(0.0, f64::max);
-    Bloom { triangles, lines, middle, reach }
+    let later = Box::new(move || {
+        let mut lines = Vec::new();
+        model.draw(&mut lines);
+        // The receptacle's rim, and the stamens, once it's open.
+        if open > 0.25 {
+            let rim: Line = (0..=32).map(|k| (model.on(receptacle, 1.0, -1.0 + 2.0 * k as f64 / 32.0), false)).collect();
+            model.visible(&rim, &mut lines);
+            for stamen in &stamens {
+                let tip = stamen[stamen.len() - 1].0;
+                model.visible(stamen, &mut lines);
+                if !model.hidden(tip) {
+                    let anther = tip.0.flat();
+                    lines.push((0..=8).map(|j| (anther + V::angle(TAU * j as f64 / 8.0) * (0.022 * radius), false)).collect());
+                }
+            }
+        }
+        (triangles, lines)
+    });
+    Bloom { later, middle, reach }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::solid::Run;
     use rand::SeedableRng;
 
     fn draw(openness: f64, tilt: f64, facing: f64) -> Bloom {
@@ -265,20 +276,21 @@ mod tests {
     }
 
     /// Anthers: the small closed loops at the stamens' tips.
-    fn anthers(bloom: &Bloom) -> usize {
-        bloom.lines.iter().filter(|line| line.len() == 9 && (line[0].0 - line[8].0).len() < 1e-9).count()
+    fn anthers(lines: &[Run]) -> usize {
+        lines.iter().filter(|line| line.len() == 9 && (line[0].0 - line[8].0).len() < 1e-9).count()
     }
 
     #[test]
     fn flowers_open_from_closed_buds() {
         let (bud, open) = (draw(0.0, 0.0, 0.0), draw(1.0, 0.0, 0.0));
         assert!(open.reach > 1.8 * bud.reach, "bud {} vs open {}", bud.reach, open.reach);
+        let (bud, open) = ((bud.later)(), (open.later)());
         // A bud's sepals hide its stamens; an open flower's face shows them.
-        assert_eq!(anthers(&bud), 0);
-        assert!(anthers(&open) > 15, "{} anthers", anthers(&open));
-        for bloom in [&bud, &open] {
-            assert!(!bloom.lines.is_empty());
-            assert!(bloom.lines.iter().flatten().map(|p| &p.0).chain(bloom.triangles.iter().flatten()).all(|p| p.is_finite()));
+        assert_eq!(anthers(&bud.1), 0);
+        assert!(anthers(&open.1) > 15, "{} anthers", anthers(&open.1));
+        for (triangles, lines) in [&bud, &open] {
+            assert!(!lines.is_empty());
+            assert!(lines.iter().flatten().map(|p| &p.0).chain(triangles.iter().flatten()).all(|p| p.is_finite()));
         }
     }
 
@@ -287,8 +299,8 @@ mod tests {
         // Facing +x, side on, a bud or half-open flower reaches out to the
         // right of where it sits, much further than its sepals fold back.
         for openness in [0.0, 0.5] {
-            let bloom = draw(openness, FRAC_PI_2, 0.0);
-            let xs = bloom.triangles.iter().flatten().map(|p| p.x);
+            let (triangles, _) = (draw(openness, FRAC_PI_2, 0.0).later)();
+            let xs = triangles.iter().flatten().map(|p| p.x);
             let (back, out) = xs.fold((0.0, 0.0), |(lo, hi): (f64, f64), x| (lo.min(x), hi.max(x)));
             assert!(out > 1.5 * -back && out > 30.0, "openness {}: reaches {} forward, {} back", openness, out, -back);
         }
@@ -296,7 +308,7 @@ mod tests {
 
     #[test]
     fn the_same_generator_draws_the_same_flower() {
-        let lines = |bloom: Bloom| format!("{:?}", bloom.lines);
+        let lines = |bloom: Bloom| format!("{:?}", (bloom.later)().1);
         assert_eq!(lines(draw(0.6, 0.8, 1.0)), lines(draw(0.6, 0.8, 1.0)));
     }
 }
