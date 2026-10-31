@@ -19,7 +19,8 @@ target/release/journalbuild journal_entries --entry entry_17
 
 Renders go to `journal_entries_output/entry_17/` in the current directory
 (emptied first), a directory for each entry built; leave out `--entry` for
-every entry. Rendering needs a GPU
+every entry. An entry that fails doesn't stop the others rendering: the
+failures are listed at the end, and the exit status is 1. Rendering needs a GPU
 that wgpu can use (Metal on macOS). While it runs, one line of the
 terminal shows its progress: a spinner while the script runs, then a bar
 of the pages rendered, the page it's on and the time left
@@ -33,8 +34,8 @@ Useful flags (`journalbuild` with no arguments lists them all):
 - `--scale 0.25`: smaller output, much faster to render.
 - `--svg`: render each canvas as an SVG, and that SVG as a PNG, instead of
   with Darkly. It needs no GPU.
-- `--strict-glyphs`: fail if any character has no glyph, instead of
-  drawing an X and warning.
+- `--strict-glyphs`: fail an entry if any of its characters has no glyph,
+  instead of drawing an X and warning.
 - `--parchment`: render each page as one image, `darkly_{page}.png`, on
   procedural parchment: a mottled scroll browning toward ragged edges.
   Pages get a border of parchment round their strokes; typeset pages are

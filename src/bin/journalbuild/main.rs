@@ -52,7 +52,9 @@ const USAGE: &str = "Usage: journalbuild <journal> [--entry E[,E...]] [--page N[
                       journal.json, its entries in entries/, and its own
                       resources (locks/, layouts/, illustrations/, chains/,
                       styles/, lib/, glyphsets/, content/) over the
-                      library's.
+                      library's. An entry that fails doesn't stop the others
+                      rendering: the failures are listed at the end, and the
+                      exit status is 1.
   --entry E,...       Build only these entries, by name (default: every
                       entry, in the manifest's order).
   --page P,...        Render only these pages of each entry built, by index
@@ -84,8 +86,9 @@ const USAGE: &str = "Usage: journalbuild <journal> [--entry E[,E...]] [--page N[
                       it goes with, on parchment, or without, on nothing).
                       With --pdf, the PDF's pages are the stitches instead
                       (a page left alone at the end is a page of its own).
-  --strict-glyphs     Fail before rendering if any character had no glyph
-                      (by default they're drawn as X and listed as a warning).
+  --strict-glyphs     Fail an entry before rendering it if any of its characters
+                      had no glyph (by default they're drawn as X and listed
+                      as a warning).
   --scale S           Scale output images (default 1.0), brushes included.
                       Darkly work scales with output size, so e.g. 0.25
                       renders much faster.
@@ -289,11 +292,41 @@ fn run(args: &Args) -> Result<(), String> {
         Renderer::Darkly(darkly::new_engine(1, 1))
     };
     let mut rendered = 0;
+    let mut built = Vec::new();
+    let mut failures = Vec::new();
     for entry_name in &entries {
-        rendered += build_entry(args, &journal, &library, entry_name, &format!("{}/{}", output_dir, entry_name), default_output, &mut renderer)?;
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            build_entry(args, &journal, &library, entry_name, &format!("{}/{}", output_dir, entry_name), default_output, &mut renderer)
+        })).unwrap_or_else(|panic| Err(format!("{} crashed the build: {}", journal.entry_path(entry_name).display(), panic_message(&*panic))));
+        match result {
+            Ok(pages) => {
+                rendered += pages;
+                built.push(entry_name.as_str());
+            }
+            // The others still render, and the run fails at the end, listing
+            // these. Said now too, as the rest may take a while.
+            Err(err) => {
+                if entries.len() > 1 {
+                    eprintln!("error: {}", err);
+                }
+                failures.push(format!("  {}: {}", entry_name, err));
+            }
+        }
     }
-    eprintln!("Rendered {} page{} of {} ({}) to {} in {}", rendered, if rendered == 1 { "" } else { "s" }, journal_name, entries.join(", "), output_dir, clock(started.elapsed()));
+    if !built.is_empty() {
+        eprintln!("Rendered {} page{} of {} ({}) to {} in {}", rendered, if rendered == 1 { "" } else { "s" }, journal_name, built.join(", "), output_dir, clock(started.elapsed()));
+    }
+    if !failures.is_empty() {
+        return Err(format!("{} of {} entries failed, so weren't rendered:\n{}", failures.len(), entries.len(), failures.join("\n")));
+    }
     Ok(())
+}
+
+/// What a panic said.
+fn panic_message(panic: &(dyn std::any::Any + Send)) -> &str {
+    panic.downcast_ref::<&str>().copied()
+        .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("a panic")
 }
 
 /// What a run renders with: SVG on the CPU, which never touches Darkly or

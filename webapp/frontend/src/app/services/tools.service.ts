@@ -1,6 +1,6 @@
 import { Injectable, inject, signal, untracked } from '@angular/core';
 import type {
-  ChainFile, ChainRun, ChainType, IllustrationType, JournalPayload, LayoutType, LockPorts, LockType, Preview, RenderPreview, ToolError, ToolFunction, ToolsReply, ToolsRequest, ValueKind,
+  ChainFile, ChainRun, ChainType, IllustrationType, JournalPayload, LayoutType, LockPorts, LockType, Preview, RenderPreview, ScriptError, ToolError, ToolFunction, ToolsReply, ToolsRequest, ValueKind,
 } from '../scribe';
 import { JournalStore } from './journal-store.service';
 
@@ -53,9 +53,9 @@ export class ToolsService {
     return JSON.parse(await this.call<string>('libraryFiles'));
   }
 
-  /** The library files `entries` (scripts) use, run with the journal's files: what an export bundles. */
-  async usedLibrary(entries: string[]): Promise<Answer<{ paths: string[] }>> {
-    return JSON.parse(await this.callWith<string>(60_000, 'usedLibrary', JSON.stringify(entries)));
+  /** The library files the entry script `source` uses, run with the journal's files: what an export bundles. If it fails, those it read first, and why. */
+  async usedLibrary(source: string): Promise<{ paths: string[]; error: ScriptError | null }> {
+    return JSON.parse(await this.callWith<string>(60_000, 'usedLibrary', source));
   }
 
   async lockTypes(): Promise<Answer<LockType[]>> {
