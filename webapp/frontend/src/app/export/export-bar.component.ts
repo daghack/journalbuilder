@@ -10,10 +10,11 @@ type Format = 'pdf' | 'png';
 @Component({
   selector: 'app-export-bar',
   template: `
-    <button type="button" class="export" (click)="ask()" [disabled]="!canExport()">Export</button>
+    <button type="button" class="export" (click)="ask()" [disabled]="!canExport()" [title]="cantExport()">Export</button>
 
     <dialog #dialog (close)="onClose()" (cancel)="$event.preventDefault(); stop()">
       <h2>Export</h2>
+      @if (journal.error(); as error) { <p class="error">The script fails, so this exports the pages shown, from the last time it ran: {{ error.message }}</p> }
       @if (!running() && !done()) {
         <p class="note">
           {{ journal.pages().length }} page{{ journal.pages().length === 1 ? '' : 's' }}, rendered with Darkly
@@ -92,7 +93,14 @@ export class ExportBarComponent {
     if (n === null || n < 2) return '';
     return this.format() === 'pdf' ? `, ${n} pages side by side to a PDF page` : `, and every ${n} side by side`;
   });
-  protected readonly canExport = computed(() => this.journal.pages().some((p) => p.view) && !this.journal.error());
+  /** The pages shown are the last good run's, so a script failing since doesn't stop them being exported. */
+  protected readonly canExport = computed(() => this.journal.pages().some((p) => p.view));
+  /** Why there's nothing to export, if there isn't. */
+  protected readonly cantExport = computed(() => {
+    if (this.canExport()) return '';
+    const error = this.journal.error();
+    return error ? `Nothing to export: the script fails, and hasn't run yet. ${error.message}` : 'Nothing to export: no page has anything drawn on it';
+  });
   protected readonly overall = computed(() => {
     const p = this.progress();
     if (this.done()) return 1;

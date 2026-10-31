@@ -10,8 +10,8 @@
 //!
 //! The editors use the rest, which answer in JSON: `previewSvg` draws a
 //! script's first page without touching what `evaluate` keeps;
-//! `libraryFiles` lists the library and `usedLibrary` the library files a
-//! journal's entries use; the lock and chain editor has `lockTypes`,
+//! `libraryFiles` lists the library and `usedLibrary` the library files an
+//! entry uses; the lock and chain editor has `lockTypes`,
 //! `lockPorts`, `lockExamples`, `chainTypes`, `runChain`, `readChain` and
 //! `valueKinds`; and the illustration, layout and style editors have
 //! `illustrationTypes`, `illustrationPorts`, `illustrationPreview`,
@@ -305,24 +305,19 @@ pub fn library_files() -> String {
     Value::Object(files).to_string()
 }
 
-/// The library files the journal's entries (`entries`, JSON: an array of
-/// their scripts) use, run with the journal's files: what an export
-/// bundles. JSON: `{ paths: [...] }` (`locks/huffman.rhai`), or `{ error }`
-/// naming the first entry that fails.
+/// The library files the entry script `source` uses, run with the journal's
+/// files: what an export bundles. JSON: `{ paths: [...], error }`
+/// (`locks/huffman.rhai`); `error` is `{ message, line, column }` if the
+/// script failed, and `paths` are then those it read before it did.
 #[wasm_bindgen(js_name = usedLibrary)]
-pub fn used_library(entries: &str) -> String {
-    answer((|| {
-        let entries: Vec<String> = serde_json::from_str(entries).map_err(|e| format!("entries: {}", e))?;
-        let (library, used) = Resources::embedded().recording();
-        let resources = resources_over(library, &[]);
-        let (book, _) = glyphsets(&resources);
-        for (i, source) in entries.iter().enumerate() {
-            let mut engine = JournalEngine::with_resources(book.clone(), resources.clone());
-            engine.build_entry(source).map_err(|e| format!("entry {}: {}", i, e.message))?;
-        }
-        let paths = used.paths(Some((&book, &Resources::embedded().glyphsets)));
-        Ok(json!({ "paths": paths }))
-    })())
+pub fn used_library(source: &str) -> String {
+    let (library, used) = Resources::embedded().recording();
+    let resources = resources_over(library, &[]);
+    let (book, _) = glyphsets(&resources);
+    let mut engine = JournalEngine::with_resources(book.clone(), resources);
+    let error = engine.build_entry(source).err().map(|err| ScriptError { message: err.message, line: err.line, column: err.column });
+    let paths = used.paths(Some((&book, &Resources::embedded().glyphsets)));
+    json!({ "paths": paths, "error": error }).to_string()
 }
 
 /// A lock library over the journal's lock and chain files, and `chains`

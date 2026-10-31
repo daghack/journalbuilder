@@ -1305,14 +1305,14 @@ doc += api("fn example()", "Optional, in a style file: the text to preview it wi
 // ---- building ----
 
 doc += heading("Building");
-doc += api("journalbuild NAME [flags]", "Runs a journal's entries, each on its own, and renders their pages, an entry's into a directory named for it.", [
+doc += api("journalbuild NAME [flags]", "Runs a journal's entries, each on its own, and renders their pages, an entry's into a directory named for it. An entry that fails doesn't stop the others rendering: the failures, and why, are listed at the end, and the exit status is 1.", [
 	arg("NAME", "Which journal.", "a directory with a journal.json in the journals directories (the first that has it), or a journal directory's path (anything with a slash)."),
 	opt("--entry E,...", "every entry, in order", "Builds only these entries.", "entry names, separated by commas, as --entry letter_1."),
 	opt("--page P,...", "every page", "Renders only these pages of each entry built; other pages' existing output is kept.", "page indices (from 0) or names, separated by commas, as --page 0,maze."),
 	opt("--scale S", "1", "Scales output images, brushes included; Darkly work scales with output size, so 0.25 renders much faster.", "a positive number."),
 	opt("--supersample K", "1.2", "Renders Darkly output K times larger and filters it back down, smoothing thin, aliased strokes; render time grows with K squared.", "a number of at least 1; 1 turns it off."),
 	opt("--svg", "off", "Also renders each canvas as an SVG, PAGE_CANVAS.svg, and that SVG as a PNG.", "a flag."),
-	opt("--strict-glyphs", "off", "Fails before rendering if any character had no glyph, rather than drawing it as X and warning.", "a flag."),
+	opt("--strict-glyphs", "off", "Fails an entry before rendering it if any of its characters had no glyph, rather than drawing it as X and warning.", "a flag."),
 	opt("--parchment", "off", "Renders each page as one image, darkly_PAGE.png, its canvases layered on procedural parchment; light inks are drawn dark, and ink soaks in a little unevenly, very slightly thinner in places.", "a flag."),
 	opt("--pdf", "off", "Puts each entry's pages in one PDF, ENTRY.pdf, a page each at 150 canvas units to the inch, rather than writing images; on parchment with --parchment; with --stitch N, N pages side by side to a PDF page.", "a flag."),
 	opt("--stitch N", "off", "Also lays every N pages side by side, in order, tops level, named for the pages they hold: page_0 to page_5 as darkly_page_0-5.png (the last may have fewer; a page left alone is not stitched). Pages are rendered one image each, as with --parchment, on parchment with it. With --pdf, the PDF's pages are the stitches instead, a page left alone at the end a page of its own.", "a whole number of at least 1."),

@@ -18,7 +18,9 @@ opens it in the editor for its kind. The address keeps the file open
   `journals/`, say). **Export** downloads
   this one as a zip, with the library files its entries use bundled in and
   listed in its `journal.json`, so it renders the same wherever the
-  library has changed; importing drops them again. Nothing is merged:
+  library has changed; importing drops them again. Scripts that fail don't
+  stop it: every file goes in, theirs too, with the library files they got
+  to, and a report says which failed and why. Nothing is merged:
   New, Open and Import ask first if the journal has changes not exported.
 - The journal is kept in this browser between visits.
 - **Library files.** Any of the library's files opens, to read. Changing
@@ -44,7 +46,8 @@ journal's other files changes.
   with Darkly, with a progress bar. The dialog sets the scale, supersample,
   parchment, and `stitch`, as journalbuild's flags do: PNGs get stitched
   images besides the pages, and a PDF's pages are the stitches. Cancel
-  stops it.
+  stops it. If the script fails, it exports the pages shown, from the last
+  time it ran, and says why it failed.
 
 Darkly previews and exports need WebGPU: a current Chrome, Edge or Safari.
 The SVG preview works anywhere.

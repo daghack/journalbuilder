@@ -1,5 +1,6 @@
 import { Component, ElementRef, effect, inject, signal, viewChild } from '@angular/core';
-import { JournalIoService } from '../services/journal-io.service';
+import { entryPath } from '../journal/journal-files';
+import { JournalIoService, type ExportedZip } from '../services/journal-io.service';
 import { JournalStore } from '../services/journal-store.service';
 import { ShellService } from './shell.service';
 
@@ -41,6 +42,19 @@ import { ShellService } from './shell.service';
     </div>
     <button type="button" class="primary" (click)="exportZip()" [disabled]="io.exporting()"
             title="Download the journal as a zip, with the library files it uses">{{ io.exporting() ? 'Exporting…' : 'Export' }}</button>
+
+    <dialog #reportDialog class="report" aria-labelledby="export-report-title">
+      @if (report(); as report) {
+        <h2 id="export-report-title">Exported {{ report.saved }}, but {{ report.failures.length }} script{{ report.failures.length === 1 ? '' : 's' }} failed</h2>
+        <p>The zip has every file of the journal, these scripts too, but perhaps not all the library files they use: only those they got to.</p>
+        <ul>
+          @for (failure of report.failures; track failure.entry) {
+            <li><strong>{{ entryPath(failure.entry) }}</strong><pre>{{ failure.message }}</pre></li>
+          }
+        </ul>
+        <div class="actions"><button type="button" class="primary" (click)="reportDialog.close()">OK</button></div>
+      }
+    </dialog>
   `,
   styles: `
     :host { display: flex; align-items: center; gap: 8px; padding: 4px 10px; background: var(--rail-bg); color: var(--rail-fg); font-size: 12px; }
@@ -64,6 +78,15 @@ import { ShellService } from './shell.service';
     .list button:hover, .list button:focus-visible { background: var(--surface-2); }
     .list .none { color: var(--muted); }
     em { font-style: normal; color: var(--muted); font-family: var(--mono); margin-left: 6px; }
+    .report { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--fg); padding: 20px; width: min(560px, calc(100vw - 32px)); font-size: 13px; }
+    .report::backdrop { background: rgb(0 0 0 / 0.45); }
+    .report h2 { margin: 0 0 12px; font-size: 16px; overflow-wrap: anywhere; }
+    .report p { margin: 0 0 12px; color: var(--muted); }
+    .report ul { margin: 0; padding: 0; list-style: none; max-height: 50vh; overflow: auto; }
+    .report li { margin-bottom: 12px; }
+    .report strong { font-family: var(--mono); font-weight: 600; }
+    .report pre { margin: 4px 0 0; color: var(--danger); font-family: var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+    .report .actions { display: flex; justify-content: flex-end; margin-top: 16px; }
   `,
 })
 export class JournalBarComponent {
@@ -75,6 +98,10 @@ export class JournalBarComponent {
   /** The title being edited, in place. */
   protected readonly editing = signal(false);
   private readonly titleInput = viewChild<ElementRef<HTMLInputElement>>('titleInput');
+  /** The last export that had scripts fail, for its report. */
+  protected readonly report = signal<ExportedZip | null>(null);
+  protected readonly reportDialog = viewChild.required<ElementRef<HTMLDialogElement>>('reportDialog');
+  protected readonly entryPath = entryPath;
 
   constructor() {
     effect(() => {
@@ -134,10 +161,15 @@ export class JournalBarComponent {
     try {
       const exported = await this.io.exportZip();
       if (!exported) return;
-      const { saved, bundled } = exported;
-      this.say(bundled.length
+      const { saved, bundled, failures } = exported;
+      const done = bundled.length
         ? `Exported ${saved}, with ${bundled.length} library file${bundled.length === 1 ? '' : 's'} it uses.`
-        : `Exported ${saved}.`);
+        : `Exported ${saved}.`;
+      this.say(failures.length ? `${done} ${failures.length} script${failures.length === 1 ? '' : 's'} failed.` : done, failures.length > 0);
+      if (failures.length) {
+        this.report.set(exported);
+        this.reportDialog().nativeElement.showModal();
+      }
     } catch (err) {
       this.say(`Couldn't export it: ${(err as Error).message}`, true);
     }
