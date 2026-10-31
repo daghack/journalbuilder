@@ -9,13 +9,13 @@
 //! path, so parts can be stroked differently.
 
 use rayon::prelude::*;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::sync::OnceLock;
 
 use super::geom::{simplify, spline, spline_closed, V};
 use crate::journal::paths::StrokePath;
 
-struct Shape<T> {
+pub(super) struct Shape<T> {
     part: T,
     /// Higher is nearer.
     depth: f64,
@@ -39,12 +39,12 @@ struct Shape<T> {
 struct Triangles {
     triangles: Vec<[V; 3]>,
     cell: f64,
-    grid: HashMap<(i64, i64), Vec<usize>>,
+    grid: FxHashMap<(i64, i64), Vec<usize>>,
 }
 
 impl Triangles {
     fn new(triangles: Vec<[V; 3]>, cell: f64) -> Self {
-        let mut grid: HashMap<(i64, i64), Vec<usize>> = HashMap::new();
+        let mut grid: FxHashMap<(i64, i64), Vec<usize>> = FxHashMap::default();
         for (t, corners) in triangles.iter().enumerate() {
             let key = |p: V| ((p.x / cell).floor() as i64, (p.y / cell).floor() as i64);
             let keys = corners.map(key);
@@ -87,7 +87,7 @@ pub(super) struct Scene<T> {
     speck: f64,
     /// The shapes bucketed by where they reach on the page, built when
     /// first needed (after the shapes are all added).
-    index: OnceLock<HashMap<(i64, i64), Vec<usize>>>,
+    index: OnceLock<FxHashMap<(i64, i64), Vec<usize>>>,
 }
 
 /// A stretch of line: its points, and whether each is a corner.
@@ -114,15 +114,19 @@ impl<T: Copy + PartialEq + Send + Sync> Scene<T> {
         self.shapes.len() - 1
     }
 
-    /// Add a shape covered by `triangles`, drawn as `strokes` alone.
-    pub fn add_triangles(&mut self, part: T, depth: f64, triangles: Vec<[V; 3]>, strokes: Vec<Run>, cell: f64) -> usize {
+    /// A shape covered by `triangles`, drawn as `strokes` alone, for `extend`.
+    pub fn covered(part: T, depth: f64, triangles: Vec<[V; 3]>, strokes: Vec<Run>, cell: f64) -> Shape<T> {
         let corners = triangles.iter().flatten();
         let min = corners.clone().fold(V::new(f64::INFINITY, f64::INFINITY), |m, p| V::new(m.x.min(p.x), m.y.min(p.y)));
         let max = corners.fold(V::new(f64::NEG_INFINITY, f64::NEG_INFINITY), |m, p| V::new(m.x.max(p.x), m.y.max(p.y)));
         let triangles = Some(Triangles::new(triangles, cell));
-        self.shapes.push(Shape { part, depth, outline: Vec::new(), triangles, corners: Vec::new(), strokes, joins: Vec::new(), min, max });
+        Shape { part, depth, outline: Vec::new(), triangles, corners: Vec::new(), strokes, joins: Vec::new(), min, max }
+    }
+
+    /// Add shapes made apart from the scene.
+    pub fn extend(&mut self, shapes: Vec<Shape<T>>) {
+        self.shapes.extend(shapes);
         self.index = OnceLock::new();
-        self.shapes.len() - 1
     }
 
     /// Join two shapes that grow out of each other at `at`: within `reach`
@@ -161,7 +165,7 @@ impl<T: Copy + PartialEq + Send + Sync> Scene<T> {
         let cell = 4.0 * self.max_gap;
         let key = |p: V| ((p.x / cell).floor() as i64, (p.y / cell).floor() as i64);
         let index = self.index.get_or_init(|| {
-            let mut index: HashMap<(i64, i64), Vec<usize>> = HashMap::new();
+            let mut index: FxHashMap<(i64, i64), Vec<usize>> = FxHashMap::default();
             for (i, shape) in self.shapes.iter().enumerate() {
                 let ((x0, y0), (x1, y1)) = (key(shape.min), key(shape.max));
                 for x in x0..=x1 {

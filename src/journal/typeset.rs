@@ -137,7 +137,7 @@ impl<'a> Outlines<'a> {
         Outlines { glyphs, size, cache: RefCell::new(vec![None; glyphs.len()]) }
     }
     fn get(&self, k: usize) -> Rc<Outline> {
-        self.cache.borrow_mut()[k].get_or_insert_with(|| Rc::new(self.glyphs[k].outline(self.size))).clone()
+        self.cache.borrow_mut()[k].get_or_insert_with(|| self.glyphs[k].outline(self.size)).clone()
     }
 }
 

@@ -1,5 +1,7 @@
 use rayon::prelude::*;
 use crate::journal::{avoid::AvoidanceTree, StrokePath};
+use crate::journal::paths::{push_cut_number, push_number, trim_decimals};
+use std::borrow::Cow;
 use crate::journal::gradient::{Gradient, GradientKind};
 use parry2d::math::{Vec2};
 use noise::{NoiseFn, Perlin};
@@ -468,6 +470,173 @@ fn stroke_rng(seed: u64, stroke_seed: u32) -> StdRng {
     StdRng::seed_from_u64(seed ^ (stroke_seed as u64 + 1).wrapping_mul(0x9e37_79b9_7f4a_7c15))
 }
 
+/// A stroke's SVG output is one or more of these: closed outlines, filled
+/// and outlined in one paint.
+struct Mark {
+    /// Its gradient's definition, if it has one.
+    defs: String,
+    outlines: Vec<Vec<Vec2>>,
+    paint: String,
+    /// How wide its outline is, if not SVG's default (1).
+    width: Option<f32>,
+}
+
+/// How wide the outline of a piece of a stroke is where its colour changes
+/// along it: enough to close the seams.
+const ALONG_PIECE_OVERLAP: f32 = 0.3;
+
+impl Mark {
+    /// As SVG, added to `svg`, with its numbers cut to two decimal places
+    /// if `cut`.
+    fn write_svg(&self, svg: &mut Vec<u8>, cut: bool) {
+        let number = if cut { push_cut_number } else { push_number };
+        fn cut_text(text: &str, cut: bool) -> Cow<'_, str> {
+            if cut && text.contains('.') { Cow::Owned(trim_decimals(text, 2)) } else { Cow::Borrowed(text) }
+        }
+        let paint = cut_text(&self.paint, cut);
+        svg.extend_from_slice(cut_text(&self.defs, cut).as_bytes());
+        svg.extend_from_slice(b"<path d=\"");
+        for outline in &self.outlines {
+            for (i, p) in outline.iter().enumerate() {
+                svg.extend_from_slice(if i == 0 { b"M " } else { b"L " });
+                number(svg, p.x);
+                svg.push(b' ');
+                number(svg, p.y);
+                svg.push(b' ');
+            }
+            svg.extend_from_slice(b"Z ");
+        }
+        svg.extend_from_slice(b"\" fill=\"");
+        svg.extend_from_slice(paint.as_bytes());
+        svg.extend_from_slice(b"\" stroke=\"");
+        svg.extend_from_slice(paint.as_bytes());
+        match self.width {
+            Some(width) => {
+                svg.extend_from_slice(b"\" stroke-width=\"");
+                number(svg, width);
+                svg.extend_from_slice(b"\" />");
+            }
+            None => svg.extend_from_slice(b"\" />"),
+        }
+    }
+    /// Its outlines as a path, unless a point on them isn't a number.
+    fn path(&self) -> Option<Option<tiny_skia::Path>> {
+        let points = self.outlines.iter().map(Vec::len).sum::<usize>();
+        let mut builder = tiny_skia::PathBuilder::with_capacity(points + self.outlines.len(), points);
+        for outline in &self.outlines {
+            for (i, p) in outline.iter().enumerate() {
+                if !(p.x.is_finite() && p.y.is_finite()) {
+                    return None;
+                }
+                if i == 0 { builder.move_to(p.x, p.y) } else { builder.line_to(p.x, p.y) }
+            }
+            builder.close();
+        }
+        Some(builder.finish())
+    }
+}
+
+/// Bytes of SVG a point takes up, about.
+const SVG_POINT_BYTES: usize = 24;
+
+fn marks_svg(marks: &[Mark], cut: bool) -> String {
+    let points: usize = marks.iter().flat_map(|mark| &mark.outlines).map(Vec::len).sum();
+    let mut svg = Vec::with_capacity(points * SVG_POINT_BYTES + marks.len() * 64);
+    for mark in marks {
+        mark.write_svg(&mut svg, cut);
+    }
+    String::from_utf8(svg).expect("marks are written in UTF-8")
+}
+
+fn svg_group(paths: &[String]) -> String {
+    let mut svg = String::with_capacity(paths.iter().map(String::len).sum::<usize>() + 7);
+    svg.push_str("<g>");
+    for path in paths {
+        svg.push_str(path);
+    }
+    svg.push_str("</g>");
+    svg
+}
+
+/// The start of an SVG showing `view`, `[x, y, width, height]` in canvas units.
+fn svg_header(view: [f32; 4]) -> String {
+    format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{}\" height=\"{}\" viewBox=\"{} {} {} {}\">",
+        view[2], view[3], view[0], view[1], view[2], view[3]
+    )
+}
+
+fn svg_document(view: [f32; 4], body: &str) -> String {
+    let header = svg_header(view);
+    let mut svg = String::with_capacity(header.len() + body.len() + 6);
+    svg.push_str(&header);
+    svg.push_str(body);
+    svg.push_str("</svg>");
+    svg
+}
+
+/// A render as a PNG, the same as `Pixmap::encode_png` makes it without
+/// copying it or dividing by the alpha of the many pixels with nothing on them.
+fn encode_png(mut pixmap: tiny_skia::Pixmap) -> Vec<u8> {
+    let (width, height) = (pixmap.width(), pixmap.height());
+    pixmap.data_mut().par_chunks_mut(4 * width as usize).for_each(|row| {
+        for pixel in row.chunks_exact_mut(4) {
+            let alpha = pixel[3];
+            if alpha != 255 && pixel != [0; 4] {
+                let a = alpha as f64 / 255.0;
+                for channel in &mut pixel[..3] {
+                    *channel = (*channel as f64 / a + 0.5) as u8;
+                }
+            }
+        }
+    });
+    let mut data = Vec::new();
+    let mut encoder = png::Encoder::new(&mut data, width, height);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    encoder.write_header().and_then(|mut writer| writer.write_image_data(pixmap.data())).expect("Failed to encode PNG");
+    data
+}
+
+/// Draw marks as their SVG would be, `transform` being how the SVG's
+/// `view` is placed on the pixmap, without writing them as SVG and reading
+/// that back: the same calls on the same shapes as resvg makes of them. A
+/// mark that isn't that simple, a gradient's, goes by way of SVG.
+fn draw_marks<'a>(marks: impl Iterator<Item = &'a Mark>, view: [f32; 4], transform: tiny_skia::Transform, pixmap: &mut tiny_skia::Pixmap) {
+    let mut surface = pixmap.as_mut();
+    // The SVG's viewBox is its size, so it only moves its origin to the corner.
+    let placed = transform.pre_concat(tiny_skia::Transform::from_translate(-view[0], -view[1]));
+    // Strokes mostly follow others of the same colour.
+    let mut last: Option<(&str, Option<svgtypes::Color>)> = None;
+    for mark in marks {
+        let color = match last {
+            Some((paint, color)) if paint == mark.paint => color,
+            _ => match svgtypes::Paint::from_str(&mark.paint) {
+                Ok(svgtypes::Paint::Color(color)) => Some(color),
+                _ => None,
+            },
+        };
+        last = Some((&mark.paint, color));
+        match (color, mark.path()) {
+            (Some(color), Some(path)) => {
+                let Some(path) = path else { continue };
+                let mut paint = tiny_skia::Paint::default();
+                paint.set_color_rgba8(color.red, color.green, color.blue, usvg::Opacity::new_u8(color.alpha).to_u8());
+                // Straight lines can't be filled.
+                if path.bounds().width() != 0.0 && path.bounds().height() != 0.0 {
+                    surface.fill_path(&path, &paint, tiny_skia::FillRule::Winding, placed, None);
+                }
+                let width = mark.width.unwrap_or(1.0);
+                surface.stroke_path(&path, &paint, &tiny_skia::Stroke { width, ..Default::default() }, placed, None);
+            }
+            _ => {
+                let tree = usvg::Tree::from_str(&svg_document(view, &marks_svg(std::slice::from_ref(mark), false)), &usvg::Options::default()).expect("Failed to parse SVG");
+                resvg::render(&tree, transform, &mut surface);
+            }
+        }
+    }
+}
+
 impl Canvas {
     pub fn new() -> Self {
         Canvas {
@@ -525,11 +694,11 @@ impl Canvas {
     /// Add a stroke, with its texture's seed (see `ColoredStroke::seed`).
     pub fn add_seeded_stroke(&mut self, path: StrokePath, style: StrokeStyle, seed: Option<u32>) {
         let width_vec = Vec2::splat(style.width);
-        for pos in path.points_within() {
+        path.for_each_point(|pos| {
             self.update_bounds(pos);
             self.update_bounds(pos + width_vec);
             self.update_bounds(pos - width_vec);
-        }
+        });
         self.strokes.push(ColoredStroke {
             path,
             style,
@@ -551,41 +720,51 @@ impl Canvas {
         let mut next = 0u32;
         self.strokes.iter().map(|stroke| {
             let seed = stroke.seed.unwrap_or(next);
-            next = seed.wrapping_add(stroke.path.to_substrokes().len() as u32);
+            next = seed.wrapping_add(stroke.path.substroke_count() as u32);
             seed
         }).collect()
     }
     /// Whether a stroke's marks might reach into the box from `min` to
     /// `max`: its control points' bounds, grown by `reach`.
     pub fn stroke_reaches(stroke: &ColoredStroke, min: Vec2, max: Vec2, reach: f32) -> bool {
-        let points = stroke.path.points_within();
-        if points.is_empty() {
+        let (mut lo, mut hi) = (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN));
+        let mut any = false;
+        stroke.path.for_each_point(|p| {
+            lo = lo.min(p);
+            hi = hi.max(p);
+            any = true;
+        });
+        if !any {
             return false;
         }
-        let (lo, hi) = points.iter().fold((Vec2::splat(f32::MAX), Vec2::splat(f32::MIN)), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
         let reach = reach + stroke.style.reach() * 2.0;
         !(lo.x - reach > max.x || lo.y - reach > max.y || hi.x + reach < min.x || hi.y + reach < min.y)
+    }
+    /// The strokes that might reach into the box from `min` to `max`, and
+    /// their seeds, in the order they're drawn.
+    fn strokes_reaching(&self, style: Option<&SvgStyle>, min: Vec2, max: Vec2) -> Vec<(&ColoredStroke, u32)> {
+        let reach = style.map_or(0.0, |s| s.roughness) + 1.0;
+        self.strokes.iter().zip(self.stroke_seeds())
+            .filter(|(stroke, _)| Self::stroke_reaches(stroke, min, max, reach))
+            .collect()
     }
     /// The canvas's strokes as SVG paths in a group, each roughened (with a
     /// style) by a generator seeded from `seed` and the stroke's own seed,
     /// so a stroke looks the same whichever tile it's drawn in. Strokes that
-    /// can't reach the box from `min` to `max` are left out.
-    fn to_svg_group(&self, style: Option<&SvgStyle>, seed: u64, min: Vec2, max: Vec2) -> String {
-        let mut svg = String::new();
-        let reach = style.map_or(0.0, |s| s.roughness) + 1.0;
-        for (stroke, stroke_seed) in self.strokes.iter().zip(self.stroke_seeds()) {
-            if !Self::stroke_reaches(stroke, min, max, reach) {
-                continue;
-            }
+    /// can't reach the box from `min` to `max` are left out. Strokes depend
+    /// only on their seeds, so they're worked out on several threads at once.
+    /// Numbers are cut to two decimal places if `cut`.
+    fn to_svg_group(&self, style: Option<&SvgStyle>, seed: u64, min: Vec2, max: Vec2, cut: bool) -> String {
+        let paths: Vec<String> = self.strokes_reaching(style, min, max).into_par_iter().map(|(stroke, stroke_seed)| {
             // Ids for gradients, unique in the file.
             let id = format!("gradient_{}", stroke_seed);
-            if let Some(opts) = style {
-                svg.push_str(&self.stylized_path(stroke, opts, &mut stroke_rng(seed, stroke_seed), &id));
-            } else {
-                svg.push_str(&plain_path(stroke, &id));
+            match style {
+                Some(opts) => marks_svg(&Self::stylized_marks(stroke, opts, &mut stroke_rng(seed, stroke_seed), &id), cut),
+                None if cut => trim_decimals(&plain_path(stroke, &id), 2),
+                None => plain_path(stroke, &id),
             }
-        }
-        format!("<g>{}</g>", svg)
+        }).collect();
+        svg_group(&paths)
     }
     /// The canvas as SVG. With a style, strokes are roughened and tapered
     /// using generators seeded with `seed`, so the result is reproducible.
@@ -597,28 +776,23 @@ impl Canvas {
     /// corner (only a tile's isn't 0, 0).
     fn to_svg_at(&self, stylized: Option<&SvgStyle>, seed: u64, scale: f32) -> (String, (u32, u32), (u32, u32)) {
         let (view, pixels, offset) = self.svg_view(scale);
-        let mut svg = format!(
-            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{}\" height=\"{}\" viewBox=\"{} {} {} {}\">",
-            view[2], view[3], view[0], view[1], view[2], view[3]
-        );
-        svg.push_str(&self.svg_group_in(stylized, seed, view));
-        svg.push_str("</svg>");
-        (svg, pixels, offset)
+        (svg_document(view, &self.svg_group_in(stylized, seed, view, false)), pixels, offset)
     }
-    /// The canvas's strokes as an SVG group in canvas units, and the box
-    /// of them its SVG shows, `[x, y, width, height]`: `to_svg` in parts,
-    /// to lay several canvases together.
+    /// The canvas's strokes as an SVG group in canvas units, its numbers cut
+    /// to two decimal places, and the box of them its SVG shows, `[x, y,
+    /// width, height]`: `to_svg` in parts, to lay several canvases together
+    /// as the web editor shows them.
     pub fn to_svg_view(&self, stylized: Option<&SvgStyle>, seed: u64, scale: f32) -> (String, [f32; 4]) {
         let (view, _, _) = self.svg_view(scale);
-        (self.svg_group_in(stylized, seed, view), view)
+        (self.svg_group_in(stylized, seed, view, true), view)
     }
     /// The box of canvas units the canvas's SVG shows, `[x, y, width,
     /// height]` (see `to_svg_view`), without drawing it.
     pub fn svg_view_box(&self, scale: f32) -> [f32; 4] {
         self.svg_view(scale).0
     }
-    fn svg_group_in(&self, stylized: Option<&SvgStyle>, seed: u64, view: [f32; 4]) -> String {
-        self.to_svg_group(stylized, seed, Vec2::new(view[0], view[1]), Vec2::new(view[0] + view[2], view[1] + view[3]))
+    fn svg_group_in(&self, stylized: Option<&SvgStyle>, seed: u64, view: [f32; 4], cut: bool) -> String {
+        self.to_svg_group(stylized, seed, Vec2::new(view[0], view[1]), Vec2::new(view[0] + view[2], view[1] + view[3]), cut)
     }
     /// The box of canvas units the SVG shows, `[x, y, width, height]`, the
     /// size of its render at `scale` pixels per unit, and the page pixel of
@@ -647,30 +821,33 @@ impl Canvas {
     pub fn stylize_pixmap(pixmap: &mut tiny_skia::Pixmap, stylized: &SvgStyle, seed: u64, offset: (u32, u32)) {
         if stylized.noise_amplitude > 0.0 {
             let perlin = Perlin::new((seed ^ (seed >> 32)) as u32);
-            let width = pixmap.width();
-            pixmap.pixels_mut().par_iter_mut().enumerate().for_each(|(i, p)| {
-                let x = (i as u32 % width + offset.0) as f64;
-                let y = (i as u32 / width + offset.1) as f64;
-                let octaves = 4;
-                let noise_num = 15.0;
-                let noise_value = (0..octaves).fold(0.0, |acc, octave| {
-                    let noise_scale = noise_num / (10.0_f64).powi(octave);
-                    acc + perlin.get([x * noise_scale, y * noise_scale]) / (2.0_f64).powi(octave)
-                });
+            const OCTAVES: [(f64, f64); 4] = [(15.0, 1.0), (1.5, 0.5), (0.15, 0.25), (0.015, 0.125)];
+            let width = pixmap.width() as usize;
+            pixmap.pixels_mut().par_chunks_mut(width).enumerate().for_each(|(row, pixels)| {
+                let y = (row as u32 + offset.1) as f64;
+                for (column, p) in pixels.iter_mut().enumerate() {
+                    // Nothing's drawn on most of a page, and nothing stays nothing.
+                    if *p == tiny_skia::PremultipliedColorU8::TRANSPARENT {
+                        continue;
+                    }
+                    let x = (column as u32 + offset.0) as f64;
+                    let noise_value = OCTAVES.iter().fold(0.0, |acc, (noise_scale, weight)| {
+                        acc + perlin.get([x * noise_scale, y * noise_scale]) * weight
+                    });
 
-                let base_opacity = 0.95;
-                let noise_amplitude = stylized.noise_amplitude;
-                let variation = base_opacity + (noise_value as f32 * noise_amplitude);
-                let variation = variation.clamp(0.0, 1.0);
-                let color = p.demultiply();
-                let alpha_f32 = color.alpha() as f32 / 255.0;
-                let new_color = resvg::tiny_skia::ColorU8::from_rgba(
-                    color.red(),
-                    color.green(),
-                    color.blue(),
-                    (alpha_f32 * variation * 255.0).round() as u8,
-                ).premultiply();
-                *p = new_color;
+                    let base_opacity = 0.95;
+                    let noise_amplitude = stylized.noise_amplitude;
+                    let variation = base_opacity + (noise_value as f32 * noise_amplitude);
+                    let variation = variation.clamp(0.0, 1.0);
+                    let color = p.demultiply();
+                    let alpha_f32 = color.alpha() as f32 / 255.0;
+                    *p = resvg::tiny_skia::ColorU8::from_rgba(
+                        color.red(),
+                        color.green(),
+                        color.blue(),
+                        (alpha_f32 * variation * 255.0).round() as u8,
+                    ).premultiply();
+                }
             });
         }
     }
@@ -681,14 +858,29 @@ impl Canvas {
     /// The canvas as SVG and that SVG rasterised at `scale` pixels per unit
     /// (with the style's noise added); see `to_svg` for `seed`.
     pub fn to_svg_and_png(&self, scale: f32, stylized: Option<&SvgStyle>, seed: u64) -> (String, Vec<u8>) {
-        let (svg_data, (width, height), offset) = self.to_svg_at(stylized, seed, scale);
-        let svg_tree = usvg::Tree::from_str(&svg_data, &usvg::Options::default()).expect("Failed to parse SVG");
+        let (view, (width, height), offset) = self.svg_view(scale);
         // A tile is drawn with a border of extra pixels and cut out of it,
         // so its edges are filled as they would be inside the whole page.
         let bleed = if self.frame.is_some() { SVG_BLEED_PX } else { 0 };
         let mut pixmap = tiny_skia::Pixmap::new(width + 2 * bleed, height + 2 * bleed).expect("Failed to create Pixmap");
         let transform = tiny_skia::Transform::from_translate(bleed as f32, bleed as f32).pre_scale(scale, scale);
-        resvg::render(&svg_tree, transform, &mut pixmap.as_mut());
+        let svg_data = match stylized {
+            Some(opts) => {
+                let (min, max) = (Vec2::new(view[0], view[1]), Vec2::new(view[0] + view[2], view[1] + view[3]));
+                let marks: Vec<Vec<Mark>> = self.strokes_reaching(stylized, min, max).into_par_iter().map(|(stroke, stroke_seed)| {
+                    Self::stylized_marks(stroke, opts, &mut stroke_rng(seed, stroke_seed), &format!("gradient_{}", stroke_seed))
+                }).collect();
+                let paths: Vec<String> = marks.par_iter().map(|marks| marks_svg(marks, false)).collect();
+                draw_marks(marks.iter().flatten(), view, transform, &mut pixmap);
+                svg_document(view, &svg_group(&paths))
+            }
+            None => {
+                let svg_data = svg_document(view, &self.svg_group_in(None, seed, view, false));
+                let svg_tree = usvg::Tree::from_str(&svg_data, &usvg::Options::default()).expect("Failed to parse SVG");
+                resvg::render(&svg_tree, transform, &mut pixmap.as_mut());
+                svg_data
+            }
+        };
         if bleed > 0 {
             let rect = tiny_skia::IntRect::from_xywh(bleed as i32, bleed as i32, width, height).expect("a tile has pixels");
             pixmap = pixmap.clone_rect(rect).expect("the tile is inside its bled render");
@@ -696,12 +888,13 @@ impl Canvas {
         if let Some(opts) = stylized {
             Self::stylize_pixmap(&mut pixmap, opts, seed, offset);
         }
-        (svg_data, pixmap.encode_png().expect("Failed to encode PNG"))
+        (svg_data, encode_png(pixmap))
     }
-    /// A stroke as SVG, roughened and tapered: each subpath an outline,
-    /// filled. `id` names its gradient, if it has one across the canvas;
-    /// along a stroke, its outline is cut into pieces, each its own colour.
-    pub fn stylized_path(&self, stroke: &ColoredStroke, opts: &SvgStyle, rng: &mut dyn RngCore, id: &str) -> String {
+    /// A stroke as the shapes SVG draws it with, roughened and tapered: each
+    /// subpath an outline, filled. `id` names its gradient, if it has one
+    /// across the canvas; along a stroke, its outline is cut into pieces,
+    /// each its own colour.
+    fn stylized_marks(stroke: &ColoredStroke, opts: &SvgStyle, rng: &mut dyn RngCore, id: &str) -> Vec<Mark> {
         let pos_roughen = opts.roughness;
         let distance = opts.point_sample_distance;
         let trail_off_percent = opts.trail_off_percent;
@@ -752,23 +945,18 @@ impl Canvas {
             outlines.push((k, samples[0].point, sides));
         }
         let outline = |start: Option<Vec2>, sides: &[(Vec2, Vec2)]| {
-            let mut path = StrokePath::new();
-            let first = start.unwrap_or(sides[0].0);
-            path = path.move_to(first.x, first.y);
-            for (left, _) in sides {
-                path = path.line_to(left.x, left.y);
-            }
-            for (_, right) in sides.iter().rev() {
-                path = path.line_to(right.x, right.y);
-            }
-            path.close_path()
+            let mut points = Vec::with_capacity(2 * sides.len() + 1);
+            points.push(start.unwrap_or(sides[0].0));
+            points.extend(sides.iter().map(|(left, _)| *left));
+            points.extend(sides.iter().rev().map(|(_, right)| *right));
+            points
         };
         match &stroke.style.color {
             StrokeColor::Gradient(gradient) if gradient.per_stroke() => {
                 // Pieces a few samples long, overlapping by one so they
                 // meet, each in the colour at its middle: how far along
                 // it is, or down the whole path.
-                let mut svg = String::new();
+                let mut marks = Vec::new();
                 for (k, _, sides) in &outlines {
                     let last = (sides.len() - 1) as f32;
                     let step = ((sides.len() as f32 / ALONG_PIECES).ceil() as usize).max(2);
@@ -782,30 +970,27 @@ impl Canvas {
                             }
                             _ => (i + end) as f32 / 2.0 / last,
                         };
-                        let colour = css(stroke.style.jittered(gradient.at(t), *k));
-                        svg.push_str(&format!("<path d=\"{}\" fill=\"{}\" stroke=\"{}\" stroke-width=\"0.3\" />", outline(None, &sides[i..=end]), colour, colour));
+                        let paint = css(stroke.style.jittered(gradient.at(t), *k));
+                        marks.push(Mark { defs: String::new(), outlines: vec![outline(None, &sides[i..=end])], paint, width: Some(ALONG_PIECE_OVERLAP) });
                         i = end;
                     }
                 }
-                svg
+                marks
             }
             _ if stroke.style.color_jitter.is_some() => {
                 // Each outline its own colour.
                 outlines.iter().map(|(k, start, sides)| {
                     let (defs, paint) = stroke.style.svg_paint(*k, &format!("{}_{}", id, k));
-                    format!("{}<path d=\"{}\" fill=\"{}\" stroke=\"{}\" />", defs, outline(Some(*start), sides), paint, paint)
+                    Mark { defs, outlines: vec![outline(Some(*start), sides)], paint, width: None }
                 }).collect()
             }
             color => {
-                let mut path = StrokePath::new();
-                for (_, start, sides) in &outlines {
-                    path.append(outline(Some(*start), sides));
-                }
                 let (defs, paint) = match color {
                     StrokeColor::Solid(c) => (String::new(), c.clone()),
                     StrokeColor::Gradient(g) => (svg_gradient(g, id), format!("url(#{})", id)),
                 };
-                format!("{}<path d=\"{}\" fill=\"{}\" stroke=\"{}\" />", defs, path, paint, paint)
+                let outlines = outlines.iter().map(|(_, start, sides)| outline(Some(*start), sides)).collect();
+                vec![Mark { defs, outlines, paint, width: None }]
             }
         }
     }

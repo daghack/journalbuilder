@@ -9,6 +9,54 @@ use crate::journal::paths::StrokePath;
 
 /// A point or direction; the art is worked out in f64, then written as an
 /// f32 path.
+/// `x.hypot(y)`, which in the browser is correctly rounded, but with no
+/// instruction for its multiplications makes up most of the time spent on
+/// some drawings.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn hypot(x: f64, y: f64) -> f64 {
+    exact_hypot(x, y).unwrap_or_else(|| x.hypot(y))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn hypot(x: f64, y: f64) -> f64 {
+    x.hypot(y)
+}
+
+/// The correctly rounded `x.hypot(y)`: the sum the standard library's makes
+/// of `x * x + y * y` and the root's error, the errors of its products got by
+/// Dekker's splitting. `None` where the numbers are extreme or the answer is
+/// too near halfway between two to tell.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+fn exact_hypot(x: f64, y: f64) -> Option<f64> {
+    // Sorted, so that not a number fails the test below.
+    let (x, y) = if x.abs() > y.abs() { (x.abs(), y.abs()) } else { (y.abs(), x.abs()) };
+    if !(y > 1e-100 && x < 1e100 && x < y * 1e8) {
+        return None;
+    }
+    // `a * a`'s rounding error, and `a * a`.
+    let squared = |a: f64| {
+        let split = 134217729.0 * a;
+        let high = split - (split - a);
+        let low = a - high;
+        let square = a * a;
+        (((high * high - square) + 2.0 * high * low) + low * low, square)
+    };
+    let ((x_error, x2), (y_error, y2)) = (squared(x), squared(y));
+    let r2 = x2 + y2;
+    let error = ((x2 - r2) + y2) + (x_error + y_error);
+    let root = r2.sqrt();
+    let (root_error, root2) = squared(root);
+    let tail = root * (0.5 / r2) * (error - ((root2 - r2) + root_error));
+    let sum = root + tail;
+    let rest = tail - (sum - root);
+    // How big what's left of the sum is, next to the sum: too big, or too
+    // small, or about half of its last place, and it can't be rounded by.
+    const EXPONENT: u64 = 0x7ff << 52;
+    let size = rest.abs().to_bits().wrapping_add(0x3fe << 52).wrapping_sub(sum.to_bits() & EXPONENT);
+    let near_half = (size.wrapping_sub(0x3c90000000000000).wrapping_add(16)) >> 5 == 0;
+    (!near_half && (0x39b0000000000000..=0x3c9fffffffffff80).contains(&size)).then_some(sum)
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct V {
     pub x: f64,
@@ -27,7 +75,7 @@ impl V {
         self.x * other.x + self.y * other.y
     }
     pub fn len(self) -> f64 {
-        self.x.hypot(self.y)
+        hypot(self.x, self.y)
     }
     /// A quarter turn from +x towards +y.
     pub fn perp(self) -> V {
@@ -171,4 +219,48 @@ pub(super) fn spline_closed(path: StrokePath, points: &[V]) -> StrokePath {
     let path = path.move_to(x, y);
     let tangents: Vec<V> = (0..n).map(|i| tangent(points[(i + n - 1) % n], points[i], points[(i + 1) % n])).collect();
     cubics(path, points, &tangents, n)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A positive number as a whole number times 2 to a power.
+    fn parts(value: f64) -> (u128, i32) {
+        let bits = value.to_bits();
+        ((bits & ((1 << 52) - 1) | 1 << 52) as u128, (bits >> 52) as i32 - 1075)
+    }
+
+    #[test]
+    fn exact_hypot_is_correctly_rounded() {
+        let mut state = 1u64;
+        let mut next = move || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            state
+        };
+        let mut told = 0;
+        for _ in 0..3_000_000 {
+            // Within 2^9 of each other, for their squares to fit in 128 bits.
+            let (a, b, c) = (next(), next(), next());
+            let x = 1.0 + (a >> 12) as f64 * 2f64.powi(-52) * 510.0;
+            let y = 1.0 + (b >> 12) as f64 * 2f64.powi(-52) * 2f64.powi((c % 2) as i32);
+            let Some(found) = exact_hypot(if c & 2 == 0 { x } else { -x }, y) else { continue };
+            told += 1;
+            let ((mx, ex), (my, ey), (mr, er)) = (parts(x), parts(y), parts(found));
+            let unit = ex.min(ey) - 1;
+            let sum = (mx << (ex - unit)).pow(2) + (my << (ey - unit)).pow(2);
+            // Half a last place either side of the answer, squared, in the
+            // same units: the sum must be between them.
+            let scale = 2 * (er - 1 - unit);
+            let (low, high) = ((2 * mr - 1).pow(2) << scale, (2 * mr + 1).pow(2) << scale);
+            assert!(low <= sum && sum <= high, "{} {} gave {}", x, y, found);
+        }
+        assert!(told > 2_900_000, "only told {}", told);
+        for (x, y) in [(f64::NAN, 1.0), (1.0, f64::NAN), (f64::INFINITY, 1.0), (0.0, 5.0), (1e300, 1e300), (1e-300, 1e-300), (1.0, 1e-20)] {
+            assert_eq!(exact_hypot(x, y), None);
+        }
+        // An exact answer leaves nothing to round by, so it's one to leave.
+        assert_eq!(exact_hypot(3.0, -4.0), None);
+        assert_eq!(exact_hypot(-1.0, 2.0), exact_hypot(2.0, 1.0));
+    }
 }

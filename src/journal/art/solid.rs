@@ -6,9 +6,10 @@
 //! Coordinates are the page's, x right and y down, with z towards the
 //! viewer; the view is straight down z.
 
-use rayon::prelude::*;
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
+use std::cell::{Cell, RefCell};
 use std::ops::{Add, Mul, Sub};
+use std::sync::OnceLock;
 
 use super::geom::V;
 
@@ -70,10 +71,36 @@ pub(super) fn mix(a: f64, b: f64, t: f64) -> f64 {
     a + (b - a) * t
 }
 
+/// What's worked out from the u of the points of a surface, whose grids come
+/// back to the same few in turn: that's most of a point's sines and powers,
+/// which in the browser are slow.
+pub(super) struct AlongU<T> {
+    recent: RefCell<[Option<(u64, T)>; 4]>,
+    next: Cell<usize>,
+}
+
+impl<T: Copy> AlongU<T> {
+    pub fn new() -> Self {
+        AlongU { recent: RefCell::new([None; 4]), next: Cell::new(0) }
+    }
+
+    pub fn at(&self, u: f64, work_out: impl FnOnce() -> T) -> T {
+        let key = u.to_bits();
+        let mut recent = self.recent.borrow_mut();
+        if let Some((_, known)) = recent.iter().flatten().find(|(k, _)| *k == key) {
+            return *known;
+        }
+        let value = work_out();
+        recent[self.next.get()] = Some((key, value));
+        self.next.set((self.next.get() + 1) % recent.len());
+        value
+    }
+}
+
 /// A surface over (u, v) in [0, 1] x [-1, 1], sampled on an `nu` by `nv`
-/// grid to hide what's behind it. Sampled on several threads at once.
+/// grid to hide what's behind it.
 pub(super) struct Surface {
-    pub point: Box<dyn Fn(f64, f64) -> P3 + Send + Sync>,
+    pub point: Box<dyn Fn(f64, f64) -> P3 + Send>,
     pub nu: usize,
     pub nv: usize,
     /// Where to draw its sides (v = -1 and 1) through: u values from its
@@ -134,11 +161,18 @@ pub(super) type Line = Vec<(Tagged, bool)>;
 /// A drawn line on the page: its points, and whether each is a corner.
 pub(super) type Run = Vec<(V, bool)>;
 
-/// Surfaces ready to draw: their triangles, bucketed on the page.
+/// What's left of a flower or leaf to work out once it's been placed: the
+/// triangles on the page that hide what's behind it, and its visible lines.
+/// That's most of the work of drawing it and takes no generator, so a whole
+/// bramble's can be done together on several threads.
+pub(super) type Later = Box<dyn FnOnce() -> (Vec<[V; 3]>, Vec<Run>) + Send>;
+
+/// Surfaces ready to draw: their triangles, bucketed on the page when first
+/// needed.
 pub(super) struct Model {
     surfaces: Vec<Surface>,
     triangles: Vec<Triangle>,
-    grid: HashMap<(i64, i64), Vec<usize>>,
+    grid: OnceLock<FxHashMap<(i64, i64), Vec<usize>>>,
     cell: f64,
     /// How much nearer a surface must be to hide a line.
     margin: f64,
@@ -152,7 +186,7 @@ impl Model {
         let mut triangles = Vec::new();
         for (index, surface) in surfaces.iter().enumerate() {
             let (nu, nv) = (surface.nu, surface.nv);
-            let grid: Vec<Vec<P3>> = (0..=nu).into_par_iter().map(|i| (0..=nv).map(|j| {
+            let grid: Vec<Vec<P3>> = (0..=nu).map(|i| (0..=nv).map(|j| {
                 (surface.point)(i as f64 / nu as f64, -1.0 + 2.0 * j as f64 / nv as f64)
             }).collect()).collect();
             for i in 0..nu {
@@ -166,18 +200,24 @@ impl Model {
                 }
             }
         }
-        let cell = scale / 8.0;
-        let mut grid: HashMap<(i64, i64), Vec<usize>> = HashMap::new();
-        for (t, triangle) in triangles.iter().enumerate() {
-            let (x0, y0) = ((triangle.min.x / cell).floor() as i64, (triangle.min.y / cell).floor() as i64);
-            let (x1, y1) = ((triangle.max.x / cell).floor() as i64, (triangle.max.y / cell).floor() as i64);
-            for x in x0..=x1 {
-                for y in y0..=y1 {
-                    grid.entry((x, y)).or_default().push(t);
+        Model { surfaces, triangles, grid: OnceLock::new(), cell: scale / 24.0, margin: 0.004 * scale, speck: 0.04 * scale }
+    }
+
+    fn grid(&self) -> &FxHashMap<(i64, i64), Vec<usize>> {
+        self.grid.get_or_init(|| {
+            let cell = self.cell;
+            let mut grid: FxHashMap<(i64, i64), Vec<usize>> = FxHashMap::default();
+            for (t, triangle) in self.triangles.iter().enumerate() {
+                let (x0, y0) = ((triangle.min.x / cell).floor() as i64, (triangle.min.y / cell).floor() as i64);
+                let (x1, y1) = ((triangle.max.x / cell).floor() as i64, (triangle.max.y / cell).floor() as i64);
+                for x in x0..=x1 {
+                    for y in y0..=y1 {
+                        grid.entry((x, y)).or_default().push(t);
+                    }
                 }
             }
-        }
-        Model { surfaces, triangles, grid, cell, margin: 0.004 * scale, speck: 0.04 * scale }
+            grid
+        })
     }
 
     /// The surfaces' triangles on the page.
@@ -194,7 +234,7 @@ impl Model {
     /// line runs along, close by.
     pub fn hidden(&self, (q, on): Tagged) -> bool {
         let key = ((q.x / self.cell).floor() as i64, (q.y / self.cell).floor() as i64);
-        let Some(near) = self.grid.get(&key) else { return false };
+        let Some(near) = self.grid().get(&key) else { return false };
         near.iter().any(|&t| {
             let triangle = &self.triangles[t];
             if let Some((surface, u, v)) = on {
@@ -225,14 +265,9 @@ impl Model {
                 lines.extend(self.folds(index));
             }
         }
-        // Each line's visible stretches, on several threads at once, kept
-        // in order.
-        let visible: Vec<Vec<Run>> = lines.par_iter().map(|line| {
-            let mut runs = Vec::new();
-            self.visible(line, &mut runs);
-            runs
-        }).collect();
-        out.extend(visible.into_iter().flatten());
+        for line in &lines {
+            self.visible(line, out);
+        }
     }
 
     /// The visible stretches of a line, on the page.
@@ -286,7 +321,7 @@ impl Model {
         let (nu, nv) = (surface.nu * 2, surface.nv * 2);
         let at = |i: usize, j: usize| (i as f64 / nu as f64, -1.0 + 2.0 * j as f64 / nv as f64);
         let (du, dv) = (0.25 / nu as f64, 0.5 / nv as f64);
-        let facing: Vec<Vec<f64>> = (0..=nu).into_par_iter().map(|i| (0..=nv).map(|j| {
+        let facing: Vec<Vec<f64>> = (0..=nu).map(|i| (0..=nv).map(|j| {
             // Just inside the ends, where a surface can pinch to a point
             // and have no facing.
             let (u, v) = at(i, j);
@@ -312,28 +347,36 @@ impl Model {
             Some((mix(u0, u1, t), mix(v0, v1, t)))
         };
         type Edge = (usize, usize, bool);
-        let mut links: HashMap<Edge, Vec<Edge>> = HashMap::new();
+        let mut links: FxHashMap<Edge, Vec<Edge>> = FxHashMap::default();
+        let mut link = |a: Edge, b: Edge| {
+            links.entry(a).or_default().push(b);
+            links.entry(b).or_default().push(a);
+        };
         for i in 0..nu {
             for j in 0..nv {
-                let sides: Vec<Edge> = [(i, j, false), (i + 1, j, true), (i, j + 1, false), (i, j, true)].into_iter()
-                    .filter(|&(a, b, along_v)| crossing(a, b, along_v).is_some())
-                    .collect();
-                let pairs: Vec<(Edge, Edge)> = match sides.len() {
-                    2 => vec![(sides[0], sides[1])],
+                // Most cells have none.
+                let mut sides = [(0, 0, false); 4];
+                let mut count = 0;
+                for side in [(i, j, false), (i + 1, j, true), (i, j + 1, false), (i, j, true)] {
+                    if crossing(side.0, side.1, side.2).is_some() {
+                        sides[count] = side;
+                        count += 1;
+                    }
+                }
+                match count {
+                    2 => link(sides[0], sides[1]),
                     // A saddle: pair them by the cell's middle.
                     4 => {
                         let middle = facing[i][j] + facing[i + 1][j] + facing[i][j + 1] + facing[i + 1][j + 1];
                         if (middle > 0.0) == (facing[i][j] > 0.0) {
-                            vec![(sides[0], sides[1]), (sides[2], sides[3])]
+                            link(sides[0], sides[1]);
+                            link(sides[2], sides[3]);
                         } else {
-                            vec![(sides[0], sides[3]), (sides[1], sides[2])]
+                            link(sides[0], sides[3]);
+                            link(sides[1], sides[2]);
                         }
                     }
-                    _ => vec![],
-                };
-                for (a, b) in pairs {
-                    links.entry(a).or_default().push(b);
-                    links.entry(b).or_default().push(a);
+                    _ => {}
                 }
             }
         }
@@ -341,7 +384,7 @@ impl Model {
         let mut keys: Vec<Edge> = links.keys().copied().collect();
         keys.sort();
         keys.sort_by_key(|k| links[k].len());
-        let mut used: HashSet<Edge> = HashSet::new();
+        let mut used: FxHashSet<Edge> = FxHashSet::default();
         let mut lines = Vec::new();
         for start in keys {
             if used.contains(&start) {

@@ -31,7 +31,8 @@ Useful flags (`journalbuild` with no arguments lists them all):
 - `--entry letter_1,response_1`: only these entries.
 - `--page 0,maze`: only these pages of each entry, by index or name.
 - `--scale 0.25`: smaller output, much faster to render.
-- `--svg`: also render each canvas as an SVG, and that SVG as a PNG.
+- `--svg`: render each canvas as an SVG, and that SVG as a PNG, instead of
+  with Darkly. It needs no GPU.
 - `--strict-glyphs`: fail if any character has no glyph, instead of
   drawing an X and warning.
 - `--parchment`: render each page as one image, `darkly_{page}.png`, on
@@ -136,7 +137,7 @@ journal_entry.add(new_page(#{ name: "hello" }).add(canvas));
 
 This renders `darkly_hello_0.png` (in the entry's output directory): one image per canvas, named
 `darkly_{page}_{canvas}.png` after the page's and canvas's names, or their
-indices. With `--svg` there's also `hello_0.svg` and `hello_0.png`.
+indices. With `--svg` it's `hello_0.svg` and `hello_0.png` instead.
 
 What to know:
 

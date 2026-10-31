@@ -40,7 +40,6 @@
 
 use rand::RngCore;
 use rhai::{Dynamic, Engine, Map};
-use std::sync::OnceLock;
 
 use super::gradient;
 use super::options::{above_zero, at_least_zero, one_of, register_settings, setting_number, Settings};
@@ -52,14 +51,14 @@ use crate::journal::paths::StrokePath;
 /// The most passes a style draws its strokes in.
 pub(super) const MAX_PASSES: i64 = 64;
 
-/// Darkly's brushes, by name, sorted.
-pub fn brush_names() -> &'static [String] {
-    static NAMES: OnceLock<Vec<String>> = OnceLock::new();
-    NAMES.get_or_init(|| {
-        let mut names: Vec<String> = ::darkly::brush::builtin_brushes::all().into_iter().map(|b| b.metadata.name).collect();
-        names.sort();
-        names
-    })
+/// Darkly's brushes, by name, sorted. Listed here because Darkly parses
+/// every brush to say, and scripts check brush names however they're
+/// rendered: SVG renders don't touch Darkly. A test holds this to its list.
+pub fn brush_names() -> &'static [&'static str] {
+    &[
+        "Airbrush", "Blur", "Calligraphy", "Charcoal", "Clone", "Hair", "Ink Pen", "Liquify", "Pencil",
+        "Rough Ink", "Rough Watercolor", "Smooth Watercolor", "Smudge", "Sponge",
+    ]
 }
 
 /// The ink: a colour or gradient, a Darkly brush, and how it presses.
@@ -127,7 +126,7 @@ impl Settings for BrushStyle {
     fn set(&mut self, caller: &str, key: &str, value: &Dynamic) -> RhaiResult<()> {
         match key {
             "color" => self.color = gradient::colour_or_gradient(caller, value.clone())?,
-            "brush" => self.brush = one_of(caller, key, value, &brush_names().iter().map(String::as_str).collect::<Vec<_>>())?,
+            "brush" => self.brush = one_of(caller, key, value, brush_names())?,
             "brush_size" => self.brush_size = above_zero(caller, key, value)?,
             "min_pressure" | "max_pressure" => {
                 let pressure = setting_number(caller, key, value)?;
@@ -366,7 +365,7 @@ impl From<&Style> for JournalStrokeStyle {
 }
 
 pub(super) fn register(engine: &mut Engine) {
-    engine.register_fn("brush_names", || -> rhai::Array { brush_names().iter().cloned().map(Dynamic::from).collect() });
+    engine.register_fn("brush_names", || -> rhai::Array { brush_names().iter().map(|name| Dynamic::from(name.to_string())).collect() });
 
     engine.register_type_with_name::<BrushStyle>("BrushStyle");
     register_settings::<BrushStyle>(engine);

@@ -20,11 +20,13 @@ use std::f64::consts::{PI, TAU};
 use parry2d::math::Vec2;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
+use rayon::prelude::*;
 
 use super::flower::{self, Pose};
 use super::leaf;
 use super::geom::{arc_end, V};
 use super::scene::Scene;
+use super::solid::Later;
 use super::trail;
 use crate::journal::paths::StrokePath;
 
@@ -271,6 +273,9 @@ struct Grower {
     /// Vines that leaves and flowers keep clear of (other than the one
     /// they grow from), as discs along them and the stem they're on.
     vines: Vec<(V, f64, usize)>,
+    /// The leaves and flowers placed: their parts, depths, the size of cell
+    /// to bucket them in, and what's left to work out of them.
+    placed: Vec<(Part, f64, f64, Later)>,
 }
 
 impl Grower {
@@ -282,6 +287,7 @@ impl Grower {
             thickening: None,
             room: Vec::new(),
             vines: Vec::new(),
+            placed: Vec::new(),
         }
     }
 
@@ -310,7 +316,12 @@ impl Grower {
     }
 
     fn parts(self) -> Bramble {
-        let scene = self.scene;
+        let mut scene = self.scene;
+        // Most of a bramble's work, on several threads at once.
+        scene.extend(self.placed.into_par_iter().map(|(part, depth, cell, later)| {
+            let (triangles, lines) = later();
+            Scene::covered(part, depth, triangles, lines, cell)
+        }).collect());
         Bramble { vines: scene.path(Part::Vine), leaves: scene.path(Part::Leaf), flowers: scene.path(Part::Flower) }
     }
 
@@ -586,7 +597,7 @@ impl Grower {
                 self.stalk(&petiole, petiole.length(), heading, length, &bend);
             }
             let depth = LEAF_DEPTH + self.rng.random_range(0.0..5.0);
-            self.scene.add_triangles(Part::Leaf, depth, drawn.triangles, drawn.lines, size / 6.0);
+            self.placed.push((Part::Leaf, depth, size / 6.0, drawn.later));
             self.room.extend(drawn.room);
             return true;
         }
@@ -631,7 +642,7 @@ impl Grower {
     fn blossom(&mut self, pose: &Pose) {
         let bloom = flower::bloom(pose, &mut self.rng);
         let depth = FLOWER_DEPTH + self.rng.random_range(0.0..5.0);
-        self.scene.add_triangles(Part::Flower, depth, bloom.triangles, bloom.lines, pose.radius / 6.0);
+        self.placed.push((Part::Flower, depth, pose.radius / 6.0, bloom.later));
         self.room.push((bloom.middle, 0.9 * bloom.reach));
     }
 

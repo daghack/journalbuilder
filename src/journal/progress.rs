@@ -43,6 +43,11 @@ impl Progress {
         }
     }
 
+    /// There are `total` steps after all.
+    pub fn resize(&mut self, total: usize) {
+        self.total = total;
+    }
+
     /// Working on `item` now.
     pub fn start(&mut self, item: &str) {
         self.item = item.to_string();
