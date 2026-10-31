@@ -283,6 +283,7 @@ impl JournalEngine {
         text::register(&mut engine, symdict.clone(), rng.clone());
         let illustrations = Rc::new(IllustrationLibrary::new(resources.illustrations.clone()));
         locks::register(&mut engine, Rc::new(LockLibrary::new(&resources)), illustrations.clone());
+        illustrations::register(&mut engine, illustrations.clone());
         let text_styles = Rc::new(TextStyleLibrary::new(resources.styles.clone()));
         text_styles::register(&mut engine, text_styles.clone());
         content::register(&mut engine, resources.clone());

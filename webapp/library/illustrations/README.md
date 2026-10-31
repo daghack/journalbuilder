@@ -30,17 +30,35 @@ input still needing its value, and locking and unlocking never run the
 illustration. A chain file attaches illustrations too (see chains/README.md).
 Adding an illustration means adding a file; nothing needs recompiling.
 
+A journal can also fetch an illustration and run it on its own, with no chain:
+
+```rhai
+let marks = illustration("trit_message", #{ per_row: 24 });
+marks.inputs();   // #{ message: "Base3Symbol", heading_style: "TextStyle", ... }
+let canvases = marks.run(#{ message: symbols(3, "CAB") });
+// Options for one run, over the ones it was fetched with:
+let more = marks.run(#{ message: symbols(27, "HI") }, #{ base: 27, title: "HI" });
+```
+
+`illustration(name[, options])` finds the file as `attach` does.
+`run([inputs[, options]])` gives an array of canvases, as `result.canvases`
+does. Its inputs take lock values (`symbols(...)`, `result.get(name)`), values
+as lock files write them, strings, and `text_style(...)`, `glyphset(...)` or
+`layout(...)`, each checked against its input's type; an input left out takes
+its fallback.
+
 ## What an illustration file defines
 
 | function | returns |
 |---|---|
-| `options()` *(optional)* | `#{ NAME: default }`: its options. `lock.attach` can give only these, each like its default (a whole number is fine for a number, and comes as one). |
+| `options()` *(optional)* | `#{ NAME: default }`: its options. `lock.attach`, `illustration` and its `run` can give only these, each like its default (a whole number is fine for a number, and comes as one). |
 | `inputs(o)` | `#{ NAME: type }`: the values it draws, typed as lock files type them (`Base27Symbol`, `HuffmanCode`, `Maze`, `StarChart`, `Any`). They can follow the options: `trit_message`'s input is `` `Base${o.base}Symbol` ``. |
 | `render(o, i)` | a canvas, or an array of canvases |
 | `fallbacks(o)` *(optional)* | `#{ NAME: value }`: what inputs nothing's wired to draw with. The library's illustrations take each kind of text they write as a `TextStyle` input, so a chain can wire in a style source, and give fallbacks for them made from their options (a `<role>_size` option for each one's size). A `TextStyle` input comes whole, `#{ style, type, paragraph }`, and what a wired style leaves out (a pen-only style's glyphset and size, say) is taken from the fallback's. An input with no fallback must be wired. |
 | `example()` *(optional)* | `#{ NAME: value }`: values to draw when nothing's wired, which the web editor previews and `cargo test` checks it draws |
 
-`o` is the options, its defaults with what `lock.attach` gave over them.
+`o` is the options, its defaults with what `lock.attach`, or `illustration`
+and its `run`, gave over them.
 `i` holds the values as lock files see them: symbols as arrays of whole
 numbers, a value kind's data as its map. An illustration runs in the journal's
 engine, so it can call everything a journal can: `new_canvas`, glyphsets,

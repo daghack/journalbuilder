@@ -19,20 +19,42 @@
 //! Journals attach one to a lock chain, `lock.attach("pages", "star_pages",
 //! #{ digit: 24 })`, wire values to it, `lock.connect("sky.chart",
 //! "pages.chart")`, and draw a run's values with `result.canvases("pages")`.
+//! Or they fetch one on its own and run it, no chain needed:
+//! `illustration("star_pages", #{ digit: 24 }).run(#{ chart: chart },
+//! #{ heading_size: 60.0 })`.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use rhai::{Array, Dynamic, Engine, Map, Scope, AST};
+use rhai::{Array, CustomType, Dynamic, Engine, EvalAltResult, FuncArgs, Map, NativeCallContext, Scope, TypeBuilder, AST};
 
 use super::sources::Sources;
-use super::{text_styles, Canvas};
+use super::{locks, text_styles, Canvas, RhaiResult};
+
+/// How deep calls into illustration files can nest. An illustration can run
+/// another, or itself with options that stop it, each on a rhai call stack
+/// of its own that rhai's limit on nesting doesn't see: running itself for
+/// ever would run the process out of stack.
+const MAX_DEPTH: usize = 32;
+
+/// `call`, a call into illustration `name`'s file, one level deeper.
+fn deeper<T>(depth: &Cell<usize>, name: &str, call: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    if depth.get() >= MAX_DEPTH {
+        return Err(format!("illustration '{}': illustrations are running each other more than {} deep; is one running itself?", name, MAX_DEPTH));
+    }
+    depth.set(depth.get() + 1);
+    let result = call();
+    depth.set(depth.get() - 1);
+    result
+}
 
 /// The illustration types: the files in a directory, loaded on first use.
 pub struct IllustrationLibrary {
     sources: Sources,
     types: RefCell<HashMap<String, Rc<IllustrationType>>>,
+    /// How deep calls into its files are now.
+    depth: Rc<Cell<usize>>,
 }
 
 /// A loaded illustration file.
@@ -44,11 +66,12 @@ pub struct IllustrationType {
     pub defaults: Map,
     /// The file's opening comment, without its "name: ".
     pub description: String,
+    depth: Rc<Cell<usize>>,
 }
 
 impl IllustrationLibrary {
     pub fn new(sources: Sources) -> IllustrationLibrary {
-        IllustrationLibrary { sources, types: RefCell::default() }
+        IllustrationLibrary { sources, types: RefCell::default(), depth: Rc::default() }
     }
 
     pub fn sources(&self) -> &Sources {
@@ -76,15 +99,23 @@ impl IllustrationLibrary {
                 return Err(format!("illustration '{}': {} doesn't define {}", name, file, what));
             }
         }
-        let defaults = super::options::declared_defaults(engine, &ast, &format!("illustration '{}'", name))?;
+        let defaults = deeper(&self.depth, name, || super::options::declared_defaults(engine, &ast, &format!("illustration '{}'", name)))?;
         let source = self.sources.read(name).map_err(|e| e.to_string())?;
-        let loaded = Rc::new(IllustrationType { name: name.to_string(), file, ast: Rc::new(ast), defaults, description: description(&source, name) });
+        let loaded = Rc::new(IllustrationType { name: name.to_string(), file, ast: Rc::new(ast), defaults, description: description(&source, name), depth: self.depth.clone() });
         self.types.borrow_mut().insert(name.to_string(), loaded.clone());
         Ok(loaded)
     }
 }
 
 impl IllustrationType {
+    /// What its file's `function`, `shown` in errors, gives for `args`.
+    fn call(&self, engine: &Engine, function: &str, shown: &str, args: impl FuncArgs) -> Result<Dynamic, String> {
+        deeper(&self.depth, &self.name, || {
+            engine.call_fn::<Dynamic>(&mut Scope::new(), &self.ast, function, args)
+                .map_err(|e| format!("illustration '{}' {}: {}", self.name, shown, e))
+        })
+    }
+
     /// `given` over the defaults; an option it doesn't have, or one of
     /// another type than its default, is an error.
     pub fn options(&self, given: &Map) -> Result<Map, String> {
@@ -93,8 +124,7 @@ impl IllustrationType {
 
     /// The values it draws, name -> type, for `o`.
     pub fn inputs(&self, engine: &Engine, o: &Map) -> Result<Vec<(String, String)>, String> {
-        let value = engine.call_fn::<Dynamic>(&mut Scope::new(), &self.ast, "inputs", (Dynamic::from_map(o.clone()),))
-            .map_err(|e| format!("illustration '{}' inputs(o): {}", self.name, e))?;
+        let value = self.call(engine, "inputs", "inputs(o)", (Dynamic::from_map(o.clone()),))?;
         let type_name = value.type_name();
         let map = value.try_cast::<Map>().ok_or_else(|| format!("illustration '{}': inputs(o) should return #{{ NAME: type }}, got {}", self.name, type_name))?;
         map.into_iter().map(|(name, t)| {
@@ -109,8 +139,7 @@ impl IllustrationType {
         if !self.ast.iter_functions().any(|f| f.name == "fallbacks" && f.params.len() == 1) {
             return Ok(Map::new());
         }
-        let value = engine.call_fn::<Dynamic>(&mut Scope::new(), &self.ast, "fallbacks", (Dynamic::from_map(o.clone()),))
-            .map_err(|e| format!("illustration '{}' fallbacks(o): {}", self.name, e))?;
+        let value = self.call(engine, "fallbacks", "fallbacks(o)", (Dynamic::from_map(o.clone()),))?;
         let type_name = value.type_name();
         let map = value.try_cast::<Map>().ok_or_else(|| format!("illustration '{}': fallbacks(o) should return #{{ NAME: value }}, got {}", self.name, type_name))?;
         let inputs = self.inputs(engine, o)?;
@@ -154,8 +183,7 @@ impl IllustrationType {
 
     /// The canvases it draws `inputs` (name -> value) as, with `o`.
     pub fn render(&self, engine: &Engine, o: &Map, inputs: Map) -> Result<Vec<Canvas>, String> {
-        let value = engine.call_fn::<Dynamic>(&mut Scope::new(), &self.ast, "render", (Dynamic::from_map(o.clone()), Dynamic::from_map(inputs)))
-            .map_err(|e| format!("illustration '{}' render(o, i): {}", self.name, e))?;
+        let value = self.call(engine, "render", "render(o, i)", (Dynamic::from_map(o.clone()), Dynamic::from_map(inputs)))?;
         if value.is::<Canvas>() {
             return Ok(vec![value.cast::<Canvas>()]);
         }
@@ -172,11 +200,82 @@ impl IllustrationType {
         if !self.ast.iter_functions().any(|f| f.name == "example" && f.params.is_empty()) {
             return Ok(None);
         }
-        let value = engine.call_fn::<Dynamic>(&mut Scope::new(), &self.ast, "example", ())
-            .map_err(|e| format!("illustration '{}' example(): {}", self.name, e))?;
+        let value = self.call(engine, "example", "example()", ())?;
         let type_name = value.type_name();
         value.try_cast::<Map>().map(Some).ok_or_else(|| format!("illustration '{}': example() should return #{{ NAME: value }}, got {}", self.name, type_name))
     }
+}
+
+/// An illustration on its own, as `illustration(name[, options])` fetches
+/// it: `run` draws it, no chain needed.
+#[derive(Clone)]
+pub struct Illustration {
+    loaded: Rc<IllustrationType>,
+    /// Its options, the ones given over its defaults.
+    options: Map,
+}
+
+impl Illustration {
+    fn new(ctx: &NativeCallContext, library: &IllustrationLibrary, name: &str, options: &Map) -> RhaiResult<Self> {
+        let fail = |e: String| -> Box<EvalAltResult> { format!("illustration: {}", e).into() };
+        let loaded = library.load(ctx.engine(), name).map_err(fail)?;
+        let options = loaded.options(options).map_err(fail)?;
+        Ok(Illustration { loaded, options })
+    }
+
+    /// `illustration.inputs()`: the values it draws, #{ NAME: type }.
+    fn inputs(&mut self, ctx: &NativeCallContext) -> RhaiResult<Map> {
+        let types = self.loaded.inputs(ctx.engine(), &self.options).map_err(|e| format!("inputs: {}", e))?;
+        Ok(types.into_iter().map(|(name, t)| (name.into(), t.into())).collect())
+    }
+
+    /// `illustration.run([inputs[, options]])`: what it draws of `inputs`,
+    /// an array of canvases, with `overrides` over its options for this run.
+    fn run(&mut self, ctx: &NativeCallContext, inputs: Map, overrides: Map) -> RhaiResult<Array> {
+        let fail = |e: String| -> Box<EvalAltResult> { format!("run: {}", e).into() };
+        let (engine, name) = (ctx.engine(), &self.loaded.name);
+        let mut given = self.options.clone();
+        given.extend(overrides);
+        let options = self.loaded.options(&given).map_err(fail)?;
+        let types = self.loaded.inputs(engine, &options).map_err(fail)?;
+        let mut values = Map::new();
+        for (input, value) in inputs {
+            let (_, expected) = types.iter().find(|(known, _)| known == input.as_str()).ok_or_else(|| {
+                fail(format!("illustration '{}' has no input '{}'; inputs: {}", name, input, types.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", ")))
+            })?;
+            let value = locks::illustration_value(value, expected).map_err(|e| fail(format!("illustration '{}' input '{}': {}", name, input, e)))?;
+            values.insert(input, value);
+        }
+        let values = self.loaded.with_fallbacks(engine, &options, values).map_err(fail)?;
+        if let Some((input, _)) = types.iter().find(|(input, _)| !values.contains_key(input.as_str())) {
+            return Err(fail(format!("illustration '{}' has no value for its input '{}'", name, input)));
+        }
+        let canvases = self.loaded.render(engine, &options, values).map_err(fail)?;
+        Ok(canvases.into_iter().map(Dynamic::from).collect())
+    }
+}
+
+impl CustomType for Illustration {
+    fn build(mut builder: TypeBuilder<Self>) {
+        builder
+            .with_name("Illustration")
+            .with_fn("inputs", |ctx: NativeCallContext, illustration: &mut Self| illustration.inputs(&ctx))
+            .with_fn("run", |ctx: NativeCallContext, illustration: &mut Self| illustration.run(&ctx, Map::new(), Map::new()))
+            .with_fn("run", |ctx: NativeCallContext, illustration: &mut Self, inputs: Map| illustration.run(&ctx, inputs, Map::new()))
+            .with_fn("run", |ctx: NativeCallContext, illustration: &mut Self, inputs: Map, options: Map| illustration.run(&ctx, inputs, options));
+    }
+}
+
+/// Register `illustration(name[, options])`, with illustration types from
+/// `library`.
+pub fn register(engine: &mut Engine, library: Rc<IllustrationLibrary>) {
+    engine
+        .build_type::<Illustration>()
+        .register_fn("illustration", {
+            let library = library.clone();
+            move |ctx: NativeCallContext, name: &str| Illustration::new(&ctx, &library, name, &Map::new())
+        })
+        .register_fn("illustration", move |ctx: NativeCallContext, name: &str, options: Map| Illustration::new(&ctx, &library, name, &options));
 }
 
 /// The opening `//` comment of a file, joined into a line, without a
@@ -238,6 +337,83 @@ mod tests {
         "#;
         let entry = engine().build_entry_str(script).expect("script should run");
         assert_eq!(entry.page_count(), 1);
+    }
+
+    /// Draws nothing; its canvas's name says what options it ran with.
+    const SIZED: &str = "fn options() { #{ w: 1.0, h: 2.0 } }\nfn inputs(o) { #{} }\nfn render(o, i) { new_canvas(#{ name: `${o.w}_${o.h}` }) }";
+
+    #[test]
+    fn a_journal_runs_an_illustration_on_its_own() {
+        let script = r#"
+            let marks = illustration("trit_message", #{ per_row: 12 });
+            assert(marks.inputs()["message"] == "Base3Symbol", "inputs() follows its options");
+            assert(marks.run(#{ message: symbols(3, "CAB") }).len() == 1, "a lock value");
+            assert(marks.run(#{ message: [0, 1, 2] }).len() == 1, "symbols as lock files write them");
+            assert(marks.run(#{ message: symbols(27, "HI") }, #{ base: 27 }).len() == 1, "options for the run, the inputs following");
+
+            let sized = illustration("sized", #{ w: 5 });
+            assert(sized.run()[0].name == "5.0_2.0", "its options, over its defaults");
+            assert(sized.run(#{}, #{ h: 7 })[0].name == "5.0_7.0", "a run's options over those");
+            assert(sized.run(#{}, #{ w: 9 })[0].name == "9.0_2.0", "a run's options override what it was fetched with");
+            assert(sized.run()[0].name == "5.0_2.0", "and last only that run");
+            assert(illustration("wraps").run()[0].name == "1.0_2.0", "an illustration can run another");
+
+            let run = new_lock("m").add("maze", "maze_lock", #{ input_base: 27 })
+                .run(#{ "maze.maze_text": symbols(27, "HELLO"), "maze.random_seed": symbols(10, "4") });
+            let maze = illustration("maze_glyphs", #{ cell: 40.0 }).run(#{ maze: run.get("maze.generated_maze") });
+            let note = illustration("styled_text").run(#{ text: content("lorem"), style: text_style("plain_hand", #{ size: 20.0 }) });
+            journal_entry.add(new_page().add(maze[0]).add(note[0]));
+        "#;
+        let entry = engine_with(&[], &[("sized", SIZED), ("wraps", "fn inputs(o) { #{} }\nfn render(o, i) { illustration(\"sized\").run() }")]).build_entry_str(script);
+        assert!(entry.as_ref().is_ok_and(|e| e.empty_canvases().is_empty()), "{:?}", entry.err());
+    }
+
+    #[test]
+    fn a_journals_illustration_stands_in_front_of_the_librarys() {
+        let mine = "fn inputs(o) { #{} }\nfn render(o, i) { new_canvas(#{ name: \"mine\" }) }";
+        let result = engine_with(&[], &[("eye", mine)]).build_entry_str(r#"assert(illustration("eye").run()[0].name == "mine", "the journal's eye");"#);
+        assert!(result.is_ok(), "{:?}", result.err());
+    }
+
+    #[test]
+    fn an_illustration_running_itself_stops_with_an_error() {
+        let illustrations = [
+            ("nested", "fn options() { #{ depth: 0 } }\nfn inputs(o) { #{} }\nfn render(o, i) { if o.depth > 0 { illustration(\"nested\").run(#{}, #{ depth: o.depth - 1 }) } else { new_canvas(#{ name: \"bottom\" }) } }"),
+            ("endless", "fn inputs(o) { #{} }\nfn render(o, i) { illustration(\"endless\").run() }"),
+            ("endless_fallbacks", "fn inputs(o) { #{} }\nfn fallbacks(o) { illustration(\"endless_fallbacks\").run(); #{} }\nfn render(o, i) { new_canvas() }"),
+            ("endless_options", "fn options() { illustration(\"endless_options\"); #{} }\nfn inputs(o) { #{} }\nfn render(o, i) { new_canvas() }"),
+            ("attaches_itself", "fn inputs(o) { #{} }\nfn render(o, i) { new_lock(\"l\").attach(\"me\", \"attaches_itself\").run().canvases(\"me\") }"),
+        ];
+        let result = engine_with(&[], &illustrations).build_entry_str(r#"assert(illustration("nested", #{ depth: 10 }).run()[0].name == "bottom", "running itself with options that stop it");"#);
+        assert!(result.is_ok(), "{:?}", result.err());
+        for name in ["endless", "endless_fallbacks", "endless_options", "attaches_itself"] {
+            let script = format!(r#"illustration("{}").run();"#, name);
+            let err = engine_with(&[], &illustrations).build_entry_str(&script).expect_err(name);
+            assert!(err.contains("illustrations are running each other more than 32 deep; is one running itself?"), "{}: {}", name, err);
+        }
+        let again = engine_with(&[], &illustrations).build_entry_str(r#"
+            try { illustration("endless").run(); } catch {}
+            assert(illustration("nested").run()[0].name == "bottom", "it runs again after one that didn't stop");
+        "#);
+        assert!(again.is_ok(), "{:?}", again.err());
+    }
+
+    #[test]
+    fn running_mistakes_are_named() {
+        for (script, want) in [
+            (r#"illustration("nope");"#, "illustration: no illustration named 'nope'; illustrations: "),
+            (r#"illustration("maze_glyphs", #{ size: 3 });"#, "illustration: illustration 'maze_glyphs' has no option 'size'; its options: cell, corridors, glyphs"),
+            (r#"illustration("maze_glyphs").run();"#, "run: illustration 'maze_glyphs' has no value for its input 'maze'"),
+            (r#"illustration("maze_glyphs").run(#{ grid: 1 });"#, "run: illustration 'maze_glyphs' has no input 'grid'; inputs: corridor_style, glyph_style, maze"),
+            (r#"illustration("maze_glyphs").run(#{ maze: symbols(27, "HI") });"#, "run: illustration 'maze_glyphs' input 'maze': expects Maze, got Base27Symbol"),
+            (r#"illustration("maze_glyphs").run(#{ maze: 3 });"#, "run: illustration 'maze_glyphs' input 'maze': expected a Maze, got an integer"),
+            (r#"illustration("trit_message").run(#{ message: [5] });"#, "run: illustration 'trit_message' input 'message': symbol 5 (item 0) is outside Base3's 0-2"),
+            (r#"illustration("maze_glyphs").run(#{}, #{ size: 3 });"#, "run: illustration 'maze_glyphs' has no option 'size'; its options: cell, corridors, glyphs"),
+            (r#"illustration("maze_glyphs").run(#{}, #{ cell: "big" });"#, "run: illustration 'maze_glyphs': option 'cell' should be like its default, 70.0, got big"),
+        ] {
+            let err = engine().build_entry_str(script).expect_err(script);
+            assert!(err.contains(want), "{}\n  wanted: {}\n  got: {}", script, want, err);
+        }
     }
 
     #[test]
