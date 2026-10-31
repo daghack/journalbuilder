@@ -51,6 +51,7 @@ export class JournalStore {
     .filter((path) => kindOf(path) === 'entries' && !this.manifest().entries.some((entry) => entryPath(entry) === path)));
 
   private keepTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly renameListeners = new Set<(from: string, to: string) => void>();
 
   constructor() {
     void this.restore();
@@ -141,7 +142,14 @@ export class JournalStore {
       const entries = a.kind === 'entries' ? j.manifest.entries.map((e) => (e === a.name ? b.name : e)) : j.manifest.entries;
       return { ...j, files: renamed, manifest: { ...j.manifest, entries } };
     });
+    for (const listener of this.renameListeners) listener(from, to);
     return null;
+  }
+
+  /** Have `listener` told of each file renamed, as it's renamed, so what's kept by path follows it. Returns how to stop. */
+  onRename(listener: (from: string, to: string) => void): () => void {
+    this.renameListeners.add(listener);
+    return () => this.renameListeners.delete(listener);
   }
 
   /** Add an entry, `name`, last. Returns why it can't, or null. */

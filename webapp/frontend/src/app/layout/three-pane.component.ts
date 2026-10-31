@@ -1,5 +1,6 @@
 import { Component, Directive, computed, inject, input, signal, type OnInit } from '@angular/core';
 import { FileSidebarComponent } from '../shell/file-sidebar.component';
+import { FileTabsComponent } from '../shell/file-tabs.component';
 import { filesShown, keep, stored } from './pane-state';
 
 type Splitter = 'left' | 'right';
@@ -19,12 +20,13 @@ const leftWidth = signal<number>(stored('left', 240));
 /**
  * Three columns with splitters between them. The left is tabbed: the
  * journal's files first, then what's projected with `[appPaneTab]="id"`
- * for each of `tabs`. Then `[center]`, and `[right]` unless `right` is
- * false. Each editor keeps its right width and its tab (`key`).
+ * for each of `tabs`. Then `[center]`, under the tabs of the files opened
+ * lately, and `[right]` unless `right` is false. Each editor keeps its
+ * right width and its tab (`key`).
  */
 @Component({
   selector: 'app-three-pane',
-  imports: [FileSidebarComponent],
+  imports: [FileSidebarComponent, FileTabsComponent],
   host: {
     '[class.no-right]': '!right()',
     '[style.--left-width.px]': 'leftWidth()',
@@ -46,7 +48,10 @@ const leftWidth = signal<number>(stored('left', 240));
       <ng-content select="[appPaneTab]" />
     </div>
     <div class="split" role="separator" aria-label="Resize the left pane" (pointerdown)="startDrag($event, 'left')"></div>
-    <ng-content select="[center]" />
+    <div class="center">
+      <app-file-tabs />
+      <ng-content select="[center]" />
+    </div>
     @if (right()) {
       <div class="split" role="separator" aria-label="Resize the right pane" (pointerdown)="startDrag($event, 'right')"></div>
       <ng-content select="[right]" />
@@ -70,6 +75,8 @@ const leftWidth = signal<number>(stored('left', 240));
                    color: var(--rail-fg); padding: 4px 12px; font-size: 12px; white-space: nowrap; }
     .tabs button:hover { background: var(--rail-hover); }
     .tabs button.on { background: var(--rail-selected-bg); border-color: var(--rail-selected); font-weight: 600; }
+    .center { display: flex; flex-direction: column; }
+    .center > ::ng-deep :not(app-file-tabs) { flex: 1; min-height: 0; min-width: 0; }
     @media (max-width: 760px) {
       :host, :host(.no-right) { grid-template-columns: 1fr; grid-template-rows: minmax(0, 40vh) 45vh auto; height: auto; min-height: 100%; }
       .split { display: none; }

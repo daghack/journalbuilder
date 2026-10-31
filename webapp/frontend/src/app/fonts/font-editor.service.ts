@@ -145,6 +145,8 @@ export class FontEditorService {
   readonly onion = signal(true);
 
   private pushTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The glyph and variant each glyphset showed last, to come back to. */
+  private readonly leftOn = new Map<string, Selection>();
 
   constructor() {
     // The journal's glyphset files, and the library's, as they change:
@@ -326,9 +328,13 @@ export class FontEditorService {
   }
 
   pickFont(name: string) {
+    const left = this.selection();
+    if (left) this.leftOn.set(this.fontName(), left);
     this.fontName.set(name);
     const font = this.file()?.find((f) => f.name === name);
-    this.selection.set(font && font.glyphs.length ? { glyph: 0, variant: 0 } : null);
+    const kept = this.leftOn.get(name);
+    if (kept && font?.glyphs[kept.glyph]?.variants[kept.variant] !== undefined) this.selection.set(kept);
+    else this.selection.set(font && font.glyphs.length ? { glyph: 0, variant: 0 } : null);
   }
 
   select(glyph: number, variant = 0) {

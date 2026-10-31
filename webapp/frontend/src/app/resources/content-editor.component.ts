@@ -89,10 +89,8 @@ export class ContentEditorComponent {
 
   protected readonly bases = Array.from({ length: 26 }, (_, i) => i + 2);
   protected readonly symbolHelp = symbolHelp;
-  protected readonly path = computed(() => {
-    const path = this.shell.selected();
-    return path && splitPath(path)?.kind === 'content' ? path : null;
-  });
+  /** The file edited, which stays while another kind's shows. */
+  protected readonly path = this.shell.lastOpened(['content']);
   protected readonly name = computed(() => splitPath(this.path() ?? '')?.name ?? '');
   protected readonly ext = computed(() => splitPath(this.path() ?? '')?.ext ?? 'txt');
   protected readonly own = computed(() => (this.path() ?? '') in this.store.files());
@@ -153,15 +151,22 @@ export class ContentEditorComponent {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private asked = 0;
   private shownUrl: string | null = null;
+  /** What the preview was last asked to draw. */
+  private drawn: { path: string; text: string } | null = null;
 
   constructor() {
+    // Drawn only while it shows, and when back on it only if it's changed.
     effect(() => {
       const path = this.path();
       const text = this.text();
       const ext = this.ext();
+      const showing = this.shell.selected() === path;
       if (this.timer) clearTimeout(this.timer);
-      if (!path || ext === 'json') return;
-      this.timer = setTimeout(() => void this.draw(path, text, ext === 'md'), PREVIEW_DELAY_MS);
+      if (!path || ext === 'json' || !showing || (this.drawn?.path === path && this.drawn.text === text)) return;
+      this.timer = setTimeout(() => {
+        this.drawn = { path, text };
+        void this.draw(path, text, ext === 'md');
+      }, PREVIEW_DELAY_MS);
     });
     effect(() => {
       const url = this.previewUrl();

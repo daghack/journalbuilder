@@ -7,6 +7,9 @@ import { strFromU8, strToU8, unzipSync, zipSync, type Zippable } from 'fflate';
 /** The kinds of file a journal has, each in a directory of its own. */
 export type Kind = 'entries' | 'chains' | 'locks' | 'helpers' | 'illustrations' | 'layouts' | 'styles' | 'content' | 'glyphsets' | 'lib';
 
+/** The kinds the resource editor edits. */
+export const RESOURCE_KINDS: readonly Kind[] = ['locks', 'helpers', 'illustrations', 'layouts', 'styles', 'lib'];
+
 export interface KindInfo {
   kind: Kind;
   /** What the sidebar calls them. */
