@@ -1022,25 +1022,30 @@ impl<'a> Placer<'a> {
 /// Place glyphs one by one along a path's subpaths, each at the first spot
 /// clear of `args.avoid` and of the glyphs before it, until the path runs
 /// out. Returns the glyphs placed and those left over.
-pub fn place_along_path(symbols: Vec<Symbol>, path: &StrokePath, args: &SymbolPlacementArgs) -> (Vec<Symbol>, Vec<Symbol>) {
+pub fn place_along_path(mut symbols: Vec<Symbol>, path: &StrokePath, args: &SymbolPlacementArgs) -> (Vec<Symbol>, Vec<Symbol>) {
     let mut placer = Placer::new(args);
-    let pieces: Vec<Piece> = symbols.iter().map(|s| placer.piece(s.clone())).collect();
+    // Each glyph's outline is made when the path comes to it, so a line
+    // costs what it holds, not all the text still to place.
+    let mut pieces: Vec<Piece> = Vec::new();
     let mut placed = Vec::new();
     for substroke in path.to_substrokes() {
-        if placed.len() == pieces.len() {
+        if placed.len() == symbols.len() {
             break;
         }
         let walk = Walk::new(&substroke, SAMPLES_PER_CURVE);
         let mut cursor = 0.0;
-        while placed.len() < pieces.len() {
+        while placed.len() < symbols.len() {
             let next = placed.len();
+            if pieces.len() == next {
+                pieces.push(placer.piece(symbols[next].clone()));
+            }
             let Some(run) = placer.fit_run(&walk, cursor, &pieces[next..=next], &placer.spacing, 0.0) else { break };
             cursor = run.spans[0].1 + placer.gap();
             placed.extend(placer.commit(run));
         }
         placer.finish_walk(&walk);
     }
-    let unplaced = symbols[placed.len()..].to_vec();
+    let unplaced = symbols.split_off(placed.len());
     (placed, unplaced)
 }
 
@@ -1050,28 +1055,36 @@ pub fn place_along_path(symbols: Vec<Symbol>, path: &StrokePath, args: &SymbolPl
 /// rules may break others (see `WordRules`).
 pub fn place_words_along_path(symbols: Vec<Symbol>, path: &StrokePath, args: &SymbolPlacementArgs, rules: WordRules) -> (Vec<Symbol>, Vec<Symbol>) {
     let mut placer = Placer::new(args);
-    let mut words: VecDeque<Vec<Piece>> = VecDeque::new();
-    let mut word = Vec::new();
-    for symbol in symbols {
-        let blank = symbol.is_blank();
-        word.push(placer.piece(symbol));
-        if blank {
-            words.push_back(std::mem::take(&mut word));
+    // The next word off the rest, its glyphs' outlines made only when the
+    // path comes to it, so a line costs what it holds, not all the text
+    // still to place.
+    let mut rest = symbols.into_iter();
+    let next_word = |placer: &Placer, rest: &mut std::vec::IntoIter<Symbol>| {
+        let mut word = Vec::new();
+        for symbol in rest.by_ref() {
+            let blank = symbol.is_blank();
+            word.push(placer.piece(symbol));
+            if blank {
+                break;
+            }
         }
-    }
-    if !word.is_empty() {
-        words.push_back(word);
-    }
+        (!word.is_empty()).then_some(word)
+    };
+    let mut current: Option<Vec<Piece>> = None;
 
     let mut placed = Vec::new();
     for substroke in path.to_substrokes() {
-        if words.is_empty() {
+        if current.is_none() && rest.as_slice().is_empty() {
             break;
         }
         let walk = Walk::new(&substroke, SAMPLES_PER_CURVE);
         let mut cursor = 0.0;
         let mut line_used = false;
-        while let Some(word) = words.front_mut() {
+        loop {
+            if current.is_none() {
+                current = next_word(&placer, &mut rest);
+            }
+            let Some(word) = current.as_mut() else { break };
             // Blanks after the word go wherever the word ends, even past
             // the end of the line.
             let letters = word.len() - word.iter().rev().take_while(|p| p.symbol.is_blank()).count();
@@ -1090,7 +1103,7 @@ pub fn place_words_along_path(symbols: Vec<Symbol>, path: &StrokePath, args: &Sy
                         placed.push(placer.spot_or_end(&walk, cursor, blank));
                         cursor += blank.outline.width() + placer.gap();
                     }
-                    words.pop_front();
+                    current = None;
                     line_used = true;
                 }
                 None => {
@@ -1121,7 +1134,7 @@ pub fn place_words_along_path(symbols: Vec<Symbol>, path: &StrokePath, args: &Sy
         }
         placer.finish_walk(&walk);
     }
-    (placed, words.into_iter().flatten().map(|p| p.symbol).collect())
+    (placed, current.into_iter().flatten().map(|p| p.symbol).chain(rest).collect())
 }
 
 #[cfg(test)]

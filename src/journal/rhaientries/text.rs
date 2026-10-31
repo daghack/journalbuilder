@@ -374,16 +374,20 @@ fn write_block(msg: &str, at: Vec2, width: Dynamic, settings: Map, symdict: &Fon
 /// What `write_inside_path` takes, besides a style, a type and a paragraph.
 const INSIDE_KEYS: [&str; 1] = ["avoid"];
 
-/// How many halvings close in on the largest glyph scale that fits, for
-/// `write_inside_path` with the paragraph's `fit`.
+/// How near, as a share of it, `write_inside_path` with the paragraph's
+/// `fit` comes to the largest glyph scale that fits.
+const FIT_TOLERANCE: f32 = 0.01;
+
+/// The most halvings it takes closing in on that scale, so text that fits
+/// at no scale gives up.
 const FIT_STEPS: usize = 20;
 
 /// `write_inside_path(text, path, settings)`: the text written inside a
 /// closed path, as a text box of that shape writes it, giving
 /// `#{ canvas, rest }`, `rest` being the text that didn't fit (blanks it
 /// starts with trimmed). With the paragraph's `fit`, the glyphs are as big
-/// as they can be, up to the type's glyph_scale, and still all fit, so
-/// `rest` is empty.
+/// as they can be (to within 1%), up to the type's glyph_scale, and still
+/// all fit, so `rest` is empty.
 fn write_inside_path(msg: &str, path: &Path, settings: Map, symdict: &FontBook, rng: &SharedRng) -> RhaiResult<Map> {
     const CALLER: &str = "write_inside_path";
     let text = TextSettings::read(CALLER, settings, &INSIDE_KEYS)?;
@@ -398,9 +402,12 @@ fn write_inside_path(msg: &str, path: &Path, settings: Map, symdict: &FontBook, 
     let (mut placed, unplaced) = set(&tb, &mut *r);
     if fit && !unplaced.is_empty() {
         // The largest scale at which everything fits, closed in on by
-        // halving.
+        // halving until it's known to within the tolerance.
         let (mut low, mut high, mut best) = (0.0, size, None);
         for _ in 0..FIT_STEPS {
+            if high - low <= FIT_TOLERANCE * high {
+                break;
+            }
             let mid = (low + high) / 2.0;
             let scaled = tb.at_scale(mid);
             let (at, rest) = set(&scaled, &mut *r);
