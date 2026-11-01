@@ -1,6 +1,7 @@
 // What a new file of each kind starts as: something that works, to change.
 
 import { BLANK_ENTRY, type Kind } from './journal-files';
+import { DEFAULT_STYLE, styleFile } from './style-builder';
 
 /** A new file of `kind`, called `name`, with extension `ext`. */
 export function template(kind: Kind, name: string, ext: string): string {
@@ -133,25 +134,7 @@ fn example() {
 }
 `;
     case 'styles':
-      return `// ${name}: how a kind of text looks.
-
-fn options() {
-\t#{ size: 30.0, color: "#2b1d12" }
-}
-
-fn style(o) {
-\t#{
-\t\tstyle: new_style(new_brush_style(o.color, "Ink Pen", 1.4), new_handwriting_style(#{ glyph_rotation_jitter: 0.02 })),
-\t\ttype: new_type_style(glyphset("plain"), o.size),
-\t\tparagraph: #{ line_height: 1.4 },
-\t}
-}
-
-// The text the editor previews it with.
-fn example() {
-\tcontent("lorem")
-}
-`;
+      return styleFile(DEFAULT_STYLE);
     case 'content':
       return ext === 'json' ? '{ "base": 27, "text": "" }\n' : '';
     case 'glyphsets':

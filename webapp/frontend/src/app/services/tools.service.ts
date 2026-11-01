@@ -100,14 +100,14 @@ export class ToolsService {
     return JSON.parse(await this.call<string>('layoutPreview', name, source, JSON.stringify(options)));
   }
 
-  /** Every text style: the journal's styles/*.rhai over the library's. */
+  /** Every text style: the journal's styles/*.json over the library's. */
   async styleTypes(): Promise<LayoutType[]> {
     return JSON.parse(await this.call<string>('styleTypes'));
   }
 
-  /** Text style `name` writing its example in a block `width` wide, `source` standing in for its file if given. */
-  async stylePreview(name: string, source: string | null, options: Record<string, unknown>, width: number): Promise<Answer<RenderPreview>> {
-    return JSON.parse(await this.call<string>('stylePreview', name, source, JSON.stringify(options), width));
+  /** A style script, from when styles were scripts, as a style file, and what the file wouldn't do that the script did. */
+  async convertStyle(name: string, source: string): Promise<Answer<{ file: string; problems: string[] }>> {
+    return JSON.parse(await this.call<string>('convertStyle', name, source));
   }
 
   /** What a style can be made of: every Darkly brush's name and every glyphset's, sorted. */

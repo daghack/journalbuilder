@@ -35,9 +35,9 @@ fn engine_with(book: Rc<FontBook>, styles: &[(&str, &str)], illustrations: &[(&s
 }
 
 /// A style file of just a pen: no type, no paragraph.
-const PEN_ONLY: &str = r#"fn options() { #{ color: "black" } } fn style(o) { #{ style: #{ color: o.color, brush_size: 2.0 } } }"#;
+const PEN_ONLY: &str = r#"{ "color": "black", "brush_size": 2.0 }"#;
 /// A style file of the cursive glyphset, ayan.
-const CURSIVE: &str = r#"fn options() { #{ size: 40.0, color: "black" } } fn style(o) { #{ style: #{ color: o.color }, type: new_type_style(glyphset("ayan"), o.size) } }"#;
+const CURSIVE: &str = r#"{ "color": "black", "glyphset": "ayan", "size": 40.0 }"#;
 
 /// What illustration `name` draws, attached with `options` to `chain` (a
 /// lock, its values set), `wires` (input, port) connected: a page a canvas.

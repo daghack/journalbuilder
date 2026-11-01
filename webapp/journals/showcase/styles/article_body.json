@@ -1,0 +1,21 @@
+{
+  "description": "the body of the showcase's typeset page, to show what a style file can hold besides its ink and size: paragraphs indented and set apart, ink pooling low in each glyph, emphasis red and small, strong text ruled twice.",
+  "color": "#2b1d12",
+  "brush": "Ink Pen",
+  "brush_size": 1.4,
+  "min_pressure": 0.4,
+  "max_pressure": 0.8,
+  "pool": 0.25,
+  "pool_depth": 0.25,
+  "glyph_position_jitter": 0.02,
+  "glyph_rotation_jitter": 0.03,
+  "glyphset": "plain",
+  "size": 26,
+  "line_height": 1.4,
+  "paragraph_gap": 0.8,
+  "indent": 1.5,
+  "spans": {
+    "em": { "style": { "color": "#9b2318" }, "type": { "glyph_scale_factor": 0.9 } },
+    "strong": { "type": { "underline": { "count": 2, "spacing": 0.15, "style": { "color": "#9b2318" } } } }
+  }
+}

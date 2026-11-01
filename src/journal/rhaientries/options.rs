@@ -167,7 +167,8 @@ pub(super) fn unwrap_runtime(err: &EvalAltResult) -> String {
 }
 
 /// Options a file declares as `fn options() { #{ NAME: default } }`
-/// (illustrations, layouts, text styles): `given` over `defaults`. An
+/// (illustrations, layouts) or holds (a text style's size and colour):
+/// `given` over `defaults`. An
 /// option `what` (`illustration 'eye'`) doesn't have, or one of another
 /// type than its default, is an error; a whole number for a float option
 /// is that float, so the file sees its default's type. A colour option

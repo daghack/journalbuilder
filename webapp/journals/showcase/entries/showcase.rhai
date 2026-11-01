@@ -2144,7 +2144,7 @@ files.add(caption("the library's plain_hand, with content(\"lorem\"), the librar
 let hand = write_block(content("lorem"), vec2(LEFT, TOP + 160), 1000, text_style("plain_hand"));
 files.add(hand.canvas);
 let y = hand.bottom + 70;
-files.add(caption("text_style(\"copper_heading\", #{ size: 60, color: ... }), and the showcase's own styles/margin_note.rhai", y));
+files.add(caption("text_style(\"copper_heading\", #{ size: 60, color: ... }), and the showcase's own styles/margin_note.json", y));
 files.add(write_line("Dolor Sit Amet", vec2(LEFT, y + 80), text_style("copper_heading", #{ size: 60, color: BLUE })));
 files.add(write_line("nota bene: written in the margin", vec2(LEFT + 520, y + 80), text_style("margin_note")));
 
@@ -2156,6 +2156,12 @@ files.add(write_line("Dolor Sit Amet", vec2(LEFT, y + 80), text_style("copper_he
 let y = y + 130;
 files.add(caption("or as data: #{ color: #{ colors: [RED, GOLD, BLUE], from: [LEFT, 0], to: [LEFT + 520, 0] } }", y));
 files.add(write_line("Dolor Sit Amet", vec2(LEFT, y + 80), text_style("copper_heading", #{ size: 60, color: #{ colors: [RED, GOLD, BLUE], from: [LEFT, 0], to: [LEFT + 520, 0] } })));
+
+// A style file holds every setting a style, type and paragraph have, and
+// spans: this one's indent, paragraph_gap and spans show where it's typeset.
+let y = y + 130;
+files.add(caption("a style file holds any setting, and spans: styles/article_body.json sets the layout page after these,", y));
+files.add(caption("with pool, pool_depth, indent and paragraph_gap; em smaller and red, strong ruled twice in red", y + 40));
 
 book.bind("files", files);
 
@@ -2183,7 +2189,7 @@ for page in layout("two_column_article", #{ gap: 90, folios: false }).typeset(#{
 	name: "files_layout", width: W, height: H,
 	flows: #{ title: "Layout Options", body: markdown([content("fragment"), content("lorem"), content("fragment"), content("lorem"), content("lorem"), content("fragment")].reduce(|text, p| if text == () { p } else { text + "\n\n" + p })) },
 	roles: #{
-		body: text_style("plain_hand"),
+		body: text_style("article_body"),
 		heading: text_style("copper_heading", #{ size: 80 }),
 		initial: #{ style: HEADING, type: #{ glyphset: glyphset("copper") } },
 		rule: #{ style: CAPTION },

@@ -1,0 +1,14 @@
+{
+  "description": "easy-reading text in the plain glyphset, written with an ink pen by a hand a little unsteady: each glyph a touch off true, each line wandering.",
+  "color": "#2b1d12",
+  "brush": "Ink Pen",
+  "brush_size": 1.4,
+  "min_pressure": 0.4,
+  "max_pressure": 0.8,
+  "glyph_position_jitter": 0.02,
+  "glyph_rotation_jitter": 0.03,
+  "baseline_wander": 0.08,
+  "glyphset": "plain",
+  "size": 26,
+  "line_height": 1.4
+}

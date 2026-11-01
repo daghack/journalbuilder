@@ -38,6 +38,17 @@ describe('a journal', () => {
     expect(journalHash(back)).toBe(journalHash(journal));
   });
 
+  it('keeps old style scripts, to be converted, and drops other files in no kind\'s directory', () => {
+    const zip = zipSync({
+      'journal.json': strToU8(manifestText({ version: 1, title: 'Old', entries: ['one'] })),
+      'entries/one.rhai': strToU8(''),
+      'styles/inked.rhai': strToU8('// inked'),
+      'styles/a.b.rhai': strToU8(''),
+      'locks/notes.txt': strToU8(''),
+    });
+    expect(Object.keys(unpackZip(zip, 'old').files).sort()).toEqual(['entries/one.rhai', 'styles/inked.rhai']);
+  });
+
   it('unzips a journal from a zip of its directory\'s contents, or failing that says why', () => {
     const flat = zipSync({ 'journal.json': strToU8(manifestText({ version: 1, title: 'Flat', entries: ['one'] })), 'entries/one.rhai': strToU8('') });
     expect(unpackZip(flat, 'flat').name).toBe('flat');

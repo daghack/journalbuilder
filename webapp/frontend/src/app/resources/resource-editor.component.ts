@@ -13,12 +13,11 @@ const DEFINES: Record<string, string> = {
   locks: 'A lock file defines options() (option types: integer(3), one_of([...], default)…), inputs(o) and outputs(o) (name → type), lock(o, inputs), unlock(o, outputs), and optionally check(o) and examples(), which are run here.',
   illustrations: 'An illustration file defines inputs(o) (the values it draws, name → type) and render(o, i) (a canvas, or an array of them), and optionally options() (defaults) and example() (inputs to preview with). It runs in the journal\'s engine, so it can draw.',
   layouts: 'A layout file defines page(n, info) (page n\'s tree of boxes; info.options are its options), and optionally options() (defaults), page_size(o) and example() (what to typeset to preview it).',
-  styles: 'A text style file defines style(o) (#{ style, type, paragraph, spans }), and optionally options() (defaults) and example() (the text to preview it with). Entries use it as text_style("name", options).',
   lib: 'A helper file defines functions any script imports: import "lib/name" as name; then name::f(x). A helper runs in the engine of the script importing it.',
 };
 
 /**
- * A lock, illustration, layout, style or helper file: its options in a
+ * A lock, illustration, layout or helper file: its options in a
  * tab beside the files, given values to preview with; its preview in the
  * middle; its code on the right. Helpers have only their code.
  */

@@ -55,11 +55,12 @@ export class RenderService {
 
   /**
    * Send `worker` the journal's files if they've changed since `sent`, just
-   * before asking for a run, so the run is sure to use them. Returns what
-   * the worker has now.
+   * before asking for a run, so the run is sure to use them, with `over`
+   * in front of them. Returns what the worker has now.
    */
-  private sendJournal(worker: Worker, sent: JournalPayload | null): JournalPayload {
-    const files = untracked(() => this.store.resources());
+  private sendJournal(worker: Worker, sent: JournalPayload | null, over?: JournalPayload): JournalPayload {
+    const own = untracked(() => this.store.resources());
+    const files = over ? { ...own, ...over } : own;
     if (files !== sent) worker.postMessage({ type: 'journal', files } satisfies EvalRequest);
     return files;
   }
@@ -198,13 +199,14 @@ export class RenderService {
 
   /**
    * Render pages `indices` of `source` with Darkly, calling `page` with each
-   * one's PNG (null if nothing's drawn on it) as it's done.
+   * one's PNG (null if nothing's drawn on it) as it's done, with `over`
+   * (path -> text) in front of the journal's files.
    */
   renderPages(source: string, indices: number[], options: RenderOptions,
-              page: (index: number, png: Blob | null) => void, progress: (p: RenderProgress) => void): Promise<void> {
+              page: (index: number, png: Blob | null) => void, progress: (p: RenderProgress) => void, over?: JournalPayload): Promise<void> {
     return this.job({ type: 'renderPages', id: 0, source, indices, options }, progress, (reply) => {
       if (reply.type === 'page') page(reply.index, reply.png ? new Blob([reply.png], { type: 'image/png' }) : null);
-    }).then(() => undefined);
+    }, over).then(() => undefined);
   }
 
   /** Every page of `source` rendered with Darkly into one PDF titled `title`. */
@@ -214,10 +216,10 @@ export class RenderService {
   }
 
   private job(request: Extract<DarklyRequest, { id: number }>, progress: (p: RenderProgress) => void,
-              other?: (reply: DarklyReply) => void): Promise<Extract<DarklyReply, { type: 'done' }>> {
+              other?: (reply: DarklyReply) => void, over?: JournalPayload): Promise<Extract<DarklyReply, { type: 'done' }>> {
     const id = ++this.nextId;
     const worker = this.darkly();
-    this.darklyJournal = this.sendJournal(worker, this.darklyJournal);
+    this.darklyJournal = this.sendJournal(worker, this.darklyJournal, over);
     this.startWatchdog();
     return new Promise((resolve, reject) => {
       this.jobs.set(id, (reply) => {

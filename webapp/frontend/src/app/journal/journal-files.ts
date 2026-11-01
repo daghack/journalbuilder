@@ -8,7 +8,7 @@ import { strFromU8, strToU8, unzipSync, zipSync, type Zippable } from 'fflate';
 export type Kind = 'entries' | 'chains' | 'locks' | 'helpers' | 'illustrations' | 'layouts' | 'styles' | 'content' | 'glyphsets' | 'lib';
 
 /** The kinds the resource editor edits. */
-export const RESOURCE_KINDS: readonly Kind[] = ['locks', 'helpers', 'illustrations', 'layouts', 'styles', 'lib'];
+export const RESOURCE_KINDS: readonly Kind[] = ['locks', 'helpers', 'illustrations', 'layouts', 'lib'];
 
 export interface KindInfo {
   kind: Kind;
@@ -28,13 +28,16 @@ export const KINDS: KindInfo[] = [
   { kind: 'helpers', label: 'Helpers', exts: ['rhai'], library: true },
   { kind: 'illustrations', label: 'Illustrations', exts: ['rhai'], library: true },
   { kind: 'layouts', label: 'Layouts', exts: ['rhai'], library: true },
-  { kind: 'styles', label: 'Styles', exts: ['rhai'], library: true },
+  { kind: 'styles', label: 'Styles', exts: ['json'], library: true },
   { kind: 'content', label: 'Content', exts: ['txt', 'md', 'json'], library: true },
   { kind: 'glyphsets', label: 'Glyphsets', exts: ['json'], library: true },
   { kind: 'lib', label: 'Lib', exts: ['rhai'], library: true },
 ];
 
 export const KIND_INFO = new Map(KINDS.map((k) => [k.kind, k]));
+
+/** A style as a script, as they were: kept until it's converted (see StyleConversionService). */
+export const OLD_STYLE = /^styles\/([A-Za-z0-9_]+)\.rhai$/;
 
 /** The types of content, each kept in files of its own extension, which nobody types. */
 export const CONTENT_TYPES = [
@@ -164,7 +167,7 @@ export function packZip(journal: JournalData, bundled: Record<string, string> = 
  * The journal in a directory's files: `manifest`, its journal.json's text,
  * and the rest by path from the directory. Library files the manifest lists
  * as bundled are dropped, so the journal uses the library's own, as are
- * files in no kind's directory.
+ * files in no kind's directory (old style scripts aside, to be converted).
  */
 export function readJournal(name: string, manifest: string, files: Record<string, string>): JournalData {
   let manifestValue: unknown;
@@ -176,7 +179,7 @@ export function readJournal(name: string, manifest: string, files: Record<string
   const checked = checkManifest(manifestValue);
   const bundled = new Set(checked.bundled ?? []);
   delete checked.bundled;
-  const own = Object.fromEntries(Object.entries(files).filter(([path]) => !bundled.has(path) && splitPath(path)));
+  const own = Object.fromEntries(Object.entries(files).filter(([path]) => !bundled.has(path) && (splitPath(path) || OLD_STYLE.test(path))));
   checkEntries(checked, own);
   return { name, manifest: checked, files: own };
 }
@@ -206,7 +209,7 @@ export function unpackZip(bytes: Uint8Array, fallbackName: string): JournalData 
   const root = manifestPath.slice(0, -MANIFEST.length);
   const files: Record<string, string> = {};
   for (const path of paths) {
-    if (!path.startsWith(root) || path === manifestPath || !splitPath(path.slice(root.length))) continue;
+    if (!path.startsWith(root) || path === manifestPath || !(splitPath(path.slice(root.length)) || OLD_STYLE.test(path.slice(root.length)))) continue;
     files[path.slice(root.length)] = strFromU8(entries[path]);
   }
   const name = root.replace(/\/$/, '').split('/').pop() || fallbackName;

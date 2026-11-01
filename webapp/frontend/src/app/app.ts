@@ -7,6 +7,7 @@ import { LocksWorkspaceComponent } from './locks/locks-workspace.component';
 import { EntryPreviewDialogComponent } from './preview/entry-preview-dialog.component';
 import { ContentEditorComponent } from './resources/content-editor.component';
 import { ResourceEditorComponent } from './resources/resource-editor.component';
+import { StyleEditorComponent } from './resources/style-editor.component';
 import { JournalStore } from './services/journal-store.service';
 import { JournalBarComponent } from './shell/journal-bar.component';
 import { ShellService } from './shell/shell.service';
@@ -20,7 +21,7 @@ import { ShellService } from './shell/shell.service';
 @Component({
   selector: 'app-root',
   imports: [JournalBarComponent, ThreePaneComponent, JournalWorkspaceComponent, FontsWorkspaceComponent, LocksWorkspaceComponent,
-    ResourceEditorComponent, ContentEditorComponent, EntryPreviewDialogComponent],
+    ResourceEditorComponent, StyleEditorComponent, ContentEditorComponent, EntryPreviewDialogComponent],
   template: `
     <app-journal-bar />
     <main class="editor">
@@ -39,6 +40,9 @@ import { ShellService } from './shell/shell.service';
         }
         @defer (when resource()) {
           <app-resource-editor class="workspace" [hidden]="!resource()" />
+        }
+        @defer (when kind() === 'styles') {
+          <app-style-editor class="workspace" [hidden]="kind() !== 'styles'" />
         }
         @if (kind() === null) {
           <app-three-pane class="workspace" key="none" [right]="false"><p center class="hint waiting">Pick a file in the Files tab, or add one.</p></app-three-pane>

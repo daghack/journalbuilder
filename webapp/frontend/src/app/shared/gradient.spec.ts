@@ -1,4 +1,4 @@
-import { between, gradientCss, isGradient, layoutOf, paintSource, stopsOf, withLayout, withStops } from './gradient';
+import { between, gradientCss, isGradient, layoutOf, stopsOf, withLayout, withStops } from './gradient';
 
 describe('gradients as data', () => {
   it('tells gradients from other values', () => {
@@ -25,14 +25,6 @@ describe('gradients as data', () => {
     expect(layoutOf(withLayout({ colors }, 'across'))).toBe('across');
     expect(layoutOf(withLayout({ colors }, 'out'))).toBe('out');
     expect(withLayout(withLayout({ colors }, 'out'), 'across')).toEqual({ colors, from: [0, 0], to: [1000, 0] });
-  });
-
-  it('writes rhai', () => {
-    expect(paintSource('#fff')).toBe('"#fff"');
-    expect(paintSource({ colors: ['#fff', '#000'] })).toBe('new_gradient(["#fff", "#000"])');
-    expect(paintSource({ colors: ['#fff', [0.5, 'red'], '#000'], vertical: true })).toBe('new_gradient(["#fff", [0.5, "red"], "#000"], #{ vertical: true })');
-    expect(paintSource({ colors: ['a', 'b'], from: [0, 0], to: [1000, 0.5] })).toBe('new_gradient(["a", "b"], #{ from: vec2(0.0, 0.0), to: vec2(1000.0, 0.5) })');
-    expect(paintSource({ colors: ['a', 'b'], center: [1, 2], radius: 3 })).toBe('new_gradient(["a", "b"], #{ center: vec2(1.0, 2.0), radius: 3.0 })');
   });
 
   it('shows as a CSS gradient', () => {

@@ -46,8 +46,8 @@ the same change:
   `chain(name)` on the locks pages.
 - **A layout, text style or content file** (`webapp/library/layouts/`,
   `styles/`, `content/`): use it with `layout(name)`, `text_style(name)`
-  or `content(name)`. Library layouts and styles also define `example()`,
-  which their tests preview.
+  or `content(name)`. Library layouts also define `example()`, and styles
+  can give an `example`, which their tests preview.
 - **A new kind of page or output** (layouts, splitting, ...): show it on
   its own page, and update the page list at the top of the showcase.
 

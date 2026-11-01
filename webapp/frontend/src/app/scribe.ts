@@ -74,7 +74,7 @@ export type DarklyReply =
 
 /** The engine functions the tools worker calls (see webapp/wasm). */
 export type ToolFunction = 'previewSvg' | 'libraryFiles' | 'usedLibrary' | 'lockTypes' | 'lockPorts' | 'lockExamples' | 'chainTypes' | 'runChain' | 'readChain'
-  | 'valueKinds' | 'illustrationTypes' | 'illustrationPorts' | 'illustrationPreview' | 'layoutTypes' | 'layoutPreview' | 'styleTypes' | 'stylePreview' | 'styleChoices';
+  | 'valueKinds' | 'illustrationTypes' | 'illustrationPorts' | 'illustrationPreview' | 'layoutTypes' | 'layoutPreview' | 'styleTypes' | 'convertStyle' | 'styleChoices';
 
 /** Whose a file is: the journal's own, the library's, or both (the journal's standing in for the library's). */
 export interface Whose {
@@ -105,7 +105,7 @@ export interface IllustrationType extends Whose {
   error?: string;
 }
 
-/** A layout file, layouts/*.rhai, or a text style file, styles/*.rhai. */
+/** A layout file, layouts/*.rhai, or a text style file, styles/*.json. */
 export interface LayoutType extends Whose {
   name: string;
   description?: string;

@@ -10,8 +10,6 @@ import { fieldsOf, type OptionField } from './options-form.component';
 
 /** How long typing pauses before the preview is drawn again. */
 const PREVIEW_DELAY_MS = 300;
-/** How wide a text style's preview writes. */
-const STYLE_WIDTH = 1000;
 
 /** What a lock file does with the options given: its examples, run, and its ports. */
 export interface LockCheck {
@@ -20,10 +18,10 @@ export interface LockCheck {
 }
 
 /** The kinds this editor edits. */
-export type ResourceKind = Extract<Kind, 'locks' | 'helpers' | 'illustrations' | 'layouts' | 'styles' | 'lib'>;
+export type ResourceKind = Extract<Kind, 'locks' | 'helpers' | 'illustrations' | 'layouts' | 'lib'>;
 
 /**
- * A lock, illustration, layout, style or helper file being edited: its
+ * A lock, illustration, layout or helper file being edited: its
  * text (the journal's, or the library's until it's changed, when the
  * journal gets a copy that stands in for it), the options it declares,
  * values for them to preview with, and the preview. It stays the file
@@ -166,14 +164,12 @@ export class ResourceEditorService {
         this.preview.set(null);
         return;
       }
-      const list = kind === 'illustrations' ? await this.tools.illustrationTypes()
-        : kind === 'layouts' ? await this.tools.layoutTypes() : await this.tools.styleTypes();
+      const list = kind === 'illustrations' ? await this.tools.illustrationTypes() : await this.tools.layoutTypes();
       const type = list.find((t) => t.name === name);
       const preview = kind === 'illustrations' ? await this.tools.illustrationPreview(name, text, values, null)
-        : kind === 'layouts' ? await this.tools.layoutPreview(name, text, values)
-        : await this.tools.stylePreview(name, text, values, STYLE_WIDTH);
+        : await this.tools.layoutPreview(name, text, values);
       if (asked !== this.asked) return;
-      this.info.set({ description: type?.description, fields: fieldsOf(type?.options, kind === 'styles'), error: type?.error });
+      this.info.set({ description: type?.description, fields: fieldsOf(type?.options), error: type?.error });
       this.preview.set(preview);
       this.lockCheck.set(null);
     } catch (err) {

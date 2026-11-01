@@ -1,7 +1,8 @@
-import { Component, ElementRef, effect, inject, signal, viewChild } from '@angular/core';
+import { Component, ElementRef, effect, inject, signal, untracked, viewChild } from '@angular/core';
 import { entryPath } from '../journal/journal-files';
 import { JournalIoService, type ExportedZip } from '../services/journal-io.service';
 import { JournalStore } from '../services/journal-store.service';
+import { StyleConversionService } from '../services/style-conversion.service';
 import { ShellService } from './shell.service';
 
 /** Across the top: the journal's title (click it to change it), the last entry's preview, and new, open, import (a zip or a directory) and export. */
@@ -55,6 +56,25 @@ import { ShellService } from './shell.service';
         <div class="actions"><button type="button" class="primary" (click)="reportDialog.close()">OK</button></div>
       }
     </dialog>
+
+    <dialog #conversionDialog class="report" aria-labelledby="conversion-title">
+      <h2 id="conversion-title">{{ conversion.left().length }} old style script{{ conversion.left().length === 1 ? '' : 's' }} not converted</h2>
+      <p>Styles are JSON files now. These can't become one as they are, so they're left, and text_style won't find them until they do.</p>
+      <ul>
+        @for (style of conversion.left(); track style.path) {
+          <li>
+            <strong>{{ style.path }}</strong>
+            <pre>{{ style.problems.join('\n') }}</pre>
+            <details><summary>The script</summary><pre class="script">{{ style.source }}</pre></details>
+            <div class="actions">
+              <button type="button" (click)="conversion.remove(style)" title="Remove the script from the journal">Remove it</button>
+              @if (style.file) { <button type="button" class="primary" (click)="conversion.convertAnyway(style)" title="Replace the script with the nearest a style file can come, losing what's listed above">Convert anyway</button> }
+            </div>
+          </li>
+        }
+      </ul>
+      <div class="actions"><button type="button" (click)="conversionDialog.close()" title="Leave them: they're said again when the journal next loads">Leave them</button></div>
+    </dialog>
   `,
   styles: `
     :host { display: flex; align-items: center; gap: 8px; padding: 4px 10px; background: var(--rail-bg); color: var(--rail-fg); font-size: 12px; }
@@ -86,13 +106,17 @@ import { ShellService } from './shell.service';
     .report li { margin-bottom: 12px; }
     .report strong { font-family: var(--mono); font-weight: 600; }
     .report pre { margin: 4px 0 0; color: var(--danger); font-family: var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
-    .report .actions { display: flex; justify-content: flex-end; margin-top: 16px; }
+    .report .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+    .report li .actions { margin-top: 6px; }
+    .report pre.script { color: var(--fg); }
+    .report summary { cursor: pointer; margin-top: 4px; }
   `,
 })
 export class JournalBarComponent {
   protected readonly store = inject(JournalStore);
   protected readonly io = inject(JournalIoService);
   protected readonly shell = inject(ShellService);
+  protected readonly conversion = inject(StyleConversionService);
   protected readonly message = signal<{ text: string; error: boolean } | null>(null);
   private messageTimer: ReturnType<typeof setTimeout> | null = null;
   /** The title being edited, in place. */
@@ -102,8 +126,20 @@ export class JournalBarComponent {
   protected readonly report = signal<ExportedZip | null>(null);
   protected readonly reportDialog = viewChild.required<ElementRef<HTMLDialogElement>>('reportDialog');
   protected readonly entryPath = entryPath;
+  private readonly conversionDialog = viewChild.required<ElementRef<HTMLDialogElement>>('conversionDialog');
 
   constructor() {
+    // Old style scripts: those that won't convert are said until they're dealt with.
+    effect(() => {
+      const dialog = this.conversionDialog().nativeElement;
+      const left = this.conversion.left().length;
+      if (left && !dialog.open) dialog.showModal();
+      if (!left && dialog.open) dialog.close();
+    });
+    effect(() => {
+      const names = this.conversion.converted();
+      if (names.length) untracked(() => this.say(`Converted old style script${names.length === 1 ? '' : 's'} to JSON: ${names.join(', ')}.`));
+    });
     effect(() => {
       const input = this.titleInput()?.nativeElement;
       if (input) {
