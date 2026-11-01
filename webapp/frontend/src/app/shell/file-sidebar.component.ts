@@ -124,7 +124,7 @@ const open = signal<Record<string, boolean>>(readOpen());
       </form>
     </dialog>
 
-    <app-style-builder (created)="create(styleKind, $event.name, 'rhai', $event.source)" />
+    <app-style-builder (created)="create(styleKind, $event.name, 'json', $event.text)" />
   `,
   styles: `
     :host { display: flex; flex-direction: column; overflow: auto; background: var(--surface); font-size: 12px; padding-bottom: 12px; }

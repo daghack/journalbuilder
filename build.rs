@@ -12,7 +12,7 @@ const KINDS: [(&str, &str); 11] = [
     ("layouts", "rhai"),
     ("illustrations", "rhai"),
     ("chains", "rhai"),
-    ("styles", "rhai"),
+    ("styles", "json"),
     ("lib", "rhai"),
     ("glyphsets", "json"),
     ("content", "txt"),

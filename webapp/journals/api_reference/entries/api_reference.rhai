@@ -1186,7 +1186,7 @@ doc += api("art::sketch(value)", "A value kind's default drawing as a parts map 
 // ---- journals ----
 
 doc += heading("Journals and Their Files");
-doc += para("A journal is a directory: its manifest, journal.json; its entries, entries/NAME.rhai, each a script building a journal_entry of pages; and files of its own, each kind in a directory of its own: locks/, helpers/, layouts/, illustrations/, chains/, styles/ and lib/ (rhai files), glyphsets/ (NAME.json), and content/ (NAME.txt, a String; NAME.md, Markdown; or NAME.json, Symbols: { base, text }, with strict: true or not, or { base, symbols }). They stand in front of the built-in library's, webapp/library/, which has the same directories: a journal's file stands in for the library's of the same name. Each entry runs on its own, sharing the journal's files but not code with the other entries.");
+doc += para("A journal is a directory: its manifest, journal.json; its entries, entries/NAME.rhai, each a script building a journal_entry of pages; and files of its own, each kind in a directory of its own: locks/, helpers/, layouts/, illustrations/, chains/ and lib/ (rhai files), styles/ and glyphsets/ (NAME.json), and content/ (NAME.txt, a String; NAME.md, Markdown; or NAME.json, Symbols: { base, text }, with strict: true or not, or { base, symbols }). They stand in front of the built-in library's, webapp/library/, which has the same directories: a journal's file stands in for the library's of the same name. Each entry runs on its own, sharing the journal's files but not code with the other entries.");
 doc += listing("journal.json: the journal's manifest, a JSON object.", [
 	req("version", "Which manifest format.", "1."),
 	req("title", "The journal's title.", "a string."),
@@ -1202,14 +1202,14 @@ doc += listing("glyphsets/NAME.json: a glyphset, a JSON object. Glyph units span
 	opt("glyph_padding", "none", "Room some glyphs keep on top of character_padding, in glyph scales.", "an object of glyphs to numbers of at least 0."),
 	opt("joins", "none", "Joins words up, as glyphset.joined says: enter and leave, the glyphs that join the glyph before and the glyph after; leave_high, those left high, after which a variant entered high is drawn; x_height and baseline, the heights a variant's entry is told high or low by, and between them the x-height how far apart glyphs join is measured in.", "an object: enter, leave and leave_high (default none), strings of glyphs; x_height and baseline, glyph units, x_height less than baseline."),
 ]);
-doc += api("text_style(name), text_style(name, options)", "A text style file's bundle, styles/NAME.rhai, the journal's or the library's: #{ style, type, paragraph, spans }, the style, type and paragraph whole (a map's settings over default_style(), no type and the default paragraph), and spans if it gives any. It's a role for typeset, and the settings map of any text call, which ignores spans unless it sets marked-up text.", [
-	arg("name", "Which style file.", "a style file's name without .rhai."),
-	opt("options", "the file's defaults", "Its options, which its style(o) sees as o.", "a map of names its options() gives to values like their defaults: a whole number is fine for a number, and a colour or a gradient for a colour option (see Gradients)."),
+doc += api("text_style(name), text_style(name, options)", "A text style file's bundle, styles/NAME.json, the journal's or the library's: #{ style, type, paragraph, spans }, the style, type and paragraph whole (a map's settings over default_style(), no type and the default paragraph), and spans if it gives any. It's a role for typeset, and the settings map of any text call, which ignores spans unless it sets marked-up text.", [
+	arg("name", "Which style file.", "a style file's name without .json."),
+	opt("options", "the file's own", "Its options: size, the glyph scale, which its glyph_position_jitter and baseline_wander follow, and color, its ink.", "a map of size, a positive number, and color, a colour or a gradient, whole or as data (see Gradients)."),
 ]);
 doc += api("content(name)", "A content file, content/NAME.txt, NAME.md or NAME.json, the journal's or the library's: a .txt or .md file's text, without the newline ending the file (markdown(content(name)) sets marked-up text), or a .json file's symbols: its text made to fit its base, as symbols(base, text, #{ lenient: true }) gives them, or with strict: true in the file, read as symbols(base, text) reads it, text the base can't write being an error; or the symbols the file holds, { base, symbols }.", [
 	arg("name", "Which content file; there mustn't be more than one of that name.", "a content file's name without its extension."),
 ]);
-doc += para("Any script, an entry or a lock, layout, illustration, chain or style file, imports shared functions from lib/: import \"lib/NAME\" as NAME; then NAME::f(x) calls lib/NAME.rhai's function f. A lib function runs in the engine of the script importing it: a lock file's lib functions can't draw.");
+doc += para("Any script, an entry or a lock, layout, illustration or chain file, imports shared functions from lib/: import \"lib/NAME\" as NAME; then NAME::f(x) calls lib/NAME.rhai's function f. A lib function runs in the engine of the script importing it: a lock file's lib functions can't draw.");
 
 // ---- files ----
 
@@ -1305,12 +1305,20 @@ doc += api("fn page(n, info)", "Gives page n's tree of boxes.", [
 ]);
 doc += api("fn page_size(o), fn page_size()", "Optional: the page's size, #{ width, height }, positive numbers, given the options. typeset's width and height take its place.");
 doc += api("fn example()", "Optional, in a layout file: what to typeset to preview it, as the web editor does and cargo test checks: typeset's options, #{ flows, roles, art, ... }.");
-doc += para("A text style file, styles/NAME.rhai, runs in the journal's engine; text_style(name) gives what it describes.");
-doc += api("fn options()", "Optional, in a style file: its options and their defaults, #{ NAME: value }; text_style(name, options) can give only these, each like its default, a colour option taking a colour or a gradient (see Gradients).");
-doc += api("fn style(o)", "In a style file: #{ style, type, paragraph, spans }, each whole or a map of settings as a role takes them (all optional); style() if it has no options.", [
-	arg("o", "The options.", "a map."),
+doc += listing("styles/NAME.json: a text style, a JSON object of every setting a style, type and paragraph have, as the web editor's style form sets them, every key optional; text_style(name) gives what it describes. Styles were once scripts, styles/NAME.rhai: the web editor converts those a file can say all of when it loads a journal, and says what's stopping the others; nothing else reads them.", [
+	opt("description", "none", "What it's for, as the web editor lists it.", "a string."),
+	opt("example", "lorem ipsum, content(\"lorem\")", "The text to preview it with, as the web editor does and cargo test checks.", "a string."),
+	opt("color", "black", "Its ink, and the color option's default.", "a colour, or a gradient as data: { colors, ...new_gradient's options } (see Gradients)."),
+	opt("brush, brush_size, min_pressure, max_pressure, pressure_profile, pressure_wander, pressure_wander_length, pool, pool_depth, color_jitter", "default_style()'s", "Its pen.", "as new_brush_style takes them."),
+	opt("passes, pass_end_jitter, stroke_point_jitter, glyph_rotation_jitter, glyph_scale_jitter", "default_style()'s", "Its hand.", "as new_handwriting_style takes them."),
+	opt("glyph_position_jitter, baseline_wander", "0", "Its hand, in glyph scales here, not canvas units, wherever they're written, a span's and a line's too: they follow its size, and need one.", "numbers of at least 0; glyph_position_jitter also [across, down]."),
+	opt("glyphset", "none", "The glyphs it's set in.", "a glyphset's name."),
+	opt("size", "none", "Its glyph scale, and the size option's default.", "a positive number."),
+	opt("glyph_scale_factor, glyph_outline_gap, glyph_tracking, space_width, skew, italic, joined", "those of a type_style", "Its type.", "as new_type_style takes them."),
+	opt("underline, strike", "none", "Lines under and through it.", "as new_type_style takes them, a line's style a map of settings, its colour a colour or a gradient as data."),
+	opt("line_height, paragraph_gap, indent, align, valign, fit, layout, angle, split_words, split_padding, break_words, clearance, line_start_jitter, line_gap_jitter, overhang", "those of a paragraph_style", "Its paragraph.", "as new_paragraph_style takes them."),
+	opt("spans", "none", "Named spans, as a role has them: each one's style and type are maps of settings, colours and gradients as above and glyphsets by name.", "an object of span names to their style and type."),
 ]);
-doc += api("fn example()", "Optional, in a style file: the text to preview it with, as the web editor does and cargo test checks: a string.");
 
 // ---- building ----
 

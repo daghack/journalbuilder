@@ -1,5 +1,5 @@
-//! A journal's resources: its lock, helper, layout, illustration, chain,
-//! style and lib scripts, glyphsets and content, each kind in a directory of its
+//! A journal's resources: its lock, helper, layout, illustration, chain
+//! and lib scripts, text styles, glyphsets and content, each kind in a directory of its
 //! own, in front of the built-in library's (`webapp/library/`), which has
 //! the same directories. A journal's file stands in for a library file of
 //! the same name.
@@ -10,7 +10,7 @@
 //! layouts/NAME.rhai        page layouts, for layout(name)
 //! illustrations/NAME.rhai  what chains draw their values with
 //! chains/NAME.rhai         locks wired together, for chain(name)
-//! styles/NAME.rhai         text styles, for text_style(name)
+//! styles/NAME.json         text styles, for text_style(name)
 //! lib/NAME.rhai            helpers any script imports: import "lib/NAME"
 //! glyphsets/NAME.json      glyphsets, for glyphset(name)
 //! content/NAME.txt         plain text, for content(name)
@@ -46,7 +46,7 @@ pub const KINDS: [(&str, &str); 11] = [
     ("layouts", "rhai"),
     ("illustrations", "rhai"),
     ("chains", "rhai"),
-    ("styles", "rhai"),
+    ("styles", "json"),
     ("lib", "rhai"),
     ("glyphsets", "json"),
     ("content", "txt"),
@@ -103,7 +103,7 @@ impl Resources {
             layouts: sources("layouts", "rhai"),
             illustrations: sources("illustrations", "rhai"),
             chains: sources("chains", "rhai"),
-            styles: sources("styles", "rhai"),
+            styles: sources("styles", "json"),
             lib: sources("lib", "rhai"),
             glyphsets: sources("glyphsets", "json"),
             text: sources("content", "txt"),

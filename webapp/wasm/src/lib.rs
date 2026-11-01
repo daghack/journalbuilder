@@ -15,7 +15,7 @@
 //! `lockPorts`, `lockExamples`, `chainTypes`, `runChain`, `readChain` and
 //! `valueKinds`; and the illustration, layout and style editors have
 //! `illustrationTypes`, `illustrationPorts`, `illustrationPreview`,
-//! `layoutTypes`, `layoutPreview`, `styleTypes`, `stylePreview` and
+//! `layoutTypes`, `layoutPreview`, `styleTypes`, `convertStyle` and
 //! `styleChoices`.
 
 use scribe::journal::darkly;
@@ -129,7 +129,7 @@ fn journal_files<'a>(files: impl IntoIterator<Item = (&'a str, &'a str)>) -> Res
             ("layouts", "rhai") => &mut journal.layouts,
             ("illustrations", "rhai") => &mut journal.illustrations,
             ("chains", "rhai") => &mut journal.chains,
-            ("styles", "rhai") => &mut journal.styles,
+            ("styles", "json") => &mut journal.styles,
             ("lib", "rhai") => &mut journal.lib,
             ("glyphsets", "json") => &mut journal.glyphsets,
             ("content", "txt") => &mut journal.text,
@@ -537,7 +537,7 @@ pub fn layout_preview(name: &str, source: Option<String>, options: &str) -> Stri
 pub fn style_types() -> String {
     let engine = engine(&[]);
     let types: Vec<Value> = engine.text_style_names().into_iter().map(|name| {
-        let path = format!("styles/{}.rhai", name);
+        let path = format!("styles/{}.json", name);
         match engine.describe_text_style(&name) {
             Ok(info) => marked(serde_json::to_value(info).unwrap_or(Value::Null), &path),
             Err(error) => marked(json!({ "name": name, "error": error }), &path),
@@ -546,18 +546,14 @@ pub fn style_types() -> String {
     Value::Array(types).to_string()
 }
 
-/// Text style `name` writing its example() (or lorem ipsum) in a block
-/// `width` wide, with `options` (JSON) over its defaults and `source`
-/// standing in for its file if given: `{ pages: [{ svg, view }] }`, or
-/// `{ error }`.
-#[wasm_bindgen(js_name = stylePreview)]
-pub fn style_preview(name: &str, source: Option<String>, options: &str, width: f64) -> String {
+/// A style script, from when styles were scripts, as a style file `name`:
+/// `{ file, problems }`, what the file wouldn't do that the script did, or
+/// `{ error }` if the script can't be run.
+#[wasm_bindgen(js_name = convertStyle)]
+pub fn convert_style(name: &str, source: &str) -> String {
     answer((|| {
-        let options = parse_json(options, "options")?;
-        let path = format!("styles/{}.rhai", name);
-        let extra: Vec<(&str, &str)> = source.as_deref().map(|source| (path.as_str(), source)).into_iter().collect();
-        let entry = engine(&extra).preview_text_style(name, &options, width)?;
-        Ok(pages_json(&entry))
+        let converted = engine(&[]).convert_old_text_style(name, source)?;
+        Ok(json!({ "file": converted.file, "problems": converted.problems }))
     })())
 }
 

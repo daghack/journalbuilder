@@ -137,7 +137,7 @@ pub(super) fn glyph_array(caller: &str, glyphs: Array) -> RhaiResult<Vec<Glyph>>
 }
 
 /// A glyphset from the book, by name.
-fn named(book: &FontBook, caller: &str, name: &str) -> RhaiResult<Font> {
+pub(super) fn named(book: &FontBook, caller: &str, name: &str) -> RhaiResult<Font> {
     book.font(name).ok_or_else(|| format!("{}: no glyphset named '{}'; glyphsets: {}", caller, name, book.names().join(", ")).into())
 }
 

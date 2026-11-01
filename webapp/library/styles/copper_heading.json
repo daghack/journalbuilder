@@ -1,0 +1,15 @@
+{
+  "description": "headings in the copper glyphset, centred, with a broad calligraphy nib at a constant pressure; strong text gone over twice.",
+  "color": "#9b2318",
+  "brush": "Calligraphy",
+  "brush_size": 1.5,
+  "min_pressure": 0.48,
+  "max_pressure": 0.96,
+  "pressure_profile": "constant",
+  "glyphset": "copper",
+  "size": 72,
+  "line_height": 1.1,
+  "align": "center",
+  "spans": { "strong": { "style": { "passes": 2, "pass_end_jitter": 1.0 } } },
+  "example": "Dolor Sit Amet"
+}

@@ -144,19 +144,40 @@ let pages = result.canvases("mg");
 - The snippets copy entry script: `chain("name")` in use, or the chain
   built node by node with `new_lock`.
 
-## Locks, helpers, illustrations, layouts, styles and lib
+## Locks, helpers, illustrations, layouts and lib
 
 Each opens in three panes: on the left the options its file declares, to
 give values to preview with; in the middle the preview (a lock's examples,
 run, and its ports; what an illustration draws of its `example()`; a
-layout typesetting its `example()`; a style writing its example text); on
-the right its code. Helper types run their examples as locks do. Lib
+layout typesetting its `example()`); on the right its code. Helper types run their examples as locks do. Lib
 files (`lib/`), shared functions, have only their code.
 
-A style's ink can be a colour or a gradient, in the New style dialog, in a
-style's options and in a chain's style source: a switch beside the colour
-gives its colours, each placed from 0 to 1, and how it runs (along each
-stroke, down each glyph, across the page or out from a point).
+## Styles
+
+A style is its ink, hand, type and paragraph, every setting of each, set with
+sliders and choices beside a page writing its example text, as SVG or rendered
+with Darkly, and as `write_block` writes it or as a layout typesets it, for what
+shows only in one or the other (a setting that does moves the preview there). A
+setting left to the glyphset or the call shows what it comes to until it's set.
+Spans list what they change over the text's, and so do an underline's or a
+strike's lines. New style shows them in a dialog, and a style file opens in the
+same ones, each change kept as it's made (a library style changed gives the
+journal a copy that stands in for it). Nobody edits the JSON a style is kept as,
+`styles/NAME.json`. Its size and colour are its options: entries can give their
+own, `text_style("name", #{ size, color })`, as a chain's style source can.
+
+Styles were once scripts, `styles/NAME.rhai`. A journal loaded or imported with
+any has them converted: each is run and written down, and the file tried against
+the script at another size and colour. If they come to the same, the file takes
+the script's place. If not (an option that isn't size or colour, a setting worked
+out from the size, what's different each run), or if it won't run, the script is
+left as it is and what's stopping it is said, with **Convert anyway** to take the
+nearest a file can come.
+
+A style's ink can be a colour or a gradient, in the form and in a chain's
+style source: a switch beside the colour gives its colours, each placed from
+0 to 1, and how it runs (along each stroke, down each glyph, across the page
+or out from a point).
 
 ## Content
 

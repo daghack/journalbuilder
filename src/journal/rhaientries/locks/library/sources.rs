@@ -53,7 +53,7 @@ impl SourceKind {
 pub struct SourceSpec {
     pub id: String,
     pub kind: SourceKind,
-    /// The file's name: content/NAME.*, styles/NAME.rhai, glyphsets/NAME.json, layouts/NAME.rhai.
+    /// The file's name: content/NAME.*, styles/NAME.json, glyphsets/NAME.json, layouts/NAME.rhai.
     pub name: String,
     /// A style's or layout's options.
     pub options: Map,

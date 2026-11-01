@@ -21,6 +21,7 @@ mod sources;
 mod style;
 mod text;
 mod text_settings;
+mod old_text_styles;
 mod text_styles;
 mod vec;
 
@@ -32,6 +33,7 @@ pub use locks::{LockLibrary, SourceKind};
 pub use manifest::{valid_name, Journal, Manifest, MANIFEST, MANIFEST_VERSION};
 pub use illustrations::IllustrationLibrary;
 pub use style::brush_names;
+pub use old_text_styles::ConvertedStyle;
 use text_styles::TextStyleLibrary;
 /// What the web editor's lock editor asks of lock types.
 pub mod lock_inspection {
@@ -201,9 +203,6 @@ pub struct LayoutInfo {
     pub example: bool,
 }
 
-/// What a text style without an `example()` previews with.
-const PREVIEW_TEXT: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.";
-
 impl JournalEngine {
     /// An engine with the built-in library's resources (`webapp/library/`).
     pub fn new(symdict: Rc<FontBook>) -> Self {
@@ -221,7 +220,7 @@ impl JournalEngine {
     /// (`resources.glyphset_book()`).
     pub fn with_resources(symdict: Rc<FontBook>, resources: Resources) -> Self {
         let mut engine = rhai_engine();
-        // Entries, layouts, illustrations and styles `import "lib/name"`.
+        // Entries, layouts and illustrations `import "lib/name"`.
         engine.set_module_resolver(resources.lib.module_resolver());
         let rng = random::register(&mut engine);
         let text: TextSource = (symdict.clone(), rng.clone());
@@ -284,7 +283,7 @@ impl JournalEngine {
         let illustrations = Rc::new(IllustrationLibrary::new(resources.illustrations.clone()));
         locks::register(&mut engine, Rc::new(LockLibrary::new(&resources)), illustrations.clone());
         illustrations::register(&mut engine, illustrations.clone());
-        let text_styles = Rc::new(TextStyleLibrary::new(resources.styles.clone()));
+        let text_styles = Rc::new(TextStyleLibrary::new(resources.styles.clone(), symdict.clone()));
         text_styles::register(&mut engine, text_styles.clone());
         content::register(&mut engine, resources.clone());
 
@@ -390,34 +389,18 @@ impl JournalEngine {
     }
     /// What text style `name` takes, and the text it previews with.
     pub fn describe_text_style(&self, name: &str) -> Result<TextStyleInfo, String> {
-        let file = self.text_styles.load(&self.engine, name)?;
+        let file = self.text_styles.load(name)?;
         Ok(TextStyleInfo {
             name: name.to_string(),
             description: file.description.clone(),
             options: locks::to_json(&Dynamic::from_map(file.defaults.clone())),
-            example: file.example(&self.engine)?,
+            example: file.example.clone(),
         })
     }
-    /// Text style `name` with `options` (a JSON object) over its defaults,
-    /// writing its `example()` text (or else a line of lorem ipsum) in a
-    /// block `width` wide: a page.
-    pub fn preview_text_style(&mut self, name: &str, options: &serde_json::Value, width: f64) -> Result<Entry, String> {
-        let text = self.describe_text_style(name)?.example.unwrap_or_else(|| PREVIEW_TEXT.to_string());
-        let mut scope = Scope::new();
-        scope.push("journal_entry", Entry::default());
-        scope.push_constant("NAME", name.to_string());
-        scope.push_constant("OPTIONS", json_map(options, "options")?);
-        scope.push_constant("TEXT", text);
-        scope.push_constant("WIDTH", width);
-        self.run_preview(scope, r#"
-            let style = text_style(NAME, OPTIONS);
-            let size = style.type.glyph_scale ?? 30.0;
-            let c = new_canvas();
-            c.add(write_block(TEXT, vec2(size, size * 2), WIDTH - size * 2, style).canvas);
-            let p = new_page();
-            p.add(c);
-            journal_entry.add(p);
-        "#)
+    /// The old style script `source` as a style file called `name` (see
+    /// `old_text_styles`), or why it can't be run.
+    pub fn convert_old_text_style(&self, name: &str, source: &str) -> Result<ConvertedStyle, String> {
+        old_text_styles::convert(&self.engine, self.text_styles.book(), name, source)
     }
     /// The layouts' names.
     pub fn layout_names(&self) -> Vec<String> {

@@ -3,7 +3,6 @@
 // default).
 
 import { parseColour, formatHsl } from './colour';
-import { rhaiFloat, rhaiString } from './rhai-literal';
 
 /** A gradient: its colours, each a CSS colour or `[position, colour]`, and how it's laid out. */
 export interface GradientData {
@@ -89,19 +88,4 @@ export function between(a: string, b: string): string {
 export function gradientCss(g: GradientData): string {
   const stops = stopsOf(g).map(({ at, colour }) => `${colour} ${+(at * 100).toFixed(2)}%`);
   return `linear-gradient(to right, ${stops.join(', ')})`;
-}
-
-/** A colour or gradient as rhai source: a string literal, or a call of new_gradient. */
-export function paintSource(paint: Paint): string {
-  if (typeof paint === 'string') return rhaiString(paint);
-  const point = ([x, y]: [number, number]) => `vec2(${rhaiFloat(x)}, ${rhaiFloat(y)})`;
-  const colors = paint.colors.map((c) => (typeof c === 'string' ? rhaiString(c) : `[${rhaiFloat(c[0])}, ${rhaiString(c[1])}]`));
-  const options = [
-    paint.vertical ? 'vertical: true' : null,
-    paint.from ? `from: ${point(paint.from)}` : null,
-    paint.to ? `to: ${point(paint.to)}` : null,
-    paint.center ? `center: ${point(paint.center)}` : null,
-    paint.radius !== undefined ? `radius: ${rhaiFloat(paint.radius)}` : null,
-  ].filter((o) => o !== null);
-  return `new_gradient([${colors.join(', ')}]${options.length ? `, #{ ${options.join(', ')} }` : ''})`;
 }
