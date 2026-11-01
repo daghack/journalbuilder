@@ -407,7 +407,7 @@ export class LockPanelComponent {
     const source = this.editor.source();
     if (!source) return [];
     const types = source.kind === 'style' ? this.editor.styleTypes() : this.editor.layoutTypes();
-    return fieldsOf(types.find((t) => t.name === source.name)?.options);
+    return fieldsOf(types.find((t) => t.name === source.name)?.options, source.kind === 'style');
   });
 
   protected setBase(id: string, text: string) {

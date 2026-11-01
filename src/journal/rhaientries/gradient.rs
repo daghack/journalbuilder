@@ -17,6 +17,11 @@
 //!
 //! let style = new_style(fade, brush);   // in place of a colour
 //! style.color = across;                            // or set it later
+//!
+//! // A file's colour option takes one too, whole or as data (a map of
+//! // `colors` and the options, points as [x, y]), as JSON has to write it.
+//! text_style("plain_hand", #{ color: pooled });
+//! text_style("plain_hand", #{ color: #{ colors: ["red", "blue"], from: [0, 0], to: [500, 0] } });
 //! ```
 //!
 //! In Darkly renders a gradient stroke is drawn in white and coloured
@@ -24,11 +29,12 @@
 //! don't reach across it. In SVG output a gradient along or down a stroke
 //! is drawn in short pieces, each its own colour.
 
-use rhai::{Array, Dynamic, Engine, EvalAltResult, Map};
+use rhai::{Array, Dynamic, Engine, EvalAltResult, ImmutableString, Map};
+use serde_json::{json, Value};
 
-use super::options::{check_keys, number};
+use super::options::{as_number, check_keys, number};
 use super::Vec2;
-use crate::journal::canvas::parse_color;
+use crate::journal::canvas::{css, parse_color};
 use crate::journal::gradient::{Gradient, GradientKind};
 
 use super::RhaiResult;
@@ -81,11 +87,16 @@ fn stops(colours: Array) -> RhaiResult<Vec<(f32, [f32; 4])>> {
     Ok(placed.into_iter().map(|(at, c)| (at.expect("placed"), c)).collect())
 }
 
+/// A point: a vec, or `[x, y]`, which JSON can write.
 fn vec_option(options: &Map, key: &str) -> RhaiResult<Option<parry2d::math::Vec2>> {
     options.get(key).map(|v| {
-        v.clone().try_cast::<Vec2>()
-            .map(Into::into)
-            .ok_or_else(|| -> Box<EvalAltResult> { format!("{}: '{}' should be a vec", CALLER, key).into() })
+        let bad = || -> Box<EvalAltResult> { format!("{}: '{}' should be a vec or [x, y]", CALLER, key).into() };
+        if let Some(pair) = v.read_lock::<Array>() {
+            let [x, y] = pair.as_slice() else { return Err(bad()) };
+            let what = format!("'{}'", key);
+            return Ok(parry2d::math::Vec2::new(as_number(CALLER, &what, x)?, as_number(CALLER, &what, y)?));
+        }
+        v.clone().try_cast::<Vec2>().map(Into::into).ok_or_else(bad)
     }).transpose()
 }
 
@@ -155,6 +166,38 @@ pub fn colour_or_gradient(caller: &str, value: Dynamic) -> RhaiResult<crate::jou
     Ok(StrokeColor::Solid(colour.to_string()))
 }
 
+/// Whether an option with this default is a colour option: its default a
+/// colour or a gradient.
+pub(super) fn is_colour_option(default: &Dynamic) -> bool {
+    default.is::<Gradient>() || default.read_lock::<ImmutableString>().is_some_and(|text| parse_color(&text).is_ok())
+}
+
+/// What a colour option is given, for its file to see: a gradient written
+/// as data, `#{ colors, ...new_gradient's options }`, as a gradient; else
+/// as it is.
+pub(super) fn colour_option(given: &Dynamic) -> RhaiResult<Dynamic> {
+    let Some(data) = given.read_lock::<Map>() else { return Ok(given.clone()) };
+    let mut options = (*data).clone();
+    let colours = options.remove("colors").ok_or_else(|| -> Box<EvalAltResult> { "a gradient written as a map needs 'colors'".into() })?;
+    let colours = colours.into_array().map_err(|t| -> Box<EvalAltResult> { format!("a gradient's 'colors' should be an array, got {}", t).into() })?;
+    new_gradient(colours, options).map(Dynamic::from)
+}
+
+/// A gradient as data, which `colour_option` reads: its colours placed,
+/// `[position, colour]`, and its options.
+pub fn to_json(g: &Gradient) -> Value {
+    // JSON's numbers are doubles: without the noise of having been floats.
+    let plain = |v: f32| (v as f64 * 1e4).round() / 1e4;
+    let point = |p: parry2d::math::Vec2| json!([plain(p.x), plain(p.y)]);
+    let colors: Vec<Value> = g.stops.iter().map(|(at, colour)| json!([plain(*at), css(*colour)])).collect();
+    match g.kind {
+        GradientKind::Along => json!({ "colors": colors }),
+        GradientKind::Vertical => json!({ "colors": colors, "vertical": true }),
+        GradientKind::Linear { from, to } => json!({ "colors": colors, "from": point(from), "to": point(to) }),
+        GradientKind::Radial { center, radius } => json!({ "colors": colors, "center": point(center), "radius": plain(radius) }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::JournalEngine;
@@ -195,6 +238,27 @@ mod tests {
         assert_eq!(g.kind, GradientKind::Vertical);
         let g = gradient(r#"new_gradient(["red", "blue"], #{ vertical: false })"#);
         assert_eq!(g.kind, GradientKind::Along);
+        let g = gradient(r#"new_gradient(["red", "blue"], #{ from: [0, 0.5], to: vec2(10.0, 0.0) })"#);
+        assert!(matches!(g.kind, GradientKind::Linear { from, .. } if from.y == 0.5));
+    }
+
+    #[test]
+    fn gradients_as_data_come_back_the_same() {
+        for script in [
+            r#"new_gradient(["red", [0.8, "rgba(0, 0, 255, 0.5)"], "gold"])"#,
+            r#"new_gradient(["red", "blue"], #{ vertical: true })"#,
+            r#"new_gradient(["red", "blue"], #{ from: vec2(1.5, 2.0), to: vec2(10.0, 0.0) })"#,
+            r#"new_gradient(["red", "blue"], #{ center: vec2(1.0, 1.0), radius: 5.25 })"#,
+        ] {
+            let g = gradient(script);
+            let data = super::super::locks::from_json(&super::to_json(&g));
+            let back = super::colour_option(&data).unwrap().cast::<Gradient>();
+            assert_eq!(back.kind, g.kind, "{}", script);
+            assert_eq!(back.stops.len(), g.stops.len(), "{}", script);
+            for (a, b) in back.stops.iter().zip(&g.stops) {
+                assert!((a.0 - b.0).abs() < 1e-3 && a.1.iter().zip(b.1).all(|(x, y)| (x - y).abs() < 1e-2), "{}: {:?} {:?}", script, a, b);
+            }
+        }
     }
 
     #[test]
@@ -225,6 +289,8 @@ mod tests {
             (r#"new_gradient(["red", "blue"], #{ angle: 1 })"#, "unknown option 'angle'"),
             (r#"new_gradient(["red", "blue"], #{ vertical: 1 })"#, "'vertical' should be true or false"),
             (r#"new_gradient(["red", "blue"], #{ vertical: true, radius: 3 })"#, "'vertical' runs down each path"),
+            (r#"new_gradient(["red", "blue"], #{ from: [0], to: vec2(1.0, 0.0) })"#, "'from' should be a vec or [x, y]"),
+            (r#"new_gradient(["red", "blue"], #{ from: "here", to: vec2(1.0, 0.0) })"#, "'from' should be a vec or [x, y]"),
             (r#"new_brush_style(3, "Ink Pen", 1.6)"#, "expected a colour string or a gradient"),
         ] {
             let err = fails(&format!("let ok = 1;\n{};", script));

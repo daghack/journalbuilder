@@ -2148,7 +2148,19 @@ files.add(caption("text_style(\"copper_heading\", #{ size: 60, color: ... }), an
 files.add(write_line("Dolor Sit Amet", vec2(LEFT, y + 80), text_style("copper_heading", #{ size: 60, color: BLUE })));
 files.add(write_line("nota bene: written in the margin", vec2(LEFT + 520, y + 80), text_style("margin_note")));
 
-let y = y + 170;
+// A file's colour option takes a gradient: whole, or as data, as the
+// editor gives one (points as [x, y]).
+let y = y + 130;
+files.add(caption("a colour option takes a gradient: #{ color: new_gradient([RED, BLUE], #{ vertical: true }) }", y));
+files.add(write_line("Dolor Sit Amet", vec2(LEFT, y + 80), text_style("copper_heading", #{ size: 60, color: new_gradient([RED, BLUE], #{ vertical: true }) })));
+let y = y + 130;
+files.add(caption("or as data: #{ color: #{ colors: [RED, GOLD, BLUE], from: [LEFT, 0], to: [LEFT + 520, 0] } }", y));
+files.add(write_line("Dolor Sit Amet", vec2(LEFT, y + 80), text_style("copper_heading", #{ size: 60, color: #{ colors: [RED, GOLD, BLUE], from: [LEFT, 0], to: [LEFT + 520, 0] } })));
+
+book.bind("files", files);
+
+let files = sheet("files");
+let y = TOP;
 files.add(subhead("content", y));
 files.add(caption("content(name): a .txt or .md file's text; a .json file's text as symbols, #{ base, text }, made to fit unless strict", y + 50));
 let cipher = content("cipher");

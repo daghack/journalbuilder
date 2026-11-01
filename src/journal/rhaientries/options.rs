@@ -3,7 +3,8 @@
 
 use rhai::{Dynamic, EvalAltResult, Map};
 
-use super::RhaiResult;
+use super::{gradient, RhaiResult};
+use crate::journal::gradient::Gradient;
 
 pub(super) fn check_keys(caller: &str, options: &Map, known: &[&str]) -> RhaiResult<()> {
     match options.keys().find(|k| !known.contains(&k.as_str())) {
@@ -169,7 +170,10 @@ pub(super) fn unwrap_runtime(err: &EvalAltResult) -> String {
 /// (illustrations, layouts, text styles): `given` over `defaults`. An
 /// option `what` (`illustration 'eye'`) doesn't have, or one of another
 /// type than its default, is an error; a whole number for a float option
-/// is that float, so the file sees its default's type.
+/// is that float, so the file sees its default's type. A colour option
+/// (one whose default is a colour or a gradient) takes either, a gradient
+/// whole or written as data (see `gradient::colour_option`), so the file
+/// can give it to a brush as it stands.
 pub(super) fn over_defaults(what: &str, defaults: &Map, given: &Map) -> Result<Map, String> {
     let mut options = defaults.clone();
     for (key, value) in given {
@@ -177,14 +181,21 @@ pub(super) fn over_defaults(what: &str, defaults: &Map, given: &Map) -> Result<M
             let known: Vec<&str> = defaults.keys().map(|k| k.as_str()).collect();
             return Err(format!("{} has no option '{}'; its options: {}", what, key, if known.is_empty() { "none".to_string() } else { known.join(", ") }));
         };
+        let colour = gradient::is_colour_option(default);
+        let taken = if colour {
+            gradient::colour_option(value).map_err(|e| format!("{}: option '{}': {}", what, key, unwrap_runtime(&e)))?
+        } else {
+            value.clone()
+        };
         let number = |v: &Dynamic| v.is_int() || v.is_float();
-        let same = (number(default) && number(value)) || default.type_name() == value.type_name() || default.is_unit();
+        let same = (number(default) && number(&taken)) || default.type_name() == taken.type_name() || default.is_unit()
+            || (colour && (taken.is_string() || taken.is::<Gradient>()));
         if !same {
             return Err(format!("{}: option '{}' should be like its default, {}, got {}", what, key, default, value));
         }
-        let value = match value.as_int() {
+        let value = match taken.as_int() {
             Ok(n) if default.is_float() => Dynamic::from_float(n as rhai::FLOAT),
-            _ => value.clone(),
+            _ => taken,
         };
         options.insert(key.clone(), value);
     }

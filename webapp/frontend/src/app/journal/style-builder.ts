@@ -1,11 +1,12 @@
 // What the style builder sets, and the text style file it writes from it.
 
+import { paintSource, type Paint } from '../shared/gradient';
 import { rhaiFloat, rhaiString } from '../shared/rhai-literal';
 
 /** A text style as the builder shows it: the ink, the hand, the type and the paragraph. */
 export interface StyleSettings {
   description: string;
-  color: string;
+  color: Paint;
   brush: string;
   brush_size: number;
   min_pressure: number;
@@ -89,7 +90,7 @@ export const SETTING_GROUPS: SettingGroup[] = [
   {
     label: 'Ink',
     fields: [
-      { key: 'color', label: 'Colour', title: 'The ink: an option of the style, so journals can change it', kind: 'colour' },
+      { key: 'color', label: 'Colour', title: 'The ink, a colour or a gradient: an option of the style, so journals can change it', kind: 'colour' },
       { key: 'brush', label: 'Brush', title: 'Which Darkly brush draws (its texture shows in the Darkly preview)', kind: 'choice', choices: 'brushes' },
       { key: 'brush_size', label: 'Brush size', title: 'How wide its marks are, in canvas units', kind: 'range', min: 0.2, max: 8, step: 0.1 },
       { key: 'min_pressure', label: 'Min pressure', title: 'The least pressure along a stroke', kind: 'range', min: 0, max: 1, step: 0.01 },
@@ -145,7 +146,7 @@ function num(n: number): string {
 }
 
 /** `key: value` for each setting of `keys` that isn't the engine's default, as a rhai map, or null if none is. */
-function options(s: StyleSettings, keys: SettingKey[], write: (key: SettingKey) => string = (key) => value(s[key])): string | null {
+function options(s: StyleSettings, keys: Exclude<SettingKey, 'color'>[], write: (key: Exclude<SettingKey, 'color'>) => string = (key) => value(s[key])): string | null {
   const set = keys.filter((key) => s[key] !== ENGINE_DEFAULTS[key]);
   return set.length ? `#{ ${set.map((key) => `${key}: ${write(key)}`).join(', ')} }` : null;
 }
@@ -180,7 +181,7 @@ export function styleSource(name: string, s: StyleSettings): string {
   return `${comment(`${name}: ${s.description.trim() || 'how a kind of text looks.'}`)}
 
 fn options() {
-\t#{ size: ${num(s.size)}, color: ${rhaiString(s.color)} }
+\t#{ size: ${num(s.size)}, color: ${paintSource(s.color)} }
 }
 
 fn style(o) {

@@ -69,7 +69,7 @@ impl From<&str> for StrokeColor {
 }
 
 /// A colour as CSS, for SVG.
-fn css(c: [f32; 4]) -> String {
+pub(crate) fn css(c: [f32; 4]) -> String {
     let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
     format!("rgba({}, {}, {}, {})", byte(c[0]), byte(c[1]), byte(c[2]), c[3])
 }

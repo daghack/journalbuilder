@@ -229,11 +229,57 @@ mod tests {
     }
 
     #[test]
+    fn colour_options_take_gradients() {
+        const INKED: &str = r#"
+            fn options() { #{ color: new_gradient(["red", "blue"], #{ vertical: true }) } }
+            fn style(o) { #{ style: #{ color: o.color }, type: new_type_style(glyphset("plain"), 30.0) } }
+        "#;
+        let mut engine = engine(&[("hand", HAND), ("inked", INKED)]);
+        let entry = engine.build_entry_str(r#"
+            let whole = text_style("hand", #{ color: new_gradient(["red", "blue"]) });
+            assert(type_of(whole.style.color) == "Gradient", "a gradient, whole");
+            let data = text_style("hand", #{ color: #{ colors: ["red", "blue"], from: [0, 0], to: [90, 0] } });
+            assert(type_of(data.style.color) == "Gradient", "a gradient, as data");
+            assert(text_style("hand", #{ color: "gold" }).style.color == "gold", "a colour still");
+            assert(type_of(text_style("inked").style.color) == "Gradient", "a gradient by default");
+            assert(text_style("inked", #{ color: "gold" }).style.color == "gold", "a colour over a gradient");
+            // As a lock's source, the way the chain editor writes it.
+            let sourced = new_lock("inks")
+                .source("hand", "style", "hand", #{ options: #{ color: #{ colors: ["red", "blue"], vertical: true } } })
+                .source("words", "content", "lorem")
+                .attach("note", "styled_text", #{ width: 500.0 })
+                .connect("words.value", "note.text")
+                .connect("hand.value", "note.style");
+            assert(sourced.run().canvases("note").len() == 1, "a source's gradient");
+            let c = new_canvas();
+            c.add(write_line("Lorem", vec2(0, 0), data));
+            let p = new_page();
+            p.add(c);
+            journal_entry.add(p);
+        "#);
+        assert!(entry.is_ok(), "{:?}", entry.err());
+        // The editor's way: the default as data, and data given back as JSON.
+        let info = engine.describe_text_style("inked").unwrap();
+        assert_eq!(info.options["color"]["vertical"], serde_json::json!(true));
+        assert_eq!(info.options["color"]["colors"][1], serde_json::json!([1.0, "rgba(0, 0, 255, 1)"]));
+        let colors = serde_json::json!({ "color": { "colors": ["red", [0.7, "gold"], "blue"], "center": [40, 40], "radius": 50 } });
+        let page = engine.preview_text_style("hand", &colors, 900.0).unwrap();
+        assert!(page.page_count() == 1 && page.empty_canvases().is_empty());
+        let given_back = serde_json::json!({ "color": info.options["color"] });
+        assert!(engine.preview_text_style("inked", &given_back, 900.0).is_ok());
+    }
+
+    #[test]
     fn style_file_mistakes_are_named() {
         for (script, want) in [
             (r#"text_style("nope")"#, "text_style: no text style named 'nope'"),
             (r#"text_style("hand", #{ width: 3 })"#, "text_style: text style 'hand' has no option 'width'; its options: color, size"),
             (r#"text_style("hand", #{ size: "big" })"#, "text_style: text style 'hand': option 'size' should be like its default"),
+            (r#"text_style("hand", #{ size: new_gradient(["red", "blue"]) })"#, "option 'size' should be like its default"),
+            (r#"text_style("hand", #{ color: 3 })"#, "option 'color' should be like its default"),
+            (r#"text_style("hand", #{ color: #{ to: [1, 1] } })"#, "option 'color': a gradient written as a map needs 'colors'"),
+            (r#"text_style("hand", #{ color: #{ colors: "red" } })"#, "a gradient's 'colors' should be an array"),
+            (r#"text_style("hand", #{ color: #{ colors: ["red"] } })"#, "option 'color': new_gradient: needs at least two colours"),
             (r#"text_style("keys")"#, "text_style: text style 'keys' style(o): unknown option 'font'"),
             (r#"text_style("none")"#, "doesn't define style(o)"),
         ] {
