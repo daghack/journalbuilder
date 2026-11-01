@@ -173,7 +173,7 @@ export class ResourceEditorService {
         : kind === 'layouts' ? await this.tools.layoutPreview(name, text, values)
         : await this.tools.stylePreview(name, text, values, STYLE_WIDTH);
       if (asked !== this.asked) return;
-      this.info.set({ description: type?.description, fields: fieldsOf(type?.options), error: type?.error });
+      this.info.set({ description: type?.description, fields: fieldsOf(type?.options, kind === 'styles'), error: type?.error });
       this.preview.set(preview);
       this.lockCheck.set(null);
     } catch (err) {

@@ -330,11 +330,15 @@ pub fn value_view(var: &InfoVar) -> ValueView {
 }
 
 /// A rhai value as JSON: maps, arrays and plain values as themselves (a
-/// value kind's data among them), an option's place in `chain(o)` as
-/// `{"$option": name}` and any other value as `{"$type": its type}`.
+/// value kind's data among them), a gradient as data, an option's place in
+/// `chain(o)` as `{"$option": name}` and any other value as
+/// `{"$type": its type}`.
 pub fn to_json(value: &Dynamic) -> Value {
     if let Some(option) = value.read_lock::<OptionRef>() {
         return json!({ "$option": option.0 });
+    }
+    if let Some(gradient) = value.read_lock::<crate::journal::gradient::Gradient>() {
+        return crate::journal::rhaientries::gradient::to_json(&gradient);
     }
     if let Some(items) = value.read_lock::<Array>() {
         return Value::Array(items.iter().map(to_json).collect());

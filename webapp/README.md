@@ -153,6 +153,11 @@ layout typesetting its `example()`; a style writing its example text); on
 the right its code. Helper types run their examples as locks do. Lib
 files (`lib/`), shared functions, have only their code.
 
+A style's ink can be a colour or a gradient, in the New style dialog, in a
+style's options and in a chain's style source: a switch beside the colour
+gives its colours, each placed from 0 to 1, and how it runs (along each
+stroke, down each glyph, across the page or out from a point).
+
 ## Content
 
 New content asks for its name and its type: String, Markdown or Symbols

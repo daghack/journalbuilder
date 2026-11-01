@@ -1,36 +1,55 @@
+import { NgTemplateOutlet } from '@angular/common';
 import { Component, input, output } from '@angular/core';
 import { ColourFieldComponent } from '../shared/colour-field.component';
 import { isColour } from '../shared/colour';
+import { isGradient } from '../shared/gradient';
+import { PaintFieldComponent } from '../shared/paint-field.component';
 
 /** An option a file declares, as the form shows it. */
 export interface OptionField {
   name: string;
-  kind: 'integer' | 'number' | 'string' | 'colour' | 'bool' | 'array' | 'one_of' | 'json';
+  /** A paint is a colour that can be a gradient. */
+  kind: 'integer' | 'number' | 'string' | 'colour' | 'paint' | 'bool' | 'array' | 'one_of' | 'json';
   choices?: unknown[];
   /** What it is when left alone; undefined if it must be given. */
   default?: unknown;
 }
 
-/** Fields for a file's `options()` defaults, `#{ NAME: default }`, each typed as its default is (a colour if it's written as one). */
-export function fieldsOf(defaults: Record<string, unknown> | undefined): OptionField[] {
+/**
+ * Fields for a file's `options()` defaults, `#{ NAME: default }`, each typed
+ * as its default is (a colour if it's written as one). `paints`: its colours
+ * are for brushes, as a style file's are, so can be gradients; one that
+ * defaults to a gradient always can.
+ */
+export function fieldsOf(defaults: Record<string, unknown> | undefined, paints = false): OptionField[] {
   return Object.entries(defaults ?? {}).map(([name, value]) => ({
     name,
     default: value,
     kind: typeof value === 'number' ? (Number.isInteger(value) ? 'integer' : 'number')
-      : typeof value === 'boolean' ? 'bool' : isColour(value) ? 'colour' : typeof value === 'string' ? 'string' : Array.isArray(value) ? 'array' : 'json',
+      : typeof value === 'boolean' ? 'bool' : isColour(value) ? (paints ? 'paint' : 'colour') : typeof value === 'string' ? 'string'
+      : Array.isArray(value) ? 'array' : isGradient(value) ? 'paint' : 'json',
   }));
 }
 
 /** The options a file takes: a field each, its value or its default. */
 @Component({
   selector: 'app-options-form',
-  imports: [ColourFieldComponent],
+  imports: [ColourFieldComponent, PaintFieldComponent, NgTemplateOutlet],
   template: `
+    <ng-template #fieldName let-field>
+      <span class="name">{{ field.name }}
+        @if (field.name in values()) { <button type="button" class="reset" (click)="changed.emit({ name: field.name, value: undefined })" title="Back to its default">↺</button> }
+      </span>
+    </ng-template>
     @for (field of fields(); track field.name) {
+      @if (kindOf(field) === 'paint') {
+        <div class="field">
+          <ng-container [ngTemplateOutlet]="fieldName" [ngTemplateOutletContext]="{ $implicit: field }" />
+          <app-paint-field [value]="$any(value(field) ?? '')" [label]="field.name" (changed)="set(field, $event)" />
+        </div>
+      } @else {
       <label class="field">
-        <span class="name">{{ field.name }}
-          @if (field.name in values()) { <button type="button" class="reset" (click)="changed.emit({ name: field.name, value: undefined })" title="Back to its default">↺</button> }
-        </span>
+        <ng-container [ngTemplateOutlet]="fieldName" [ngTemplateOutletContext]="{ $implicit: field }" />
         @switch (kindOf(field)) {
           @case ('bool') {
             <input type="checkbox" [checked]="value(field) === true" (change)="set(field, $any($event.target).checked)" />
@@ -57,6 +76,7 @@ export function fieldsOf(defaults: Record<string, unknown> | undefined): OptionF
           }
         }
       </label>
+      }
     } @empty {
       <p class="hint">No options.</p>
     }

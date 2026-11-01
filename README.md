@@ -198,7 +198,9 @@ What to know:
   radius }` out from a point. `#{ vertical: true }` runs down each path
   (each glyph) from its top to its bottom, for ink darker where it pools.
   Colours are spaced evenly, or placed as
-  `[position, colour]`. `style.color = gradient` works too.
+  `[position, colour]`. `style.color = gradient` works too, and so does
+  giving one to a file's colour option, `text_style("plain_hand", #{ color:
+  gradient })`, whole or as data (`#{ colors: [...], vertical: true }`).
 - **Shared values.** Paths, glyphs and canvases are shared: assigning one,
   passing it or looping over it gives the same value, so changes through any
   copy reach it. `.copy()` makes an independent one.

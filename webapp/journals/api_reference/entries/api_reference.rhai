@@ -470,13 +470,14 @@ doc += api("new_gradient(colors)", "A gradient along each stroke from its start 
 ]);
 doc += api("new_gradient(colors, options)", "A gradient laid out another way: give from and to, center and radius, or vertical, or no key for along each stroke. In Darkly renders a gradient stroke keeps its brush's texture; in SVG, gradients along or down a stroke are drawn in short pieces.", [
 	arg("colors", "The colours, as above.", "an array of at least two colours or [position, colour] pairs."),
-	opt("options.from", "none", "With to: the gradient runs across the page from this point.", "a vec, not the same as to."),
-	opt("options.to", "none", "With from: the point it runs to.", "a vec."),
-	opt("options.center", "none", "With radius: the gradient spreads out from this point.", "a vec."),
+	opt("options.from", "none", "With to: the gradient runs across the page from this point.", "a vec or [x, y], not the same as to."),
+	opt("options.to", "none", "With from: the point it runs to.", "a vec or [x, y]."),
+	opt("options.center", "none", "With radius: the gradient spreads out from this point.", "a vec or [x, y]."),
 	opt("options.radius", "none", "With center: how far it spreads.", "a positive number."),
 	opt("options.vertical", "false", "True runs the gradient down each path (each glyph, for text) from its top to its bottom.", "true or false; true takes no other key."),
 ]);
 doc += api("gradient.to_string(), gradient.to_debug()", "The gradient as text, for print and debug.");
+doc += para("A colour option of a style, layout or illustration file, one whose default is a colour or a gradient, takes a colour or a gradient: whole, from new_gradient, or as data, a map of colors and new_gradient's options, as the web editor and JSON write it: #{ colors: [...], vertical: true }. The file sees a colour or a gradient either way, and can give it to new_brush_style or style.color as it stands.");
 
 // ---- glyphsets and glyphs ----
 
@@ -1203,7 +1204,7 @@ doc += listing("glyphsets/NAME.json: a glyphset, a JSON object. Glyph units span
 ]);
 doc += api("text_style(name), text_style(name, options)", "A text style file's bundle, styles/NAME.rhai, the journal's or the library's: #{ style, type, paragraph, spans }, the style, type and paragraph whole (a map's settings over default_style(), no type and the default paragraph), and spans if it gives any. It's a role for typeset, and the settings map of any text call, which ignores spans unless it sets marked-up text.", [
 	arg("name", "Which style file.", "a style file's name without .rhai."),
-	opt("options", "the file's defaults", "Its options, which its style(o) sees as o.", "a map of names its options() gives to values like their defaults: a whole number is fine for a number."),
+	opt("options", "the file's defaults", "Its options, which its style(o) sees as o.", "a map of names its options() gives to values like their defaults: a whole number is fine for a number, and a colour or a gradient for a colour option (see Gradients)."),
 ]);
 doc += api("content(name)", "A content file, content/NAME.txt, NAME.md or NAME.json, the journal's or the library's: a .txt or .md file's text, without the newline ending the file (markdown(content(name)) sets marked-up text), or a .json file's symbols: its text made to fit its base, as symbols(base, text, #{ lenient: true }) gives them, or with strict: true in the file, read as symbols(base, text) reads it, text the base can't write being an error; or the symbols the file holds, { base, symbols }.", [
 	arg("name", "Which content file; there mustn't be more than one of that name.", "a content file's name without its extension."),
@@ -1284,7 +1285,7 @@ doc += api("random.pick(items)", "One of the items.", [
 	arg("items", "What to pick from.", "a non-empty array."),
 ]);
 doc += para("An illustration file, illustrations/TYPE.rhai, runs in the journal's engine, so it can call everything a journal can, and draws lock values as canvases; see the library's illustrations/README.md. o, in each, is its options: its defaults with what lock.attach, or illustration(name, options) and illustration.run, gave over them.");
-doc += api("fn options()", "Optional, in an illustration file: its options and their defaults, #{ NAME: value }; lock.attach, illustration(name, options) and illustration.run can give only these, each like its default.");
+doc += api("fn options()", "Optional, in an illustration file: its options and their defaults, #{ NAME: value }; lock.attach, illustration(name, options) and illustration.run can give only these, each like its default, a colour option taking a colour or a gradient (see Gradients).");
 doc += api("fn inputs(o)", "In an illustration file: the values it draws and their types, #{ NAME: type }, as a lock file's inputs are written (Base27Symbol, Maze, StarChart, String, Any...), or TextStyle, Glyphset or Layout for what a chain's style, glyphset or layout source gives. A TextStyle input comes whole, #{ style, type, paragraph } (and spans, if it has any), as text_style gives it, whatever map it was given as.", [
 	arg("o", "The options.", "a map."),
 ]);
@@ -1297,7 +1298,7 @@ doc += api("fn fallbacks(o)", "Optional, in an illustration file: what inputs no
 ]);
 doc += api("fn example()", "Optional, in an illustration file: values to draw it with when nothing's connected, as the web editor previews it and cargo test checks it: #{ NAME: value }.");
 doc += para("A layout file, layouts/NAME.rhai, runs in the journal's engine, so it can call everything a journal can; see the library's layouts/README.md.");
-doc += api("fn options()", "Optional, in a layout file: its options and their defaults, #{ NAME: value }; layout(name, options) can give only these, each like its default.");
+doc += api("fn options()", "Optional, in a layout file: its options and their defaults, #{ NAME: value }; layout(name, options) can give only these, each like its default, a colour option taking a colour or a gradient (see Gradients).");
 doc += api("fn page(n, info)", "Gives page n's tree of boxes.", [
 	arg("n", "Which page, from 0.", "a whole number."),
 	arg("info", "What's left to set: flows maps each flow's name to how many characters of it are left, art lists the art's names, width and height are the page's size, and options are the layout's options.", "a map, #{ flows, art, width, height, options }."),
@@ -1305,7 +1306,7 @@ doc += api("fn page(n, info)", "Gives page n's tree of boxes.", [
 doc += api("fn page_size(o), fn page_size()", "Optional: the page's size, #{ width, height }, positive numbers, given the options. typeset's width and height take its place.");
 doc += api("fn example()", "Optional, in a layout file: what to typeset to preview it, as the web editor does and cargo test checks: typeset's options, #{ flows, roles, art, ... }.");
 doc += para("A text style file, styles/NAME.rhai, runs in the journal's engine; text_style(name) gives what it describes.");
-doc += api("fn options()", "Optional, in a style file: its options and their defaults, #{ NAME: value }; text_style(name, options) can give only these, each like its default.");
+doc += api("fn options()", "Optional, in a style file: its options and their defaults, #{ NAME: value }; text_style(name, options) can give only these, each like its default, a colour option taking a colour or a gradient (see Gradients).");
 doc += api("fn style(o)", "In a style file: #{ style, type, paragraph, spans }, each whole or a map of settings as a role takes them (all optional); style() if it has no options.", [
 	arg("o", "The options.", "a map."),
 ]);

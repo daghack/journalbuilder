@@ -1,10 +1,10 @@
 import { Component, ElementRef, computed, effect, inject, output, signal, untracked, viewChild, type OnDestroy } from '@angular/core';
 import { VALID_NAME, pathOf } from '../journal/journal-files';
-import { DEFAULT_STYLE, SETTING_GROUPS, styleSource, stylePreviewScript, type SettingField, type SettingKey, type StyleSettings } from '../journal/style-builder';
+import { DEFAULT_STYLE, SETTING_GROUPS, styleSource, stylePreviewScript, type SettingField, type StyleSettings } from '../journal/style-builder';
 import { JournalStore } from '../services/journal-store.service';
 import { RenderService, type RenderProgress } from '../services/render.service';
 import { ToolsService, failed } from '../services/tools.service';
-import { ColourFieldComponent } from '../shared/colour-field.component';
+import { PaintFieldComponent } from '../shared/paint-field.component';
 
 /** How long changes pause before the preview is drawn again. */
 const PREVIEW_DELAY_MS = 250;
@@ -19,7 +19,7 @@ const PLACEHOLDER_NAME = 'new_style';
  */
 @Component({
   selector: 'app-style-builder',
-  imports: [ColourFieldComponent],
+  imports: [PaintFieldComponent],
   template: `
     <dialog #dialog (close)="isOpen.set(false)" aria-label="New style">
       <form method="dialog" (submit)="$event.preventDefault(); create()">
@@ -34,12 +34,15 @@ const PLACEHOLDER_NAME = 'new_style';
               <fieldset>
                 <legend>{{ group.label }}</legend>
                 @for (field of group.fields; track field.key) {
+                  @if (field.kind === 'colour') {
+                    <div class="row paint" [title]="field.title">
+                      <span>{{ field.label }}</span>
+                      <app-paint-field [value]="settings().color" [label]="field.label" (changed)="set('color', $event)" />
+                    </div>
+                  } @else {
                   <label class="row" [title]="field.title">
                     <span>{{ field.label }}</span>
                     @switch (field.kind) {
-                      @case ('colour') {
-                        <app-colour-field [value]="text(field.key)" [label]="field.label" (changed)="set(field.key, $event)" />
-                      }
                       @case ('choice') {
                         <select (change)="set(field.key, $any($event.target).value)">
                           @for (choice of choicesOf(field); track choice) { <option [value]="choice" [selected]="choice === settings()[field.key]">{{ choice }}</option> }
@@ -56,6 +59,7 @@ const PLACEHOLDER_NAME = 'new_style';
                       }
                     }
                   </label>
+                  }
                 }
               </fieldset>
             }
@@ -108,6 +112,7 @@ const PLACEHOLDER_NAME = 'new_style';
     legend { font-weight: 600; padding: 4px 0; }
     .row { display: grid; grid-template-columns: 120px 1fr; align-items: center; gap: 8px; min-height: 26px; }
     .row > span:first-child { color: var(--muted); }
+    .row.paint { grid-template-columns: 52px 1fr; align-items: start; padding: 3px 0; }
     .row select { min-width: 0; }
     .row input[type='checkbox'] { justify-self: start; }
     .range { display: flex; gap: 6px; align-items: center; min-width: 0; }
@@ -236,10 +241,6 @@ export class StyleBuilderComponent implements OnDestroy {
     // The current choice stays shown while the engine's lists load.
     const current = String(this.settings()[field.key]);
     return list.includes(current) ? list : [current, ...list];
-  }
-
-  protected text(key: SettingKey): string {
-    return String(this.settings()[key]);
   }
 
   protected set<K extends keyof StyleSettings>(key: K, value: StyleSettings[K]) {
