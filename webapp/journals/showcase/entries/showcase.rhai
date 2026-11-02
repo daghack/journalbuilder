@@ -427,6 +427,8 @@ book.bind("pens", pens);
 
 let alphabet = "abcdefghijklmnopqrstuvwxyz";
 let lorem = "lorem ipsum dolor sit amet, consectetur";
+// The brush the digit sets' symbols were drawn with.
+let tapering = new_style(new_brush_style(INK, "Calligraphy", 3.0, #{ min_pressure: 0.5, max_pressure: 1.0, pressure_profile: "taper" }), steady);
 let samples = [
 	#{ label: "glyphset(\"plain\"): made to read easily", glyphs: PLAIN, lines: [alphabet.to_upper(), alphabet, "0123456789 . , ; : ! ? ' \" - — _ ~ ( ) [ ] { } / \\ # + = * < > % &", "Lorem ipsum dolor sit amet, consectetur."] },
 	#{ label: "glyphset(\"copper\"): falling back to loche_upper for what it lacks", glyphs: glyphset("copper"), lines: [alphabet.to_upper(), alphabet, "Lorem Ipsum Dolor Sit Amet", "variants at random: aaaa eeee ssss"] },
@@ -438,6 +440,8 @@ let samples = [
 	#{ label: "glyphset(\"eldritch\")", glyphs: glyphset("eldritch"), lines: [alphabet, "lorem ipsum dolor sit amet"] },
 	#{ label: "glyphset(\"sharp_lower\")", glyphs: glyphset("sharp_lower"), lines: [alphabet, "lorem ipsum dolor sit amet"] },
 	#{ label: "ternary_glyphset(\"balanced_ternary\", #{ glyph_outline_gap: 0.2 }): letters to the ternary digits", glyphs: ternary_glyphset("balanced_ternary", #{ glyph_outline_gap: 0.2 }), lines: ["abcdefghijklm", "nopqrstuvwxyz", "lorem ipsum dolor"] },
+	#{ label: "glyphset(\"thirteen_black_priests\"): base 13 digits, 0 to 8, A, E, f and s, in a tapering brush", glyphs: glyphset("thirteen_black_priests"), size: 60, style: tapering, lines: ["0 1 2 3 4 5 6 7 8 A E f s", "10 11 12 13 14 15 16"] },
+	#{ label: "glyphset(\"the_four_divine\"): base 4 digits, a, i, l and v, in the same brush", glyphs: glyphset("the_four_divine"), size: 80, style: tapering, lines: ["a i l v", "ia ii il iv", "la li ll lv"] },
 ];
 let sets = sheet("glyphsets");
 let y = TOP;
