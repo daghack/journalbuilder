@@ -77,6 +77,9 @@ const open = signal<Record<string, boolean>>(readOpen());
                       <button type="button" (click)="store.moveEntry(nameOf(item.path), 1)" title="Move down">↓</button>
                     }
                   }
+                  @if (group.info.kind === 'styles') {
+                    <button type="button" (click)="copyStyle(item.path)" title="Copy it to a new style">⧉</button>
+                  }
                   <button type="button" (click)="rename(item.path)" title="Rename">✎</button>
                   <button type="button" (click)="remove(item.path)" [title]="item.overrides ? 'Remove it: the library\\'s is used again' : 'Remove it'">✕</button>
                 </span>
@@ -97,6 +100,11 @@ const open = signal<Record<string, boolean>>(readOpen());
                       {{ item.label }}
                       @if (item.tag) { <span class="note">{{ item.tag }}</span> }
                     </button>
+                    @if (group.info.kind === 'styles') {
+                      <span class="actions">
+                        <button type="button" (click)="copyStyle(item.path)" title="Copy it to a new style">⧉</button>
+                      </span>
+                    }
                   </li>
                 }
               </ul>
@@ -277,6 +285,12 @@ export class FileSidebarComponent {
     this.open.update((open) => ({ ...open, [info.kind]: true }));
     this.shell.open(path);
     if (this.library.has(path)) this.say(`${info.kind === 'content' ? `content ${name}` : path} stands in for the library's file of that name.`);
+  }
+
+  /** A new style, built starting as a copy of the one at `path`. */
+  protected copyStyle(path: string) {
+    const problem = this.styleBuilder().copy(nameOf(path));
+    if (problem) this.say(problem);
   }
 
   protected rename(path: string) {

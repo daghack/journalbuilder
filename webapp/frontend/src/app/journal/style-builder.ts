@@ -327,6 +327,13 @@ export function readStyle(text: string): StyleSettings {
   return { ...LEFT_OUT, ...value };
 }
 
+/** A name for a copy of the style `name`, one that isn't `taken`: NAME_copy, then NAME_copy_2 and on. */
+export function copyName(name: string, taken: (name: string) => boolean): string {
+  let copy = `${name}_copy`;
+  for (let n = 2; taken(copy); n++) copy = `${name}_copy_${n}`;
+  return copy;
+}
+
 /** The settings with `key` set to `value`, what goes with it keeping up. */
 export function withSetting(s: StyleSettings, key: SettingKey, value: unknown): StyleSettings {
   const next = { ...s, [key]: value } as StyleSettings;
