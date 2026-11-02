@@ -38,7 +38,7 @@ fn check_missing_glyphs(symd: &fonts::FontBook, strict: bool) -> Result<(), Stri
     Ok(())
 }
 
-const DEFAULT_SUPERSAMPLE: f32 = 1.2;
+const DEFAULT_SUPERSAMPLE: f32 = 3.0;
 
 const USAGE: &str = "Usage: journalbuild <journal> [--entry E[,E...]] [--page N[,N...]]
                     [--svg] [--scale S] [--supersample K] [--strict-glyphs]
@@ -93,9 +93,10 @@ const USAGE: &str = "Usage: journalbuild <journal> [--entry E[,E...]] [--page N[
                       Darkly work scales with output size, so e.g. 0.25
                       renders much faster.
   --supersample K     Render Darkly output at K times the size and filter it
-                      back down (default 1.2; any number >= 1, and 1 turns
-                      it off). Smooths thin, aliased strokes; render time
-                      grows with K squared.
+                      back down (default 3; any number >= 1, and 1 turns it
+                      off). Smooths thin, aliased strokes, at the cost of
+                      memory, which grows with K squared. Stops short of K
+                      where a render would pass 8192 pixels across or down.
   --journals-dir DIR  Directory containing journals (default: the
                       repository's journals/, then webapp/journals/, the
                       web editor's built-in ones).
@@ -151,9 +152,9 @@ fn parse_args() -> Result<Args, String> {
     let mut check_gpu = false;
     let mut scale = 1.0;
     // Supersample by default: Darkly aliases brush marks thinner than about
-    // a pixel into ragged edges. Measured on journal_entry_17, 1.2x costs
-    // about 1.6x the render time (1.5x about 2.6x, 2x about 3.3x: mark area
-    // grows with K²).
+    // a pixel into ragged edges. Measured on journal_entries' entry_18 against
+    // a render at 6x, 3x has a fifth of the error of 1.2x, for 1.5x the render
+    // time (2x has twice the error of 3x, at 0.8x the time; 4x half, at 1.3x).
     let mut supersample = None;
     // Defaults are found from the repository, not the working directory.
     let mut journals_dirs: Vec<String> = DEFAULT_JOURNALS_DIRS.iter().map(|dir| dir.to_string()).collect();

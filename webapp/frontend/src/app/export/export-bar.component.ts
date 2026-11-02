@@ -79,7 +79,7 @@ export class ExportBarComponent {
   protected readonly scales = [0.25, 0.5, 1, 2];
   protected readonly format = signal<Format>('pdf');
   protected readonly scale = signal(1);
-  protected readonly supersample = signal(1.2);
+  protected readonly supersample = signal(3);
   /** How many pages to a stitched image; null for none. */
   protected readonly stitch = signal<number | null>(null);
   protected readonly parchment = signal(false);
@@ -122,7 +122,7 @@ export class ExportBarComponent {
 
   protected setSupersample(input: HTMLInputElement) {
     const value = parseFloat(input.value);
-    this.supersample.set(Number.isFinite(value) ? Math.max(1, value) : 1.2);
+    this.supersample.set(Number.isFinite(value) ? Math.max(1, value) : 3);
     input.value = String(this.supersample());
   }
 
