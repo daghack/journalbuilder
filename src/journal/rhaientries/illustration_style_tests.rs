@@ -378,3 +378,41 @@ fn every_illustration_writes_in_the_cursive_wherever_it_writes() {
         }
     }
 }
+
+/// A symbol_ring with `options`, its glyph_style in `glyphs`, and the book
+/// it was drawn from.
+fn ring_in(glyphs: &str, options: &str) -> (Result<Entry, String>, Rc<FontBook>) {
+    let script = format!(r#"
+        let glyph_style = #{{ type: new_type_style({glyphs}, 30.0) }};
+        for c in illustration("symbol_ring", {options}).run(#{{ glyph_style: glyph_style }}) {{ journal_entry.add(new_page().add(c)); }}
+    "#);
+    let book = Rc::new(FontBook::from_file(DEFAULT_GLYPHSETS).expect("glyphsets load"));
+    let entry = engine_with(book.clone(), &[], &[]).build_entry_str(&script).map_err(|e| e.to_string());
+    (entry, book)
+}
+
+/// Where a ring's strokes reach, each.
+fn reaches(entry: &Entry) -> Vec<[f32; 4]> {
+    strokes(entry).map(bounds).map(|b| [b.mins.x, b.mins.y, b.maxs.x, b.maxs.y]).collect()
+}
+
+#[test]
+fn symbol_ring_draws_its_glyphsets_own_glyphs() {
+    // These have a fallback with capitals, which their letters aren't: the
+    // ring's the same with the fallback gone.
+    let ring = |glyphs: &str| reaches(&ring_in(glyphs, "#{ step: 1 }").0.unwrap());
+    for name in ["loche_lower", "nivelia", "copper"] {
+        assert_eq!(ring(&format!(r#"glyphset("{}")"#, name)), ring(&format!(r#"glyphset("{}", #{{ fallback: () }})"#, name)), "{}", name);
+        assert_ne!(ring(&format!(r#"glyphset("{}")"#, name)), ring(r#"glyphset("loche_upper")"#), "{}", name);
+    }
+    // A base's digits, every one of them its own: nothing's drawn as a
+    // missing glyph.
+    for (name, base) in [("thirteen_black_priests", 13), ("the_four_divine", 4)] {
+        let (entry, book) = ring_in(&format!(r#"glyphset("{}")"#, name), &format!("#{{ base: {}, step: 1 }}", base));
+        entry.unwrap();
+        assert_eq!(book.missing_glyph_report(), None, "{}", name);
+    }
+    // Too few for the base is an error, not a ring of missing glyphs.
+    let err = ring_in(r#"glyphset("the_four_divine")"#, "#{ base: 5, step: 1 }").0.unwrap_err();
+    assert!(err.contains("glyphset 'the_four_divine' has 4 symbols, too few for base 5"), "{}", err);
+}
