@@ -1876,6 +1876,26 @@ for (o, k) in [
 }
 book.bind("locks", rings);
 
+// Its symbols are glyph_style's glyphset's own glyphs, never its fallback's:
+// letters in capitals or else lowercase, ternary digits, or where it has
+// neither, its characters in order, as many as the base.
+let ring_sets = sheet("locks");
+ring_sets.add(caption("symbol_ring's glyph_style: a ring in its glyphset's own letters, ternary digits or a base's digits", TOP));
+for (o, k) in [
+	#{ set: "nivelia", base: 27, step: 5 },
+	#{ set: "balanced_ternary", base: 27, step: 13 },
+	#{ set: "thirteen_black_priests", base: 13, step: 5 },
+	#{ set: "the_four_divine", base: 4, step: 1 },
+] {
+	let x = LEFT + (k % 2) * 520;
+	let y = TOP + 80 + (k / 2) * 580;
+	ring_sets.add(write_in(`${o.set}, base ${o.base}, step ${o.step}`, x, y, 22, CAPTION, PLAIN));
+	let glyph_style = #{ style: SAMPLE, type: new_type_style(glyphset(o.set), 36.0) };
+	let ring = illustration("symbol_ring", #{ base: o.base, step: o.step, size: 450.0 }).run(#{ glyph_style: glyph_style })[0];
+	ring_sets.add(ring.translate_by(vec2(x, y + 30)));
+}
+book.bind("locks", ring_sets);
+
 // An illustration on its own: illustration(name, options) fetches a file,
 // the journal's or the library's, as chain(name) fetches a chain file, and
 // illustration.run(inputs, options) draws it with no chain, the options

@@ -15,12 +15,15 @@
 // symbols and their borders, line_style for the dashed lines.
 // glyph_style's glyphs are its type's, at its size, or smaller if the
 // ring hasn't room, leant as it leans them; the middle's are center_scale
-// times that, up to half the ring's radius. In balanced-ternary digits
-// (balanced_ternary's), a symbol is its digit, shifted to sit round 0 (1
-// to 13 as they are, 14 to 26 as -13 to -1); in any other glyphset, its
-// letter (0 a space, a gap in the ring, 1 to 26 A to Z). Unwired, they're
-// near-black and red ink pens, the glyphs loche_upper, as big as the ring
-// holds.
+// times that, up to half the ring's radius. A symbol is one of the
+// glyphset's own glyphs, never its fallback's. In balanced-ternary digits
+// (balanced_ternary's), it's its digit, shifted to sit round 0 (1 to 13 as
+// they are, 14 to 26 as -13 to -1); in a glyphset with a whole alphabet,
+// its letter, in capitals or else lowercase (0 a space, a gap in the ring,
+// 1 to 26 A to Z); in any other (thirteen_black_priests, the_four_divine),
+// the glyph that far along its characters, of which it needs at least
+// base. Unwired, they're near-black and red ink pens, the glyphs
+// loche_upper, as big as the ring holds.
 
 fn options() {
 	#{
@@ -54,6 +57,7 @@ fn render(o, i) {
 	// the style's size, up to that, and the middle's center_scale times
 	// theirs, up to half the radius.
 	let t = i.glyph_style.type;
+	let names = symbol_names(t.glyphset, n);
 	let radius = o.size / 2.0 - room(o);
 	let glyph = min(t.glyph_scale * t.glyph_scale_factor, room(o));
 	let big = min(glyph * o.center_scale, radius * 0.5);
@@ -104,9 +108,9 @@ fn render(o, i) {
 
 	let style = i.glyph_style.style;
 	for k in 0..n {
-		draw_symbol(c, t, k, at[k], glyph, o.bordered, style);
+		draw_symbol(c, t, names[k], at[k], glyph, o.bordered, style);
 	}
-	draw_symbol(c, t, o.step, centre, big, o.bordered, style);
+	draw_symbol(c, t, names[o.step], centre, big, o.bordered, style);
 	c
 }
 
@@ -120,17 +124,34 @@ fn room(o) {
 	min(o.size * 0.4 * 2.0 * (PI() / o.base).sin() * 0.55, o.size * 0.4 * 0.2)
 }
 
-// Symbol s drawn at `at`, `size` across, in the type's glyphset (its
-// digit shifted to sit round 0, or its letter, 0 a space), in a circle if
-// bordered.
-fn draw_symbol(c, t, s, at, size, bordered, style) {
+// The names of a base's symbols among a glyphset's own glyphs: its digits,
+// shifted to sit round 0, its letters, 0 a gap (()), or failing those its
+// characters in order.
+fn symbol_names(set, base) {
+	let own = set.characters();
+	if "-13" in own {
+		let digits = [];
+		for s in 0..base { digits.push(if s <= 13 { s } else { s - 27 }); }
+		return digits;
+	}
+	let letters = letters_in(own, "A", "Z");
+	if letters.len() < 26 { letters = letters_in(own, "a", "z"); }
+	if letters.len() == 26 { return [()] + letters; }
+	if own.len() < base { throw `glyphset '${set.name}' has ${own.len()} symbols, too few for base ${base}`; }
+	own
+}
+
+// The single characters of own from one to another.
+fn letters_in(own, from, to) {
+	own.filter(|c| c.len() == 1 && c >= from && c <= to)
+}
+
+// The symbol called name drawn at `at`, `size` across, in the type's
+// glyphset (() is a gap), in a circle if bordered.
+fn draw_symbol(c, t, name, at, size, bordered, style) {
 	if bordered { c.add(new_circle(at, size * 0.75), style); }
-	let g = if "-13" in t.glyphset.characters() {
-		t.glyphset.glyph(if s <= 13 { s } else { s - 27 })
-	} else {
-		if s == 0 { return; }
-		t.glyphset.glyphs(`${" ABCDEFGHIJKLMNOPQRSTUVWXYZ"[s]}`)[0]
-	};
+	if name == () { return; }
+	let g = t.glyphset.glyph(name);
 	g.scale = size;
 	g.position = at;
 	g.skew = t.skew ?? t.glyphset.skew;
