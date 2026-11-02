@@ -13,12 +13,13 @@ members = [".", "webapp/wasm"]
 embedded-assets = []
 
 [dependencies]
-# Darkly from the fork's stroke-bounded-passes branch (off its
-# offline-render-perf, off its dev, which follows darkly-art/darkly's): each
-# stroke's undo and commit cover only its dabs, and the brush graph compiles
-# once per change, for renders about 3x faster than dev.
+# Darkly from the fork's offline-batch-paint branch (off its
+# stroke-bounded-passes, off its offline-render-perf, off its dev, which follows
+# darkly-art/darkly's): strokes batch into one compute pass with runs of dabs
+# sharing a dispatch, each stroke's undo and commit cover only its dabs, and the
+# brush graph compiles once per change.
 # Pinned to a commit, so a `cargo update` can't change how journals render.
-darkly = { git = "https://github.com/daghack/darkly.git", rev = "f80948d28b43e0323fdeb3fb73e05d9c77b3912d" }
+darkly = { git = "https://github.com/daghack/darkly.git", rev = "1c43f6b4ee86e3aa7ccb8c41550aa1287506836b" }
 flate2 = "1.1"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "rayon"] }
 noise = "0.9.0"

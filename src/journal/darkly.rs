@@ -42,6 +42,8 @@ pub async fn new_engine_async(width: u32, height: u32) -> Result<DarklyEngine, S
     browser::watch(&device, &queue);
     let gpu = GpuContext::new_headless(device, queue);
     let mut engine = DarklyEngine::new(gpu, width, height);
+    // Renders are read back whole and never undone.
+    engine.set_batch_painting(true);
     engine.add_raster_layer(None);
     Ok(engine)
 }
@@ -62,20 +64,14 @@ async fn wait_for_gpu() {
     browser_pause().await;
 }
 
-/// Draw a frame, so the engine finishes the bookkeeping of the strokes
-/// drawn so far (see `Pen::draw`). In a browser, also wait for the GPU to
-/// finish the work sent so far and the readbacks it makes to land: there
-/// nothing else holds back how far the strokes run ahead of the GPU, and
-/// the GPU memory the work and readbacks hold grows until the browser's GPU
-/// process gives out. Fails if the GPU has (see `gpu_failure`).
+/// Send the GPU the strokes drawn so far. In a browser, also wait for it to
+/// finish them: there nothing else holds back how far the strokes run ahead
+/// of the GPU, and the GPU memory the work holds grows until the browser's
+/// GPU process gives out. Fails if the GPU has (see `gpu_failure`).
 async fn catch_up(engine: &mut DarklyEngine) -> Result<(), String> {
-    engine.render(0.0);
+    engine.submit_batched_strokes();
     #[cfg(target_arch = "wasm32")]
-    {
-        browser::work_done().await?;
-        browser_pause().await;
-        engine.render(0.0);
-    }
+    browser::work_done().await?;
     gpu_failure()
 }
 
@@ -94,7 +90,6 @@ fn gpu_failure() -> Result<(), String> {
 #[cfg(target_arch = "wasm32")]
 mod browser {
     use std::cell::RefCell;
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex};
 
     struct Watch {
@@ -105,6 +100,10 @@ mod browser {
     thread_local! {
         /// The GPU of the engine last made on this thread (one per worker).
         static GPU: RefCell<Option<Watch>> = const { RefCell::new(None) };
+        /// Resolves the promise `work_done` is waiting on. (The callback
+        /// wgpu takes must be `Send`, which a JS function isn't, but it's
+        /// called on this thread.)
+        static WORK_DONE: RefCell<Option<js_sys::Function>> = const { RefCell::new(None) };
     }
 
     /// Keep note of `device` failing, rather than panicking (wgpu's default
@@ -128,19 +127,17 @@ mod browser {
 
     /// Wait until the GPU has done the work sent to it so far.
     pub(super) async fn work_done() -> Result<(), String> {
-        let done = Arc::new(AtomicBool::new(false));
-        let flag = done.clone();
-        let watched = GPU.with_borrow(|gpu| gpu.as_ref().map(|gpu| gpu.queue.on_submitted_work_done(move || flag.store(true, Ordering::Release))));
-        if watched.is_none() {
+        let Some(queue) = GPU.with_borrow(|gpu| gpu.as_ref().map(|gpu| gpu.queue.clone())) else {
             return Ok(());
-        }
-        while !done.load(Ordering::Acquire) {
-            if let Some(failure) = failure() {
-                return Err(failure);
+        };
+        let done = js_sys::Promise::new(&mut |resolve, _| WORK_DONE.set(Some(resolve)));
+        queue.on_submitted_work_done(|| {
+            if let Some(resolve) = WORK_DONE.take() {
+                let _ = resolve.call0(&wasm_bindgen::JsValue::NULL);
             }
-            super::browser_pause().await;
-        }
-        Ok(())
+        });
+        let _ = wasm_bindgen_futures::JsFuture::from(done).await;
+        failure().map_or(Ok(()), Err)
     }
 }
 
@@ -182,13 +179,16 @@ const PEN_SPEED_PX_PER_MS: f64 = 0.25;
 /// How much of `render_async`'s progress is drawing strokes.
 const STROKES_SHARE: f32 = 0.85;
 
-/// How many strokes to draw between frame ticks (see `catch_up`). In a
-/// browser, where each tick waits for the GPU, fewer, to keep what's
-/// waiting on it small.
+/// How many strokes to draw between sending them to the GPU (see
+/// `catch_up`). In a browser, where each send waits for the GPU, it's also how
+/// often a render lets go of the thread.
 #[cfg(not(target_arch = "wasm32"))]
-const FRAME_EVERY_STROKES: u32 = 25;
+const SUBMIT_EVERY_STROKES: u32 = 800;
 #[cfg(target_arch = "wasm32")]
-const FRAME_EVERY_STROKES: u32 = 10;
+const SUBMIT_EVERY_STROKES: u32 = 400;
+
+/// The largest canvas Darkly takes, across or down.
+const MAX_CANVAS_PX: f32 = 8192.0;
 
 /// Output pixels rendered past a tile's edges when supersampling, for the
 /// filter back down to read: Lanczos-3 reaches 3 output pixels.
@@ -203,8 +203,9 @@ const BLEED_PX: i64 = 4;
 /// they fit together into exactly that render.
 ///
 /// With `supersample` > 1 the canvas is rendered at that multiple of the
-/// size (brushes included) and filtered back down, which smooths the
-/// aliasing Darkly produces for brush marks thinner than about a pixel.
+/// size (brushes included), or as near as Darkly's largest canvas allows, and
+/// filtered back down, which smooths the aliasing Darkly produces for brush
+/// marks thinner than about a pixel.
 ///
 /// Each stroke is drawn with its own brush; panics if a stroke has none.
 #[cfg(not(target_arch = "wasm32"))]
@@ -225,8 +226,12 @@ pub async fn render_async(canvas: &Canvas, engine: &mut DarklyEngine, scale: f32
     };
     let size = (((extents.x * scale) as u32).max(1), ((extents.y * scale) as u32).max(1));
     // Fractional factors are fine: the render rounds to whole pixels, and
-    // the filter scales back down by any ratio.
-    let k = supersample.max(1.0);
+    // the filter scales back down by any ratio. One that would take a tile
+    // past Darkly's largest canvas, with its bleed, stops short of it, the
+    // same for all a page's tiles.
+    let (columns, rows) = tile.map_or((1, 1), |frame| (frame.columns, frame.rows));
+    let largest = size.0.div_ceil(columns).max(size.1.div_ceil(rows)) as f32 + (2 * BLEED_PX + 2) as f32;
+    let k = supersample.min(MAX_CANVAS_PX / largest).max(1.0);
     let render_size = ((size.0 as f32 * k).round() as u32, (size.1 as f32 * k).round() as u32);
     let k = (render_size.0 as f64 / size.0 as f64, render_size.1 as f64 / size.1 as f64);
     // Render pixels per canvas unit.
@@ -284,51 +289,61 @@ fn filter_weights(out_origin: i64, count: u32, k: f64, src_origin: i64) -> Vec<(
 /// from `out_origin`, `out_size` of them. Both are counted from the page's
 /// corner, so tiles of a page filter exactly as the whole page would.
 fn downsample(src: &ImageBuffer<Rgba<u8>, Vec<u8>>, src_origin: (i64, i64), k: (f64, f64), out_origin: (i64, i64), out_size: (u32, u32)) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
-    let (sw, sh) = (src.width() as i64, src.height() as i64);
-    let premultiplied: Vec<[f32; 4]> = src.pixels().map(|p| {
-        let [r, g, b, a] = p.0.map(|v| v as f32 / 255.0);
-        [r * a, g * a, b * a, a]
-    }).collect();
+    let (sw, sh) = (src.width() as usize, src.height() as usize);
     let columns = filter_weights(out_origin.0, out_size.0, k.0, src_origin.0);
     let rows = filter_weights(out_origin.1, out_size.1, k.1, src_origin.1);
-    // Across first, every source row to output columns...
-    let across: Vec<[f32; 4]> = (0..sh).into_par_iter().flat_map_iter(|y| {
-        let row = &premultiplied[(y * sw) as usize..((y + 1) * sw) as usize];
-        columns.iter().map(move |(first, weights)| {
+    let width = out_size.0 as usize;
+    // Across first, every source row to output columns; a row with no ink
+    // stays clear, and most are on a page of writing, more the finer it's drawn...
+    let mut across = vec![[0.0f32; 4]; width * sh];
+    let inked: Vec<bool> = across.par_chunks_mut(width.max(1)).zip(src.as_raw().par_chunks(sw * 4)).map_init(Vec::new, |row, (out, texels)| {
+        if texels.chunks_exact(4).all(|p| p[3] == 0) {
+            return false;
+        }
+        row.clear();
+        row.extend(texels.chunks_exact(4).map(|p| {
+            let [r, g, b, a] = [p[0], p[1], p[2], p[3]].map(|v| v as f32 / 255.0);
+            [r * a, g * a, b * a, a]
+        }));
+        for (out, (first, weights)) in out.iter_mut().zip(&columns) {
             let mut sum = [0.0f32; 4];
-            for (i, w) in weights.iter().enumerate() {
-                let x = first + i as i64;
-                if (0..sw).contains(&x) {
-                    let p = row[x as usize];
-                    for c in 0..4 {
-                        sum[c] += p[c] * w;
-                    }
+            let skip = (-first).clamp(0, weights.len() as i64) as usize;
+            for (p, w) in row[(first + skip as i64).min(sw as i64) as usize..].iter().zip(&weights[skip..]) {
+                for c in 0..4 {
+                    sum[c] += p[c] * w;
                 }
             }
-            sum
-        })
+            *out = sum;
+        }
+        true
     }).collect();
     // ...then down.
-    let width = out_size.0 as usize;
-    let pixels: Vec<u8> = rows.par_iter().flat_map_iter(|(first, weights)| {
-        let across = &across;
-        (0..width).flat_map(move |x| {
-            let mut sum = [0.0f32; 4];
-            for (i, w) in weights.iter().enumerate() {
-                let y = first + i as i64;
-                if (0..sh).contains(&y) {
-                    let p = across[y as usize * width + x];
+    let mut pixels = vec![0u8; width * out_size.1 as usize * 4];
+    pixels.par_chunks_mut((width * 4).max(1)).zip(&rows).for_each_init(|| vec![[0.0f32; 4]; width], |sums, (out, (first, weights))| {
+        sums.fill([0.0; 4]);
+        let mut any = false;
+        for (i, w) in weights.iter().enumerate() {
+            let y = first + i as i64;
+            if (0..sh as i64).contains(&y) && inked[y as usize] {
+                any = true;
+                let row = &across[y as usize * width..][..width];
+                for (sum, p) in sums.iter_mut().zip(row) {
                     for c in 0..4 {
                         sum[c] += p[c] * w;
                     }
                 }
             }
+        }
+        if !any {
+            return;
+        }
+        for (out, sum) in out.chunks_exact_mut(4).zip(sums.iter()) {
             // Lanczos overshoots slightly; clamp alpha, and color to at most alpha.
             let a = sum[3].clamp(0.0, 1.0);
             let unpremultiply = |c: f32| if a > 0.0 { (c.clamp(0.0, a) / a * 255.0).round() as u8 } else { 0 };
-            [unpremultiply(sum[0]), unpremultiply(sum[1]), unpremultiply(sum[2]), (a * 255.0).round() as u8]
-        })
-    }).collect();
+            out.copy_from_slice(&[unpremultiply(sum[0]), unpremultiply(sum[1]), unpremultiply(sum[2]), (a * 255.0).round() as u8]);
+        }
+    });
     ImageBuffer::from_raw(out_size.0, out_size.1, pixels).expect("one pixel per output position")
 }
 
@@ -512,13 +527,7 @@ impl Pen<'_> {
                 });
             }
             self.engine.end_stroke();
-            // Darkly reads each stroke's undo entry back from the GPU
-            // asynchronously, landing on the next frame. Offline we never draw
-            // frames until the export, so without this every stroke's
-            // readback piles up (when those were whole-layer copies,
-            // journal_entry_18 peaked at 14 GB and was killed). Ticking every
-            // few strokes lands them as they go.
-            if self.drawn.is_multiple_of(FRAME_EVERY_STROKES) {
+            if self.drawn.is_multiple_of(SUBMIT_EVERY_STROKES) {
                 catch_up(self.engine).await?;
             }
         }

@@ -604,7 +604,7 @@ struct RenderOptions {
 
 impl Default for RenderOptions {
     fn default() -> Self {
-        RenderOptions { scale: 1.0, supersample: 1.2, parchment: false, stitch: None }
+        RenderOptions { scale: 1.0, supersample: 3.0, parchment: false, stitch: None }
     }
 }
 

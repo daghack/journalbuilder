@@ -531,7 +531,7 @@ checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 [[package]]
 name = "darkly"
 version = "0.1.0"
-source = "git+https://github.com/daghack/darkly.git?rev=f80948d28b43e0323fdeb3fb73e05d9c77b3912d#f80948d28b43e0323fdeb3fb73e05d9c77b3912d"
+source = "git+https://github.com/daghack/darkly.git?rev=1c43f6b4ee86e3aa7ccb8c41550aa1287506836b#1c43f6b4ee86e3aa7ccb8c41550aa1287506836b"
 dependencies = [
  "base64 0.23.1",
  "bytemuck",
@@ -544,6 +544,7 @@ dependencies = [
  "peniko",
  "png 0.18.1",
  "quick-xml",
+ "rustc-hash",
  "serde",
  "serde_json",
  "serde_yaml_ng",
@@ -560,7 +561,7 @@ dependencies = [
 [[package]]
 name = "darkly-macros"
 version = "0.1.0"
-source = "git+https://github.com/daghack/darkly.git?rev=f80948d28b43e0323fdeb3fb73e05d9c77b3912d#f80948d28b43e0323fdeb3fb73e05d9c77b3912d"
+source = "git+https://github.com/daghack/darkly.git?rev=1c43f6b4ee86e3aa7ccb8c41550aa1287506836b#1c43f6b4ee86e3aa7ccb8c41550aa1287506836b"
 dependencies = [
  "proc-macro2",
  "quote",

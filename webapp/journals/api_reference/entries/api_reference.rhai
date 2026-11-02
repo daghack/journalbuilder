@@ -1328,7 +1328,7 @@ doc += api("journalbuild NAME [flags]", "Runs a journal's entries, each on its o
 	opt("--entry E,...", "every entry, in order", "Builds only these entries.", "entry names, separated by commas, as --entry letter_1."),
 	opt("--page P,...", "every page", "Renders only these pages of each entry built; other pages' existing output is kept.", "page indices (from 0) or names, separated by commas, as --page 0,maze."),
 	opt("--scale S", "1", "Scales output images, brushes included; Darkly work scales with output size, so 0.25 renders much faster.", "a positive number."),
-	opt("--supersample K", "1.2", "Renders Darkly output K times larger and filters it back down, smoothing thin, aliased strokes; render time grows with K squared.", "a number of at least 1; 1 turns it off."),
+	opt("--supersample K", "3", "Renders Darkly output K times larger and filters it back down, smoothing thin, aliased strokes; memory grows with K squared. Stops short of K where a render would pass 8192 pixels across or down.", "a number of at least 1; 1 turns it off."),
 	opt("--svg", "off", "Renders each canvas as an SVG, PAGE_CANVAS.svg, and that SVG as a PNG, on the CPU, instead of with Darkly: it needs no GPU, and so takes no --parchment, --pdf, --stitch or --supersample.", "a flag."),
 	opt("--strict-glyphs", "off", "Fails an entry before rendering it if any of its characters had no glyph, rather than drawing it as X and warning.", "a flag."),
 	opt("--parchment", "off", "Renders each page as one image, darkly_PAGE.png, its canvases layered on procedural parchment; light inks are drawn dark, and ink soaks in a little unevenly, very slightly thinner in places.", "a flag."),
