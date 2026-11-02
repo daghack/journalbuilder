@@ -1,5 +1,5 @@
 import {
-  DEFAULT_STYLE, SETTING_GROUPS, SPAN_FIELDS, isTypeSetting, numberOf, pairOf, readRule, readStyle, ruleValue, spanNameProblem, startingValue, styleFile, stylePreviewScript, withSetting,
+  DEFAULT_STYLE, SETTING_GROUPS, SPAN_FIELDS, copyName, isTypeSetting, numberOf, pairOf, readRule, readStyle, ruleValue, spanNameProblem, startingValue, styleFile, stylePreviewScript, withSetting,
 } from './style-builder';
 
 describe('style files', () => {
@@ -79,6 +79,11 @@ describe('style files', () => {
       ['{ "underline": "x" }', /'underline' should be true, false, a number of lines/],
       ['{ "spans": 3 }', /'spans' should be an object/],
     ] as const) expect(() => readStyle(text), text).toThrowError(wanted);
+  });
+
+  it('names a copy with a name not taken', () => {
+    expect(copyName('ink', () => false)).toBe('ink_copy');
+    expect(copyName('ink', (name) => ['ink_copy', 'ink_copy_2'].includes(name))).toBe('ink_copy_3');
   });
 
   it('previews by name, in its example or lorem ipsum', () => {

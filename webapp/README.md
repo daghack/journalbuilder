@@ -166,6 +166,10 @@ journal a copy that stands in for it). Nobody edits the JSON a style is kept as,
 `styles/NAME.json`. Its size and colour are its options: entries can give their
 own, `text_style("name", #{ size, color })`, as a chain's style source can.
 
+A new style needn't start from the defaults: New style's **Start from** takes any
+of the journal's styles or the library's, and the ⧉ beside a style in the Files
+tab opens New style as a copy of it, named `NAME_copy` until it's given a name.
+
 Styles were once scripts, `styles/NAME.rhai`. A journal loaded or imported with
 any has them converted: each is run and written down, and the file tried against
 the script at another size and colour. If they come to the same, the file takes
