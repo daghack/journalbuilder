@@ -3,8 +3,11 @@
 import { isGradient, type Paint } from '../shared/gradient';
 import { rhaiFloat, rhaiString } from '../shared/rhai-literal';
 
-/** Lines under or through text, as a file holds them: none, on, how many, or `{ count, spacing, style }`. */
-export type RuleValue = boolean | number | { count?: number; spacing?: number; style?: Record<string, unknown> };
+/** Lines under or through text, as a file holds them: none, on, how many, a kind of strike, or `{ count, spacing, style, kind }`. */
+export type RuleValue = boolean | number | string | { count?: number; spacing?: number; style?: Record<string, unknown>; kind?: string };
+
+/** What a strike can be: lines through the text, or what hides it. */
+export const STRIKE_KINDS = ['lines', 'scribble', 'loops', 'blot'] as const;
 
 /** A span, as a role takes it: settings over the text's. */
 export interface SpanSettings {
@@ -30,9 +33,14 @@ export interface StyleSettings {
   pool: number;
   pool_depth: number;
   color_jitter: number;
+  ink_load: number;
+  redip_every: number;
+  redip_by: string;
   passes: number;
   pass_end_jitter: number;
   stroke_point_jitter: number;
+  stroke_warp: number;
+  stroke_warp_length: number;
   /** In glyph scales, so it follows the size; one for both ways, or [across, down]. */
   glyph_position_jitter: number | [number, number];
   glyph_rotation_jitter: number;
@@ -80,8 +88,8 @@ export type PreviewAs = 'block' | 'typeset';
 
 /** One control: a slider, a choice, a colour, a switch, two sliders or lines of text. */
 export interface SettingField {
-  /** Besides the file's: a span's type has the glyph scale itself, which a file calls size; lines have their spacing. */
-  key: SettingKey | 'glyph_scale' | 'spacing';
+  /** Besides the file's: a span's type has the glyph scale itself, which a file calls size; lines have their spacing and a strike its kind. */
+  key: SettingKey | 'glyph_scale' | 'spacing' | 'kind';
   label: string;
   title: string;
   kind: 'range' | 'choice' | 'colour' | 'switch' | 'pair' | 'rule';
@@ -122,6 +130,9 @@ export const SETTING_GROUPS: SettingGroup[] = [
       { key: 'pool', label: 'Ink pooling', title: 'How much heavier strokes are at the bottom of each path (Darkly)', kind: 'range', min: 0, max: 2, step: 0.05 },
       { key: 'pool_depth', label: 'Pool depth', title: 'How far up each path ink pools, as a fraction of its height (Darkly)', kind: 'range', min: 0.05, max: 1, step: 0.05 },
       { key: 'color_jitter', label: 'Colour jitter', title: 'How far each stroke\'s lightness strays from the colour', kind: 'range', min: 0, max: 0.3, step: 0.005 },
+      { key: 'ink_load', label: 'Ink load', title: 'How far the pen runs dry before it\'s dipped again: its strokes this much lighter and thinner at the end of a run', kind: 'range', min: 0, max: 0.95, step: 0.01 },
+      { key: 'redip_every', label: 'Re-dip every', title: 'How long a run of ink is: glyphs, or path length in canvas units', kind: 'range', min: 1, max: 4000, step: 1, needs: 'ink_load' },
+      { key: 'redip_by', label: 'Re-dip by', title: 'What a run of ink is measured in', kind: 'choice', choices: ['glyphs', 'length'], needs: 'ink_load' },
     ],
   },
   {
@@ -130,6 +141,8 @@ export const SETTING_GROUPS: SettingGroup[] = [
       { key: 'passes', label: 'Passes', title: 'How many times each stroke is drawn over', kind: 'range', min: 1, max: 8, step: 1, whole: true },
       { key: 'pass_end_jitter', label: 'Pass end jitter', title: 'How far each pass\'s ends stray, in canvas units', kind: 'range', min: 0, max: 4, step: 0.05 },
       { key: 'stroke_point_jitter', label: 'Stroke point jitter', title: 'How far every point of every pass strays, in canvas units', kind: 'range', min: 0, max: 4, step: 0.05 },
+      { key: 'stroke_warp', label: 'Stroke warp', title: 'How far strokes bend with a smooth tremor, either way, in canvas units', kind: 'range', min: 0, max: 6, step: 0.05 },
+      { key: 'stroke_warp_length', label: 'Warp length', title: 'About how far along a stroke the tremor takes to bend one way and back, in canvas units', kind: 'range', min: 1, max: 200, step: 0.5, needs: 'stroke_warp' },
       { key: 'glyph_position_jitter', label: 'Glyph position jitter', title: 'How far each glyph strays, across and down, in glyph scales, so it follows the size', kind: 'pair', min: 0, max: 0.2, step: 0.005 },
       { key: 'glyph_rotation_jitter', label: 'Glyph rotation jitter', title: 'How far each glyph turns, in radians', kind: 'range', min: 0, max: 0.3, step: 0.005 },
       { key: 'glyph_scale_jitter', label: 'Glyph scale jitter', title: 'How much each glyph\'s size changes, as a fraction', kind: 'range', min: 0, max: 0.3, step: 0.005 },
@@ -149,7 +162,7 @@ export const SETTING_GROUPS: SettingGroup[] = [
       { key: 'skew', label: 'Skew', title: 'How far the glyphs lean, tops forward, in radians, in place of Italic', kind: 'range', min: -1.2, max: 1.2, step: 0.01, unset: 'the glyphset\'s' },
       { key: 'joined', label: 'Joined', title: 'Whether a cursive glyphset\'s words are written joined up', kind: 'switch', unset: 'the glyphset\'s' },
       { key: 'underline', label: 'Underline', title: 'Lines under the text, where it\'s typeset', kind: 'rule', preview: 'typeset' },
-      { key: 'strike', label: 'Strike', title: 'Lines through the text, where it\'s typeset', kind: 'rule', preview: 'typeset' },
+      { key: 'strike', label: 'Strike', title: 'Lines through the text, or a scribble, loops or a blot over it, where it\'s typeset', kind: 'rule', preview: 'typeset' },
     ],
   },
   {
@@ -193,6 +206,11 @@ export const RULE_SPACING_FIELD: SettingField = {
   key: 'spacing', label: 'Spacing', title: 'How far apart the lines are, in glyph scales', kind: 'range', min: 0, max: 2, step: 0.01, unset: 'the pen\'s',
 };
 
+/** A strike's kind, as a setting. */
+export const RULE_KIND_FIELD: SettingField = {
+  key: 'kind', label: 'Kind', title: 'Lines through the text, or what hides it: a zigzag, loops or a blot of ink', kind: 'choice', choices: STRIKE_KINDS,
+};
+
 /** How many lines, as a setting. */
 export const RULE_COUNT_FIELD: Pick<SettingField, 'min' | 'max' | 'step'> = { min: 0, max: 20, step: 1 };
 
@@ -214,9 +232,14 @@ const LEFT_OUT: StyleSettings = {
   pool: 0,
   pool_depth: 0.3,
   color_jitter: 0,
+  ink_load: 0,
+  redip_every: 40,
+  redip_by: 'glyphs',
   passes: 1,
   pass_end_jitter: 0,
   stroke_point_jitter: 0,
+  stroke_warp: 0,
+  stroke_warp_length: 20,
   glyph_position_jitter: 0,
   glyph_rotation_jitter: 0,
   glyph_scale_jitter: 0,
@@ -274,6 +297,9 @@ function asWritten(key: keyof StyleSettings, s: StyleSettings): unknown {
   if (key === 'spans') return Object.keys(s.spans).length ? s.spans : undefined;
   // Of no use unless words are split, as the engine says if it's given.
   if (key === 'split_padding' && !s.split_words) return undefined;
+  // Of no use without what they go with.
+  if ((key === 'redip_every' || key === 'redip_by') && !s.ink_load) return undefined;
+  if (key === 'stroke_warp_length' && !s.stroke_warp) return undefined;
   if (Array.isArray(value)) {
     const [across, down] = value.map((n) => +n.toFixed(4));
     return across === down ? across : [across, down];
@@ -300,9 +326,15 @@ function misfit(field: SettingField, given: unknown): string | null {
     case 'choice': return typeof given === 'string' ? null : 'a string';
     case 'switch': return typeof given === 'boolean' ? null : 'a boolean';
     case 'pair': return isNumber || (Array.isArray(given) && given.length === 2 && given.every((n) => typeof n === 'number')) ? null : 'a number or [across, down]';
-    case 'rule': return isNumber || typeof given === 'boolean' || isObject(given) ? null : 'true, false, a number of lines or { count, spacing, style }';
+    case 'rule': return field.key === 'strike'
+      ? isNumber || typeof given === 'boolean' || isObject(given) || isStrikeKind(given) ? null : `true, false, a number of lines, a kind of strike (${STRIKE_KINDS.join(', ')}) or { count, spacing, style, kind }`
+      : isNumber || typeof given === 'boolean' || isObject(given) ? null : 'true, false, a number of lines or { count, spacing, style }';
     default: return isNumber || (field.unsetValue === false && typeof given === 'boolean') ? null : 'a number';
   }
+}
+
+function isStrikeKind(value: unknown): value is string {
+  return (STRIKE_KINDS as readonly unknown[]).includes(value);
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -358,25 +390,33 @@ export function pairOf(value: unknown): [number, number] {
   return [n, n];
 }
 
-/** Lines under or through text, each part of them apart. */
+/** Lines under or through text, each part of them apart; a strike's kind too. */
 export interface Rule {
   count: number;
   spacing: number | null;
   style: Record<string, unknown>;
+  kind: string;
 }
 
 export function readRule(value: unknown): Rule {
-  if (typeof value === 'number') return { count: value, spacing: null, style: {} };
-  if (!isObject(value)) return { count: value === true ? 1 : 0, spacing: null, style: {} };
-  return { count: typeof value['count'] === 'number' ? value['count'] : 1, spacing: typeof value['spacing'] === 'number' ? value['spacing'] : null, style: isObject(value['style']) ? value['style'] : {} };
+  if (typeof value === 'number') return { count: value, spacing: null, style: {}, kind: 'lines' };
+  if (typeof value === 'string') return { count: 1, spacing: null, style: {}, kind: value };
+  if (!isObject(value)) return { count: value === true ? 1 : 0, spacing: null, style: {}, kind: 'lines' };
+  return {
+    count: typeof value['count'] === 'number' ? value['count'] : 1,
+    spacing: typeof value['spacing'] === 'number' ? value['spacing'] : null,
+    style: isObject(value['style']) ? value['style'] : {},
+    kind: typeof value['kind'] === 'string' ? value['kind'] : 'lines',
+  };
 }
 
 /** Lines as a file holds them, as briefly as it can. */
 export function ruleValue(rule: Rule): RuleValue {
   if (!rule.count) return false;
   const styled = Object.keys(rule.style).length > 0;
-  if (rule.spacing === null && !styled) return rule.count;
-  return { count: rule.count, ...(rule.spacing === null ? {} : { spacing: rule.spacing }), ...(styled ? { style: rule.style } : {}) };
+  const kinded = rule.kind !== 'lines';
+  if (rule.spacing === null && !styled) return !kinded ? rule.count : rule.count === 1 ? rule.kind : { count: rule.count, kind: rule.kind };
+  return { count: rule.count, ...(rule.spacing === null ? {} : { spacing: rule.spacing }), ...(styled ? { style: rule.style } : {}), ...(kinded ? { kind: rule.kind } : {}) };
 }
 
 /** What a setting starts at, when something sets it that didn't. */
@@ -411,7 +451,7 @@ const MARKED = 'Lorem ipsum *dolor sit amet*, consectetur **adipiscing** elit, s
 function previewText(s: StyleSettings, as: PreviewAs): string {
   if (s.example.trim()) return rhaiString(s.example);
   if (as === 'block') return 'content("lorem")';
-  const named = Object.keys(s.spans).filter((name) => name !== 'em' && name !== 'strong').map((name) => `[incididunt ut labore]{${name}}`);
+  const named = Object.keys(s.spans).filter((name) => !['em', 'strong', 'struck'].includes(name)).map((name) => `[incididunt ut labore]{${name}}`);
   return `content("lorem") + "\\n\\n" + ${rhaiString([MARKED, ...named].join(' '))}`;
 }
 

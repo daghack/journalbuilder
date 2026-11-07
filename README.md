@@ -180,13 +180,23 @@ What to know:
   pass of it, too) a little off its colour: lightness moved up to 0.05
   either way in OKLab, hue and chroma up to half that (less in dark
   colours, so they keep their hue); gradients are moved
-  point by point. Default 0.
+  point by point. Default 0. `ink_load: 0.4` lets the pen run dry: over
+  `redip_every` glyphs (default 40) its strokes fade, slowly and then
+  faster, to 40% lighter and thinner, then it's dipped again and starts
+  dark. With
+  `redip_by: "length"` the run is measured in path length instead. Each
+  pen (brush and colour) runs dry on its own, in the order strokes are
+  drawn on a canvas, starts each canvas freshly dipped, and is dipped only
+  between words.
 - **Handwriting.** `new_handwriting_style(#{ passes: 7, pass_end_jitter: 9 })`
   draws each stroke seven times over, each pass's ends straying by up to 9
   units, so a straight stroke turns, stretches and shifts a little each
   time: the scored, manic look of writing gone over again and again. One
   pass with a little jitter just roughens a hand. `stroke_point_jitter`
   moves every point of every pass, so curves change shape too.
+  `stroke_warp: 1.5` bends strokes with smooth noise instead, up to 1.5
+  units either way and changing about every `stroke_warp_length` units
+  along them (default 20): the slow tremor of a real hand, not fuzz.
   `glyph_position_jitter`, `glyph_rotation_jitter` and `glyph_scale_jitter`
   set each glyph text calls place a little off true, and `baseline_wander`
   bends the lines `write_line` and `write_block` write along. Every jitter
@@ -376,7 +386,8 @@ journal_entry.add(layout("two_column_article").typeset(#{
   of the same name, then onto the next page. A flow can also be
   `markdown(text)`: `*emphasis*`, `**strong**`, `~~struck out~~`, and
   `[text]{settings}` and named spans for colour, size, lean, passes,
-  spacing, and lines under and through, which break where the text does (see
+  spacing, and lines under and through, which break where the text does,
+  or words scratched out under a scribble, loops or a blot (see
   [webapp/library/layouts/README.md](webapp/library/layouts/README.md#marked-up-text)).
 - **Roles** are `#{ style, type, paragraph, spans }`, by name. Text roles
   need a type with a glyphset and glyph scale; the style defaults to

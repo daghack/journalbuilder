@@ -12,6 +12,9 @@
 //!     pool: 0.4,                              // ink pooling: 40% heavier at the bottom (default 0)
 //!     pool_depth: 0.25,                       // over the lowest quarter of each path (default 0.3)
 //!     color_jitter: 0.05,                     // each stroke's colour off by up to 0.05 (default 0)
+//!     ink_load: 0.4,                          // running 40% dry before it's dipped again (default 0)
+//!     redip_every: 40,                        // dipped every 40 glyphs (default 40)
+//!     redip_by: "glyphs",                     // or "length": every 40 canvas units of stroke
 //! });
 //!
 //! // The hand: how it goes over its strokes and sets glyphs and lines.
@@ -19,6 +22,8 @@
 //!     passes: 2,                     // each stroke drawn twice (default 1)
 //!     pass_end_jitter: 1.0,          // each pass's ends astray by up to 1 unit
 //!     stroke_point_jitter: 0.5,      // every point of every pass astray by up to 0.5
+//!     stroke_warp: 0.8,              // each pass bent by a slow tremor, up to 0.8 each way
+//!     stroke_warp_length: 15,        // turning about every 15 units along it (default 20)
 //!     glyph_position_jitter: 1.0,    // each glyph moved up to 1 unit (or [across, down])
 //!     glyph_rotation_jitter: 0.05,   // and turned up to 0.05 radians
 //!     glyph_scale_jitter: 0.1,       // and scaled up to 10%, either way
@@ -37,6 +42,14 @@
 //! its lightness moved up to that far either way, its hue and chroma up to
 //! half as far (less in dark colours), and a gradient's colours with it.
 //! In SVG output a stroke is `brush_size * max_pressure` wide.
+//!
+//! A pen with an `ink_load` runs dry as it writes: each stroke lighter and
+//! lighter in pressure and colour, falling off faster as it goes, until it
+//! has written `redip_every` glyphs (or that much length of stroke) since
+//! it was dipped, `ink_load` down by then, and it's dipped again before its
+//! next word (it finishes a word dry). Strokes are counted in the order
+//! they're drawn on a canvas, for each pen (each brush and colour) apart,
+//! from a fresh dip; a path that isn't a glyph counts as one.
 
 use rand::RngCore;
 use rhai::{Dynamic, Engine, Map};
@@ -44,7 +57,7 @@ use rhai::{Dynamic, Engine, Map};
 use super::gradient;
 use super::options::{above_zero, at_least_zero, one_of, register_settings, setting_number, Settings};
 use super::RhaiResult;
-use crate::journal::canvas::{Brush, ColorJitter, PressureProfile, StrokeColor};
+use crate::journal::canvas::{Brush, ColorJitter, InkRun, PressureProfile, StrokeColor};
 use crate::journal::canvas::StrokeStyle as JournalStrokeStyle;
 use crate::journal::paths::StrokePath;
 
@@ -75,6 +88,27 @@ pub struct BrushStyle {
     pool: f64,
     pool_depth: f64,
     color_jitter: f64,
+    ink_load: f64,
+    redip_every: f64,
+    redip_by: RedipBy,
+}
+
+/// What a pen's ink is measured in: how many glyphs it writes between
+/// dips, or how much length of stroke.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum RedipBy {
+    Glyphs,
+    Length,
+}
+
+impl RedipBy {
+    const NAMES: [&'static str; 2] = ["glyphs", "length"];
+    fn name(self) -> &'static str {
+        match self {
+            RedipBy::Glyphs => "glyphs",
+            RedipBy::Length => "length",
+        }
+    }
 }
 
 impl BrushStyle {
@@ -91,6 +125,9 @@ impl BrushStyle {
             pool: 0.0,
             pool_depth: 0.3,
             color_jitter: 0.0,
+            ink_load: 0.0,
+            redip_every: 40.0,
+            redip_by: RedipBy::Glyphs,
         };
         style.set(caller, "color", color)?;
         style.set(caller, "brush", brush)?;
@@ -103,6 +140,7 @@ impl Settings for BrushStyle {
     const NAME: &'static str = "brush_style";
     const KEYS: &'static [&'static str] = &[
         "color", "brush", "brush_size", "min_pressure", "max_pressure", "pressure_profile", "pressure_wander", "pressure_wander_length", "pool", "pool_depth", "color_jitter",
+        "ink_load", "redip_every", "redip_by",
     ];
     fn get(&self, key: &str) -> Dynamic {
         match key {
@@ -120,6 +158,9 @@ impl Settings for BrushStyle {
             "pool" => self.pool.into(),
             "pool_depth" => self.pool_depth.into(),
             "color_jitter" => self.color_jitter.into(),
+            "ink_load" => self.ink_load.into(),
+            "redip_every" => self.redip_every.into(),
+            "redip_by" => self.redip_by.name().into(),
             _ => Dynamic::UNIT,
         }
     }
@@ -163,6 +204,18 @@ impl Settings for BrushStyle {
                 }
                 self.color_jitter = jitter;
             }
+            "ink_load" => {
+                let load = at_least_zero(caller, key, value)?;
+                if load >= 1.0 {
+                    return Err(format!("{}: 'ink_load' is how far the ink falls off, a fraction below 1, got {}", caller, load).into());
+                }
+                self.ink_load = load;
+            }
+            "redip_every" => self.redip_every = above_zero(caller, key, value)?,
+            "redip_by" => {
+                let by = one_of(caller, key, value, &RedipBy::NAMES)?;
+                self.redip_by = if by == "length" { RedipBy::Length } else { RedipBy::Glyphs };
+            }
             _ => unreachable!("{} isn't a brush setting", key),
         }
         Ok(())
@@ -181,6 +234,8 @@ pub struct HandwritingStyle {
     passes: i64,
     pass_end_jitter: f64,
     stroke_point_jitter: f64,
+    stroke_warp: f64,
+    stroke_warp_length: f64,
     /// Across and down.
     glyph_position_jitter: (f64, f64),
     glyph_rotation_jitter: f64,
@@ -190,7 +245,7 @@ pub struct HandwritingStyle {
 
 impl HandwritingStyle {
     pub(super) fn new() -> HandwritingStyle {
-        HandwritingStyle { passes: 1, ..HandwritingStyle::default() }
+        HandwritingStyle { passes: 1, stroke_warp_length: 20.0, ..HandwritingStyle::default() }
     }
     /// How far each placed glyph strays, across and down, at most.
     pub(super) fn glyph_position_jitter(&self) -> (f64, f64) {
@@ -211,13 +266,15 @@ impl HandwritingStyle {
 impl Settings for HandwritingStyle {
     const NAME: &'static str = "handwriting_style";
     const KEYS: &'static [&'static str] = &[
-        "passes", "pass_end_jitter", "stroke_point_jitter", "glyph_position_jitter", "glyph_rotation_jitter", "glyph_scale_jitter", "baseline_wander",
+        "passes", "pass_end_jitter", "stroke_point_jitter", "stroke_warp", "stroke_warp_length", "glyph_position_jitter", "glyph_rotation_jitter", "glyph_scale_jitter", "baseline_wander",
     ];
     fn get(&self, key: &str) -> Dynamic {
         match key {
             "passes" => self.passes.into(),
             "pass_end_jitter" => self.pass_end_jitter.into(),
             "stroke_point_jitter" => self.stroke_point_jitter.into(),
+            "stroke_warp" => self.stroke_warp.into(),
+            "stroke_warp_length" => self.stroke_warp_length.into(),
             "glyph_position_jitter" => match self.glyph_position_jitter {
                 (x, y) if x == y => x.into(),
                 (x, y) => Dynamic::from_array(vec![x.into(), y.into()]),
@@ -239,6 +296,8 @@ impl Settings for HandwritingStyle {
             }
             "pass_end_jitter" => self.pass_end_jitter = at_least_zero(caller, key, value)?,
             "stroke_point_jitter" => self.stroke_point_jitter = at_least_zero(caller, key, value)?,
+            "stroke_warp" => self.stroke_warp = at_least_zero(caller, key, value)?,
+            "stroke_warp_length" => self.stroke_warp_length = above_zero(caller, key, value)?,
             "glyph_position_jitter" => {
                 self.glyph_position_jitter = match value.clone().into_array() {
                     Ok(pair) => match pair.as_slice() {
@@ -284,6 +343,11 @@ impl Style {
     pub(super) fn brush_size(&self) -> f32 {
         self.brush.brush_size as f32
     }
+    /// How wide its marks are, about, halfway between its least pressure
+    /// and its most.
+    pub(super) fn pen_width(&self) -> f32 {
+        (self.brush.brush_size * (self.brush.min_pressure + self.brush.max_pressure) / 2.0) as f32
+    }
     pub(super) fn handwriting(&self) -> &HandwritingStyle {
         &self.handwriting
     }
@@ -297,19 +361,54 @@ impl Style {
     }
     /// A path as this style draws it: each subpath gone over `passes`
     /// times, each pass astray by up to `pass_end_jitter` (see
-    /// `StrokePath::retraced`) and each of its points by up to
+    /// `StrokePath::retraced`), bent by up to `stroke_warp` (see
+    /// `StrokePath::warped`), and each of its points astray by up to
     /// `stroke_point_jitter` (see `StrokePath::point_jittered`), drawn
     /// from `rng`.
     pub fn retrace(&self, path: StrokePath, rng: &mut dyn RngCore) -> StrokePath {
         let hand = &self.handwriting;
-        if hand.passes == 1 && hand.pass_end_jitter == 0.0 && hand.stroke_point_jitter == 0.0 {
-            return path;
+        // Point jitter alone goes over the path once, as it always has, so
+        // what's drawn from the generator stays as it was.
+        let mut path = match hand.passes == 1 && hand.pass_end_jitter == 0.0 && hand.stroke_point_jitter == 0.0 {
+            true => path,
+            false => path.retraced(hand.passes as usize, hand.pass_end_jitter as f32, rng),
+        };
+        if hand.stroke_warp > 0.0 {
+            path = path.warped(hand.stroke_warp as f32, hand.stroke_warp_length as f32, rng);
         }
-        let retraced = path.retraced(hand.passes as usize, hand.pass_end_jitter as f32, rng);
-        if hand.stroke_point_jitter == 0.0 {
-            return retraced;
+        if hand.stroke_point_jitter > 0.0 {
+            path = path.point_jittered(hand.stroke_point_jitter as f32, rng);
         }
-        retraced.point_jittered(hand.stroke_point_jitter as f32, rng)
+        path
+    }
+    /// Which pen it writes with, for its ink to run dry as that pen's
+    /// does: its brush and colour, if it has an ink load.
+    pub(super) fn pen(&self) -> Option<String> {
+        let b = &self.brush;
+        (b.ink_load > 0.0).then(|| format!("{}|{:?}", b.brush, b.color))
+    }
+    /// How far through its dip the pen is over a stroke that writes
+    /// `glyphs` glyphs (a path that isn't a glyph counts as one) along
+    /// `path`, `used` being how much it has written since it was last
+    /// dipped, which the stroke adds to. A stroke that would run past the
+    /// dip is written after dipping again, unless it's the first since or
+    /// it goes on writing a word (`mid_word`), which is finished dry.
+    pub(super) fn ink_run(&self, used: &mut f32, glyphs: u32, mid_word: bool, path: &StrokePath) -> Option<InkRun> {
+        let b = &self.brush;
+        if b.ink_load <= 0.0 {
+            return None;
+        }
+        let amount = match b.redip_by {
+            RedipBy::Glyphs => glyphs.max(1) as f32,
+            RedipBy::Length => path.length(),
+        };
+        let every = b.redip_every as f32;
+        if *used > 0.0 && *used + amount > every && !mid_word {
+            *used = 0.0;
+        }
+        let from = *used / every;
+        *used += amount;
+        Some(InkRun { load: b.ink_load as f32, from, to: *used / every })
     }
 }
 
@@ -317,7 +416,8 @@ impl Settings for Style {
     const NAME: &'static str = "style";
     const KEYS: &'static [&'static str] = &[
         "color", "brush", "brush_size", "min_pressure", "max_pressure", "pressure_profile", "pressure_wander", "pressure_wander_length", "pool", "pool_depth", "color_jitter",
-        "passes", "pass_end_jitter", "stroke_point_jitter", "glyph_position_jitter", "glyph_rotation_jitter", "glyph_scale_jitter", "baseline_wander",
+        "ink_load", "redip_every", "redip_by",
+        "passes", "pass_end_jitter", "stroke_point_jitter", "stroke_warp", "stroke_warp_length", "glyph_position_jitter", "glyph_rotation_jitter", "glyph_scale_jitter", "baseline_wander",
     ];
     fn get(&self, key: &str) -> Dynamic {
         if BrushStyle::KEYS.contains(&key) { self.brush.get(key) } else { self.handwriting.get(key) }

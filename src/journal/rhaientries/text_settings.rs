@@ -10,7 +10,8 @@
 //!     joined: false,             // a cursive glyphset's words written unjoined (default: the glyphset's)
 //!     glyph_scale_factor: 1.5,   // times the glyph scale (default 1)
 //!     underline: true,           // one line under (or a number of lines, or #{ count, spacing, style })
-//!     strike: 2,                 // two lines through
+//!     strike: 2,                 // two lines through (or #{ kind: "scribble" }, "loops" or "blot",
+//!                                // or the kind's name alone: strike: "scribble")
 //! });
 //!
 //! // Paragraphs: how lines are built and set.
@@ -46,7 +47,7 @@ use super::RhaiResult;
 use crate::journal::canvas::textbox::TextBoxLineMode;
 use crate::journal::fonts::Font;
 use crate::journal::symbol::{Symbol, WordRules, WordSplit};
-use crate::journal::typeset::Align;
+use crate::journal::typeset::{Align, StrikeKind};
 
 /// How far `italic: true` leans text, in radians.
 pub(super) const ITALIC_SKEW: f64 = 0.25;
@@ -61,20 +62,27 @@ pub(super) struct RuleStyle {
     pub(super) spacing: Option<f32>,
     /// What they're drawn in: a style, or a map of settings over the text's.
     pub(super) style: Option<Dynamic>,
+    /// How text is struck out; lines under text are always lines.
+    pub(super) kind: StrikeKind,
 }
 
 impl RuleStyle {
     pub(super) fn lines(count: u32) -> RuleStyle {
-        RuleStyle { count, spacing: None, style: None }
+        RuleStyle { count, spacing: None, style: None, kind: StrikeKind::Lines }
     }
     /// `true` (one line), `false` (none), a number of lines, or
-    /// `#{ count, spacing, style }`.
+    /// `#{ count, spacing, style }`; through text, also `kind`, or the
+    /// kind's name alone.
     fn read(caller: &str, key: &str, value: &Dynamic) -> RhaiResult<Option<RuleStyle>> {
+        let strike = key == "strike";
         let count = |value: &Dynamic| -> RhaiResult<u32> {
             match value.as_int() {
                 Ok(n) if (1..=MAX_RULES).contains(&n) => Ok(n as u32),
                 _ => Err(format!("{}: '{}' lines should be a whole number from 1 to {}, got {}", caller, key, MAX_RULES, value).into()),
             }
+        };
+        let kind = |value: &Dynamic| -> Option<StrikeKind> {
+            value.clone().into_immutable_string().ok().and_then(|name| StrikeKind::from_name(&name))
         };
         if let Ok(on) = value.as_bool() {
             return Ok(on.then(|| RuleStyle::lines(1)));
@@ -82,12 +90,23 @@ impl RuleStyle {
         if value.is_int() {
             return Ok(Some(RuleStyle::lines(count(value)?)));
         }
+        if let (true, Some(kind)) = (strike, kind(value)) {
+            return Ok(Some(RuleStyle { kind, ..RuleStyle::lines(1) }));
+        }
         let Some(settings) = value.clone().try_cast::<Map>() else {
-            return Err(format!("{}: '{}' should be true, false, a number of lines or #{{ count, spacing, style }}, got {}", caller, key, value.type_name()).into());
+            let wanted = match strike {
+                true => format!("true, false, a number of lines, a kind of strike ({}) or #{{ count, spacing, style, kind }}", StrikeKind::NAMES.join(", ")),
+                false => "true, false, a number of lines or #{ count, spacing, style }".to_string(),
+            };
+            let given = value.clone().into_immutable_string().map_or_else(|_| value.type_name().to_string(), |s| format!("'{}'", s));
+            return Err(format!("{}: '{}' should be {}, got {}", caller, key, wanted, given).into());
         };
         let caller = format!("{} '{}'", caller, key);
-        check_keys(&caller, &settings, &["count", "spacing", "style"])?;
+        check_keys(&caller, &settings, if strike { &["count", "spacing", "style", "kind"] } else { &["count", "spacing", "style"] })?;
         let mut rule = RuleStyle::lines(1);
+        if let Some(given) = settings.get("kind") {
+            rule.kind = StrikeKind::from_name(&one_of(&caller, "kind", given, &StrikeKind::NAMES)?).expect("a kind's name");
+        }
         if let Some(n) = settings.get("count") {
             rule.count = count(n)?;
         }
@@ -109,6 +128,9 @@ impl RuleStyle {
         }
         if let Some(style) = &self.style {
             map.insert("style".into(), style.clone());
+        }
+        if self.kind != StrikeKind::Lines {
+            map.insert("kind".into(), self.kind.name().into());
         }
         map.into()
     }

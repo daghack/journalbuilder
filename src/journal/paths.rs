@@ -348,6 +348,104 @@ impl StrokePath {
         })).collect();
         StrokePath { commands }
     }
+    /// The path bent by smooth noise, as a hand's slow tremor bends it:
+    /// each point moved by an offset of up to `amount` across and down,
+    /// which wanders as it goes along its subpath, turning about every
+    /// `length` units, each subpath its own way (drawn from `rng`). Long
+    /// segments are cut into pieces a quarter of `length` long first, so
+    /// they bend too; every segment becomes a cubic. Subpaths stay joined,
+    /// and a closed one is closed by a short straight line.
+    pub fn warped(&self, amount: f32, length: f32, rng: &mut dyn RngCore) -> StrokePath {
+        use noise::{NoiseFn, Perlin};
+        let noise = Perlin::new(rng.next_u32());
+        let length = length.max(1e-3);
+        let piece = length / 4.0;
+        // Where a subpath reads the noise from: its own stretch of it.
+        let mut lane = || (rng.random::<f64>() * 1000.0, rng.random::<f64>() * 1000.0);
+        let offset = |(a, b): (f64, f64), along: f32| {
+            let x = (along / length) as f64;
+            // Two octaves, as pressure wanders, rarely past ±0.9 together.
+            let n = |a: f64, b: f64| {
+                let v = noise.get([x + a, b]) + 0.5 * noise.get([2.0 * x + a + 17.31, b + 5.13]);
+                (v as f32 / 0.9).clamp(-1.0, 1.0)
+            };
+            Vec2::new(n(a, b), n(b + 31.7, a + 3.37)) * amount
+        };
+        let mut commands = Vec::with_capacity(self.commands.len() * 2);
+        let (mut current, mut start) = (Vec2::ZERO, Vec2::ZERO);
+        let mut here: Option<(f64, f64)> = None;
+        let mut along = 0.0f32;
+        // A cubic from `current`, cut into pieces, each piece's points moved
+        // by the offset where they are along the subpath.
+        let bend = |commands: &mut Vec<PathCmd>, lane: (f64, f64), along: &mut f32, p: [Vec2; 4]| {
+            let polygon = p[0].distance(p[1]) + p[1].distance(p[2]) + p[2].distance(p[3]);
+            let reach = (polygon + p[0].distance(p[3])) / 2.0;
+            let pieces = ((reach / piece).ceil() as usize).clamp(1, 1000);
+            let mut rest = p;
+            for k in 0..pieces {
+                let (q, after) = split_cubic(rest, 1.0 / (pieces - k) as f32);
+                rest = after;
+                let (s0, step) = (*along + reach * k as f32 / pieces as f32, reach / pieces as f32);
+                let (c1, c2, end) = (q[1] + offset(lane, s0 + step / 3.0), q[2] + offset(lane, s0 + step * 2.0 / 3.0), q[3] + offset(lane, s0 + step));
+                commands.push(PathCmd::CubicCurveTo(c1.x, c1.y, c2.x, c2.y, end.x, end.y));
+            }
+            *along += reach;
+        };
+        for cmd in &self.commands {
+            let third = |a: Vec2, b: Vec2| [a, a + (b - a) / 3.0, a + (b - a) * (2.0 / 3.0), b];
+            match *cmd {
+                PathCmd::MoveTo(x, y) => {
+                    (current, start, along) = (Vec2::new(x, y), Vec2::new(x, y), 0.0);
+                    let lane = *here.insert(lane());
+                    let p = current + offset(lane, 0.0);
+                    commands.push(PathCmd::MoveTo(p.x, p.y));
+                }
+                PathCmd::ClosePath => {
+                    let lane = *here.get_or_insert_with(&mut lane);
+                    if current.distance(start) > 1e-4 {
+                        bend(&mut commands, lane, &mut along, third(current, start));
+                    }
+                    commands.push(PathCmd::ClosePath);
+                    current = start;
+                }
+                _ => {
+                    // Drawn from the origin before any move.
+                    let lane = match here {
+                        Some(lane) => lane,
+                        None => {
+                            let lane = *here.insert(lane());
+                            let p = offset(lane, 0.0);
+                            commands.push(PathCmd::MoveTo(p.x, p.y));
+                            lane
+                        }
+                    };
+                    let end = cmd.ending_point().expect("a segment ends somewhere");
+                    let p = match *cmd {
+                        PathCmd::CubicCurveTo(x1, y1, x2, y2, ..) => [current, Vec2::new(x1, y1), Vec2::new(x2, y2), end],
+                        PathCmd::QuadraticCurveTo(qx, qy, ..) => {
+                            let q = Vec2::new(qx, qy);
+                            [current, current + (q - current) * (2.0 / 3.0), end + (q - end) * (2.0 / 3.0), end]
+                        }
+                        _ => third(current, end),
+                    };
+                    bend(&mut commands, lane, &mut along, p);
+                    current = end;
+                }
+            }
+        }
+        StrokePath { commands }
+    }
+    /// How long its subpaths are, all together, closing lines included.
+    pub fn length(&self) -> f32 {
+        self.flattened(0.1).iter().map(|(points, closed)| {
+            let open: f32 = points.windows(2).map(|w| w[0].distance(w[1])).sum();
+            let close = match (closed, points.first(), points.last()) {
+                (true, Some(a), Some(b)) => a.distance(*b),
+                _ => 0.0,
+            };
+            open + close
+        }).sum()
+    }
     /// How many subpaths `to_substrokes` makes of it.
     pub fn substroke_count(&self) -> usize {
         let moves = self.commands.iter().filter(|cmd| matches!(cmd, PathCmd::MoveTo(..))).count();
@@ -1153,6 +1251,15 @@ impl SubstrokePath {
         let mut stepper = SubstrokeStepper::new(self, 50);
         stepper.generate_equidistant_samples(distance_interval)
     }
+}
+
+/// A cubic's points cut in two at `t`: the part before, and after.
+fn split_cubic(p: [Vec2; 4], t: f32) -> ([Vec2; 4], [Vec2; 4]) {
+    let lerp = |a: Vec2, b: Vec2| a + (b - a) * t;
+    let (a, b, c) = (lerp(p[0], p[1]), lerp(p[1], p[2]), lerp(p[2], p[3]));
+    let (d, e) = (lerp(a, b), lerp(b, c));
+    let f = lerp(d, e);
+    ([p[0], a, d, f], [f, e, c, p[3]])
 }
 
 fn bc_interp(p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2, t: f32) -> Vec2 {

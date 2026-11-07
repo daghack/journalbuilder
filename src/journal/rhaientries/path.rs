@@ -154,8 +154,8 @@ impl PathText {
         let mut rng = rng.borrow_mut();
         self.jitter.apply(&mut placed, &mut *rng);
         let mut canvas = CanvasData::default();
-        for (_, path) in joined_paths(&placed, |_| false) {
-            canvas.add_path(path, &self.style, &mut *rng);
+        for (span, path) in joined_paths(&placed, |_| false) {
+            canvas.add_text_path(path, super::canvas::TextRun::of(&placed, span), &self.style, &mut *rng);
         }
         Canvas::new(canvas)
     }

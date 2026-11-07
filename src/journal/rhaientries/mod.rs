@@ -1260,6 +1260,95 @@ brush.color = \"darkredd\";", BRUSH)).expect_err("bad color should fail").to_str
     }
 
     #[test]
+    fn stroke_warp_bends_strokes_smoothly() {
+        let script = r#"
+            let s = new_style(new_brush_style("black", "Ink Pen", 1.0), new_handwriting_style(#{ stroke_warp: 2, stroke_warp_length: 30 }));
+            if s.stroke_warp != 2.0 || s.stroke_warp_length != 30.0 { throw "warp reads back"; }
+            let steady = new_handwriting_style();
+            if steady.stroke_warp != 0.0 || steady.stroke_warp_length != 20.0 { throw "no warp by default"; }
+            let c = new_canvas();
+            c.add(new_line(vec2(0, 0), vec2(300, 0)), s);
+            s.passes = 2;
+            c.add(new_line(vec2(0, 50), vec2(300, 50)), s);
+            journal_entry.add(new_page().add(c));
+        "#;
+        let entry = engine().build_entry_str(script).expect("script should run");
+        let jc: JournalCanvas = entry.pages[0].canvases()[0].clone().into();
+        // A straight line, cut into pieces so it bends all along it, each
+        // point up to 2 off, and moving smoothly: no fuzz.
+        let line = &jc.strokes()[0].path.polylines(1.0)[0];
+        let ys: Vec<f32> = line.iter().map(|p| p.y).collect();
+        assert!(ys.iter().all(|y| y.abs() <= 2.0 + 1e-4), "{:?}", ys);
+        assert!(ys.iter().any(|y| y.abs() > 0.3), "it bends: {:?}", ys);
+        assert!(ys.windows(2).all(|w| (w[0] - w[1]).abs() < 0.6), "smoothly: {:?}", ys);
+        // Each pass bent its own way.
+        let passes = jc.strokes()[1].path.polylines(1.0);
+        assert_eq!(passes.len(), 2);
+        assert!(passes[0].iter().zip(&passes[1]).any(|(a, b)| (a.y - b.y).abs() > 0.3));
+        let again = engine().build_entry_str(script).expect("script should run");
+        let again: JournalCanvas = again.pages[0].canvases()[0].clone().into();
+        assert_eq!(jc.strokes()[0].path.to_string(), again.strokes()[0].path.to_string(), "the same every run");
+        let err = engine().build_entry_str("let s = default_style();\ns.stroke_warp_length = 0;").expect_err("no length").to_string();
+        assert!(err.contains("style: 'stroke_warp_length' must be positive") && err.contains("line 2"), "{}", err);
+    }
+
+    #[test]
+    fn pens_run_dry_and_are_dipped_again() {
+        let script = r#"
+            let pen = new_brush_style("black", "Ink Pen", 1.0, #{ ink_load: 0.5, redip_every: 4 });
+            if pen.ink_load != 0.5 || pen.redip_every != 4.0 || pen.redip_by != "glyphs" { throw "ink reads back"; }
+            let b = new_brush_style("black", "Ink Pen", 1.0);
+            if b.ink_load != 0.0 || b.redip_every != 40.0 || b.redip_by != "glyphs" { throw "never dry by default"; }
+            let s = new_style(pen, new_handwriting_style());
+            let c = new_canvas();
+            for i in 0..6 { c.add(new_line(vec2(i * 10, 0), vec2(i * 10 + 5, 0)), s); }
+            // Another colour is another pen, with ink of its own.
+            let red = s;
+            red.color = "red";
+            c.add(new_line(vec2(0, 20), vec2(5, 20)), red);
+            // By length: 60 and 60 is past 100, so dipped between them.
+            let long = s;
+            long.color = "blue";
+            long.redip_by = "length";
+            long.redip_every = 100;
+            c.add(new_line(vec2(0, 40), vec2(60, 40)), long);
+            c.add(new_line(vec2(0, 50), vec2(60, 50)), long);
+            // A word isn't dipped into: "aaaa aaaa", dipped every 3 glyphs.
+            let green = s;
+            green.color = "green";
+            green.redip_every = 3;
+            c.add(write_line("aaaa aaaa", vec2(0, 100), #{ style: green, type: new_type_style(glyphset("plain"), 20) }));
+            journal_entry.add(new_page().add(c));
+        "#;
+        let entry = engine().build_entry_str(script).expect("script should run");
+        let jc: JournalCanvas = entry.pages[0].canvases()[0].clone().into();
+        let runs: Vec<(f32, f32)> = jc.strokes().iter().map(|s| s.ink.map(|i| (i.from, i.to)).expect("every pen here runs dry")).collect();
+        assert_eq!(runs[..6], [(0.0, 0.25), (0.25, 0.5), (0.5, 0.75), (0.75, 1.0), (0.0, 0.25), (0.25, 0.5)]);
+        assert_eq!(runs[6], (0.0, 0.25));
+        assert_eq!(runs[7..9], [(0.0, 0.6), (0.0, 0.6)]);
+        let third = 1.0 / 3.0;
+        let word: Vec<(f32, f32)> = runs[9..].to_vec();
+        assert_eq!(word.len(), 8);
+        // The first word's last glyph is finished dry; the next word dipped.
+        assert!((word[3].0 - 1.0).abs() < 1e-5 && (word[3].1 - 4.0 * third).abs() < 1e-5, "{:?}", word);
+        assert!(word[4].0 == 0.0 && (word[4].1 - third).abs() < 1e-5, "{:?}", word);
+        // Strong just dipped, down by the load when it's due again, and no
+        // further past it.
+        let ink = jc.strokes()[3].ink.unwrap();
+        assert_eq!(jc.strokes()[0].ink.unwrap().at(0.0), 1.0);
+        assert!((ink.at(1.0) - 0.5).abs() < 1e-6);
+        assert!((jc.strokes()[12].ink.unwrap().at(1.0) - 0.5).abs() < 1e-6);
+        for (script, want) in [
+            ("b.ink_load = 1;", "style: 'ink_load' is how far the ink falls off, a fraction below 1"),
+            ("b.redip_every = 0;", "style: 'redip_every' must be positive"),
+            ("b.redip_by = \"words\";", "style: unknown redip_by 'words'"),
+        ] {
+            let err = engine().build_entry_str(&format!("let b = default_style();\n{}", script)).expect_err(script).to_string();
+            assert!(err.contains(want) && err.contains("line 2"), "{}: {}", want, err);
+        }
+    }
+
+    #[test]
     fn styles_go_over_their_strokes_in_passes() {
         let script = r#"
             let s = new_style(new_brush_style("black", "Ink Pen", 1.0), new_handwriting_style());

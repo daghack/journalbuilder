@@ -14,7 +14,7 @@ describe('style files', () => {
 
   it('leaves out what the engine takes anyway', () => {
     const file = JSON.parse(styleFile(DEFAULT_STYLE));
-    for (const key of ['pressure_profile', 'pool_depth', 'passes', 'italic', 'skew', 'underline', 'indent', 'align', 'split_words', 'spans', 'example']) expect(file[key], key).toBeUndefined();
+    for (const key of ['pressure_profile', 'pool_depth', 'redip_every', 'redip_by', 'stroke_warp_length', 'passes', 'italic', 'skew', 'underline', 'indent', 'align', 'split_words', 'spans', 'example']) expect(file[key], key).toBeUndefined();
   });
 
   it('reads back what it wrote', () => {
@@ -38,8 +38,8 @@ describe('style files', () => {
 
   it('keeps every setting a style has', () => {
     const made = {
-      ...DEFAULT_STYLE, pool: 0.4, pool_depth: 0.25, pressure_wander_length: 8, glyph_position_jitter: [0.1, 0.2], glyph_scale_factor: 1.5, glyph_outline_gap: 0.1, space_width: 0.4,
-      skew: 0.2, joined: false, underline: { count: 2, spacing: 0.3, style: { color: 'red' } }, strike: 1, paragraph_gap: 0.8, indent: 1.5, valign: 'center', fit: true, layout: 'words', angle: 0.1,
+      ...DEFAULT_STYLE, pool: 0.4, pool_depth: 0.25, pressure_wander_length: 8, ink_load: 0.4, redip_every: 30, redip_by: 'length', stroke_warp: 1.5, stroke_warp_length: 8, glyph_position_jitter: [0.1, 0.2], glyph_scale_factor: 1.5, glyph_outline_gap: 0.1, space_width: 0.4,
+      skew: 0.2, joined: false, underline: { count: 2, spacing: 0.3, style: { color: 'red' } }, strike: 'scribble', paragraph_gap: 0.8, indent: 1.5, valign: 'center', fit: true, layout: 'words', angle: 0.1,
       split_words: 3, split_padding: 0.3, break_words: 2, clearance: 5, overhang: 3, spans: { strong: { style: { passes: 2 }, type: { underline: true } } },
     } as typeof DEFAULT_STYLE;
     expect(readStyle(styleFile(made))).toEqual(made);
@@ -77,6 +77,8 @@ describe('style files', () => {
       ['{ "split_words": "x" }', /'split_words' should be a number/],
       ['{ "glyph_position_jitter": [1] }', /'glyph_position_jitter' should be a number or \[across, down\]/],
       ['{ "underline": "x" }', /'underline' should be true, false, a number of lines/],
+      ['{ "underline": "scribble" }', /'underline' should be true, false, a number of lines or/],
+      ['{ "strike": "smudge" }', /'strike' should be true, false, a number of lines, a kind of strike \(lines, scribble, loops, blot\)/],
       ['{ "spans": 3 }', /'spans' should be an object/],
     ] as const) expect(() => readStyle(text), text).toThrowError(wanted);
   });
@@ -121,13 +123,18 @@ describe('style settings', () => {
   });
 
   it('reads lines however a file has them, and writes them as briefly as it can', () => {
-    expect(readRule(false)).toEqual({ count: 0, spacing: null, style: {} });
-    expect(readRule(true)).toEqual({ count: 1, spacing: null, style: {} });
-    expect(readRule(3)).toEqual({ count: 3, spacing: null, style: {} });
-    expect(readRule({ spacing: 0.2 })).toEqual({ count: 1, spacing: 0.2, style: {} });
-    expect(ruleValue({ count: 0, spacing: 0.2, style: {} })).toBe(false);
-    expect(ruleValue({ count: 2, spacing: null, style: {} })).toBe(2);
-    expect(ruleValue({ count: 2, spacing: null, style: { color: 'red' } })).toEqual({ count: 2, style: { color: 'red' } });
+    expect(readRule(false)).toEqual({ count: 0, spacing: null, style: {}, kind: 'lines' });
+    expect(readRule(true)).toEqual({ count: 1, spacing: null, style: {}, kind: 'lines' });
+    expect(readRule(3)).toEqual({ count: 3, spacing: null, style: {}, kind: 'lines' });
+    expect(readRule({ spacing: 0.2 })).toEqual({ count: 1, spacing: 0.2, style: {}, kind: 'lines' });
+    expect(readRule('scribble')).toEqual({ count: 1, spacing: null, style: {}, kind: 'scribble' });
+    expect(readRule({ kind: 'blot', count: 2 })).toEqual({ count: 2, spacing: null, style: {}, kind: 'blot' });
+    expect(ruleValue({ count: 0, spacing: 0.2, style: {}, kind: 'lines' })).toBe(false);
+    expect(ruleValue({ count: 2, spacing: null, style: {}, kind: 'lines' })).toBe(2);
+    expect(ruleValue({ count: 2, spacing: null, style: { color: 'red' }, kind: 'lines' })).toEqual({ count: 2, style: { color: 'red' } });
+    expect(ruleValue({ count: 1, spacing: null, style: {}, kind: 'loops' })).toBe('loops');
+    expect(ruleValue({ count: 2, spacing: null, style: {}, kind: 'loops' })).toEqual({ count: 2, kind: 'loops' });
+    expect(ruleValue({ count: 1, spacing: 0.1, style: {}, kind: 'scribble' })).toEqual({ count: 1, spacing: 0.1, kind: 'scribble' });
   });
 
   it('starts what a span sets with something the engine takes', () => {

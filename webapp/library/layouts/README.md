@@ -124,7 +124,7 @@ flows: #{ body: markdown("Plain, *emphasis*, **strong**, ~~struck out~~, [in blu
 ```
 
 - `*text*` or `_text_` is the span `em`, `**text**` or `__text__` the span
-  `strong`, and `~~text~~` struck through.
+  `strong`, and `~~text~~` the span `struck`.
 - `[text]{settings}` is text with settings of its own: span names, and
   `key: value` pairs separated by commas, a key on its own being `true`.
   A word on its own is a setting if it's one, and a span's name otherwise;
@@ -135,8 +135,10 @@ flows: #{ body: markdown("Plain, *emphasis*, **strong**, ~~struck out~~, [in blu
 
 A span is `#{ style, type }`, each a whole one or a map of settings over
 the text it's in. Spans are named in a role's `spans` and in `markdown(text,
-#{ spans })`, which win. `em` defaults to `#{ type: #{ italic: true } }` and
-`strong` to `#{ style: #{ passes: 2, pass_end_jitter: 1.3 } }`.
+#{ spans })`, which win. `em` defaults to `#{ type: #{ italic: true } }`,
+`strong` to `#{ style: #{ passes: 2, pass_end_jitter: 1.3 } }` and
+`struck` to `#{ type: #{ strike: true } }`: `spans: #{ struck: #{ type:
+#{ strike: "scribble" } } }` scratches out every `~~text~~` instead.
 
 Settings in braces are a style's and a type's: `color`, `passes`,
 `pass_end_jitter`, `stroke_point_jitter` and the rest; `italic`, `skew`,
@@ -153,6 +155,14 @@ it go back and forth as one stroke, scribbling it out. They run across the
 spaces between the words they mark, and break where the text does: at the
 ends of lines, either side of what the text wraps round, and wherever
 they'd come within its `clearance` of it.
+
+A strike can also be a kind that hides the text rather than crossing it
+out: `{strike: scribble}` (or `strike: {kind: scribble, count, spacing,
+style}`) sweeps a tight zigzag from end to end down the words and back,
+`loops` coils over them like a row of joined *e*s, and `blot` fills them in
+with a lumpy patch of ink. `count` is how many passes (coats, for a
+blot), and `spacing` how far apart its sweeps, turns or rows are (in glyph
+scales). `lines` is the default kind, the lines above.
 
 ## Art
 
