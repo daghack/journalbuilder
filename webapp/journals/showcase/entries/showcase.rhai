@@ -99,6 +99,16 @@ fn write_in(text, x, y, size, style, glyphs) {
 }
 
 // A label naming the calls an example shows.
+// "bordered: false" and "center_bordered: false", each that a symbol
+// ring's options turn off, for its label.
+fn borders(o) {
+	let off = [];
+	for key in ["bordered", "center_bordered"] {
+		if key in o && !o[key] { off.push(`${key}: false`); }
+	}
+	off.reduce(|said, k| if said == "" { k } else { said + ", " + k }, "")
+}
+
 fn caption(text, y) {
 	write_in(text, global::LEFT, y, 22, global::CAPTION, global::PLAIN)
 }
@@ -1956,22 +1966,23 @@ book.bind("locks", sized);
 // symbol_ring: a base's symbols round a ring, each joined by dashes to the
 // one step on, and the step's symbol in the middle; it draws no lock
 // value, only its options. With steps, only the first lines of the walk
-// from the top, and half the next with an arrow.
+// from the top, and half the next with an arrow. bordered rings the
+// symbols round the ring, center_bordered the middle's.
 let rings = sheet("locks");
-rings.add(caption("symbol_ring (base, step, steps, bordered, size, center_scale, dash, gap, glyph_ink, line_ink)", TOP));
+rings.add(caption("symbol_ring (base, step, steps, bordered, center_bordered, size, center_scale, dash, gap, glyph_ink, line_ink)", TOP));
 for (o, k) in [
 	#{ base: 27, step: 5, size: 450.0 },
 	#{ base: 27, step: 13, bordered: false, size: 450.0 },
 	#{ base: 12, step: 5, steps: 6, size: 450.0, dash: 10.0, gap: 6.0 },
-	#{ base: 9, step: 2, steps: 5, bordered: false, size: 450.0, center_scale: 2.0 },
+	#{ base: 9, step: 2, steps: 5, bordered: false, center_bordered: false, size: 450.0, center_scale: 2.0 },
 ] {
 	let x = LEFT + (k % 2) * 520;
 	let y = TOP + 80 + (k / 2) * 580;
-	let bordered = if "bordered" in o { o.bordered } else { true };
 	let steps = if "steps" in o { `, steps: ${o.steps}` } else { "" };
-	rings.add(write_in(`base ${o.base}, step ${o.step}${steps}${if bordered { "" } else { ", bordered: false" }}`, x, y, 22, CAPTION, PLAIN));
+	rings.add(write_in(`base ${o.base}, step ${o.step}${steps}`, x, y, 22, CAPTION, PLAIN));
+	rings.add(write_in(borders(o), x, y + 28, 22, CAPTION, PLAIN));
 	let ring = new_lock("ring").attach("ring", "symbol_ring", o).run().canvases("ring")[0];
-	rings.add(ring.translate_by(vec2(x, y + 30)));
+	rings.add(ring.translate_by(vec2(x, y + 50)));
 }
 book.bind("locks", rings);
 
@@ -1994,6 +2005,60 @@ for (o, k) in [
 	ring_sets.add(ring.translate_by(vec2(x, y + 30)));
 }
 book.bind("locks", ring_sets);
+
+// rearranged_symbol_ring: the ring as taking a step's path rearranges
+// it, place k holding symbol k times step: symbol_ring's walk unwound.
+// Where base and step share a factor, the walk's back at the top early
+// and the ring repeats; step 0 takes no path, and leaves the places empty.
+let rearranged = sheet("locks");
+rearranged.add(caption("rearranged_symbol_ring (base, step, bordered, center_bordered, size, center_scale, glyph_ink)", TOP));
+for (o, k) in [
+	#{ name: "symbol_ring", base: 13, step: 5 },
+	#{ name: "rearranged_symbol_ring", base: 13, step: 5 },
+	#{ name: "rearranged_symbol_ring", base: 12, step: 4, bordered: false },
+	#{ name: "rearranged_symbol_ring", base: 13, step: 0, center_bordered: false },
+] {
+	let x = LEFT + (k % 2) * 520;
+	let y = TOP + 80 + (k / 2) * 580;
+	rearranged.add(write_in(`${o.name}, base ${o.base}, step ${o.step}`, x, y, 22, CAPTION, PLAIN));
+	rearranged.add(write_in(borders(o), x, y + 28, 22, CAPTION, PLAIN));
+	let options = #{ base: o.base, step: o.step, size: 450.0 };
+	for key in ["bordered", "center_bordered"] { if key in o { options[key] = o[key]; } }
+	let ring = new_lock("ring").attach("ring", o.name, options).run().canvases("ring")[0];
+	rearranged.add(ring.translate_by(vec2(x, y + 50)));
+}
+book.bind("locks", rearranged);
+
+// joined_symbol_ring: two paths round one ring, each its own colour, their
+// symbols next to each other in the middle, and a second canvas, the path
+// they join to: first times second round the base, in the colour of the
+// two. Where both draw the same line, each is moved to its own side; a
+// step of 0, given or joined to, takes no path.
+for (examples, page) in [
+	[#{ base: 13, first: 3, second: 5, steps: 5 }, #{ base: 13, first: 5, second: 8, steps: 0, bordered: false }],
+	[#{ base: 12, first: 3, second: 4, steps: 0, center_bordered: false }, #{ base: 13, first: 0, second: 7, steps: 4 }],
+] {
+	let joined = sheet("locks");
+	if page == 0 {
+		joined.add(caption("joined_symbol_ring (base, first, second, steps, bordered, center_bordered, size, center_scale,", TOP));
+		joined.add(caption("dash, gap, glyph_ink, first_ink, second_ink, joined_ink): two canvases, the paths and what they join to", TOP + 36));
+	} else {
+		joined.add(caption("joined_symbol_ring: a step of 0, given or joined to, takes no path", TOP));
+	}
+	for (o, row) in examples {
+		let y = TOP + 116 + row * 600;
+		let steps = if o.steps > 0 { `, steps ${o.steps}` } else { "" };
+		let off = borders(o);
+		joined.add(write_in(`base ${o.base}, first ${o.first}, second ${o.second}${steps}${if off == "" { "" } else { ", " + off }}`, LEFT, y, 22, CAPTION, PLAIN));
+		joined.add(write_in(`joined: ${o.first} times ${o.second} is ${(o.first * o.second) % o.base} round ${o.base}`, LEFT + 520, y, 22, CAPTION, PLAIN));
+		let options = #{ base: o.base, first: o.first, second: o.second, steps: o.steps, size: 450.0 };
+		for key in ["bordered", "center_bordered"] { if key in o { options[key] = o[key]; } }
+		let both = new_lock("joined").attach("joined", "joined_symbol_ring", options).run().canvases("joined");
+		joined.add(both[0].translate_by(vec2(LEFT, y + 30)));
+		joined.add(both[1].translate_by(vec2(LEFT + 520, y + 30)));
+	}
+	book.bind("locks", joined);
+}
 
 // An illustration on its own: illustration(name, options) fetches a file,
 // the journal's or the library's, as chain(name) fetches a chain file, and

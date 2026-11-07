@@ -370,6 +370,8 @@ fn every_illustration_writes_in_the_cursive_wherever_it_writes() {
         ("maze_glyphs", Box::new(maze), &["glyph_style"]),
         ("styled_text", Box::new(styled), &["style"]),
         ("symbol_ring", Box::new(|s: &str, w: &[(&str, &str)]| drawn(&format!(r#"new_lock("t"){}"#, s), "symbol_ring", "#{ step: 1 }", w)), &["glyph_style"]),
+        ("rearranged_symbol_ring", Box::new(|s: &str, w: &[(&str, &str)]| drawn(&format!(r#"new_lock("t"){}"#, s), "rearranged_symbol_ring", "#{ step: 2 }", w)), &["glyph_style"]),
+        ("joined_symbol_ring", Box::new(|s: &str, w: &[(&str, &str)]| drawn(&format!(r#"new_lock("t"){}"#, s), "joined_symbol_ring", "#{ first: 1, second: 2 }", w)), &["glyph_style"]),
     ];
     for (name, draw, inputs) in illustrations {
         for input in inputs {
