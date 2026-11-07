@@ -190,7 +190,7 @@ pub(super) fn over_defaults(what: &str, defaults: &Map, given: &Map) -> Result<M
         };
         let number = |v: &Dynamic| v.is_int() || v.is_float();
         let same = (number(default) && number(&taken)) || default.type_name() == taken.type_name() || default.is_unit()
-            || (colour && (taken.is_string() || taken.is::<Gradient>()));
+            || (colour && (taken.is_string() || taken.is::<Gradient>() || taken.is::<crate::journal::image_paint::ImagePaint>()));
         if !same {
             return Err(format!("{}: option '{}' should be like its default, {}, got {}", what, key, default, value));
         }

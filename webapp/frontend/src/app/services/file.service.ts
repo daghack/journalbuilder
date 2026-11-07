@@ -1,4 +1,5 @@
 import { Injectable } from '@angular/core';
+import { IMAGE_TYPES, bytesToDataUrl } from '../journal/journal-files';
 
 // The File System Access API (Chromium only), when the browser has it.
 interface FileHandle {
@@ -186,6 +187,12 @@ export class FileService {
   }
 }
 
+/** A file in a directory read as a journal holds it: a picture as a data URL, anything else as text. */
+async function read(file: File): Promise<string> {
+  const ext = /\.([a-z]+)$/.exec(file.name)?.[1] ?? '';
+  return ext in IMAGE_TYPES ? bytesToDataUrl(new Uint8Array(await file.arrayBuffer()), ext) : file.text();
+}
+
 function isAbort(err: unknown): boolean {
   return err instanceof DOMException && err.name === 'AbortError';
 }
@@ -199,7 +206,7 @@ function handleDirectory(handle: DirectoryHandle): Directory {
       const dirs: Directory[] = [];
       for await (const entry of handle.values()) {
         if (entry.kind === 'directory') dirs.push(handleDirectory(entry));
-        else files.set(entry.name, async () => (await entry.getFile()).text());
+        else files.set(entry.name, async () => read(await entry.getFile()));
       }
       return { files, dirs };
     },
@@ -225,7 +232,7 @@ function filesDirectory(picked: File[]): Directory {
   const directory = (name: string, node: Node): Directory => ({
     name,
     list: async () => ({
-      files: new Map([...node.files].map(([name, file]) => [name, () => file.text()])),
+      files: new Map([...node.files].map(([name, file]) => [name, () => read(file)])),
       dirs: [...node.dirs].map(([name, dir]) => directory(name, dir)),
     }),
   });

@@ -16,7 +16,13 @@
 //! content/NAME.txt         plain text, for content(name)
 //! content/NAME.md          marked-up text, for content(name)
 //! content/NAME.json        symbols, #{ base, symbols }, for content(name)
+//! images/NAME.png          pictures, for image(name)
+//! images/NAME.jpg          pictures, for image(name)
 //! ```
+//!
+//! Pictures are read as text like the rest, as data URLs
+//! (`data:image/png;base64,...`), which is how the web editor and the
+//! compiled-in library hold them; `Sources::read_bytes` gives their bytes.
 
 use super::sources::Sources;
 use crate::journal::fonts::FontBook;
@@ -40,7 +46,7 @@ pub const BUILT_IN_JOURNALS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/we
 pub const DEFAULT_JOURNALS_DIRS: [&str; 2] = [DEFAULT_JOURNALS_DIR, BUILT_IN_JOURNALS_DIR];
 
 /// Every kind of resource: its directory, and its files' extension.
-pub const KINDS: [(&str, &str); 11] = [
+pub const KINDS: [(&str, &str); 13] = [
     ("locks", "rhai"),
     ("helpers", "rhai"),
     ("layouts", "rhai"),
@@ -52,6 +58,8 @@ pub const KINDS: [(&str, &str); 11] = [
     ("content", "txt"),
     ("content", "md"),
     ("content", "json"),
+    ("images", "png"),
+    ("images", "jpg"),
 ];
 
 /// A journal's resources, each kind in front of the library's.
@@ -70,6 +78,9 @@ pub struct Resources {
     pub text: Sources,
     pub markdown: Sources,
     pub symbols: Sources,
+    /// Pictures: PNGs and JPEGs.
+    pub png_images: Sources,
+    pub jpg_images: Sources,
 }
 
 impl Resources {
@@ -109,6 +120,8 @@ impl Resources {
             text: sources("content", "txt"),
             markdown: sources("content", "md"),
             symbols: sources("content", "json"),
+            png_images: sources("images", "png"),
+            jpg_images: sources("images", "jpg"),
         }
     }
 
@@ -126,6 +139,8 @@ impl Resources {
             text: self.text.over(under.text),
             markdown: self.markdown.over(under.markdown),
             symbols: self.symbols.over(under.symbols),
+            png_images: self.png_images.over(under.png_images),
+            jpg_images: self.jpg_images.over(under.jpg_images),
         }
     }
 
@@ -151,12 +166,14 @@ impl Resources {
             text: record(self.text),
             markdown: record(self.markdown),
             symbols: record(self.symbols),
+            png_images: record(self.png_images),
+            jpg_images: record(self.jpg_images),
         };
         (resources, used)
     }
 
     /// Every kind's files, in `KINDS`' order, with their directory's name.
-    pub fn kinds(&self) -> [(&'static str, &Sources); 11] {
+    pub fn kinds(&self) -> [(&'static str, &Sources); 13] {
         [
             ("locks", &self.locks),
             ("helpers", &self.helpers),
@@ -169,6 +186,8 @@ impl Resources {
             ("content", &self.text),
             ("content", &self.markdown),
             ("content", &self.symbols),
+            ("images", &self.png_images),
+            ("images", &self.jpg_images),
         ]
     }
 
@@ -193,6 +212,12 @@ impl Resources {
             .filter(|(sources, _)| sources.has(name))
             .map(|(_, ext)| ext)
             .collect()
+    }
+
+    /// The picture called `name`'s files, by extension: where there's
+    /// more than one (`sky.png` and `sky.jpg`), image(name) is ambiguous.
+    pub fn image_files(&self, name: &str) -> Vec<&Sources> {
+        [&self.png_images, &self.jpg_images].into_iter().filter(|sources| sources.has(name)).collect()
     }
 
     /// Every content name, sorted.

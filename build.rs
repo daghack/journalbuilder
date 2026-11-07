@@ -1,12 +1,13 @@
 //! With the `embedded-assets` feature, lists every file of the built-in
 //! library (`webapp/library/`) for `resources::embedded` to compile in
-//! (`$OUT_DIR/embedded_library.rs`).
+//! (`$OUT_DIR/embedded_library.rs`). Pictures go in as data URLs, as
+//! `Sources` reads them.
 
 use std::path::Path;
 
 /// Every kind of resource: its directory, and its files' extension, as
 /// `resources::KINDS` lists them.
-const KINDS: [(&str, &str); 11] = [
+const KINDS: [(&str, &str); 13] = [
     ("locks", "rhai"),
     ("helpers", "rhai"),
     ("layouts", "rhai"),
@@ -18,6 +19,8 @@ const KINDS: [(&str, &str); 11] = [
     ("content", "txt"),
     ("content", "md"),
     ("content", "json"),
+    ("images", "png"),
+    ("images", "jpg"),
 ];
 
 fn main() {
@@ -38,13 +41,43 @@ fn main() {
         files.sort();
         out.push_str(&format!("    ({:?}, {:?}, &[\n", kind, ext));
         for (name, path) in files {
-            out.push_str(&format!("        ({:?}, include_str!({:?})),\n", name, path));
+            match image_type(ext) {
+                Some(mime) => {
+                    println!("cargo:rerun-if-changed={}", path);
+                    let url = format!("data:{};base64,{}", mime, base64(&std::fs::read(&path).unwrap()));
+                    out.push_str(&format!("        ({:?}, {:?}),\n", name, url));
+                }
+                None => out.push_str(&format!("        ({:?}, include_str!({:?})),\n", name, path)),
+            }
         }
         out.push_str("    ]),\n");
     }
     out.push_str("];\n");
     let out_dir = std::env::var("OUT_DIR").unwrap();
     std::fs::write(Path::new(&out_dir).join("embedded_library.rs"), out).unwrap();
+}
+
+/// The media type of pictures with extension `ext`, as
+/// `sources::image_type` has it; `None` for text.
+fn image_type(ext: &str) -> Option<&'static str> {
+    match ext {
+        "png" => Some("image/png"),
+        "jpg" => Some("image/jpeg"),
+        _ => None,
+    }
+}
+
+/// `bytes` in base64, padded, as `sources::base64` writes it.
+fn base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let n = (chunk[0] as u32) << 16 | (*chunk.get(1).unwrap_or(&0) as u32) << 8 | *chunk.get(2).unwrap_or(&0) as u32;
+        for i in 0..4 {
+            out.push(if i <= chunk.len() { ALPHABET[(n >> (18 - 6 * i) & 63) as usize] as char } else { '=' });
+        }
+    }
+    out
 }
 
 /// Every `.ext` file under `dir`, by its name: its path from there without

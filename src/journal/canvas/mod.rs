@@ -3,6 +3,7 @@ use crate::journal::{avoid::AvoidanceTree, StrokePath};
 use crate::journal::paths::{push_cut_number, push_number, trim_decimals};
 use std::borrow::Cow;
 use crate::journal::gradient::{Gradient, GradientKind};
+use crate::journal::image_paint::ImagePaint;
 use parry2d::math::{Vec2};
 use noise::{NoiseFn, Perlin};
 use rand::rngs::StdRng;
@@ -16,18 +17,20 @@ pub mod color_jitter;
 
 pub use color_jitter::ColorJitter;
 
-/// What a stroke is drawn in: a CSS colour, or a gradient.
+/// What a stroke is drawn in: a CSS colour, a gradient, or a picture each
+/// of its subpaths takes one colour from.
 #[derive(Clone, Debug, PartialEq)]
 pub enum StrokeColor {
     Solid(String),
     Gradient(Gradient),
+    Image(ImagePaint),
 }
 
 impl StrokeColor {
     pub fn gradient(&self) -> Option<&Gradient> {
         match self {
             StrokeColor::Gradient(g) => Some(g),
-            StrokeColor::Solid(_) => None,
+            StrokeColor::Solid(_) | StrokeColor::Image(_) => None,
         }
     }
 }
@@ -37,8 +40,8 @@ impl StrokeColor {
     /// mid-tone get as dark as they were light (their lightness mirrored,
     /// hue and saturation kept), so light inks meant for a dark background
     /// come out dark; darker ones stay as they are. Gradients' stops each.
-    /// A solid colour that doesn't parse is left for the renderer to warn
-    /// about.
+    /// A picture keeps its colours. A solid colour that doesn't parse is
+    /// left for the renderer to warn about.
     pub fn as_ink_on_paper(&self) -> StrokeColor {
         match self {
             StrokeColor::Solid(color) => match parse_color(color) {
@@ -49,6 +52,7 @@ impl StrokeColor {
                 let stops = g.stops.iter().map(|(at, c)| (*at, dark_ink(*c))).collect();
                 StrokeColor::Gradient(Gradient { stops, kind: g.kind })
             }
+            StrokeColor::Image(_) => self.clone(),
         }
     }
 }
@@ -314,13 +318,18 @@ impl StrokeStyle {
                 let stops = g.stops.iter().map(|(at, c)| (*at, self.inked(*c, index, ink))).collect();
                 (svg_gradient(&Gradient { stops, kind: g.kind }, id), format!("url(#{})", id))
             }
+            // Strokes in a picture are drawn subpath by subpath, each in
+            // its own colour: this is only its average.
+            StrokeColor::Image(paint) => (String::new(), css(self.inked(paint.average, index, ink))),
         }
     }
-    /// The stroke colour as sRGB RGBA floats in 0-1: a gradient's first.
+    /// The stroke colour as sRGB RGBA floats in 0-1: a gradient's first, a
+    /// picture's average.
     pub fn rgba(&self) -> Result<[f32; 4], String> {
         match &self.color {
             StrokeColor::Solid(color) => parse_color(color),
             StrokeColor::Gradient(g) => Ok(g.first()),
+            StrokeColor::Image(paint) => Ok(paint.average),
         }
     }
     /// How far a stroke's marks reach either side of its line: half the
@@ -353,15 +362,16 @@ fn down(y: f32, top: f32, bottom: f32) -> f32 {
 
 /// A stroke as a plain SVG path, `width` wide. `id` names its gradient,
 /// if it has one across the canvas; along a stroke, it's cut into pieces,
-/// each its own colour.
+/// each its own colour. In a picture, each subpath is its own colour.
 fn plain_path(stroke: &ColoredStroke, id: &str) -> String {
     let ColoredStroke { path, style, ink, .. } = stroke;
     let line = |d: &dyn std::fmt::Display, paint: &str, width: f32, cap: &str| format!(
         "<path d=\"{}\" style=\"fill:none;stroke:{};stroke-width:{};{}\" />", d, paint, width, cap);
     match &style.color {
-        // Jittered or running dry, each subpath its own colour and width,
-        // as at its middle.
-        _ if (style.color_jitter.is_some() || ink.is_some()) && !style.color.gradient().is_some_and(Gradient::per_stroke) => {
+        // Jittered, running dry or in a picture, each subpath its own
+        // colour and width, as at its middle.
+        _ if (style.color_jitter.is_some() || ink.is_some() || matches!(style.color, StrokeColor::Image(_)))
+            && !style.color.gradient().is_some_and(Gradient::per_stroke) => {
             let subpaths = path.subpaths();
             let lengths: Vec<f32> = subpaths.iter().map(|sub| if ink.is_some() { sub.length() } else { 0.0 }).collect();
             let total: f32 = lengths.iter().sum();
@@ -369,7 +379,13 @@ fn plain_path(stroke: &ColoredStroke, id: &str) -> String {
             subpaths.iter().enumerate().map(|(k, sub)| {
                 let strength = ink.map_or(1.0, |ink| ink.at(if total > 0.0 { (along + lengths[k] / 2.0) / total } else { 0.0 }));
                 along += lengths[k];
-                let (defs, paint) = style.svg_paint(k, &format!("{}_{}", id, k), strength);
+                let (defs, paint) = match &style.color {
+                    StrokeColor::Image(picture) => {
+                        let points = sub.flattened(0.1).into_iter().flat_map(|(points, _)| points);
+                        (String::new(), css(style.inked(picture.stroke_colour(points), k, strength)))
+                    }
+                    _ => style.svg_paint(k, &format!("{}_{}", id, k), strength),
+                };
                 format!("{}{}", defs, line(sub, &paint, style.width * strength, ""))
             }).collect()
         }
@@ -427,6 +443,7 @@ fn plain_path(stroke: &ColoredStroke, id: &str) -> String {
             svg
         }
         StrokeColor::Gradient(gradient) => format!("{}{}", svg_gradient(gradient, id), line(path, &format!("url(#{})", id), style.width, "")),
+        StrokeColor::Image(_) => unreachable!("strokes in a picture are drawn subpath by subpath"),
     }
 }
 
@@ -1065,6 +1082,15 @@ impl Canvas {
                 }
                 marks
             }
+            StrokeColor::Image(picture) => {
+                // Each outline its own colour: the picture's halfway along
+                // its middle, as strong as its ink is there.
+                outlines.iter().map(|(k, start, sides, strengths)| {
+                    let colour = picture.stroke_colour(sides.iter().map(|(l, r)| l.lerp(*r, 0.5)));
+                    let paint = css(stroke.style.inked(colour, *k, strengths[strengths.len() / 2]));
+                    Mark { defs: String::new(), outlines: vec![outline(Some(*start), sides)], paint, width: None }
+                }).collect()
+            }
             _ if stroke.style.color_jitter.is_some() || stroke.ink.is_some() => {
                 // Each outline its own colour, as it is at its middle.
                 outlines.iter().map(|(k, start, sides, strengths)| {
@@ -1076,6 +1102,7 @@ impl Canvas {
                 let (defs, paint) = match color {
                     StrokeColor::Solid(c) => (String::new(), c.clone()),
                     StrokeColor::Gradient(g) => (svg_gradient(g, id), format!("url(#{})", id)),
+                    StrokeColor::Image(_) => unreachable!("strokes in a picture are drawn outline by outline"),
                 };
                 let outlines = outlines.iter().map(|(_, start, sides, _)| outline(Some(*start), sides)).collect();
                 vec![Mark { defs, outlines, paint, width: None }]
@@ -1167,6 +1194,23 @@ mod svg_output_tests {
             assert!(svg.contains("<linearGradient id=\"gradient_0\"") && svg.contains("url(#gradient_0)"), "{}", svg);
             canvas.to_png(1.0, styled, 1);
         }
+    }
+
+    #[test]
+    fn image_paint_colours_each_subpath() {
+        // Red on the left half, blue on the right, over 0-100 across.
+        let pixels = image::RgbaImage::from_fn(4, 1, |x, _| if x < 2 { image::Rgba([255, 0, 0, 255]) } else { image::Rgba([0, 0, 255, 255]) });
+        let paint = ImagePaint::new("flag".into(), std::sync::Arc::new(pixels), Vec2::new(0.0, 0.0), Vec2::new(100.0, 10.0));
+        // Two strokes: one mostly on the left, ending on the right; one on
+        // the right.
+        let path = StrokePath::new().move_to(5.0, 5.0).line_to(60.0, 5.0).move_to(80.0, 2.0).line_to(95.0, 8.0);
+        let mut canvas = Canvas::new();
+        canvas.add_strokes(path, StrokeStyle { width: 2.0, color: StrokeColor::Image(paint), color_jitter: None, brush: None });
+        let svg = canvas.to_svg(None, 0);
+        assert_eq!(svg.matches("<path").count(), 2, "{}", svg);
+        assert!(svg.contains("stroke:rgba(255, 0, 0, 1)") && svg.contains("stroke:rgba(0, 0, 255, 1)"), "each its own colour, whole: {}", svg);
+        let svg = canvas.to_svg(Some(&SvgStyle { roughness: 0.5, point_sample_distance: 1.0, trail_off_percent: 0.15, noise_amplitude: 0.0 }), 0);
+        assert!(svg.contains("rgba(255, 0, 0, 1)") && svg.contains("rgba(0, 0, 255, 1)"), "stylized too: {}", svg);
     }
 
     #[test]

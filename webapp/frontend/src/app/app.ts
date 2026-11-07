@@ -6,6 +6,7 @@ import { ThreePaneComponent } from './layout/three-pane.component';
 import { LocksWorkspaceComponent } from './locks/locks-workspace.component';
 import { EntryPreviewDialogComponent } from './preview/entry-preview-dialog.component';
 import { ContentEditorComponent } from './resources/content-editor.component';
+import { ImageViewerComponent } from './resources/image-viewer.component';
 import { ResourceEditorComponent } from './resources/resource-editor.component';
 import { StyleEditorComponent } from './resources/style-editor.component';
 import { JournalStore } from './services/journal-store.service';
@@ -21,7 +22,7 @@ import { ShellService } from './shell/shell.service';
 @Component({
   selector: 'app-root',
   imports: [JournalBarComponent, ThreePaneComponent, JournalWorkspaceComponent, FontsWorkspaceComponent, LocksWorkspaceComponent,
-    ResourceEditorComponent, StyleEditorComponent, ContentEditorComponent, EntryPreviewDialogComponent],
+    ResourceEditorComponent, StyleEditorComponent, ContentEditorComponent, ImageViewerComponent, EntryPreviewDialogComponent],
   template: `
     <app-journal-bar />
     <main class="editor">
@@ -40,6 +41,9 @@ import { ShellService } from './shell/shell.service';
         }
         @defer (when resource()) {
           <app-resource-editor class="workspace" [hidden]="!resource()" />
+        }
+        @defer (when kind() === 'images') {
+          <app-image-viewer class="workspace" [hidden]="kind() !== 'images'" />
         }
         @defer (when kind() === 'styles') {
           <app-style-editor class="workspace" [hidden]="kind() !== 'styles'" />

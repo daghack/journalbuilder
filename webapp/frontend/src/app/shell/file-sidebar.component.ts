@@ -1,6 +1,6 @@
 import { Component, ElementRef, computed, inject, signal, viewChild } from '@angular/core';
 import { showEditorTab } from '../layout/pane-state';
-import { CONTENT_TYPES, KINDS, VALID_NAME, contentType, entryPath, nameOf, pathOf, splitPath, type KindInfo } from '../journal/journal-files';
+import { CONTENT_TYPES, KINDS, VALID_NAME, bytesToDataUrl, contentType, entryPath, journalName, nameOf, pathOf, splitPath, type KindInfo } from '../journal/journal-files';
 import { template } from '../journal/templates';
 import { StyleBuilderComponent } from '../resources/style-builder.component';
 import { JournalStore } from '../services/journal-store.service';
@@ -247,6 +247,7 @@ export class FileSidebarComponent {
   /** A new file of `info`'s kind, named as the user says; content asks its type too, and a style is built. */
   protected add(info: KindInfo) {
     if (info.kind === 'styles') return this.styleBuilder().open();
+    if (info.kind === 'images') return this.addImage(info);
     if (info.kind === 'content') {
       const name = this.contentName().nativeElement;
       name.value = '';
@@ -258,6 +259,26 @@ export class FileSidebarComponent {
     if (!typed) return;
     if (!VALID_NAME.test(typed)) return this.say('A name is letters, digits and _ only.');
     this.create(info, typed, info.exts[0]);
+  }
+
+  /** A new image: a PNG or JPEG picked from the user's files, named as they say (its file's name, to start with). */
+  protected addImage(info: KindInfo) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/png,image/jpeg';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const ext = file.type === 'image/png' ? 'png' : file.type === 'image/jpeg' ? 'jpg' : null;
+      if (!ext) return this.say('An image is a PNG or a JPEG.');
+      const typed = prompt("New image's name:", journalName(file.name.replace(/\.[^.]*$/, ''), 'image'))?.trim();
+      if (!typed) return;
+      if (!VALID_NAME.test(typed)) return this.say('A name is letters, digits and _ only.');
+      const other = pathOf('images', typed, ext === 'png' ? 'jpg' : 'png');
+      if (other in { ...this.library.files(), ...this.store.files() }) return this.say(`There's ${other} already: image("${typed}") would be ambiguous.`);
+      this.create(info, typed, ext, bytesToDataUrl(new Uint8Array(await file.arrayBuffer()), ext));
+    };
+    input.click();
   }
 
   /** New content called `name`, of the type kept in files ending `ext`: none of another type may share its name. */

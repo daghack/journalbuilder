@@ -1,11 +1,13 @@
 // A journal as the editor holds it: its manifest and its files by path,
 // as a journal's directory has them (see the repository's
 // src/journal/rhaientries/manifest.rs and resources.rs), and zips of it.
+// Pictures (images/NAME.png or .jpg) are held as data URLs, as the
+// renderer reads them, and are bytes again in a zip or on disk.
 
 import { strFromU8, strToU8, unzipSync, zipSync, type Zippable } from 'fflate';
 
 /** The kinds of file a journal has, each in a directory of its own. */
-export type Kind = 'entries' | 'chains' | 'locks' | 'helpers' | 'illustrations' | 'layouts' | 'styles' | 'content' | 'glyphsets' | 'lib';
+export type Kind = 'entries' | 'chains' | 'locks' | 'helpers' | 'illustrations' | 'layouts' | 'styles' | 'content' | 'glyphsets' | 'lib' | 'images';
 
 /** The kinds the resource editor edits. */
 export const RESOURCE_KINDS: readonly Kind[] = ['locks', 'helpers', 'illustrations', 'layouts', 'lib'];
@@ -32,6 +34,7 @@ export const KINDS: KindInfo[] = [
   { kind: 'content', label: 'Content', exts: ['txt', 'md', 'json'], library: true },
   { kind: 'glyphsets', label: 'Glyphsets', exts: ['json'], library: true },
   { kind: 'lib', label: 'Lib', exts: ['rhai'], library: true },
+  { kind: 'images', label: 'Images', exts: ['png', 'jpg'], library: true },
 ];
 
 export const KIND_INFO = new Map(KINDS.map((k) => [k.kind, k]));
@@ -49,6 +52,37 @@ export const CONTENT_TYPES = [
 /** What a content file's extension makes it: String, Markdown or Symbols. */
 export function contentType(ext: string): string {
   return CONTENT_TYPES.find((t) => t.ext === ext)?.label ?? ext;
+}
+
+/** The media types of pictures, by extension. */
+export const IMAGE_TYPES: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg' };
+
+/** Whether `path` is a picture's, held as a data URL. */
+export function isImage(path: string): boolean {
+  return splitPath(path)?.kind === 'images';
+}
+
+/** A picture's bytes as a data URL, of the type its extension `ext` says. */
+export function bytesToDataUrl(bytes: Uint8Array, ext: string): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return `data:${IMAGE_TYPES[ext] ?? 'application/octet-stream'};base64,${btoa(binary)}`;
+}
+
+/** The bytes a data URL (or plain base64) holds. */
+export function dataUrlToBytes(url: string): Uint8Array {
+  const binary = atob(url.slice(url.indexOf(',') + 1));
+  return Uint8Array.from(binary, (c) => c.charCodeAt(0));
+}
+
+/** A file's text as a journal holds it: a picture's bytes as a data URL, other files' as text. */
+export function fileText(path: string, bytes: Uint8Array): string {
+  return isImage(path) ? bytesToDataUrl(bytes, splitPath(path)!.ext) : strFromU8(bytes);
+}
+
+/** A file's bytes, as a zip or a directory has them. */
+export function fileBytes(path: string, text: string): Uint8Array {
+  return isImage(path) ? dataUrlToBytes(text) : strToU8(text);
 }
 
 /** A journal's `journal.json`. */
@@ -158,8 +192,8 @@ export function packZip(journal: JournalData, bundled: Record<string, string> = 
   const manifest: Manifest = { ...journal.manifest, ...(extra.length ? { bundled: extra } : {}) };
   if (!extra.length) delete manifest.bundled;
   const tree: Zippable = { [`${journal.name}/${MANIFEST}`]: strToU8(manifestText(manifest)) };
-  for (const [path, text] of Object.entries(journal.files)) tree[`${journal.name}/${path}`] = strToU8(text);
-  for (const path of extra) tree[`${journal.name}/${path}`] = strToU8(bundled[path]);
+  for (const [path, text] of Object.entries(journal.files)) tree[`${journal.name}/${path}`] = fileBytes(path, text);
+  for (const path of extra) tree[`${journal.name}/${path}`] = fileBytes(path, bundled[path]);
   return zipSync(tree, { level: 6 });
 }
 
@@ -210,7 +244,7 @@ export function unpackZip(bytes: Uint8Array, fallbackName: string): JournalData 
   const files: Record<string, string> = {};
   for (const path of paths) {
     if (!path.startsWith(root) || path === manifestPath || !(splitPath(path.slice(root.length)) || OLD_STYLE.test(path.slice(root.length)))) continue;
-    files[path.slice(root.length)] = strFromU8(entries[path]);
+    files[path.slice(root.length)] = fileText(path.slice(root.length), entries[path]);
   }
   const name = root.replace(/\/$/, '').split('/').pop() || fallbackName;
   return readJournal(VALID_NAME.test(name) ? name : fallbackName, strFromU8(entries[manifestPath]), files);

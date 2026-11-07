@@ -1031,6 +1031,7 @@ fn typeset_page(ctx: &NativeCallContext, root: &Node, n: usize, content: &mut Co
                     (vec![glyph], k + 1)
                 } else {
                     let text_style = text_style.ok_or_else(|| format!("{}: its role '{}' needs a type with a 'glyph_scale'", caller, node.role))?;
+                    let avoid = avoiding_paint(&avoid, role.style());
                     let mut setting = set_slot(inner, &text_style, role, text.glyphs(), text.chars, text.paragraph_start, &avoid, rng);
                     role.jitter().apply(&mut setting.placed, &mut *rng.borrow_mut());
                     text.styled.draw(&mut canvas, &setting, text.start, &style, &avoid, text_style.clearance, &mut *rng.borrow_mut())?;
@@ -1059,6 +1060,7 @@ fn typeset_page(ctx: &NativeCallContext, root: &Node, n: usize, content: &mut Co
         if text.glyphs().is_empty() {
             continue;
         }
+        let avoid = avoiding_paint(&avoid, role.style());
         let mut setting = set_slot(placed[i].inner, &text_style, role, text.glyphs(), text.chars, text.paragraph_start, &avoid, rng);
         role.jitter().apply(&mut setting.placed, &mut *rng.borrow_mut());
         text.styled.draw(&mut canvas, &setting, text.start, &style, &avoid, text_style.clearance, &mut *rng.borrow_mut())?;
@@ -1073,6 +1075,19 @@ fn typeset_page(ctx: &NativeCallContext, root: &Node, n: usize, content: &mut Co
 /// Set text in a slot: fitted if its role says, and placed down the box as
 /// its role says.
 #[allow(clippy::too_many_arguments)]
+/// What text drawn in `style` keeps clear of: `avoid`, and the parts of a
+/// picture its image paint avoids.
+fn avoiding_paint<'a>(avoid: &'a AvoidanceTree, style: &Style) -> std::borrow::Cow<'a, AvoidanceTree> {
+    match style.color() {
+        crate::journal::canvas::StrokeColor::Image(paint) if !paint.avoided().is_empty() => {
+            let mut both = avoid.clone();
+            paint.add_avoided(&mut both, 0.0);
+            std::borrow::Cow::Owned(both)
+        }
+        _ => std::borrow::Cow::Borrowed(avoid),
+    }
+}
+
 fn set_slot(rect: Aabb, style: &TextStyle, role: &Role, glyphs: &[Symbol], chars: &[char], paragraph_start: bool, avoid: &AvoidanceTree, rng: &SharedRng) -> crate::journal::typeset::Setting {
     let mut style = style.clone();
     if role.settings.paragraph.fit()

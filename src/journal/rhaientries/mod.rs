@@ -7,6 +7,7 @@ mod entry;
 mod generate;
 mod glyphs;
 mod gradient;
+mod images;
 mod layout;
 mod locks;
 mod illustrations;
@@ -286,6 +287,7 @@ impl JournalEngine {
         let text_styles = Rc::new(TextStyleLibrary::new(resources.styles.clone(), symdict.clone()));
         text_styles::register(&mut engine, text_styles.clone());
         content::register(&mut engine, resources.clone());
+        images::register(&mut engine, resources.clone());
 
         JournalEngine {
             engine,

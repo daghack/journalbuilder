@@ -66,7 +66,7 @@ use crate::journal::typeset::Align;
 use crate::journal::canvas::textbox::{rectangle, TextBox as CoreTextBox, TextBoxLineMode, TextBoxOptions};
 use crate::journal::canvas::Canvas as JournalCanvas;
 use crate::journal::symbol::Symbol;
-use super::avoid::{Avoid, AvoidOption};
+use super::avoid::AvoidOption;
 use super::options::{positive, range};
 use super::options::Settings;
 use super::text_settings::{Jitter, TextSettings, Wander};
@@ -81,7 +81,7 @@ pub struct TextBox {
     symbol_scale: f32,
     jagged_edge: f32,
     layout: TextBoxLineMode,
-    avoid: Option<Avoid>,
+    avoid: AvoidOption,
     padding: f32,
     spacing: f32,
     align: Align,
@@ -138,7 +138,7 @@ impl TextBox {
         let options = &text.options;
         let symbol_scale = text.type_.size(caller)?;
         let paragraph = &text.paragraph;
-        let avoid = AvoidOption::parse(caller, options, paragraph.clearance())?;
+        let avoid = AvoidOption::parse(caller, options, paragraph.clearance(), &text.style)?;
         Ok(TextBox {
             shape: Rc::new(shape),
             angle: paragraph.angle().unwrap_or(0.0),
@@ -147,7 +147,7 @@ impl TextBox {
             jagged_edge: paragraph.line_start_jitter() / symbol_scale,
             layout: paragraph.line_mode(caller, false)?,
             padding: avoid.padding(),
-            avoid: avoid.tree,
+            avoid,
             spacing: text.type_.tracking(),
             align: paragraph.align(),
             contain: true,
@@ -192,7 +192,7 @@ impl TextBox {
     }
     /// Run `f` with the text box, avoiding what its tree holds now.
     fn with_core<R>(&self, f: impl FnOnce(&CoreTextBox) -> R) -> R {
-        let tree = self.avoid.as_ref().map(|a| a.borrow());
+        let tree = self.avoid.now();
         let core = CoreTextBox::new(TextBoxOptions {
             jagged_edge: self.jagged_edge,
             layout: self.layout.clone(),
@@ -256,7 +256,7 @@ fn splat(canvas: &Canvas, msgs: Array, width_range: Dynamic, height_range: Dynam
     };
     let symbol_scale = text.type_.size(CALLER)?;
     let paragraph = &text.paragraph;
-    let avoid = AvoidOption::parse(CALLER, &text.options, paragraph.clearance())?;
+    let avoid = AvoidOption::parse(CALLER, &text.options, paragraph.clearance(), &text.style)?;
     let ranges = Map::from_iter([("width_range".into(), width_range), ("height_range".into(), height_range)]);
     let opts = ScatterOptions {
         symbol_scale,
@@ -286,7 +286,7 @@ fn splat(canvas: &Canvas, msgs: Array, width_range: Dynamic, height_range: Dynam
         symbols
     }).collect();
     let journal_canvas: JournalCanvas = canvas.into();
-    let tree = avoid.tree.as_ref().map(|a| a.borrow());
+    let tree = avoid.now();
     let placed = scatter_notes(&journal_canvas, tree.as_deref(), &symbol_msgs, &opts, &mut *rng)
         .map_err(|err| format!("{}: {}", CALLER, err))?;
 

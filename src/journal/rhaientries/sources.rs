@@ -6,6 +6,10 @@
 //! memory (the web editor's unsaved files) can add to the directory or
 //! stand in for files in it, and the directory can stand in front of
 //! another (`over`): a journal's own files over the built-in library's.
+//!
+//! Pictures (`png` and `jpg` files) are read as text too, as data URLs
+//! (`data:image/png;base64,...`): that's how the web editor and the
+//! compiled-in library hold them. `read_bytes` gives their bytes.
 
 use rhai::{Engine, EvalAltResult, Module, ModuleResolver, Position, Scope, Shared, AST};
 use std::cell::RefCell;
@@ -213,8 +217,32 @@ impl Sources {
             Some(scripts) => scripts.get(name).map(|source| source.to_string()).ok_or_else(|| {
                 std::io::Error::new(std::io::ErrorKind::NotFound, format!("no file {}", self.path(name).display()))
             }),
+            None if image_type(self.ext).is_some() => {
+                let bytes = std::fs::read(self.own_path(name))?;
+                Ok(format!("data:{};base64,{}", image_type(self.ext).expect("a picture"), base64(&bytes)))
+            }
             None => std::fs::read_to_string(self.own_path(name)),
         }
+    }
+
+    /// The bytes of the picture called `name`: its own, or else the one in
+    /// what these are in front of. Read from disk as they are, or decoded
+    /// from the data URL (or plain base64) held in memory or compiled in.
+    pub fn read_bytes(&self, name: &str) -> std::io::Result<Vec<u8>> {
+        if let Some(under) = &self.under
+            && !self.has_own(name) && under.has(name) {
+            return under.read_bytes(name);
+        }
+        if self.overlaid(name).is_none() && self.embedded.is_none() {
+            if self.has_own(name) {
+                self.note(name);
+            }
+            return std::fs::read(self.own_path(name));
+        }
+        let text = self.read(name)?;
+        decode_base64(text.split_once(";base64,").map_or(text.as_str(), |(_, data)| data)).ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, format!("{} isn't a data URL or base64", self.path(name).display()))
+        })
     }
 
     /// The script called `name`, compiled, with its path as its source,
@@ -362,5 +390,71 @@ mod tests {
         assert_eq!(text.read("lorem").unwrap(), "lorem");
         assert!(!text.has("other"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+/// The media type of pictures with extension `ext`; `None` for text.
+pub fn image_type(ext: &str) -> Option<&'static str> {
+    match ext {
+        "png" => Some("image/png"),
+        "jpg" => Some("image/jpeg"),
+        _ => None,
+    }
+}
+
+const BASE64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/// `bytes` in base64, padded.
+pub fn base64(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let n = (chunk[0] as u32) << 16 | (*chunk.get(1).unwrap_or(&0) as u32) << 8 | *chunk.get(2).unwrap_or(&0) as u32;
+        for i in 0..4 {
+            out.push(if i <= chunk.len() { BASE64[(n >> (18 - 6 * i) & 63) as usize] as char } else { '=' });
+        }
+    }
+    out
+}
+
+/// The bytes `text` holds in base64, padded or not, whitespace aside;
+/// `None` if it isn't base64.
+pub fn decode_base64(text: &str) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(text.len() / 4 * 3);
+    let (mut bits, mut count) = (0u32, 0);
+    for c in text.bytes().filter(|c| !c.is_ascii_whitespace()) {
+        if c == b'=' {
+            break;
+        }
+        bits = bits << 6 | BASE64.iter().position(|&b| b == c)? as u32;
+        count += 6;
+        if count >= 8 {
+            count -= 8;
+            out.push((bits >> count) as u8);
+        }
+    }
+    Some(out)
+}
+
+#[cfg(test)]
+mod base64_tests {
+    use super::*;
+
+    #[test]
+    fn base64_goes_there_and_back() {
+        for bytes in [&b""[..], b"f", b"fo", b"foo", b"foob", b"fooba", b"foobar", &[0, 255, 128, 7, 250]] {
+            let text = base64(bytes);
+            assert_eq!(text.len() % 4, 0, "padded");
+            assert_eq!(decode_base64(&text).as_deref(), Some(bytes), "{}", text);
+        }
+        assert_eq!(base64(b"foobar"), "Zm9vYmFy");
+        assert_eq!(decode_base64("Zm9v\nYg"), Some(b"foob".to_vec()), "unpadded, with whitespace");
+        assert_eq!(decode_base64("Zm9v!"), None);
+    }
+
+    #[test]
+    fn pictures_held_as_data_urls_have_bytes() {
+        let sources = Sources::none("images").with_ext("png").with_overlay([("dot".to_string(), "data:image/png;base64,AQID".to_string())]);
+        assert_eq!(sources.read_bytes("dot").unwrap(), vec![1, 2, 3]);
+        assert!(sources.read_bytes("nope").is_err());
     }
 }

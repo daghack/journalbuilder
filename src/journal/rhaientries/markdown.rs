@@ -481,6 +481,7 @@ mod tests {
         match stroke.style.color() {
             StrokeColor::Solid(c) => c.clone(),
             StrokeColor::Gradient(_) => "gradient".into(),
+            StrokeColor::Image(_) => "image".into(),
         }
     }
 

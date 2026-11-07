@@ -1,7 +1,8 @@
 // Copies the journals built into the editor, from webapp/journals (a
 // journal.json, its entries and its own files), to
 // generated/journals/<name>.json, { manifest, files }, with an index.json
-// listing them, for the editor's Open menu. The rest of webapp/journals
+// listing them, for the editor's Open menu. Pictures (images/*.png, .jpg)
+// go in as data URLs, as the editor holds them. The rest of webapp/journals
 // isn't built in: the editor opens them from the folder. Also writes
 // generated/fixtures/, the repository files the unit tests check against
 // (the library's glyphsets/ as one fonts.json, a chain file), as modules
@@ -35,8 +36,11 @@ for (const name of builtIn) {
   const manifest = JSON.parse(readFileSync(join(dir, 'journal.json'), 'utf8'));
   const files = {};
   for (const path of walk(dir).sort()) {
-    if (path === 'journal.json' || !/^[a-z]+\/.+\.(rhai|json|txt|md)$/.test(path)) continue;
-    files[path] = readFileSync(join(dir, path), 'utf8');
+    if (path === 'journal.json' || !/^[a-z]+\/.+\.(rhai|json|txt|md|png|jpg)$/.test(path)) continue;
+    const image = /\.(png|jpg)$/.exec(path);
+    files[path] = image
+      ? `data:image/${image[1] === 'png' ? 'png' : 'jpeg'};base64,${readFileSync(join(dir, path)).toString('base64')}`
+      : readFileSync(join(dir, path), 'utf8');
   }
   writeFileSync(join(out, `${name}.json`), JSON.stringify({ manifest, files }));
   index.push({ name, title: manifest.title, description: manifest.description, entries: manifest.entries });
