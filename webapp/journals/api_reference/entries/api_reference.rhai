@@ -397,6 +397,9 @@ doc += api("new_brush_style(color, brush, brush_size), new_brush_style(color, br
 	opt("options.pool", "0", "As brush_style.pool.", "as brush_style.pool."),
 	opt("options.pool_depth", "0.3", "As brush_style.pool_depth.", "as brush_style.pool_depth."),
 	opt("options.color_jitter", "0", "As brush_style.color_jitter.", "as brush_style.color_jitter."),
+	opt("options.ink_load", "0", "As brush_style.ink_load.", "as brush_style.ink_load."),
+	opt("options.redip_every", "40", "As brush_style.redip_every.", "as brush_style.redip_every."),
+	opt("options.redip_by", "glyphs", "As brush_style.redip_by.", "as brush_style.redip_by."),
 ]);
 doc += api("brush_style.color = color", "The ink.", [
 	arg("color", "The ink.", "a CSS colour or a gradient."),
@@ -428,10 +431,21 @@ doc += api("brush_style.pool_depth = number", "How far up the pooling rises.", [
 doc += api("brush_style.color_jitter = number", "Each stroke a little off its colour, each its own way: every subpath, so every pass of a stroke gone over, too. Colours move in OKLab, so steps look alike whatever the colour: lightness up to number either way, hue and chroma (OKLab's a and b) up to half that times the colour's lightness, so dark inks keep their hue, alpha kept. A gradient's colours move with its stroke. Drawn from the journal's generator as strokes are added to a canvas.", [
 	arg("number", "How far lightness moves, OKLab lightness running from 0 (black) to 1 (white): 0.05 is a slight variation. Default 0.", "a number from 0 to 1."),
 ]);
+doc += api("brush_style.ink_load = number", "A dip pen running dry: each stroke lighter and thinner than the last, its pressure and its colour's opacity falling off, slowly at first and faster as the dip runs out, until it's written redip_every since it was dipped, when it's this far down, and it's dipped again before its next word (a word it's in the middle of is finished dry). Strokes are counted in the order they're drawn on a canvas, every canvas starting freshly dipped, and each pen apart: strokes in another brush or colour have ink of their own. Nothing is drawn from the journal's generator.", [
+	arg("number", "How far the ink falls off by the time the pen is dipped again, as a fraction: 0.4 is 40% lighter. Default 0, never running dry.", "a number from 0 up to, not including, 1."),
+]);
+doc += api("brush_style.redip_every = number", "How much the pen writes between dips, as redip_by measures it.", [
+	arg("number", "How many glyphs, or canvas units of stroke. Default 40.", "a positive number."),
+]);
+doc += api("brush_style.redip_by = name", "What a dip is measured in: glyphs, each glyph written counting one (and a path that isn't text, one too), or the length of the strokes drawn, passes and all.", [
+	arg("name", "Default glyphs.", "glyphs or length."),
+]);
 doc += api("new_handwriting_style(), new_handwriting_style(options)", "A handwriting style: one clean pass, nothing astray, unless the options set its properties (below), as setting them does.", [
 	opt("options.passes", "1", "As handwriting_style.passes.", "as handwriting_style.passes."),
 	opt("options.pass_end_jitter", "0", "As handwriting_style.pass_end_jitter.", "as handwriting_style.pass_end_jitter."),
 	opt("options.stroke_point_jitter", "0", "As handwriting_style.stroke_point_jitter.", "as handwriting_style.stroke_point_jitter."),
+	opt("options.stroke_warp", "0", "As handwriting_style.stroke_warp.", "as handwriting_style.stroke_warp."),
+	opt("options.stroke_warp_length", "20", "As handwriting_style.stroke_warp_length.", "as handwriting_style.stroke_warp_length."),
 	opt("options.glyph_position_jitter", "0", "As handwriting_style.glyph_position_jitter.", "as handwriting_style.glyph_position_jitter."),
 	opt("options.glyph_rotation_jitter", "0", "As handwriting_style.glyph_rotation_jitter.", "as handwriting_style.glyph_rotation_jitter."),
 	opt("options.glyph_scale_jitter", "0", "As handwriting_style.glyph_scale_jitter.", "as handwriting_style.glyph_scale_jitter."),
@@ -445,6 +459,12 @@ doc += api("handwriting_style.pass_end_jitter = number", "How far each pass's en
 ]);
 doc += api("handwriting_style.stroke_point_jitter = number", "How far every point of every pass strays, control points included, each its own way, so curves change shape rather than just shifting. On top of pass_end_jitter.", [
 	arg("number", "How far, in canvas units. Default 0.", "a number of at least 0."),
+]);
+doc += api("handwriting_style.stroke_warp = number", "A hand's slow tremor: every pass of every stroke bent by smooth noise along it, so lines waver and curves wobble rather than fuzz, each pass its own way. Long straight segments are cut into pieces to bend too. After pass_end_jitter, before stroke_point_jitter. Drawn from the journal's generator as strokes are added to a canvas.", [
+	arg("number", "How far a point moves, at most, across and down, in canvas units. Default 0.", "a number of at least 0."),
+]);
+doc += api("handwriting_style.stroke_warp_length = number", "How far along a stroke the tremor takes to turn.", [
+	arg("number", "The distance, in canvas units: short shakes, long sways. Default 20.", "a positive number."),
 ]);
 doc += api("handwriting_style.glyph_position_jitter = number", "How far each glyph text calls place strays, at most, either way.", [
 	arg("number", "How far, in canvas units. Default 0.", "a number of at least 0, or [across, down]."),
@@ -609,8 +629,9 @@ doc += api("type_style.skew = angle, type_style.italic = on", "Leans the glyphs,
 doc += api("type_style.joined = on", "Whether a cursive glyphset's words are joined up, over the glyphset's (see glyphset.joined).", [
 	arg("on", "Whether they join; true joins only a glyphset whose file gives joins.", "true or false."),
 ]);
-doc += api("type_style.underline = lines, type_style.strike = lines", "Lines under the text, one below another, or through it, back and forth as one stroke, scribbling it out. Drawn where text is typeset (flows and labels, and spans in markdown); lines run across the spaces between words and break where the text does.", [
-	arg("lines", "Which lines.", "true for one, false for none, a number of lines from 1 to 20, or #{ count, spacing, style }: count lines (default 1), spacing glyph scales apart (default as the pen sets them), drawn in style, a style or a map of style settings over the text's (default the text's)."),
+doc += api("type_style.underline = lines, type_style.strike = lines", "Lines under the text, one below another, or through it, back and forth as one stroke, scribbling it out. A strike can instead hide the text under one stroke made by hand, reaching a little above and below it: a scribble, a tight zigzag back and forth across it working down it; loops, a coil of loops along it; or a blot, rows back and forth filling a lumpy round of ink. Drawn where text is typeset (flows and labels, and spans in markdown); lines run across the spaces between words and break where the text does.", [
+	arg("lines", "Which lines.", "true for one, false for none, a number of lines from 1 to 20, or #{ count, spacing, style }: count lines (default 1), spacing glyph scales apart (default as the pen sets them), drawn in style, a style or a map of style settings over the text's (default the text's). A strike also takes kind, and a kind's name alone (strike: scribble is #{ kind: scribble })."),
+	opt("lines.kind", "lines", "How a strike strikes the text out; count is then how many times across (a scribble down and back up, loops there and back) or a blot's coats, and spacing (in glyph scales) how far apart a scribble's sweeps are (default 0.08), a coil's loops (default 0.3) or a blot's rows (default half the pen's width).", "lines, scribble, loops or blot; strikes only."),
 ]);
 doc += api("new_paragraph_style(), new_paragraph_style(options)", "A paragraph style: the defaults below unless the options set them, as setting the properties does.", [
 	opt("options.KEY", "as below", "Any of the properties below.", "as each takes."),
@@ -1018,14 +1039,14 @@ doc += listing("Roles: the keys of each role in typeset's roles. Flows and label
 
 doc += heading("Marked-Up Text");
 doc += api("markdown(text), markdown(text, options)", "A flow whose text is styled as it's set. Spans nest, each changing what it's in.", [
-	arg("text", "The text, with its marks: *emphasis* or _emphasis_ is the span em; **strong** or __strong__ the span strong; ~~text~~ is struck through; [text]{settings} is set with settings of its own: span names, and key: value pairs, separated by commas, a key alone meaning true. A word alone is a setting if it's one, and a span's name otherwise; the spans named are applied first, then the settings. A backslash writes a mark as it is.", "a string."),
+	arg("text", "The text, with its marks: *emphasis* or _emphasis_ is the span em; **strong** or __strong__ the span strong; ~~text~~ the span struck; [text]{settings} is set with settings of its own: span names, and key: value pairs, separated by commas, a key alone meaning true. A word alone is a setting if it's one, and a span's name otherwise; the spans named are applied first, then the settings. A backslash writes a mark as it is.", "a string."),
 	opt("options.spans", "none", "Named spans of the text's own, over its role's.", "a map of names to spans."),
 ]);
-doc += listing("A span: a style and a type, each whole or a map of settings over the text it's in. em is by default #{ type: #{ italic: true } }, and strong #{ style: #{ passes: 2, pass_end_jitter: 1.3 } }: gone over twice, a little astray.", [
+doc += listing("A span: a style and a type, each whole or a map of settings over the text it's in. em is by default #{ type: #{ italic: true } }, strong #{ style: #{ passes: 2, pass_end_jitter: 1.3 } }: gone over twice, a little astray, and struck #{ type: #{ strike: true } }: a line through; struck: #{ type: #{ strike: scribble } } scribbles out what ~~ marks.", [
 	opt("style", "the text's", "What it's drawn in.", "a style, or a map of style settings."),
 	opt("type", "the text's", "How it's set: a glyph_scale_factor multiplies the size of the text round it, and underline and strike draw lines under and through it.", "a type style, or a map of type settings."),
 ]);
-doc += para("Settings in a span's braces are a style's and a type's: color, passes, pass_end_jitter and the rest; italic, skew, glyph_scale_factor, glyph_outline_gap, space_width, underline and strike. Lines take true, false (none, inside text that has them), a number of lines, or {count, spacing, style}, the style in braces too.");
+doc += para("Settings in a span's braces are a style's and a type's: color, passes, pass_end_jitter and the rest; italic, skew, glyph_scale_factor, glyph_outline_gap, space_width, underline and strike. Lines take true, false (none, inside text that has them), a number of lines, or {count, spacing, style}, the style in braces too; a strike also takes kind, or a kind's name alone: [text]{strike: blot}.");
 
 // ---- locks ----
 

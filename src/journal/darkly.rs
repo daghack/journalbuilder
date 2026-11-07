@@ -8,7 +8,7 @@ use image::{ImageBuffer, Rgba};
 use parry2d::math::Vec2;
 use rayon::prelude::*;
 use crate::journal::paths::{CurveSample};
-use crate::journal::canvas::{Canvas, ColoredStroke, StrokeColor};
+use crate::journal::canvas::{Canvas, ColoredStroke, InkAlong, StrokeColor};
 use crate::journal::compose::{self, Placed};
 use crate::journal::canvas::color_jitter::{shifted, Shift};
 use crate::journal::gradient::{colorize, Along, GradientKind};
@@ -479,6 +479,9 @@ impl Pen<'_> {
         // vertical gradient runs between.
         let (top, bottom) = substrokes.iter().flatten()
             .fold((f32::MAX, f32::MIN), |(top, bottom), s| (top.min(s.point.y), bottom.max(s.point.y)));
+        // How strong its ink is along it, if its pen runs dry: its pressure
+        // and opacity both.
+        let ink = InkAlong::new(stroke.ink, &substrokes);
         let mut points = Vec::new();
         for (i, samples) in substrokes.into_iter().enumerate() {
             // Darkly seeds each stroke's random brush texture from the wall
@@ -495,15 +498,18 @@ impl Pen<'_> {
             // its points, Darkly draws the whole stroke at once when it ends.
             self.engine.begin_stroke(layer).expect("begin_stroke failed");
             let sample_count = samples.len();
+            let subpath = i;
             let mut distance = 0.0;
             let mut last = samples.first().map(|s| s.point);
             for (i, CurveSample { point, normal, .. }) in samples.into_iter().enumerate() {
                 distance += last.map_or(0.0, |l| l.distance(point));
                 last = Some(point);
                 let t_param = i as f32 / sample_count as f32;
+                let strength = ink.at(subpath, distance);
                 let pressure = (brush.pressure_profile.at(t_param, normal) * pressure_range + pressure_min)
                     * brush.pooling(point.y, top, bottom)
-                    * variation.as_ref().map_or(1.0, |v| v.at(distance));
+                    * variation.as_ref().map_or(1.0, |v| v.at(distance))
+                    * strength;
                 // Where it is in the whole page's render, less the offset:
                 // a whole number, so a tile's strokes land exactly where the
                 // page's would.
@@ -523,7 +529,7 @@ impl Pen<'_> {
                     cr,
                     cg,
                     cb,
-                    ca,
+                    ca: ca * strength,
                 });
             }
             self.engine.end_stroke();

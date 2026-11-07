@@ -11,8 +11,8 @@
 //! ```
 //!
 //! The markup (see `journal::markup`): `*text*` or `_text_` is the span
-//! `em`, `**text**` or `__text__` the span `strong`, `~~text~~` struck
-//! through, and `[text]{settings}` text with settings of its own: span
+//! `em`, `**text**` or `__text__` the span `strong`, `~~text~~` the span
+//! `struck`, and `[text]{settings}` text with settings of its own: span
 //! names, and `key: value` pairs, separated by commas (a key on its own is
 //! `true`). A word on its own is a setting if it's one, and a span's name
 //! otherwise; the spans named are applied first, then the settings. Spans
@@ -25,22 +25,26 @@
 //! `false` (none, inside text that has them), or `{count, spacing, style}`,
 //! drawn by default in the text's style. Lines under text go one below
 //! another; lines through it go back and forth through it as one stroke,
-//! as scribbling out. They run across the spaces between words, but break
-//! where the text does: at the end of a line, either side of what the text
-//! avoids, and wherever they'd come near it.
+//! as scribbling out. A strike can be another kind, `{kind: scribble}` or
+//! just `scribble`, `loops` or `blot`, hiding the text under one stroke.
+//! They run across the spaces between words, but break where the text
+//! does: at the end of a line, either side of what the text avoids, and
+//! wherever they'd come near it.
 //!
 //! Spans are named in a role's `spans` and in `markdown`'s, which win: each
 //! `#{ style, type }`, a whole style or type, or a map of some of their
-//! settings over the text's. `em` and `strong` are spans too, by default
-//! `#{ type: #{ italic: true } }` and
+//! settings over the text's. `em`, `strong` and `struck` are spans too, by
+//! default `#{ type: #{ italic: true } }`,
 //! `#{ style: #{ passes: 2, pass_end_jitter: 1.3 } }` (gone over twice, a
-//! little astray).
+//! little astray) and `#{ type: #{ strike: true } }` (a line through), so
+//! `spans: #{ struck: #{ type: #{ strike: "scribble" } } }` scribbles out
+//! what `~~` marks.
 
 use rhai::{Dynamic, Engine, EvalAltResult, Map};
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use super::canvas::CanvasData;
+use super::canvas::{CanvasData, TextRun};
 use super::options::{check_keys, Settings};
 use super::text_settings::{RuleStyle, TypeStyle};
 use super::{check_finite, RhaiResult, Style};
@@ -48,7 +52,7 @@ use crate::journal::avoid::AvoidanceTree;
 use crate::journal::fonts::FontBook;
 use crate::journal::markup::{Markup, SpanKind, Value};
 use crate::journal::symbol::{joined_paths, Symbol};
-use crate::journal::typeset::{marked_runs, rule_path, Rule, Setting};
+use crate::journal::typeset::{marked_runs, rule_path, Lines, Rule, Setting};
 
 /// How a span changes the text it covers: a style, a type, each whole or
 /// a map of some settings over the text's.
@@ -88,7 +92,7 @@ impl SpanStyle {
         let style = Map::from_iter([("passes".into(), Dynamic::from(2_i64)), ("pass_end_jitter".into(), Dynamic::from(1.3))]);
         SpanStyle { style: Some(style.into()), type_: None }
     }
-    /// Struck through once, as `~~text~~` is.
+    /// Struck through once, as `~~text~~` is unless a span says otherwise.
     fn struck() -> SpanStyle {
         SpanStyle { style: None, type_: Some(Map::from_iter([("strike".into(), true.into())]).into()) }
     }
@@ -256,9 +260,7 @@ pub(super) struct Look {
 /// Lines under or through a span, ready to draw.
 #[derive(Clone, Debug)]
 struct RuleLook {
-    rule: Rule,
-    count: u32,
-    spacing: Option<f32>,
+    lines: Lines,
     ink: Ink,
 }
 
@@ -297,7 +299,8 @@ impl State {
                 continue;
             }
             *slot = rule.map(|r: &RuleStyle| {
-                rules.push(RuleLook { rule: kind, count: r.count, spacing: r.spacing, ink: ink.then(r.style.as_ref()) });
+                let lines = Lines { rule: kind, kind: r.kind, count: r.count, spacing: r.spacing };
+                rules.push(RuleLook { lines, ink: ink.then(r.style.as_ref()) });
                 rules.len() - 1
             });
         }
@@ -363,7 +366,7 @@ impl Styled {
             let state = match (&span.kind, inline) {
                 (SpanKind::Emphasis, _) => around.then(&caller, spans.get("em").unwrap_or(&em), &mut rules)?,
                 (SpanKind::Strong, _) => around.then(&caller, spans.get("strong").unwrap_or(&strong), &mut rules)?,
-                (SpanKind::Strike, _) => around.then(&caller, &struck, &mut rules)?,
+                (SpanKind::Strike, _) => around.then(&caller, spans.get("struck").unwrap_or(&struck), &mut rules)?,
                 (SpanKind::Settings(_), Some(inline)) => {
                     let mut state = around.clone();
                     for name in &inline.names {
@@ -410,15 +413,13 @@ impl Styled {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn draw(&self, canvas: &mut CanvasData, setting: &Setting, start: usize, style: &Style, avoid: &AvoidanceTree, clearance: f32, rng: &mut dyn rand::RngCore) -> RhaiResult<()> {
         const CALLER: &str = "typeset";
-        let mut add = |path, style: Style| -> RhaiResult<()> {
-            check_finite(CALLER, &path)?;
-            canvas.add_path(path, &style, rng);
-            Ok(())
-        };
         // Joined up, but not where the look changes.
         let look_at = |k: usize| self.look_of[start + setting.places[k].index];
-        for (glyphs, path) in joined_paths(&setting.placed[..setting.places.len().min(setting.placed.len())], |k| look_at(k) != look_at(k - 1)) {
-            add(path, self.look(start + setting.places[glyphs.start].index).ink.on(CALLER, style)?)?;
+        let placed = &setting.placed[..setting.places.len().min(setting.placed.len())];
+        for (glyphs, path) in joined_paths(placed, |k| look_at(k) != look_at(k - 1)) {
+            check_finite(CALLER, &path)?;
+            let ink = self.look(start + setting.places[glyphs.start].index).ink.on(CALLER, style)?;
+            canvas.add_text_path(path, TextRun::of(placed, glyphs), &ink, rng);
         }
         for rule in [Rule::Under, Rule::Through] {
             let mark = |k: usize| {
@@ -428,8 +429,10 @@ impl Styled {
             for (r, run) in marked_runs(setting, mark) {
                 let glyphs: Vec<&Symbol> = run.iter().map(|&p| &setting.placed[p]).collect();
                 let rule_look = &self.rules[r];
-                let path = rule_path(&glyphs, rule_look.rule, rule_look.count, rule_look.spacing, Some(avoid), clearance);
-                add(path, rule_look.ink.on(CALLER, style)?)?;
+                let ink = rule_look.ink.on(CALLER, style)?;
+                let path = rule_path(&glyphs, &rule_look.lines, ink.pen_width(), Some(avoid), clearance, rng);
+                check_finite(CALLER, &path)?;
+                canvas.add_path(path, &ink, rng);
             }
         }
         Ok(())
@@ -587,6 +590,38 @@ mod tests {
         assert!(ys.windows(2).all(|w| w[1] > w[0]), "{:?}", ys);
         let once: Vec<&Vec<Vec2>> = s.iter().filter(|(p, st)| color(st) == "black" && p.len() == 2 && (p[0].y - p[1].y).abs() < 1e-3).map(|(p, _)| p).collect();
         assert_eq!(once.len(), 1, "~~once~~ is struck through once");
+    }
+
+    #[test]
+    fn strikes_hide_text_under_a_scribble_loops_or_a_blot() {
+        let bounds = |points: &mut dyn Iterator<Item = Vec2>| points.fold((Vec2::splat(f32::MAX), Vec2::splat(f32::MIN)), |(a, b), p| (a.min(p), b.max(p)));
+        for (kind, settings) in [("scribble", "{kind: scribble, style: {color: red}}"), ("loops", "{kind: loops, count: 2, style: {color: red}}"), ("blot", "{kind: blot, style: {color: red}}")] {
+            let entry = typeset(&format!(r#"markdown("[hidden]{{strike: {}}}")"#, settings), "", "").unwrap();
+            let s = strokes(&entry);
+            let red: Vec<&Vec<Vec2>> = s.iter().filter(|(_, st)| color(st) == "red").map(|(p, _)| p).collect();
+            assert_eq!(red.len(), 1, "{}: one stroke", kind);
+            assert_eq!(s.iter().filter(|(_, st)| color(st) == "red").map(|(_, st)| st.path.substroke_count()).sum::<usize>(), 1, "{}: one subpath", kind);
+            let (lo, hi) = bounds(&mut red[0].iter().copied());
+            let (text_lo, text_hi) = bounds(&mut s.iter().filter(|(_, st)| color(st) == "black").flat_map(|(p, _)| p.iter().copied()));
+            // Across the whole word, and most of its height, ascenders too.
+            assert!(lo.x <= text_lo.x + 1.0 && hi.x >= text_hi.x - 1.0, "{}: {:?} across {:?}", kind, (lo, hi), (text_lo, text_hi));
+            assert!(hi.y - lo.y >= 0.8 * (text_hi.y - text_lo.y), "{}: {:?} down {:?}", kind, (lo, hi), (text_lo, text_hi));
+            assert!(red[0].len() > 8, "{}: many turns", kind);
+        }
+        // A kind's name alone, and ~~ as the span struck says.
+        let entry = typeset(r#"markdown("[ab]{strike: blot} ~~cd~~", #{ spans: #{ struck: #{ type: #{ strike: "loops" } } } })"#, "", "").unwrap();
+        // Four glyphs, then what strikes them out.
+        let points: Vec<usize> = strokes(&entry).iter().map(|(p, _)| p.len()).collect();
+        assert!(points.len() == 6 && points[4] > 20 && points[5] > 20, "both struck out: {:?}", points);
+        for (text, want) in [
+            ("[x]{strike: {kind: smudge}}", "unknown kind 'smudge'"),
+            ("[x]{underline: scribble}", "'underline' should be true, false, a number of lines or #{ count, spacing, style }, got 'scribble'"),
+            ("[x]{underline: {kind: scribble}}", "unknown option 'kind'"),
+            ("[x]{strike: smudge}", "'strike' should be true, false, a number of lines, a kind of strike (lines, scribble, loops, blot)"),
+        ] {
+            let err = engine().build_entry_str(&format!("let ok = 1;\nmarkdown({:?});", text)).expect_err(text);
+            assert!(err.contains(want) && err.contains("line 2"), "{}: {}", want, err);
+        }
     }
 
     #[test]

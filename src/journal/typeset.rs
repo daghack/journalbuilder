@@ -482,6 +482,51 @@ pub enum Rule {
     Through,
 }
 
+/// How text is struck out: with lines, or hidden under a scribble, a coil
+/// of loops or a blot of ink.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum StrikeKind {
+    #[default]
+    Lines,
+    Scribble,
+    Loops,
+    Blot,
+}
+
+impl StrikeKind {
+    pub const NAMES: [&'static str; 4] = ["lines", "scribble", "loops", "blot"];
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "lines" => Some(Self::Lines),
+            "scribble" => Some(Self::Scribble),
+            "loops" => Some(Self::Loops),
+            "blot" => Some(Self::Blot),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Lines => "lines",
+            Self::Scribble => "scribble",
+            Self::Loops => "loops",
+            Self::Blot => "blot",
+        }
+    }
+}
+
+/// Lines under or through text, as they're drawn: how many (or, for a
+/// strike that isn't lines, how many times across), of what kind, and how
+/// far apart, in sizes, if not as the pen sets them.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Lines {
+    pub rule: Rule,
+    pub kind: StrikeKind,
+    pub count: u32,
+    pub spacing: Option<f32>,
+}
+
 /// How far below the baseline a line under text goes, and by default how
 /// far apart lines under it are, in sizes.
 const UNDER_GAP: f32 = 0.12;
@@ -494,11 +539,25 @@ const SCRIBBLE_BAND: f32 = 0.8;
 const SCRIBBLE_STEP: f32 = 0.25;
 const SCRIBBLE_MAX: f32 = 1.2;
 const SCRIBBLE_FALL: f32 = 0.3;
+/// A scribble or a coil of loops covers the body of the text from
+/// `COVER_ABOVE` of its height above its top to `COVER_BELOW` below its
+/// baseline; a blot reaches further, to `BLOT_ABOVE` and `BLOT_BELOW`, and
+/// `BLOT_PAST` sizes past either end.
+const COVER_ABOVE: f32 = 0.45;
+const COVER_BELOW: f32 = 0.15;
+const BLOT_ABOVE: f32 = 0.6;
+const BLOT_BELOW: f32 = 0.3;
+const BLOT_PAST: f32 = 0.08;
+/// By default, how far apart a scribble's sweeps are, and a coil's loops,
+/// in sizes, and a blot's rows, in pen widths.
+const SCRIBBLE_SWEEP: f32 = 0.08;
+const LOOP_STEP: f32 = 0.3;
+const BLOT_ROW: f32 = 0.5;
 
-/// `count` lines under or through a run of set glyphs (in order along one
-/// line), from the left of the first to the right of the last, `spacing`
+/// `lines` under or through a run of set glyphs (in order along one line),
+/// from the left of the first to the right of the last, `lines.spacing`
 /// sizes apart if given (how far apart lines can be and still show depends
-/// on the pen).
+/// on the pen, `pen` wide).
 ///
 /// Lines under go just below the glyphs' baseline (the middle of where they
 /// end at the bottom), each below the last, and break where they come
@@ -507,7 +566,15 @@ const SCRIBBLE_FALL: f32 = 0.3;
 /// where they start at the top (in lowercase text, a lowercase letter's
 /// height); more go back and forth across the body as one stroke, each
 /// below the last, as words are scribbled out.
-pub fn rule_path(glyphs: &[&Symbol], rule: Rule, count: u32, spacing: Option<f32>, avoid: Option<&AvoidanceTree>, clearance: f32) -> StrokePath {
+///
+/// Struck out another way, the body is hidden, a little above and below
+/// it too, by one stroke made by hand (its unevenness drawn from `rng`): a
+/// tight zigzag back and forth across it, working down it (`count` times,
+/// down and back up), a coil of loops along it (`count` times, there and
+/// back), or a blot of ink, rows back and forth filling a lumpy round
+/// (`count` coats of it).
+pub fn rule_path(glyphs: &[&Symbol], lines: &Lines, pen: f32, avoid: Option<&AvoidanceTree>, clearance: f32, rng: &mut dyn RngCore) -> StrokePath {
+    let Lines { rule, kind, count, spacing } = *lines;
     let mut path = StrokePath::new();
     if glyphs.is_empty() || count == 0 {
         return path;
@@ -542,6 +609,19 @@ pub fn rule_path(glyphs: &[&Symbol], rule: Rule, count: u32, spacing: Option<f32
                 }
             }
         }
+        Rule::Through if kind != StrikeKind::Lines => {
+            let height = (baseline - top).max(size * 0.3);
+            let cover = (top - COVER_ABOVE * height, baseline + COVER_BELOW * height);
+            return match kind {
+                StrikeKind::Scribble => scribble(x0, x1, cover, count, spacing.unwrap_or(SCRIBBLE_SWEEP) * size, rng),
+                StrikeKind::Loops => coil(x0, x1, cover, count, spacing.unwrap_or(LOOP_STEP) * size, rng),
+                _ => {
+                    let (x0, x1) = (x0 - BLOT_PAST * size, x1 + BLOT_PAST * size);
+                    let cover = (top - BLOT_ABOVE * height, baseline + BLOT_BELOW * height);
+                    blot(x0, x1, cover, count, spacing.map_or(BLOT_ROW * pen, |s| s * size), rng)
+                }
+            };
+        }
         Rule::Through => {
             let middle = (top + baseline) / 2.0;
             if count == 1 {
@@ -559,6 +639,140 @@ pub fn rule_path(glyphs: &[&Symbol], rule: Rule, count: u32, spacing: Option<f32
                 path = if k == 0 { path.move_to(from, y) } else { path.line_to(from, y) };
                 path = path.line_to(to, y + step * SCRIBBLE_FALL);
             }
+        }
+    }
+    path
+}
+
+/// A tight zigzag across the band from `cover.0` down to `cover.1`: sweeps
+/// back and forth from `x0` to `x1`, each about `step` below the last,
+/// down the band and back up, `passes` times over (each pass between the
+/// last one's sweeps), its turns mostly a little past the ends, as a hand
+/// scribbles a word out.
+fn scribble(x0: f32, x1: f32, cover: (f32, f32), passes: u32, step: f32, rng: &mut dyn RngCore) -> StrokePath {
+    let (top, bottom) = cover;
+    let band = bottom - top;
+    let step = step.max(band / 60.0).max(1e-2);
+    // How far a turn goes past its end, or (less often, and less far) short.
+    let stray = band * 0.15;
+    let turn = |left: bool, rng: &mut dyn RngCore| {
+        let past = stray * rng.random_range(-0.3..1.0);
+        if left { x0 - past } else { x1 + past }
+    };
+    let mut path = StrokePath::new();
+    let mut left = true;
+    for pass in 0..passes {
+        let down = pass % 2 == 0;
+        let way = if down { 1.0 } else { -1.0 };
+        let mut y = if down { top } else { bottom };
+        if pass > 0 {
+            y += way * step / 2.0;
+        }
+        let x = turn(left, rng);
+        path = if pass == 0 { path.move_to(x, y) } else { path.line_to(x, y) };
+        loop {
+            y += way * step * rng.random_range(0.7..1.3);
+            let done = if down { y >= bottom } else { y <= top };
+            left = !left;
+            path = path.line_to(turn(left, rng), y.clamp(top, bottom));
+            if done {
+                break;
+            }
+        }
+    }
+    path
+}
+
+/// A coil of loops along the band from `cover.0` down to `cover.1`, from
+/// `x0` to `x1` and back, `passes` times across, a loop about every `step`,
+/// each a little bigger or smaller than the last: round the way a hand
+/// writes an `e`, back over the top and on along the bottom.
+fn coil(x0: f32, x1: f32, cover: (f32, f32), passes: u32, step: f32, rng: &mut dyn RngCore) -> StrokePath {
+    use std::f32::consts::{FRAC_PI_2, TAU};
+    let (top, bottom) = cover;
+    let (middle, ry) = ((top + bottom) / 2.0, (bottom - top) / 2.0);
+    let step = step.max(1e-2);
+    // As wide as tall, about, and always wide enough to loop back on itself.
+    let rx = (ry * 0.55).max(step / TAU * 1.5);
+    let mut path = StrokePath::new();
+    let loops = (((x1 - x0 - 2.0 * rx).max(0.0) / step).ceil() as usize).max(1);
+    for pass in 0..passes {
+        let forward = pass % 2 == 0;
+        // Each pass a little lower than the last, as a hand drifts.
+        let drop = ry * 0.12 * pass as f32;
+        // A quarter turn at a time: where it is, and which way it's going.
+        let quarters = 4 * loops;
+        let mut knots = Vec::with_capacity(quarters + 1);
+        for q in 0..=quarters {
+            let theta = q as f32 * FRAC_PI_2;
+            let (sx, sy) = (rx * rng.random_range(0.85..1.15), ry * rng.random_range(0.85..1.1));
+            let advance = step / TAU;
+            let along = x0 + rx + advance * theta;
+            let (x, dx) = (along - sx * theta.sin(), advance - sx * theta.cos());
+            let (y, dy) = (middle + drop - sy * theta.cos(), sy * theta.sin());
+            // Backwards, mirrored about the middle of the run.
+            let (x, dx) = if forward { (x, dx) } else { (x0 + x1 - x, -dx) };
+            knots.push((Vec2::new(x, y), Vec2::new(dx, dy)));
+        }
+        let (start, _) = knots[0];
+        path = if pass == 0 { path.move_to(start.x, start.y) } else { path.line_to(start.x, start.y) };
+        for w in knots.windows(2) {
+            let ((a, da), (b, db)) = (w[0], w[1]);
+            let (c1, c2) = (a + da * (FRAC_PI_2 / 3.0), b - db * (FRAC_PI_2 / 3.0));
+            path = path.cubic_curve_to(c1.x, c1.y, c2.x, c2.y, b.x, b.y);
+        }
+    }
+    path
+}
+
+/// A blot of ink filling the box from `x0` to `x1` across and `cover.0`
+/// down to `cover.1`: rows `row` apart, back and forth as one stroke,
+/// filling a lumpy round (squarer than an ellipse, so it covers the ends
+/// of the text, and lumps only ever reaching further), `coats` times over,
+/// each coat between the last one's rows.
+fn blot(x0: f32, x1: f32, cover: (f32, f32), coats: u32, row: f32, rng: &mut dyn RngCore) -> StrokePath {
+    use std::f32::consts::TAU;
+    let (top, bottom) = cover;
+    let center = Vec2::new((x0 + x1) / 2.0, (top + bottom) / 2.0);
+    let radii = Vec2::new((x1 - x0) / 2.0, (bottom - top) / 2.0);
+    // Its edge: a superellipse, with lumps round it: a few slow waves out
+    // from it, as far as its height's.
+    let waves: Vec<(f32, f32, f32)> = (2..=7).map(|k| (k as f32, rng.random_range(0.0..TAU), rng.random_range(0.03..0.1))).collect();
+    let squarer = |c: f32| c.signum() * c.abs().powf(0.6);
+    let edge: Vec<Vec2> = (0..128).map(|i| {
+        let a = i as f32 / 128.0 * TAU;
+        let lump = radii.y * waves.iter().map(|(k, phase, amp)| amp * (1.0 + (k * a + phase).sin())).sum::<f32>();
+        center + Vec2::new(radii.x * squarer(a.cos()) + lump * a.cos(), radii.y * squarer(a.sin()) + lump * a.sin())
+    }).collect();
+    // Where a row across at `y` goes in and out of it.
+    let across = |y: f32| -> Option<(f32, f32)> {
+        let mut xs = Vec::new();
+        for (i, a) in edge.iter().enumerate() {
+            let b = edge[(i + 1) % edge.len()];
+            if (a.y <= y) != (b.y <= y) {
+                xs.push(a.x + (y - a.y) / (b.y - a.y) * (b.x - a.x));
+            }
+        }
+        let (lo, hi) = xs.iter().fold((f32::MAX, f32::MIN), |(lo, hi), &x| (lo.min(x), hi.max(x)));
+        (hi > lo).then_some((lo, hi))
+    };
+    let (lowest, highest) = edge.iter().fold((f32::MAX, f32::MIN), |(lo, hi), p| (lo.min(p.y), hi.max(p.y)));
+    let row = row.max((highest - lowest) / 400.0).max(1e-2);
+    let mut path = StrokePath::new();
+    let mut started = false;
+    for coat in 0..coats {
+        let down = coat % 2 == 0;
+        let offset = if coat > 0 { row / 2.0 } else { 0.0 };
+        let rows = ((highest - lowest - offset) / row).floor().max(0.0) as usize + 1;
+        for k in 0..rows {
+            let y = if down { lowest + offset + row * k as f32 } else { highest - offset - row * k as f32 };
+            let Some((a, b)) = across(y) else { continue };
+            // Its ends a little short or long, as a hand fills in.
+            let (a, b) = (a + row * rng.random_range(-0.4..0.4), b + row * rng.random_range(-0.4..0.4));
+            let ((from, to), y2) = (if k % 2 == 0 { (a, b) } else { (b, a) }, y + row * rng.random_range(-0.2..0.2));
+            path = if started { path.line_to(from, y) } else { path.move_to(from, y) };
+            path = path.line_to(to, y2);
+            started = true;
         }
     }
     path
@@ -783,7 +997,8 @@ mod tests {
         // Lines under a run reach from its first glyph to its last.
         let (_, run) = &marked_runs(&s, |k| marks[k])[0];
         let glyphs: Vec<&Symbol> = run.iter().map(|&p| &s.placed[p]).collect();
-        let under = rule_path(&glyphs, Rule::Under, 2, None, None, 0.0).points_within();
+        let lines = Lines { rule: Rule::Under, kind: StrikeKind::Lines, count: 2, spacing: None };
+        let under = rule_path(&glyphs, &lines, 1.0, None, 0.0, &mut rng()).points_within();
         let xs = |g: &Symbol| g.footprint().iter().map(|p| p.x).collect::<Vec<_>>();
         assert_eq!(under.len(), 4, "two lines");
         assert!((under[0].x - xs(glyphs[0]).into_iter().fold(f32::MAX, f32::min)).abs() < 1e-3);

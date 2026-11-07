@@ -3,8 +3,9 @@
 //
 //   pens      every Darkly brush; brush styles (pressure profiles and
 //             ranges, colours, gradients, pooling ink, wandering pressure,
-//             colour jitter), handwriting (strokes gone over in passes and
-//             reshaped), and styles made of the two
+//             ink running dry, colour jitter), handwriting (strokes gone
+//             over in passes, reshaped and trembling), and styles made of
+//             the two
 //   glyphsets every glyphset, its alphabet and a line, glyphset settings,
 //             type styles (tracking, gaps, italics, scale), and glyphs
 //             placed by hand
@@ -326,6 +327,36 @@ pens.add(write_in("Lorem ipsum dolor sit amet, consectetur adipiscing elit,", LE
 pens.add(write_in("sed do eiusmod tempor incididunt ut labore et dolore.", LEFT, y + 110, 30, unsteady, PLAIN));
 book.bind("pens", pens);
 
+// A hand's slow tremor: stroke_warp bends each pass by smooth noise along
+// it, up to stroke_warp across and down, turning about every
+// stroke_warp_length, so lines waver and curves wobble rather than fuzz.
+let pens = sheet("pens");
+pens.add(subhead("a trembling hand", TOP));
+pens.add(caption("new_handwriting_style(#{ stroke_warp: a, stroke_warp_length: l }): each pass bent up to a, turning every l or so", TOP + 50));
+let y = TOP + 130;
+for row in [[0, 20], [1, 20], [2.5, 20], [2, 60], [5, 150]] {
+	let style = new_style(fine, new_handwriting_style(#{ stroke_warp: row[0], stroke_warp_length: row[1] }));
+	assert(style.stroke_warp == row[0] && style.stroke_warp_length == row[1], "stroke_warp reads back");
+	pens.add(write(`warp ${row[0]}, length ${row[1]}`, LEFT, y, 24));
+	pens.add(new_line(vec2(380, y), vec2(760, y)), style);
+	pens.add(new_circle(vec2(850, y), 30), style);
+	pens.add(write_in("lorem", 920, y, 56, style, LOCHE));
+	y += 110;
+}
+y += 40;
+pens.add(caption("with passes: passes = 3, pass_end_jitter = 1, stroke_warp = 2, each pass trembling its own way", y));
+let trembling = new_style(scored, new_handwriting_style(#{ passes: 3, pass_end_jitter: 1, stroke_warp: 2 }));
+pens.add(write_in("lorem ipsum", LEFT, y + 110, 96, trembling, LOCHE));
+y += 200;
+pens.add(caption("body text in an old hand: style.stroke_warp = 0.7, style.stroke_warp_length = 30, in red", y));
+let old_hand = TEXT;
+old_hand.color = RED;
+old_hand.stroke_warp = 0.7;
+old_hand.stroke_warp_length = 30;
+pens.add(write_in("Lorem ipsum dolor sit amet, consectetur adipiscing elit,", LEFT, y + 60, 30, old_hand, PLAIN));
+pens.add(write_in("sed do eiusmod tempor incididunt ut labore et dolore.", LEFT, y + 110, 30, old_hand, PLAIN));
+book.bind("pens", pens);
+
 // Ink as a hand leaves it: pooling toward the bottom of each glyph, a
 // gradient down each glyph, and pressure wandering along each stroke.
 let pens = sheet("pens");
@@ -370,6 +401,44 @@ for profile in ["ramp", "taper", "constant"] {
 pens.add(caption("a hand that wanders: new_brush_style(..., #{ pressure_wander: 0.35, pressure_wander_length: 10 }), tapering", y));
 let wandering = new_brush_style(INK, "Ink Pen", 1.8, #{ pressure_profile: "taper", pressure_wander: 0.35, pressure_wander_length: 10 });
 pens.add(write_in("lorem ipsum dolor", LEFT, y + 80, 72, new_style(wandering, steady), LOCHE));
+book.bind("pens", pens);
+
+// A dip pen running dry: each stroke lighter and thinner than the last,
+// falling off faster as the dip runs out, until it's written redip_every
+// glyphs (or that much length of stroke), down by ink_load, and is dipped
+// again before its next word. Each pen (brush and colour) has its own ink,
+// counted in the order strokes are drawn on the canvas.
+let pens = sheet("pens");
+pens.add(subhead("running dry", TOP));
+pens.add(caption("new_brush_style(..., #{ ink_load: l, redip_every: n }): down by l after n glyphs, dipped again at the next word", TOP + 50));
+let dipped = new_brush_style(INK, "Ink Pen", 1.6, #{ min_pressure: 0.4, max_pressure: 0.8, ink_load: 0.45, redip_every: 45 });
+assert(dipped.ink_load == 0.45 && dipped.redip_every == 45.0 && dipped.redip_by == "glyphs", "ink reads back");
+let block = write_block(LOREM, vec2(LEFT, TOP + 110), RIGHT - LEFT, #{ style: new_style(dipped, steady), type: new_type_style(PLAIN, 30), paragraph: #{ line_height: 1.45 } });
+pens.add(block.canvas);
+let y = block.bottom + 60;
+pens.add(caption("brush_style.redip_by = \"length\", .redip_every = 2400: dipped every 2400 units of stroke, here hatching", y));
+let hatching = new_brush_style(INK, "Ink Pen", 2.4, #{ min_pressure: 0.5, max_pressure: 0.9 });
+hatching.ink_load = 0.7;
+hatching.redip_by = "length";
+hatching.redip_every = 2400;
+assert(hatching.redip_by == "length", "redip_by reads back");
+for i in 0..52 {
+	pens.add(new_line(vec2(LEFT + i * 18, y + 50), vec2(LEFT + 60 + i * 18, y + 230)), new_style(hatching, steady));
+}
+y += 290;
+pens.add(caption("each pen its own ink: style.ink_load = 0.5, .redip_every = 12, red words among near-black", y));
+let dry_red = pen(RED);
+dry_red.ink_load = 0.5;
+dry_red.redip_every = 12;
+let dry_ink = pen(INK);
+dry_ink.ink_load = 0.5;
+dry_ink.redip_every = 30;
+let x = LEFT;
+for (word, i) in ["Lorem", "ipsum", "dolor", "sit", "amet,", "consectetur", "adipiscing", "elit,", "sed", "do", "eiusmod"] {
+	let line = write_line(word, vec2(x, y + 70), #{ style: if i % 3 == 1 { dry_red } else { dry_ink }, type: new_type_style(PLAIN, 34) });
+	pens.add(line);
+	x = line.bounds().max.x + 14;
+}
 book.bind("pens", pens);
 
 // A style is a brush style and a handwriting style, their settings read
@@ -2081,10 +2150,11 @@ for page in layout("captioned_figure").typeset(#{
 }
 
 // Marked-up text: markdown(text) makes a flow that's styled as it's set.
-// *emphasis* and **strong** are the spans em and strong (by default
-// italic, and gone over twice); ~~text~~ is struck through; and
+// *emphasis*, **strong** and ~~text~~ are the spans em, strong and struck
+// (by default italic, gone over twice, and struck through); and
 // [text]{settings} names spans and sets a style's and a type's settings
-// of its own, lines under and through it among them. Spans are named in
+// of its own, lines under and through it among them. A strike can hide
+// text under a scribble, a coil of loops or a blot. Spans are named in
 // a role's spans and in markdown(text, #{ spans }), which win. Lines run
 // across the spaces in what they mark, and break where the text does: at
 // the ends of lines, and either side of what it wraps round.
@@ -2097,6 +2167,8 @@ fn markdown_page(n, info) {
 		flow("spans"),
 		flow("rules_label", #{ role: "caption" }),
 		flow("rules"),
+		flow("strikes_label", #{ role: "caption" }),
+		flow("strikes"),
 		flow("roles_label", #{ role: "caption" }),
 		flow("roles", #{ role: "loud" }),
 		flow("names_label", #{ role: "caption" }),
@@ -2129,6 +2201,8 @@ for page in new_layout("marked", Fn("markdown_page")).typeset(#{
 		spans: markdown("Lorem ipsum [dolor sit]{color: #9b2318} amet, [consectetur]{glyph_scale_factor: 1.6} adipiscing [elit]{glyph_scale_factor: 0.7}, [sed do eiusmod]{italic} tempor [incididunt]{skew: -0.3} ut [labore et dolore]{passes: 4, pass_end_jitter: 2.5} magna [aliqua]{stroke_point_jitter: 2}, [aliqua ut enim]{glyph_outline_gap: 0.5} ad [minim veniam quis nostrud]{space_width: 1.4} exercitation, [ullamco [laboris]{glyph_scale_factor: 1.5} nisi]{color: #9b2318, italic}."),
 		rules_label: "underline: true, a count, or {count, spacing, style}; strike likewise",
 		rules: markdown("Lorem ipsum [dolor sit amet]{underline} consectetur [adipiscing elit]{underline: 2} sed do [eiusmod tempor incididunt ut labore et dolore magna aliqua, ut enim ad minim veniam]{underline: {style: {color: #9b2318}}} quis nostrud ~~exercitation~~ ullamco [laboris nisi ut aliquip]{strike: {count: 3, style: {color: #9b2318}}} ex ea [commodo consequat]{color: #9b2318, strike: {count: 4, spacing: 0.2, style: {color: #2b1d12, pass_end_jitter: 1.5}}}."),
+		strikes_label: "strike: {kind: scribble}, loops or blot, or the kind alone, strike: blot; and ~~ as the span struck says, here a scribble",
+		strikes: markdown("Lorem ipsum [dolor sit]{strike: scribble} amet, consectetur [adipiscing]{strike: {kind: scribble, count: 2, style: {color: #9b2318}}} elit, sed do [eiusmod]{strike: loops} tempor [incididunt]{strike: {kind: loops, count: 2, style: {color: #9b2318}}} ut labore [et dolore]{strike: blot} magna ~~aliqua~~, ut enim [ad minim]{strike: {kind: blot, style: {color: #9b2318}}} veniam.", #{ spans: #{ struck: #{ type: #{ strike: "scribble" } } } }),
 		roles_label: "a role's spans: em: #{ style: #{ color } }, strong: #{ type: #{ underline: true }, style: #{ passes: 2, pass_end_jitter: 1 } }",
 		roles: markdown("Lorem ipsum *dolor sit* amet, **consectetur adipiscing** elit, sed *do eiusmod* tempor **incididunt** ut labore."),
 		names_label: "named spans: [text]{warn}, [text]{warn, color: ...}; the role's warn and aside, and markdown(text, #{ spans }) over them",
@@ -2139,7 +2213,7 @@ for page in new_layout("marked", Fn("markdown_page")).typeset(#{
 	roles: #{
 		heading: heading_role,
 		caption: #{ style: CAPTION, type: new_type_style(PLAIN, 20) },
-		marks: marked, spans: marked, rules: marked, loud: loud, names: named,
+		marks: marked, spans: marked, rules: marked, strikes: marked, loud: loud, names: named,
 		wrap: marked + #{ paragraph: #{ line_height: 1.45, align: "justify" } },
 		seal: #{ style: CAPTION },
 		folio: #{ style: CAPTION, type: new_type_style(PLAIN, 20) },

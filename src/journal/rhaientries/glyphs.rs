@@ -53,6 +53,7 @@ use std::rc::Rc;
 use super::options::{apply_props, float};
 use super::random::SharedRng;
 use rand::RngCore;
+use super::canvas::TextRun;
 use super::{Canvas, CanvasData, Path, Shared, Style, Vec2};
 use crate::journal::fonts::{Font, Mapping};
 use crate::journal::symbol::{joined_paths, Symbol};
@@ -111,7 +112,7 @@ pub(super) fn add_glyph(canvas: &mut CanvasData, glyph: &Glyph, style: &Style, r
     if !glyph.is_blank() {
         let path = glyph.placed_strokepath();
         super::check_finite("add_glyph", &path)?;
-        canvas.add_path(path, style, rng);
+        canvas.add_text_path(path, TextRun { glyphs: 1, mid_word: false }, style, rng);
     }
     Ok(())
 }
@@ -120,9 +121,9 @@ pub(super) fn add_glyph(canvas: &mut CanvasData, glyph: &Glyph, style: &Style, r
 /// their glyphset joins (see `symbol::joined_paths`), but not to a glyph
 /// where `breaks` says so.
 pub(super) fn add_glyphs(canvas: &mut CanvasData, glyphs: &[Symbol], breaks: impl Fn(usize) -> bool, style: &Style, rng: &mut dyn RngCore) -> RhaiResult<()> {
-    for (_, path) in joined_paths(glyphs, breaks) {
+    for (span, path) in joined_paths(glyphs, breaks) {
         super::check_finite("add_glyph", &path)?;
-        canvas.add_path(path, style, rng);
+        canvas.add_text_path(path, TextRun::of(glyphs, span), style, rng);
     }
     Ok(())
 }

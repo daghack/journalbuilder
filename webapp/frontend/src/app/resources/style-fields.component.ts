@@ -1,6 +1,6 @@
 import { Component, computed, forwardRef, input, output } from '@angular/core';
 import {
-  RULE_COUNT_FIELD, RULE_SPACING_FIELD, STYLE_FIELDS, numberOf, pairOf, readRule, ruleValue, startingValue,
+  RULE_COUNT_FIELD, RULE_KIND_FIELD, RULE_SPACING_FIELD, STYLE_FIELDS, numberOf, pairOf, readRule, ruleValue, startingValue,
   type Rule, type SettingField,
 } from '../journal/style-builder';
 import { PaintFieldComponent } from '../shared/paint-field.component';
@@ -71,6 +71,9 @@ export interface StyleChoices {
         </div>
         @if (rule().count) {
           <div class="under">
+            @if (f.key === 'strike') {
+              <app-setting-field [field]="kind" [value]="rule().kind" [choices]="choices()" (changed)="setRule({ kind: $any($event) ?? 'lines' })" />
+            }
             <app-setting-field [field]="spacing" [value]="rule().spacing" [choices]="choices()" (changed)="setRule({ spacing: $any($event) })" />
             <app-setting-overrides [fields]="ruleStyleFields" [values]="rule().style" [choices]="choices()" adding="Draw the lines differently…" (changed)="setRule({ style: $event })" />
           </div>
@@ -117,6 +120,7 @@ export class SettingFieldComponent {
   protected readonly ways = ['across', 'down'];
   protected readonly count = RULE_COUNT_FIELD;
   protected readonly spacing = RULE_SPACING_FIELD;
+  protected readonly kind = RULE_KIND_FIELD;
   protected readonly ruleStyleFields = STYLE_FIELDS.map((field) => ({ ...field, preview: undefined }));
 
   protected readonly number = computed(() => numberOf(this.value()));

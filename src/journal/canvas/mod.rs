@@ -180,6 +180,58 @@ impl Variation {
     }
 }
 
+/// How dry a pen is over one stroke, as a brush style's `ink_load` says:
+/// how far through its dip the pen is at the stroke's start and end (from
+/// 0, just dipped, to 1, due to be dipped again), and how far its ink has
+/// fallen off by then.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct InkRun {
+    pub load: f32,
+    pub from: f32,
+    pub to: f32,
+}
+
+impl InkRun {
+    /// How strong the ink is `t` of the way along the stroke, by length,
+    /// as a multiple of its pressure and its colour's opacity: 1 just
+    /// dipped, falling off faster as the dip runs out, to `1 - load`.
+    pub fn at(&self, t: f32) -> f32 {
+        let u = (self.from + (self.to - self.from) * t.clamp(0.0, 1.0)).clamp(0.0, 1.0);
+        1.0 - self.load * u * u
+    }
+}
+
+/// How strong a stroke's ink is along it, its subpaths sampled: 1 all the
+/// way for a stroke with no ink run.
+pub struct InkAlong {
+    ink: Option<InkRun>,
+    /// How far along the stroke each subpath starts.
+    starts: Vec<f32>,
+    length: f32,
+}
+
+impl InkAlong {
+    pub fn new(ink: Option<InkRun>, substrokes: &[Vec<crate::journal::paths::CurveSample>]) -> InkAlong {
+        let mut length = 0.0;
+        let starts = substrokes.iter().map(|samples| {
+            let start = length;
+            if ink.is_some() {
+                length += samples.windows(2).map(|w| w[0].point.distance(w[1].point)).sum::<f32>();
+            }
+            start
+        }).collect();
+        InkAlong { ink, starts, length }
+    }
+    /// At `distance` along subpath `k`.
+    pub fn at(&self, k: usize, distance: f32) -> f32 {
+        match self.ink {
+            Some(ink) if self.length > 0.0 => ink.at((self.starts[k] + distance) / self.length),
+            Some(ink) => ink.at(0.0),
+            None => 1.0,
+        }
+    }
+}
+
 /// How pressure runs along each stroke, between a brush's min and max.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum PressureProfile {
@@ -242,18 +294,24 @@ impl StrokeStyle {
     pub fn jittered(&self, rgba: [f32; 4], index: usize) -> [f32; 4] {
         self.color_jitter.map_or(rgba, |j| j.apply(rgba, index))
     }
-    /// What subpath `index` is painted with in SVG: its solid colour,
-    /// jittered (a colour that doesn't parse is left as it is), or
-    /// `gradient` with its stops jittered, as a def `id` and a reference to
-    /// it.
-    fn svg_paint(&self, index: usize, id: &str) -> (String, String) {
+    /// `rgba` as subpath `index` is drawn in it, jittered, its opacity
+    /// times `ink` (how strong its pen's ink is there).
+    pub fn inked(&self, rgba: [f32; 4], index: usize, ink: f32) -> [f32; 4] {
+        let [r, g, b, a] = self.jittered(rgba, index);
+        [r, g, b, a * ink]
+    }
+    /// What subpath `index` is painted with in SVG, its ink `ink` strong:
+    /// its solid colour, jittered and faded (a colour that doesn't parse is
+    /// left as it is), or `gradient` with its stops jittered and faded, as
+    /// a def `id` and a reference to it.
+    fn svg_paint(&self, index: usize, id: &str, ink: f32) -> (String, String) {
         match &self.color {
-            StrokeColor::Solid(c) => match (self.color_jitter, parse_color(c)) {
-                (Some(_), Ok(rgba)) => (String::new(), css(self.jittered(rgba, index))),
+            StrokeColor::Solid(c) => match parse_color(c) {
+                Ok(rgba) if self.color_jitter.is_some() || ink != 1.0 => (String::new(), css(self.inked(rgba, index, ink))),
                 _ => (String::new(), c.clone()),
             },
             StrokeColor::Gradient(g) => {
-                let stops = g.stops.iter().map(|(at, c)| (*at, self.jittered(*c, index))).collect();
+                let stops = g.stops.iter().map(|(at, c)| (*at, self.inked(*c, index, ink))).collect();
                 (svg_gradient(&Gradient { stops, kind: g.kind }, id), format!("url(#{})", id))
             }
         }
@@ -297,21 +355,36 @@ fn down(y: f32, top: f32, bottom: f32) -> f32 {
 /// if it has one across the canvas; along a stroke, it's cut into pieces,
 /// each its own colour.
 fn plain_path(stroke: &ColoredStroke, id: &str) -> String {
-    let ColoredStroke { path, style, .. } = stroke;
-    let line = |d: &dyn std::fmt::Display, paint: &str, cap: &str| format!(
-        "<path d=\"{}\" style=\"fill:none;stroke:{};stroke-width:{};{}\" />", d, paint, style.width, cap);
+    let ColoredStroke { path, style, ink, .. } = stroke;
+    let line = |d: &dyn std::fmt::Display, paint: &str, width: f32, cap: &str| format!(
+        "<path d=\"{}\" style=\"fill:none;stroke:{};stroke-width:{};{}\" />", d, paint, width, cap);
     match &style.color {
-        // Jittered, each subpath its own colour.
-        _ if style.color_jitter.is_some() && !style.color.gradient().is_some_and(Gradient::per_stroke) => {
-            path.subpaths().iter().enumerate().map(|(k, sub)| {
-                let (defs, paint) = style.svg_paint(k, &format!("{}_{}", id, k));
-                format!("{}{}", defs, line(sub, &paint, ""))
+        // Jittered or running dry, each subpath its own colour and width,
+        // as at its middle.
+        _ if (style.color_jitter.is_some() || ink.is_some()) && !style.color.gradient().is_some_and(Gradient::per_stroke) => {
+            let subpaths = path.subpaths();
+            let lengths: Vec<f32> = subpaths.iter().map(|sub| if ink.is_some() { sub.length() } else { 0.0 }).collect();
+            let total: f32 = lengths.iter().sum();
+            let mut along = 0.0;
+            subpaths.iter().enumerate().map(|(k, sub)| {
+                let strength = ink.map_or(1.0, |ink| ink.at(if total > 0.0 { (along + lengths[k] / 2.0) / total } else { 0.0 }));
+                along += lengths[k];
+                let (defs, paint) = style.svg_paint(k, &format!("{}_{}", id, k), strength);
+                format!("{}{}", defs, line(sub, &paint, style.width * strength, ""))
             }).collect()
         }
-        StrokeColor::Solid(color) => line(path, color, ""),
+        StrokeColor::Solid(color) => line(path, color, style.width, ""),
         StrokeColor::Gradient(gradient) if gradient.per_stroke() => {
             let mut svg = String::new();
             let subpaths = path.flattened(0.1);
+            // How long the whole stroke is, for how dry its pen is along it.
+            let whole: f32 = match ink {
+                Some(_) => subpaths.iter().map(|(points, closed)| {
+                    points.windows(2).map(|w| w[0].distance(w[1])).sum::<f32>() + if *closed { points[0].distance(points[points.len() - 1]) } else { 0.0 }
+                }).sum(),
+                None => 0.0,
+            };
+            let mut before = 0.0;
             let (top, bottom) = top_and_bottom(subpaths.iter().flat_map(|(points, _)| points.iter().copied()));
             for (k, (mut points, closed)) in subpaths.into_iter().enumerate() {
                 if closed {
@@ -322,9 +395,11 @@ fn plain_path(stroke: &ColoredStroke, id: &str) -> String {
                     Some(*total)
                 })).collect();
                 let total = *lengths.last().expect("a subpath has a point");
+                before += total;
                 if total <= 0.0 {
                     continue;
                 }
+                let start = before - total;
                 let piece = (total / ALONG_PIECES).max(ALONG_PIECE_MIN);
                 let mut i = 0;
                 while i + 1 < points.len() {
@@ -341,13 +416,17 @@ fn plain_path(stroke: &ColoredStroke, id: &str) -> String {
                         GradientKind::Vertical => down(points[i].lerp(points[end], 0.5).y, top, bottom),
                         _ => (lengths[i] + lengths[end]) / 2.0 / total,
                     };
-                    svg.push_str(&line(&d, &css(style.jittered(gradient.at(t), k)), "stroke-linecap:round;stroke-linejoin:round;"));
+                    let strength = match ink {
+                        Some(ink) if whole > 0.0 => ink.at((start + (lengths[i] + lengths[end]) / 2.0) / whole),
+                        _ => 1.0,
+                    };
+                    svg.push_str(&line(&d, &css(style.inked(gradient.at(t), k, strength)), style.width * strength, "stroke-linecap:round;stroke-linejoin:round;"));
                     i = end;
                 }
             }
             svg
         }
-        StrokeColor::Gradient(gradient) => format!("{}{}", svg_gradient(gradient, id), line(path, &format!("url(#{})", id), "")),
+        StrokeColor::Gradient(gradient) => format!("{}{}", svg_gradient(gradient, id), line(path, &format!("url(#{})", id), style.width, "")),
     }
 }
 
@@ -360,6 +439,8 @@ pub struct ColoredStroke {
     /// them on this canvas. A tile keeps its strokes' numbers from the
     /// whole page, so a stroke drawn in several tiles looks the same in each.
     pub seed: Option<u32>,
+    /// How dry its pen is over it, if its pen runs dry.
+    pub ink: Option<InkRun>,
 }
 
 /// How the SVG output draws strokes: roughened, sampled every
@@ -689,10 +770,11 @@ impl Canvas {
         self.bounds.take_point(pos);
     }
     pub fn add_strokes<ISP: Into<StrokePath>>(&mut self, into_path: ISP, style: StrokeStyle) {
-        self.add_seeded_stroke(into_path.into(), style, None);
+        self.add_seeded_stroke(into_path.into(), style, None, None);
     }
-    /// Add a stroke, with its texture's seed (see `ColoredStroke::seed`).
-    pub fn add_seeded_stroke(&mut self, path: StrokePath, style: StrokeStyle, seed: Option<u32>) {
+    /// Add a stroke, with its texture's seed (see `ColoredStroke::seed`)
+    /// and how dry its pen is over it.
+    pub fn add_seeded_stroke(&mut self, path: StrokePath, style: StrokeStyle, seed: Option<u32>, ink: Option<InkRun>) {
         let width_vec = Vec2::splat(style.width);
         path.for_each_point(|pos| {
             self.update_bounds(pos);
@@ -703,6 +785,7 @@ impl Canvas {
             path,
             style,
             seed,
+            ink,
         });
     }
     pub fn strokes(&self) -> &Vec<ColoredStroke> {
@@ -909,6 +992,7 @@ impl Canvas {
         let brush = stroke.style.brush.as_ref();
         let substrokes: Vec<_> = path.to_substrokes().iter().map(|s| s.get_point_samples(distance)).collect();
         let (top, bottom) = top_and_bottom(substrokes.iter().flatten().map(|s| s.point));
+        let ink = InkAlong::new(stroke.ink, &substrokes);
         let variation_seed = brush.filter(|b| b.pressure_variation > 0.0).map(|_| rng.next_u32());
         let mut outlines = Vec::new();
         for (k, samples) in substrokes.into_iter().enumerate() {
@@ -928,21 +1012,25 @@ impl Canvas {
             };
             let variation = brush.zip(variation_seed).and_then(|(b, seed)| b.variation(seed.wrapping_add(k as u32)));
             let mut along = 0.0;
+            let mut strengths = Vec::with_capacity(samples.len());
             let heavier: Vec<f32> = samples.iter().enumerate().map(|(i, sample)| {
                 along += if i > 0 { samples[i - 1].point.distance(sample.point) } else { 0.0 };
+                let strength = ink.at(k, along);
+                strengths.push(strength);
                 // A pointed pen's width follows its pressure; the other
                 // profiles keep the trailed-off width.
                 let pointed = brush.filter(|b| b.pressure_profile == PressureProfile::Pointed && b.max_pressure > 0.0)
                     .map_or(1.0, |b| (b.min_pressure + PressureProfile::Pointed.at(0.0, sample.normal) * (b.max_pressure - b.min_pressure)) / b.max_pressure);
                 pointed * brush.map_or(1.0, |b| b.pooling(sample.point.y, top, bottom))
                     * variation.as_ref().map_or(1.0, |v| v.at(along))
+                    * strength
             }).collect();
             // Reversed, the right side's trail runs from the other end.
             let n = samples.len();
             let sides: Vec<(Vec2, Vec2)> = samples.iter().enumerate()
                 .map(|(i, sample)| (sample.point + trail(i) * heavier[i] * sample.normal, sample.point - trail(n - 1 - i) * heavier[i] * sample.normal))
                 .collect();
-            outlines.push((k, samples[0].point, sides));
+            outlines.push((k, samples[0].point, sides, strengths));
         }
         let outline = |start: Option<Vec2>, sides: &[(Vec2, Vec2)]| {
             let mut points = Vec::with_capacity(2 * sides.len() + 1);
@@ -957,7 +1045,7 @@ impl Canvas {
                 // meet, each in the colour at its middle: how far along
                 // it is, or down the whole path.
                 let mut marks = Vec::new();
-                for (k, _, sides) in &outlines {
+                for (k, _, sides, strengths) in &outlines {
                     let last = (sides.len() - 1) as f32;
                     let step = ((sides.len() as f32 / ALONG_PIECES).ceil() as usize).max(2);
                     let mut i = 0;
@@ -970,17 +1058,17 @@ impl Canvas {
                             }
                             _ => (i + end) as f32 / 2.0 / last,
                         };
-                        let paint = css(stroke.style.jittered(gradient.at(t), *k));
+                        let paint = css(stroke.style.inked(gradient.at(t), *k, strengths[(i + end) / 2]));
                         marks.push(Mark { defs: String::new(), outlines: vec![outline(None, &sides[i..=end])], paint, width: Some(ALONG_PIECE_OVERLAP) });
                         i = end;
                     }
                 }
                 marks
             }
-            _ if stroke.style.color_jitter.is_some() => {
-                // Each outline its own colour.
-                outlines.iter().map(|(k, start, sides)| {
-                    let (defs, paint) = stroke.style.svg_paint(*k, &format!("{}_{}", id, k));
+            _ if stroke.style.color_jitter.is_some() || stroke.ink.is_some() => {
+                // Each outline its own colour, as it is at its middle.
+                outlines.iter().map(|(k, start, sides, strengths)| {
+                    let (defs, paint) = stroke.style.svg_paint(*k, &format!("{}_{}", id, k), strengths[strengths.len() / 2]);
                     Mark { defs, outlines: vec![outline(Some(*start), sides)], paint, width: None }
                 }).collect()
             }
@@ -989,7 +1077,7 @@ impl Canvas {
                     StrokeColor::Solid(c) => (String::new(), c.clone()),
                     StrokeColor::Gradient(g) => (svg_gradient(g, id), format!("url(#{})", id)),
                 };
-                let outlines = outlines.iter().map(|(_, start, sides)| outline(Some(*start), sides)).collect();
+                let outlines = outlines.iter().map(|(_, start, sides, _)| outline(Some(*start), sides)).collect();
                 vec![Mark { defs, outlines, paint, width: None }]
             }
         }
@@ -1096,6 +1184,24 @@ mod svg_output_tests {
             assert!(reds.windows(2).all(|w| w[0] >= w[1]), "never back up the path: {:?}", reds);
             canvas.to_png(1.0, styled, 1);
         }
+    }
+
+    #[test]
+    fn dry_ink_is_lighter_and_thinner() {
+        let mut canvas = Canvas::new();
+        let style = StrokeStyle { width: 2.0, color: "black".into(), color_jitter: None, brush: None };
+        let dry = InkRun { load: 0.4, from: 1.0, to: 1.0 };
+        canvas.add_seeded_stroke(StrokePath::line(Vec2::new(0.0, 0.0), Vec2::new(30.0, 0.0)), style.clone(), None, Some(dry));
+        let svg = canvas.to_svg(None, 0);
+        assert!(svg.contains("stroke:rgba(0, 0, 0, 0.6)") && svg.contains("stroke-width:1.2"), "{}", svg);
+        // Fresh ink, as if it ran dry not at all.
+        let mut fresh = Canvas::new();
+        fresh.add_seeded_stroke(StrokePath::line(Vec2::new(0.0, 0.0), Vec2::new(30.0, 0.0)), style, None, Some(InkRun { load: 0.4, from: 0.0, to: 0.0 }));
+        assert!(fresh.to_svg(None, 0).contains("stroke:black;stroke-width:2;"), "{}", fresh.to_svg(None, 0));
+        let along = InkRun { load: 0.4, from: 0.0, to: 1.0 };
+        let strengths: Vec<f32> = (0..=10).map(|k| along.at(k as f32 / 10.0)).collect();
+        assert!(strengths.windows(2).all(|w| w[1] < w[0]), "falling as it goes: {:?}", strengths);
+        assert!(strengths[5] > 0.85, "slowly at first: {:?}", strengths);
     }
 
     #[test]

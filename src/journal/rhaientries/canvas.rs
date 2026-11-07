@@ -10,9 +10,13 @@ use super::RhaiResult;
 use super::options::{apply_props, float};
 use super::random::SharedRng;
 use super::{check_finite, check_name, Canvas, Path, Style, Vec2};
+use std::collections::HashMap;
+
 use crate::journal::canvas::Canvas as JournalCanvas;
+use crate::journal::canvas::InkRun;
 use crate::journal::canvas::Frame;
 use crate::journal::paths::StrokePath;
+use crate::journal::symbol::Symbol;
 
 #[derive(Debug, Default, Clone)]
 pub struct CanvasData {
@@ -31,11 +35,15 @@ impl CanvasData {
     /// Add a path drawn in `style`, gone over as its handwriting says,
     /// its jitter drawn from `rng`.
     pub fn add_path(&mut self, path: StrokePath, style: &Style, rng: &mut dyn RngCore) {
+        self.add_text_path(path, TextRun::default(), style, rng);
+    }
+    /// Add a path that writes `text`, as `add_path` does.
+    pub fn add_text_path(&mut self, path: StrokePath, text: TextRun, style: &Style, rng: &mut dyn RngCore) {
         let path = style.retrace(path, rng);
         // Only a jittered colour draws its seed, so other strokes leave the
         // generator as it was.
         let color_seed = if style.color_jitter() > 0.0 { rng.next_u64() } else { 0 };
-        self.strokes.push(Stroke { path, style: style.clone(), seed: None, color_seed });
+        self.strokes.push(Stroke { path, style: style.clone(), seed: None, color_seed, text });
     }
     fn transform(&mut self, f: impl Fn(&mut StrokePath)) {
         for stroke in &mut self.strokes {
@@ -99,11 +107,22 @@ pub(super) fn register(engine: &mut Engine, rng: SharedRng) {
         });
 }
 
+/// How dry each stroke's pen is as it's drawn (see `Style::ink_run`): the
+/// strokes in order, each pen (brush and colour) from a fresh dip.
+fn ink_runs(strokes: &[Stroke]) -> Vec<Option<InkRun>> {
+    let mut used: HashMap<String, f32> = HashMap::new();
+    strokes.iter().map(|stroke| {
+        let pen = stroke.style.pen()?;
+        stroke.style.ink_run(used.entry(pen).or_default(), stroke.text.glyphs, stroke.text.mid_word, &stroke.path)
+    }).collect()
+}
+
 impl From<CanvasData> for JournalCanvas {
     fn from(val: CanvasData) -> Self {
         let mut canvas = JournalCanvas::new();
-        for Stroke { path, style, seed, color_seed } in val.strokes {
-            canvas.add_seeded_stroke(path, style.stroke_style(color_seed), seed);
+        let inks = ink_runs(&val.strokes);
+        for (Stroke { path, style, seed, color_seed, .. }, ink) in val.strokes.into_iter().zip(inks) {
+            canvas.add_seeded_stroke(path, style.stroke_style(color_seed), seed, ink);
         }
         canvas.set_frame(val.frame);
         canvas
@@ -113,8 +132,8 @@ impl From<CanvasData> for JournalCanvas {
 impl From<&CanvasData> for JournalCanvas {
     fn from(val: &CanvasData) -> Self {
         let mut canvas = JournalCanvas::new();
-        for Stroke { path, style, seed, color_seed } in val.strokes.iter() {
-            canvas.add_seeded_stroke(path.clone(), style.stroke_style(*color_seed), *seed);
+        for (Stroke { path, style, seed, color_seed, .. }, ink) in val.strokes.iter().zip(ink_runs(&val.strokes)) {
+            canvas.add_seeded_stroke(path.clone(), style.stroke_style(*color_seed), *seed, ink);
         }
         canvas.set_frame(val.frame);
         canvas
@@ -138,6 +157,26 @@ pub struct Stroke {
     pub(super) seed: Option<u32>,
     /// Where its colour jitter's drawn from, if its style has any.
     pub(super) color_seed: u64,
+    /// What text it writes, for its pen to run dry by.
+    pub(super) text: TextRun,
+}
+
+/// What a stroke writes: how many glyphs (none, for a path that isn't
+/// text), and whether it goes on writing a word, as a glyph after the
+/// first of a word drawn on its own does.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct TextRun {
+    pub(super) glyphs: u32,
+    pub(super) mid_word: bool,
+}
+
+impl TextRun {
+    /// What `glyphs[span]` write: those that aren't blank, going on with a
+    /// word if the one before isn't blank either.
+    pub(super) fn of(glyphs: &[Symbol], span: std::ops::Range<usize>) -> TextRun {
+        let mid_word = span.start > 0 && !glyphs[span.start - 1].is_blank();
+        TextRun { glyphs: glyphs[span].iter().filter(|g| !g.is_blank()).count() as u32, mid_word }
+    }
 }
 
 /// `canvas.add(parts, styles)`: each path of `parts` (as `art::bramble` or
