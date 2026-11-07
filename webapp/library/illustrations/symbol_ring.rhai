@@ -2,8 +2,9 @@
 // joined by a dashed line to the symbol step on from it, round and round:
 // base 5 and step 2 is a five-pointed star; where base and step share a
 // factor, a figure for each cycle. In the middle, larger, is the symbol
-// for the step. With bordered, each symbol, the middle's too,
-// is ringed, and the dashes run from border to border.
+// for the step. With bordered, each symbol round the ring is ringed,
+// and the dashes run from border to border; with center_bordered, the
+// middle's is. Step 0 takes no path: no lines.
 //
 // steps, if not 0, draws only the first that many lines of the walk from
 // the top (0, step, 2 step, ...), and half the next, ending in an arrow
@@ -25,9 +26,11 @@
 // base. Unwired, they're near-black and red ink pens, the glyphs
 // loche_upper, as big as the ring holds.
 
+import "lib/symbol_rings" as rings;
+
 fn options() {
 	#{
-		base: 27, step: 5, steps: 0, bordered: true, size: 900.0, center_scale: 3.0,
+		base: 27, step: 5, steps: 0, bordered: true, center_bordered: true, size: 900.0, center_scale: 3.0,
 		dash: 14.0, gap: 10.0, glyph_ink: "#2b1d12", line_ink: "#9b2318",
 	}
 }
@@ -41,168 +44,27 @@ fn fallbacks(o) {
 	#{
 		glyph_style: #{
 			style: new_style(new_brush_style(o.glyph_ink, "Ink Pen", 2.2, #{ min_pressure: 0.4, max_pressure: 0.8 }), hand),
-			type: new_type_style(glyphset("loche_upper"), room(o)),
+			type: new_type_style(glyphset("loche_upper"), rings::room(o.size, o.base)),
 		},
 		line_style: #{ style: new_style(new_brush_style(o.line_ink, "Ink Pen", 1.4), hand) },
 	}
 }
 
 fn render(o, i) {
-	if o.base < 2 || o.base > 27 { throw `the base should be from 2 to 27, got ${o.base}`; }
-	if o.step < 0 || o.step >= o.base { throw `the step should be from 0 to base - 1 (${o.base - 1}), got ${o.step}`; }
-	if o.steps < 0 { throw `steps should be 0 (every line) or more, got ${o.steps}`; }
-	let centre = vec2(o.size / 2.0, o.size / 2.0);
-	let n = o.base;
-	// The ring leaves room round its edge for glyphs as large as fit; they're
-	// the style's size, up to that, and the middle's center_scale times
-	// theirs, up to half the radius.
+	rings::check_base(o.base);
+	rings::check_step(o.base, o.step, "the step");
+	rings::check_steps(o.steps);
 	let t = i.glyph_style.type;
-	let names = symbol_names(t.glyphset, n);
-	let radius = o.size / 2.0 - room(o);
-	let glyph = min(t.glyph_scale * t.glyph_scale_factor, room(o));
-	let big = min(glyph * o.center_scale, radius * 0.5);
-	// How far from a symbol's middle its lines stop: past its border, or
-	// clear of its glyph.
-	let clear = if o.bordered { glyph * 0.75 + glyph * 0.15 } else { glyph * 0.65 };
-	let centre_clear = if o.bordered { big * 0.75 + glyph * 0.15 } else { big * 0.65 };
-
-	let at = [];
-	for k in 0..n {
-		let a = -PI() / 2.0 + 2.0 * PI() * k / n;
-		at.push(centre + vec2(a.cos(), a.sin()) * radius);
-	}
-
+	let names = rings::symbol_names(t.glyphset, o.base);
+	let r = rings::ring(o, t, 1);
 	let c = new_canvas();
-	let lines = new_path();
-	if o.step > 0 && o.steps == 0 {
-		let done = #{};
-		for k in 0..n {
-			let j = (k + o.step) % n;
-			// A step of half the base joins each pair twice: once will do.
-			let key = `${min(k, j)}-${max(k, j)}`;
-			if key in done { continue; }
-			done[key] = true;
-			let ends = chord(at[k], at[j], clear);
-			dashes(lines, ends[0], ends[1], o.dash, o.gap);
-		}
-	} else if o.step > 0 {
-		let k = 0;
-		for s in 0..o.steps {
-			let j = (k + o.step) % n;
-			let ends = chord(at[k], at[j], clear);
-			dashes(lines, ends[0], ends[1], o.dash, o.gap);
-			k = j;
-			if k == 0 { break; }
-		}
-		if k != 0 {
-			let ends = chord(at[k], at[(k + o.step) % n], clear);
-			let tip = half_way(ends[0], ends[1], centre, centre_clear + o.gap);
-			if (tip - ends[0]).length() > 0.0 {
-				dashes(lines, ends[0], tip, o.dash, o.gap);
-				c.add(arrowhead(tip, (tip - ends[0]).normalized(), max(o.dash, glyph * 0.3)), i.line_style.style);
-			}
-		}
-	}
-	lines.erase_inside(new_circle(centre, centre_clear));
-	c.add(lines, i.line_style.style);
-
+	rings::draw_walk(c, r, rings::walk(o.base, o.step, o.steps), i.line_style.style, o, 0.0, #{});
 	let style = i.glyph_style.style;
-	for k in 0..n {
-		draw_symbol(c, t, names[k], at[k], glyph, o.bordered, style);
-	}
-	draw_symbol(c, t, names[o.step], centre, big, o.bordered, style);
+	rings::draw_symbols(c, r, t, names, 1, style);
+	rings::draw_middle(c, r, t, [names[o.step]], [style], style);
 	c
 }
 
 fn example() {
 	#{}
-}
-
-// How big the ring's glyphs can be: as large as fit side by side round
-// it, at most a fifth of its radius.
-fn room(o) {
-	min(o.size * 0.4 * 2.0 * (PI() / o.base).sin() * 0.55, o.size * 0.4 * 0.2)
-}
-
-// The names of a base's symbols among a glyphset's own glyphs: its digits,
-// shifted to sit round 0, its letters, 0 a gap (()), or failing those its
-// characters in order.
-fn symbol_names(set, base) {
-	let own = set.characters();
-	if "-13" in own {
-		let digits = [];
-		for s in 0..base { digits.push(if s <= 13 { s } else { s - 27 }); }
-		return digits;
-	}
-	let letters = letters_in(own, "A", "Z");
-	if letters.len() < 26 { letters = letters_in(own, "a", "z"); }
-	if letters.len() == 26 { return [()] + letters; }
-	if own.len() < base { throw `glyphset '${set.name}' has ${own.len()} symbols, too few for base ${base}`; }
-	own
-}
-
-// The single characters of own from one to another.
-fn letters_in(own, from, to) {
-	own.filter(|c| c.len() == 1 && c >= from && c <= to)
-}
-
-// The symbol called name drawn at `at`, `size` across, in the type's
-// glyphset (() is a gap), in a circle if bordered.
-fn draw_symbol(c, t, name, at, size, bordered, style) {
-	if bordered { c.add(new_circle(at, size * 0.75), style); }
-	if name == () { return; }
-	let g = t.glyphset.glyph(name);
-	g.scale = size;
-	g.position = at;
-	g.skew = t.skew ?? t.glyphset.skew;
-	c.add(g, style);
-}
-
-// The line from one symbol to another, as [start, end], starting and
-// stopping clear short of each.
-fn chord(from, to, clear) {
-	let dir = (to - from).normalized();
-	[from + dir * clear, to - dir * clear]
-}
-
-// Half way from `from` to `to`, or short of that where the line would
-// reach within `clear` of the centre: where it gets that close.
-fn half_way(from, to, centre, clear) {
-	let length = (to - from).length();
-	let dir = (to - from) / length;
-	let t = length / 2.0;
-	// Where the line comes within clear of the centre: along it to the
-	// nearest point, back by the half chord.
-	let near = (centre - from).dot(dir);
-	let miss = (from + dir * near - centre).length();
-	if miss < clear {
-		t = min(t, near - (clear * clear - miss * miss).sqrt());
-	}
-	from + dir * max(t, 0.0)
-}
-
-// An arrowhead with its tip at `tip`, pointing along `dir`, its barbs
-// `size` long.
-fn arrowhead(tip, dir, size) {
-	new_path().move_to(tip - turned(dir, 0.45) * size).line_to(tip).line_to(tip - turned(dir, -0.45) * size)
-}
-
-// v turned by angle a.
-fn turned(v, a) {
-	vec2(v.x * a.cos() - v.y * a.sin(), v.x * a.sin() + v.y * a.cos())
-}
-
-// A dashed line from `from` to `to`, added to path: dashes about dash
-// long with gap between, as many as fit, stretched to end on a dash.
-fn dashes(path, from, to, dash, gap) {
-	let length = (to - from).length();
-	if length <= 0.0 { return; }
-	let dir = (to - from) / length;
-	let count = max(1, ((length + gap) / (dash + gap)).round().to_int());
-	let d = (length - gap * (count - 1)) / count;
-	if d <= 0.0 { d = length; count = 1; }
-	for k in 0..count {
-		let t = k * (d + gap);
-		path.move_to(from + dir * t).line_to(from + dir * (t + d));
-	}
 }
