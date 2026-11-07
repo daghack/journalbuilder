@@ -139,6 +139,8 @@ fn example() {
       return ext === 'json' ? '{ "base": 27, "text": "" }\n' : '';
     case 'glyphsets':
       return '{\n\t"space_width": 0.5,\n\t"glyphs": {}\n}\n';
+    case 'images':
+      return '';
     case 'lib':
       return `// ${name}: shared functions, for import "lib/${name}" as ${name};
 

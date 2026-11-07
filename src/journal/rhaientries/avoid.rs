@@ -21,8 +21,10 @@
 //! path.fill_with_text(msg, #{ type: body, avoid: drawing, paragraph: #{ clearance: 6.0 } });
 //! ```
 //!
-//! `avoid` is a tree, or a path, canvas or glyph, or an array of any of
-//! these. Glyphs keep their whole outline (the hull of their strokes) at
+//! `avoid` is a tree, or a path, canvas, glyph or image paint (the parts
+//! of its picture in the colours it avoids), or an array of any of these.
+//! Text drawn in a style whose colour is image paint that avoids colours
+//! keeps out of those parts too, without being told. Glyphs keep their whole outline (the hull of their strokes) at
 //! least `clearance` from all of it (3 canvas units unless the paragraph
 //! says), on top of any margin a tree was built with. Glyphs placed by one
 //! call keep clear of each other too, so text on a path that loops back
@@ -36,11 +38,14 @@
 use rhai::{Array, Dynamic, Engine, Map};
 
 use super::glyphs::Glyph;
-use super::{Canvas, Path, Shared, Vec2};
+use super::{Canvas, Path, Shared, Style, Vec2};
 use crate::journal::avoid::AvoidanceTree;
-use crate::journal::canvas::Canvas as JournalCanvas;
+use crate::journal::canvas::{Canvas as JournalCanvas, StrokeColor};
+use crate::journal::image_paint::ImagePaint;
 use crate::journal::paths::StrokePath;
 use parry2d::math::Vec2 as PVec;
+use std::cell::Ref;
+use std::ops::Deref;
 
 use super::RhaiResult;
 
@@ -68,10 +73,12 @@ fn add_to(caller: &str, tree: &mut AvoidanceTree, item: Dynamic, clearance: f32)
         tree.add_canvas(&canvas, clearance);
     } else if let Some(glyph) = item.clone().try_cast::<Glyph>() {
         tree.add_symbol(&glyph.borrow(), clearance);
+    } else if let Some(paint) = item.clone().try_cast::<ImagePaint>() {
+        paint.add_avoided(tree, clearance);
     } else if let Some(other) = item.try_cast::<Avoid>() {
         tree.merge(&other.borrow());
     } else {
-        return Err(format!("{}: can't avoid a {}; expected a path, canvas, glyph, avoidance tree, or an array of them", caller, type_name).into());
+        return Err(format!("{}: can't avoid a {}; expected a path, canvas, glyph, image paint, avoidance tree, or an array of them", caller, type_name).into());
     }
     Ok(())
 }
@@ -126,14 +133,20 @@ fn margin_option(caller: &str, options: &Map) -> RhaiResult<f32> {
 }
 
 /// The `avoid` option, what to keep clear of, and how far to keep from it
-/// beyond its own margins: the paragraph's `clearance`.
+/// beyond its own margins: the paragraph's `clearance`. With it, the parts
+/// of a picture the text's own image paint avoids.
+#[derive(Clone)]
 pub struct AvoidOption {
-    pub tree: Option<Avoid>,
+    tree: Option<Avoid>,
+    /// What the style's image paint keeps clear of, if it avoids colours.
+    painted: Option<ImagePaint>,
     clearance: f32,
 }
 
 impl AvoidOption {
-    pub fn parse(caller: &str, options: &Map, clearance: f32) -> RhaiResult<Self> {
+    /// The `avoid` option in `options`, with what text drawn in `style`
+    /// avoids by itself.
+    pub fn parse(caller: &str, options: &Map, clearance: f32, style: &Style) -> RhaiResult<Self> {
         let tree = match options.get("avoid") {
             None => None,
             // A tree alone is used as it is, so later changes reach it.
@@ -142,12 +155,51 @@ impl AvoidOption {
                 None => Some(Avoid::new(tree_of(&format!("{} 'avoid'", caller), item.clone(), 0.0)?)),
             },
         };
-        Ok(AvoidOption { tree, clearance })
+        let painted = match style.color() {
+            StrokeColor::Image(paint) if !paint.avoided().is_empty() => Some(paint.clone()),
+            _ => None,
+        };
+        Ok(AvoidOption { tree, painted, clearance })
     }
 
     /// How far glyphs keep from what they avoid.
     pub fn padding(&self) -> f32 {
         self.clearance
+    }
+
+    /// Whether there's anything to avoid.
+    pub fn is_some(&self) -> bool {
+        self.tree.is_some() || self.painted.is_some()
+    }
+
+    /// What to keep clear of now: the tree as it is (so later changes to
+    /// it reach here), and the parts of the picture the paint avoids.
+    pub fn now(&self) -> Option<AvoidNow<'_>> {
+        match (&self.tree, &self.painted) {
+            (None, None) => None,
+            (Some(tree), None) => Some(AvoidNow::Shared(tree.borrow())),
+            (tree, Some(paint)) => {
+                let mut both = tree.as_ref().map_or_else(AvoidanceTree::new, |t| t.borrow().clone());
+                paint.add_avoided(&mut both, 0.0);
+                Some(AvoidNow::Owned(both))
+            }
+        }
+    }
+}
+
+/// What text keeps clear of, as `AvoidOption::now` gives it.
+pub enum AvoidNow<'a> {
+    Shared(Ref<'a, AvoidanceTree>),
+    Owned(AvoidanceTree),
+}
+
+impl Deref for AvoidNow<'_> {
+    type Target = AvoidanceTree;
+    fn deref(&self) -> &AvoidanceTree {
+        match self {
+            AvoidNow::Shared(tree) => tree,
+            AvoidNow::Owned(tree) => tree,
+        }
     }
 }
 

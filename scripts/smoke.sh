@@ -135,12 +135,12 @@ render fixture-paper smoke/darkly_page_0.png smoke/darkly_page_1.png smoke/darkl
 render fixture-pdf smoke/smoke.pdf \
 	-- smoke --journals-dir tests/smoke_journals --pdf --scale 0.25
 # Every page of the showcase, every character with a glyph.
-render showcase showcase/darkly_01_title_0.png showcase/darkly_02_contents_0.png showcase/darkly_03_pens_brushes.png showcase/darkly_05_pens_0.png showcase/darkly_06_pens_0.png showcase/darkly_07_pens_0.png showcase/darkly_08_pens_0.png \
-	showcase/darkly_09_glyphsets_0.png showcase/darkly_10_glyphsets_0.png showcase/darkly_12_glyphsets_0.png showcase/darkly_15_glyphs_0.png showcase/darkly_18_art_0.png showcase/darkly_22_art_0.png showcase/darkly_23_art_0.png showcase/darkly_24_art_0.png showcase/darkly_25_art_0.png showcase/darkly_26_art_0.png \
-	showcase/darkly_27_generators_0.png showcase/darkly_28_generators_0.png showcase/darkly_29_generators_0.png showcase/darkly_30_text_0.png showcase/darkly_32_text_0.png showcase/darkly_33_text_0.png showcase/darkly_34_text_0.png \
-	showcase/darkly_35_text_0.png showcase/darkly_36_text_0.png showcase/darkly_37_text_0.png showcase/darkly_38_text_0.png showcase/darkly_39_text_0.png showcase/darkly_40_text_0.png showcase/darkly_41_text_0.png showcase/darkly_42_text_0.png \
-	showcase/darkly_43_locks_ciphers.png showcase/darkly_44_locks_0.png showcase/darkly_45_locks_0.png showcase/darkly_46_locks_0.png showcase/darkly_47_locks_0.png showcase/darkly_48_locks_0.png showcase/darkly_49_locks_0.png \
-	showcase/darkly_50_locks_0.png showcase/darkly_51_locks_0.png showcase/darkly_52_spread_0.png showcase/darkly_53_spread_0.png showcase/darkly_54_layouts_0.png showcase/darkly_56_layouts_0.png showcase/darkly_60_files_0.png showcase/darkly_61_files_0.png \
+render showcase showcase/darkly_01_title_0.png showcase/darkly_02_contents_0.png showcase/darkly_03_pens_brushes.png showcase/darkly_05_pens_0.png showcase/darkly_06_pens_0.png showcase/darkly_07_pens_0.png showcase/darkly_08_pens_0.png showcase/darkly_09_pens_image_paint.png \
+	showcase/darkly_10_glyphsets_0.png showcase/darkly_11_glyphsets_0.png showcase/darkly_13_glyphsets_0.png showcase/darkly_16_glyphs_0.png showcase/darkly_19_art_0.png showcase/darkly_23_art_0.png showcase/darkly_24_art_0.png showcase/darkly_25_art_0.png showcase/darkly_26_art_0.png showcase/darkly_27_art_0.png \
+	showcase/darkly_28_generators_0.png showcase/darkly_29_generators_0.png showcase/darkly_30_generators_0.png showcase/darkly_31_text_0.png showcase/darkly_33_text_0.png showcase/darkly_34_text_0.png showcase/darkly_35_text_0.png \
+	showcase/darkly_36_text_0.png showcase/darkly_37_text_0.png showcase/darkly_38_text_0.png showcase/darkly_39_text_0.png showcase/darkly_40_text_0.png showcase/darkly_41_text_0.png showcase/darkly_42_text_0.png showcase/darkly_43_text_0.png \
+	showcase/darkly_44_locks_ciphers.png showcase/darkly_45_locks_0.png showcase/darkly_46_locks_0.png showcase/darkly_47_locks_0.png showcase/darkly_48_locks_0.png showcase/darkly_49_locks_0.png showcase/darkly_50_locks_0.png \
+	showcase/darkly_51_locks_0.png showcase/darkly_52_locks_0.png showcase/darkly_53_spread_0.png showcase/darkly_54_spread_0.png showcase/darkly_55_layouts_0.png showcase/darkly_57_layouts_0.png showcase/darkly_61_files_0.png showcase/darkly_62_files_0.png \
 	-- showcase --strict-glyphs --scale 0.25
 
 for journal in journals/*/ webapp/journals/*/; do

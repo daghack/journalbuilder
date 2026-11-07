@@ -95,7 +95,7 @@ fn vec_arg(name, effect) { arg(name, effect, "a vec.") }
 fn offset_arg() { arg("offset", "How far to move, across and down.", "a vec.") }
 fn angle_arg(effect) { arg("angle", effect + " Positive turns clockwise, y being down.", "a number, in radians.") }
 fn name_arg(what) { arg("text", "The " + what + "'s name in output files.", "a string of letters, digits, underscores, hyphens and dots, not starting with a dot, unique among its siblings. Reading it gives () until it's set.") }
-fn avoid_opt(what) { opt("settings.avoid", "nothing", "What glyphs keep clear of" + what + " (see Keeping Text Clear).", "an avoidance tree, a path, a canvas or a glyph, or an array of any of these.") }
+fn avoid_opt(what) { opt("settings.avoid", "nothing", "What glyphs keep clear of" + what + " (see Keeping Text Clear).", "an avoidance tree, a path, a canvas, a glyph or image paint, or an array of any of these.") }
 
 fn seed_opt(what) { opt("options.seed", "one from the generator", "Which " + what + " it draws: the same seed gives the same drawing, without touching the script's generator; left out, the journal's generator picks one.", "a whole number.") }
 fn thickening_opts(parts, reach) {
@@ -118,7 +118,7 @@ doc += para("Every call has one shape: what it needs, in order, then one map of 
 doc += para("Units: coordinates are canvas units, one pixel at --scale 1, with y running down the page. Angles are radians; PI() is rhai's, and degrees(d) converts. Numbers can be whole or decimal anywhere a number is taken, and must be finite; a whole number is needed only where the values say so. Colours are CSS colours: a name, #rgb, #rrggbb, rgb(), rgba(), hsl() or hsla().");
 doc += para("Shared values: paths, glyphs, canvases and avoidance trees are shared. Assigning one, passing it or looping over it gives the same value, so changes through any copy reach it; copy() makes an independent one. Their transforms change the value and return it, so calls chain: p.move_to(a).line_to(b). Vecs, glyphsets, styles (of every kind) and pages are plain values: changing one changes that copy only.");
 doc += para("Randomness is seeded: random(), glyph variant picks, text layout, hatching, point distributions and random spanning trees all draw on one generator with a fixed seed, so a journal renders the same every run. So does the handwriting that strokes are added to canvases in, and the procedural art when it isn't given a seed of its own.");
-doc += para("Sections: the entry and its pages; canvases and strokes; vectors and angles; paths; styles; gradients; glyphsets and glyphs; text; keeping text clear; randomness and messages; generators; balanced ternary; procedural art; books; page layouts; marked-up text; locks; journals and their files; lock, illustration, layout and style files; building.");
+doc += para("Sections: the entry and its pages; canvases and strokes; vectors and angles; paths; styles; gradients; images; glyphsets and glyphs; text; keeping text clear; randomness and messages; generators; balanced ternary; procedural art; books; page layouts; marked-up text; locks; journals and their files; lock, illustration, layout and style files; building.");
 
 // ---- the entry and its pages ----
 
@@ -386,7 +386,7 @@ doc += api("new_style(brush_style, handwriting_style)", "A style: the ink and th
 doc += api("default_style()", "The plainest style: black, in an Ink Pen 1.2 wide pressing from 0.3 to 0.7, by a steady hand. Text calls, roles and borders given a map of style settings take them over this.");
 doc += api("brush_names()", "The name of every Darkly brush, sorted.");
 doc += api("new_brush_style(color, brush, brush_size), new_brush_style(color, brush, brush_size, options)", "A brush style. Pressure runs from min_pressure to max_pressure along each stroke, as its pressure_profile says. Options set its properties (below) as setting them does. In SVG output (--svg) a stroke is brush_size * max_pressure wide.", [
-	arg("color", "The ink.", "a CSS colour or a gradient."),
+	arg("color", "The ink.", "a CSS colour, a gradient or image paint."),
 	arg("brush", "Which Darkly brush draws.", "one of brush_names()."),
 	arg("brush_size", "How wide its marks are, in canvas units.", "a positive number."),
 	opt("options.min_pressure", "0.3", "As brush_style.min_pressure.", "as brush_style.min_pressure."),
@@ -399,7 +399,7 @@ doc += api("new_brush_style(color, brush, brush_size), new_brush_style(color, br
 	opt("options.color_jitter", "0", "As brush_style.color_jitter.", "as brush_style.color_jitter."),
 ]);
 doc += api("brush_style.color = color", "The ink.", [
-	arg("color", "The ink.", "a CSS colour or a gradient."),
+	arg("color", "The ink.", "a CSS colour, a gradient or image paint."),
 ]);
 doc += api("brush_style.brush = name", "The Darkly brush.", [
 	arg("name", "Which brush draws.", "one of brush_names()."),
@@ -425,7 +425,7 @@ doc += api("brush_style.pool = number", "Ink pooling: strokes heavier at the ver
 doc += api("brush_style.pool_depth = number", "How far up the pooling rises.", [
 	arg("number", "The height, as a fraction of the path's. Default 0.3.", "a number above 0 and at most 1."),
 ]);
-doc += api("brush_style.color_jitter = number", "Each stroke a little off its colour, each its own way: every subpath, so every pass of a stroke gone over, too. Colours move in OKLab, so steps look alike whatever the colour: lightness up to number either way, hue and chroma (OKLab's a and b) up to half that times the colour's lightness, so dark inks keep their hue, alpha kept. A gradient's colours move with its stroke. Drawn from the journal's generator as strokes are added to a canvas.", [
+doc += api("brush_style.color_jitter = number", "Each stroke a little off its colour, each its own way: every subpath, so every pass of a stroke gone over, too. Colours move in OKLab, so steps look alike whatever the colour: lightness up to number either way, hue and chroma (OKLab's a and b) up to half that times the colour's lightness, so dark inks keep their hue, alpha kept. A gradient's colours move with its stroke, and image paint's with each stroke. Drawn from the journal's generator as strokes are added to a canvas.", [
 	arg("number", "How far lightness moves, OKLab lightness running from 0 (black) to 1 (white): 0.05 is a slight variation. Default 0.", "a number from 0 to 1."),
 ]);
 doc += api("new_handwriting_style(), new_handwriting_style(options)", "A handwriting style: one clean pass, nothing astray, unless the options set its properties (below), as setting them does.", [
@@ -477,7 +477,26 @@ doc += api("new_gradient(colors, options)", "A gradient laid out another way: gi
 	opt("options.vertical", "false", "True runs the gradient down each path (each glyph, for text) from its top to its bottom.", "true or false; true takes no other key."),
 ]);
 doc += api("gradient.to_string(), gradient.to_debug()", "The gradient as text, for print and debug.");
-doc += para("A colour option of a style, layout or illustration file, one whose default is a colour or a gradient, takes a colour or a gradient: whole, from new_gradient, or as data, a map of colors and new_gradient's options, as the web editor and JSON write it: #{ colors: [...], vertical: true }. The file sees a colour or a gradient either way, and can give it to new_brush_style or style.color as it stands.");
+doc += para("A colour option of a style, layout or illustration file, one whose default is a colour or a gradient, takes a colour or a gradient: whole, from new_gradient, or as data, a map of colors and new_gradient's options, as the web editor and JSON write it: #{ colors: [...], vertical: true }. It takes image paint too, whole. The file sees a colour, a gradient or image paint either way, and can give it to new_brush_style or style.color as it stands.");
+
+// ---- images ----
+
+doc += heading("Images");
+doc += para("A journal's pictures are its images/ files, NAME.png or NAME.jpg, the journal's own or the library's. Image paint lays one over the canvas to draw in: each stroke drawn in it, each subpath of a path (each pen stroke of a glyph, each pass of a stroke gone over), is all one colour, the picture's where the stroke is halfway along, blended between its nearest pixels. Small text in it draws the picture. In Darkly renders each stroke is drawn in its colour, so every brush works with it; in SVG, each subpath is drawn in its colour. Image paint that avoids colours keeps text off the parts of the picture in them: text drawn in it (any text call whose style is in it, and typeset roles) wraps round them as round anything in its avoid, and it can be given to avoid, or added to a tree, as what to keep clear of.");
+doc += api("image(name)", "A picture, images/NAME.png or NAME.jpg, decoded once however often it's asked for.", [
+	arg("name", "Which picture; there mustn't be both a .png and a .jpg of that name.", "a picture's name without its extension."),
+]);
+doc += api("image.name, image.width, image.height", "The picture's name, and its size in pixels: read only.");
+doc += api("image.to_string(), image.to_debug()", "The picture as text, its name and size, for print and debug.");
+doc += api("new_image_paint(image), new_image_paint(image, options)", "Image paint, to use in place of a colour: the picture laid over the canvas, its top-left corner at at. Beyond the picture, strokes take the colour at its nearest edge. It's laid in canvas units, as a gradient across the page is: moving a canvas after drawing on it moves its strokes, not the picture. style.color reads it back.", [
+	arg("image", "The picture.", "an image, from image."),
+	opt("options.at", "vec2(0, 0)", "Where the picture's top-left corner is.", "a vec."),
+	opt("options.width", "the picture's width in pixels, or from height", "How wide it's laid. With only height, the width keeps the picture's shape.", "a positive number of canvas units."),
+	opt("options.height", "the picture's height in pixels, or from width", "How tall it's laid. With only width, the height keeps the picture's shape; with both, the picture's stretched.", "a positive number of canvas units."),
+	opt("options.avoid", "none", "Colours text keeps clear of: where the picture is in one of them is avoided, as if covered by a region. The picture is looked at in a grid of at most 512 cells along its longer side, a cell being avoided when its pixels' average colour is within avoid_tolerance of one of them.", "a colour, or an array of colours."),
+	opt("options.avoid_tolerance", "0.1", "How near a colour must be to one avoided, as a distance in OKLab: 0 matches it exactly; about 0.1 takes its shades.", "a number of at least 0."),
+]);
+doc += api("image_paint.to_string(), image_paint.to_debug()", "The image paint as text, its picture and where it's laid, for print and debug.");
 
 // ---- glyphsets and glyphs ----
 
@@ -700,10 +719,10 @@ doc += api("canvas.scatter_notes(messages, width_range, height_range, settings)"
 // ---- avoidance ----
 
 doc += heading("Keeping Text Clear");
-doc += para("avoid, in every text layout, is a tree, a path, a canvas or a glyph, or an array of any of these. Glyphs keep their whole outline (the hull of their strokes) at least the paragraph's clearance from all of it (3 canvas units unless it says), on top of any margin a tree was built with. Glyphs placed by one call keep clear of each other too.");
+doc += para("avoid, in every text layout, is a tree, a path, a canvas, a glyph or image paint, or an array of any of these. Text whose style is in image paint that avoids colours keeps clear of those parts of the picture as well. Glyphs keep their whole outline (the hull of their strokes) at least the paragraph's clearance from all of it (3 canvas units unless it says), on top of any margin a tree was built with. Glyphs placed by one call keep clear of each other too.");
 doc += api("new_avoidance_tree()", "An empty tree of what to keep clear of. Trees are shared: a text box made with one sees what's added to it later, so tree.add(placed) keeps later text off what's just been placed.");
 doc += api("tree.add(item), tree.add(item, options)", "Adds what to keep clear of, as it is now. Returns the tree.", [
-	arg("item", "What to keep clear of.", "a path (its lines), a canvas (its marks), a glyph (its outline, insides included), another tree (with its own margins), or an array of any of these."),
+	arg("item", "What to keep clear of.", "a path (its lines), a canvas (its marks), a glyph (its outline, insides included), another tree (with its own margins), image paint (the parts of the picture in the colours it avoids), or an array of any of these."),
 	opt("options.margin", "0", "How far to keep from it, in canvas units, on top of the clearance text asks for.", "a number of at least 0."),
 ]);
 doc += api("tree.add_hull(item), tree.add_hull(item, options)", "Keeps out of everything inside the item's outline, not just off its marks. Returns the tree.", [
@@ -721,7 +740,7 @@ doc += api("tree.is_empty", "Read only: whether the tree holds nothing.");
 doc += api("tree.copy()", "An independent copy of the tree.");
 doc += api("free_regions(area, avoid), free_regions(area, avoid, options)", "The stroke-free space inside an area, as paths to write text into, largest first (see order): write_inside_path(text, region, settings) fills one, its rest going on into the next. The area is cut into a grid of square cells; a cell is free where its middle is inside the area and clear of what's avoided, and free cells joined side to side are one region. Each region is one path: its outline, then a subpath for each hole, outlines running half a cell from free cells' middles, so they keep inside the area and the clearance from what's avoided. Fails for a grid of more than four million cells.", [
 	arg("area", "Where to look.", "a path enclosing something, such as the page's rectangle."),
-	arg("avoid", "What isn't free.", "anything a text call's avoid takes: a path (its lines), a canvas (its marks' edges), a glyph, an avoidance tree, or an array of any of these."),
+	arg("avoid", "What isn't free.", "anything a text call's avoid takes: a path (its lines), a canvas (its marks' edges), a glyph, an avoidance tree, image paint, or an array of any of these."),
 	opt("options.clearance", "one resolution", "How far outlines keep from what's avoided, in canvas units.", "a number of at least 0."),
 	opt("options.resolution", "the area's longer side over 400", "The cells' size: smaller follows strokes more closely, and takes longer.", "a positive number."),
 	opt("options.min_width", "0", "Free space narrower than this is left out, and narrow necks part regions: each region grows from a core further than half this from anything, the nearer core taking what two could reach.", "a number of at least 0."),
@@ -1186,7 +1205,7 @@ doc += api("art::sketch(value)", "A value kind's default drawing as a parts map 
 // ---- journals ----
 
 doc += heading("Journals and Their Files");
-doc += para("A journal is a directory: its manifest, journal.json; its entries, entries/NAME.rhai, each a script building a journal_entry of pages; and files of its own, each kind in a directory of its own: locks/, helpers/, layouts/, illustrations/, chains/ and lib/ (rhai files), styles/ and glyphsets/ (NAME.json), and content/ (NAME.txt, a String; NAME.md, Markdown; or NAME.json, Symbols: { base, text }, with strict: true or not, or { base, symbols }). They stand in front of the built-in library's, webapp/library/, which has the same directories: a journal's file stands in for the library's of the same name. Each entry runs on its own, sharing the journal's files but not code with the other entries.");
+doc += para("A journal is a directory: its manifest, journal.json; its entries, entries/NAME.rhai, each a script building a journal_entry of pages; and files of its own, each kind in a directory of its own: locks/, helpers/, layouts/, illustrations/, chains/ and lib/ (rhai files), styles/ and glyphsets/ (NAME.json), content/ (NAME.txt, a String; NAME.md, Markdown; or NAME.json, Symbols: { base, text }, with strict: true or not, or { base, symbols }), and images/ (NAME.png or NAME.jpg, pictures for image(name)). They stand in front of the built-in library's, webapp/library/, which has the same directories: a journal's file stands in for the library's of the same name. Each entry runs on its own, sharing the journal's files but not code with the other entries.");
 doc += listing("journal.json: the journal's manifest, a JSON object.", [
 	req("version", "Which manifest format.", "1."),
 	req("title", "The journal's title.", "a string."),
@@ -1204,7 +1223,7 @@ doc += listing("glyphsets/NAME.json: a glyphset, a JSON object. Glyph units span
 ]);
 doc += api("text_style(name), text_style(name, options)", "A text style file's bundle, styles/NAME.json, the journal's or the library's: #{ style, type, paragraph, spans }, the style, type and paragraph whole (a map's settings over default_style(), no type and the default paragraph), and spans if it gives any. It's a role for typeset, and the settings map of any text call, which ignores spans unless it sets marked-up text.", [
 	arg("name", "Which style file.", "a style file's name without .json."),
-	opt("options", "the file's own", "Its options: size, the glyph scale, which its glyph_position_jitter and baseline_wander follow, and color, its ink.", "a map of size, a positive number, and color, a colour or a gradient, whole or as data (see Gradients)."),
+	opt("options", "the file's own", "Its options: size, the glyph scale, which its glyph_position_jitter and baseline_wander follow, and color, its ink.", "a map of size, a positive number, and color, a colour or a gradient, whole or as data (see Gradients), or image paint (see Images)."),
 ]);
 doc += api("content(name)", "A content file, content/NAME.txt, NAME.md or NAME.json, the journal's or the library's: a .txt or .md file's text, without the newline ending the file (markdown(content(name)) sets marked-up text), or a .json file's symbols: its text made to fit its base, as symbols(base, text, #{ lenient: true }) gives them, or with strict: true in the file, read as symbols(base, text) reads it, text the base can't write being an error; or the symbols the file holds, { base, symbols }.", [
 	arg("name", "Which content file; there mustn't be more than one of that name.", "a content file's name without its extension."),

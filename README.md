@@ -88,6 +88,7 @@ cd webapp/frontend && npm install && npm start
 | `webapp/library/chains/` | locks wired together, for `chain(name)`; see [webapp/library/chains/README.md](webapp/library/chains/README.md) |
 | `webapp/library/styles/` | text styles, for `text_style(name)`: a `NAME.json` for each, every setting of a style, type and paragraph and its spans, as the web editor's style form sets them, giving `#{ style, type, paragraph, spans }` |
 | `webapp/library/content/` | text (`.txt`, `.md`) and symbols (`.json`, `{ base, text }`, the text made to fit the base unless `strict`), for `content(name)` |
+| `webapp/library/images/` | pictures (`.png`, `.jpg`), for `image(name)`; none yet |
 | `webapp/library/lib/` | shared functions any script imports: `import "lib/NAME" as NAME;` |
 | `webapp/library/glyphsets/` | a `NAME.json` for each glyphset: its glyphs' SVG paths by character (a list for variants), `character_padding` (scripts' `glyph_outline_gap`), `space_width` and `fallback`; sets of symbols are glyphsets too |
 | `src/journal/` | canvases, paths, glyph placement, glyphsets, hatching, gradients, parchment, and Darkly and SVG rendering |
@@ -117,8 +118,9 @@ Each entry is a script, `entries/<entry>.rhai`, run on its own. Beside
 them, a journal can have files of its own, each kind in a directory:
 `locks/`, `helpers/`, `layouts/`, `illustrations/`, `chains/`, `styles/`
 (text styles, for `text_style(name)`), `lib/` (shared functions, `import
-"lib/name" as name;`), `glyphsets/` and `content/` (text and symbols, for
-`content(name)`). They stand in front of the built-in library,
+"lib/name" as name;`), `glyphsets/`, `content/` (text and symbols, for
+`content(name)`) and `images/` (PNG and JPEG pictures, for `image(name)`,
+which `new_image_paint` paints strokes from). They stand in front of the built-in library,
 `webapp/library/`: a journal's file stands in for the library's of the
 same name, and journalbuild notes when one does. Entries share these
 files, not code.

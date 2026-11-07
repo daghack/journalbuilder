@@ -153,15 +153,19 @@ pub fn register(engine: &mut Engine) {
         .register_fn("to_debug", describe);
 }
 
-/// A colour or a gradient, as `new_style` and `style.color` take.
+/// A colour, a gradient or image paint, as `new_style` and `style.color`
+/// take.
 pub fn colour_or_gradient(caller: &str, value: Dynamic) -> RhaiResult<crate::journal::canvas::StrokeColor> {
     use crate::journal::canvas::StrokeColor;
     if value.is::<Gradient>() {
         return Ok(StrokeColor::Gradient(value.cast::<Gradient>()));
     }
+    if value.is::<crate::journal::image_paint::ImagePaint>() {
+        return Ok(StrokeColor::Image(value.cast()));
+    }
     let type_name = value.type_name();
     let colour = value.into_immutable_string()
-        .map_err(|_| -> Box<EvalAltResult> { format!("{}: expected a colour string or a gradient, got {}", caller, type_name).into() })?;
+        .map_err(|_| -> Box<EvalAltResult> { format!("{}: expected a colour string, a gradient or image paint, got {}", caller, type_name).into() })?;
     parse_color(&colour).map_err(|e| -> Box<EvalAltResult> { format!("{}: {}", caller, e).into() })?;
     Ok(StrokeColor::Solid(colour.to_string()))
 }
@@ -291,7 +295,7 @@ mod tests {
             (r#"new_gradient(["red", "blue"], #{ vertical: true, radius: 3 })"#, "'vertical' runs down each path"),
             (r#"new_gradient(["red", "blue"], #{ from: [0], to: vec2(1.0, 0.0) })"#, "'from' should be a vec or [x, y]"),
             (r#"new_gradient(["red", "blue"], #{ from: "here", to: vec2(1.0, 0.0) })"#, "'from' should be a vec or [x, y]"),
-            (r#"new_brush_style(3, "Ink Pen", 1.6)"#, "expected a colour string or a gradient"),
+            (r#"new_brush_style(3, "Ink Pen", 1.6)"#, "expected a colour string, a gradient or image paint"),
         ] {
             let err = fails(&format!("let ok = 1;\n{};", script));
             assert!(err.contains(want) && err.contains("line 2"), "{}: {}", want, err);

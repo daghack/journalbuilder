@@ -103,7 +103,8 @@ thread_local! {
 }
 
 /// Use `files` (path from the journal's directory -> text: `locks/x.rhai`,
-/// `glyphsets/y.json`, `content/z.txt`; entries aren't needed) as the
+/// `glyphsets/y.json`, `content/z.txt`, `images/p.png` as a data URL;
+/// entries aren't needed) as the
 /// journal's own files, in front of the library's, for everything run from
 /// now on. Files in no resource directory are ignored.
 #[wasm_bindgen(js_name = setJournal)]
@@ -135,6 +136,9 @@ fn journal_files<'a>(files: impl IntoIterator<Item = (&'a str, &'a str)>) -> Res
             ("content", "txt") => &mut journal.text,
             ("content", "md") => &mut journal.markdown,
             ("content", "json") => &mut journal.symbols,
+            // Pictures as data URLs.
+            ("images", "png") => &mut journal.png_images,
+            ("images", "jpg") => &mut journal.jpg_images,
             _ => continue,
         };
         *sources = sources.clone().with_overlay([(name.to_string(), text.to_string())]);

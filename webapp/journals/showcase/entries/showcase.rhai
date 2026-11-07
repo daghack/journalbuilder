@@ -3,8 +3,8 @@
 //
 //   pens      every Darkly brush; brush styles (pressure profiles and
 //             ranges, colours, gradients, pooling ink, wandering pressure,
-//             colour jitter), handwriting (strokes gone over in passes and
-//             reshaped), and styles made of the two
+//             colour jitter, image paint), handwriting (strokes gone over
+//             in passes and reshaped), and styles made of the two
 //   glyphsets every glyphset, its alphabet and a line, glyphset settings,
 //             type styles (tracking, gaps, italics, scale), and glyphs
 //             placed by hand
@@ -417,6 +417,36 @@ pens.add(caption("a gradient, new_gradient([RED, INK], #{ vertical: true }), wit
 let jittered_ink = new_style(new_brush_style(new_gradient([RED, INK], #{ vertical: true }), "Ink Pen", 1.6, #{ max_pressure: 0.6, color_jitter: 0.1 }), steady);
 pens.add(write_in("Lorem ipsum dolor sit amet, consectetur adipiscing elit,", LEFT, y + 60, 30, jittered_ink, PLAIN));
 pens.add(write_in("sed do eiusmod tempor incididunt ut labore et dolore.", LEFT, y + 110, 30, jittered_ink, PLAIN));
+book.bind("pens", pens);
+
+// A journal's pictures, images/NAME.png or .jpg, are read with
+// image(name). Laid over the canvas with new_image_paint, a picture paints
+// strokes as a colour or a gradient does, but each stroke (each subpath of
+// a path, each pen stroke of a glyph) all in one colour: the picture's
+// where the stroke is halfway along. Dense small text in it draws the
+// picture. Text in it keeps clear of the picture's parts in the colours it
+// avoids, as of what it's told to avoid: here, the sun.
+let pens = sheet("pens");
+pens.name = "image_paint";
+pens.add(subhead("image paint", TOP));
+let sky = image("sunset");
+pens.add(caption(`image("${sky.name}"): the showcase's images/sunset.png, ${sky.width} by ${sky.height} pixels (image.width, image.height)`, TOP + 50));
+pens.add(caption("new_image_paint(image, #{ at, width }): laid over the page, each stroke the picture's colour halfway along it;", TOP + 85));
+pens.add(caption("#{ avoid: \"#ffe9a0\", avoid_tolerance: 0.12 }: text in it (a text box given its style) keeps clear of the sun's colour", TOP + 120));
+let picture = new_image_paint(sky, #{ at: vec2(LEFT, TOP + 165), width: RIGHT - LEFT, avoid: "#ffe9a0", avoid_tolerance: 0.12 });
+let lorem = "";
+for i in 0..24 { lorem += LOREM; }
+let picture_pen = new_style(new_brush_style(picture, "Ink Pen", 1.5, #{ min_pressure: 0.5, max_pressure: 0.9 }), steady);
+let block = new_textbox(#{ center: vec2((LEFT + RIGHT) / 2, TOP + 165 + (RIGHT - LEFT) / 3), width: RIGHT - LEFT, height: (RIGHT - LEFT) * 2 / 3, type: #{ glyph_scale: 24 }, style: picture_pen });
+pens.add(block.fill(PLAIN.glyphs(lorem)).placed, picture_pen);
+// An avoidance tree takes image paint too: what it avoids, with a margin.
+assert(new_avoidance_tree().add(picture, #{ margin: 4 }).blocks(vec2(LEFT + (RIGHT - LEFT) * 0.64, TOP + 165 + (RIGHT - LEFT) * 2 / 3 * 0.5)), "the sun is avoided");
+let y = TOP + 165 + (RIGHT - LEFT) * 2 / 3 + 40;
+pens.add(caption("#{ at, width, height }: stretched over the words (give one of width and height and the other keeps its shape);", y));
+pens.add(caption("a colour option takes it too: text_style(\"plain_hand\", #{ color: paint })", y + 35));
+let stretched = new_image_paint(sky, #{ at: vec2(LEFT, y + 60), width: RIGHT - LEFT, height: 230 });
+pens.add(write_in("DOLOR SIT AMET", LEFT, y + 140, 110, new_style(new_brush_style(stretched, "Calligraphy", 6, #{ min_pressure: 0.6, max_pressure: 1.0, pressure_profile: "constant" }), steady), LOCHE));
+pens.add(write_line("Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod.", vec2(LEFT, y + 250), text_style("plain_hand", #{ color: stretched, size: 30 })));
 book.bind("pens", pens);
 
 // ---- glyphsets ----

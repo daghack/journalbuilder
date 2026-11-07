@@ -51,7 +51,7 @@ const USAGE: &str = "Usage: journalbuild <journal> [--entry E[,E...]] [--page N[
                       of a journal's directory (anything with a /): its
                       journal.json, its entries in entries/, and its own
                       resources (locks/, layouts/, illustrations/, chains/,
-                      styles/, lib/, glyphsets/, content/) over the
+                      styles/, lib/, glyphsets/, content/, images/) over the
                       library's. An entry that fails doesn't stop the others
                       rendering: the failures are listed at the end, and the
                       exit status is 1.

@@ -135,7 +135,7 @@ impl PathText {
         Ok(PathText {
             symbols: font.build(msg, symdict, &mut *rng.borrow_mut()),
             mode: text.paragraph.line_mode(caller, false)?,
-            avoid: avoid::AvoidOption::parse(caller, &text.options, text.paragraph.clearance())?,
+            avoid: avoid::AvoidOption::parse(caller, &text.options, text.paragraph.clearance(), &text.style)?,
             spacing: text.type_.tracking(),
             angle: text.paragraph.angle(),
             jitter: text.jitter(),
@@ -165,7 +165,7 @@ fn fill_with_text(path: &mut Path, msg: &str, settings: Map, text: &TextSource) 
     const CALLER: &str = "fill_with_text";
     let mut set = PathText::parse(CALLER, msg, settings, text)?;
     let fontsize = set.size(CALLER)?;
-    let tree = set.avoid.tree.as_ref().map(|a| a.borrow());
+    let tree = set.avoid.now();
     let args = SymbolPlacementArgs {
         avoid: tree.as_deref(),
         padding: set.avoid.padding(),
@@ -184,7 +184,7 @@ fn fill_with_text(path: &mut Path, msg: &str, settings: Map, text: &TextSource) 
             return Err(format!(
                 "{}: glyph {} of {} doesn't fit on the path at glyph scale {}; use a longer path or a smaller scale{}",
                 CALLER, total - unplaced.len() + 1, total, fontsize,
-                if set.avoid.tree.is_some() { ", or avoid less" } else { "" },
+                if set.avoid.is_some() { ", or avoid less" } else { "" },
             ).into());
         }
         all_canvases.push(Dynamic::from(set.draw(placed, &text.1)));
@@ -197,7 +197,7 @@ fn fit_text(path: &mut Path, msg: &str, settings: Map, text: &TextSource) -> Rha
     const CALLER: &str = "fit_text";
     let set = PathText::parse(CALLER, msg, settings, text)?;
     let path = &path.get();
-    let tree = set.avoid.tree.as_ref().map(|a| a.borrow());
+    let tree = set.avoid.now();
     let mut args = SymbolPlacementArgs {
         avoid: tree.as_deref(),
         padding: set.avoid.padding(),
@@ -338,7 +338,7 @@ pub(super) fn spiral_text(msg: &str, center: Vec2, radius: &Dynamic, settings: M
         center + PVec::new(a.cos(), a.sin()) * room
     }).collect();
     let within = crate::journal::canvas::textbox::Region::new(vec![ring]);
-    let tree = set.avoid.tree.as_ref().map(|a| a.borrow());
+    let tree = set.avoid.now();
     let args = SymbolPlacementArgs {
         avoid: tree.as_deref(),
         padding: set.avoid.padding(),
@@ -407,7 +407,7 @@ fn write_line(msg: &str, at: Vec2, settings: Map, text: &TextSource) -> RhaiResu
     } else {
         StrokePath::line(start, start + PVec::new(length, 0.0))
     };
-    let tree = set.avoid.tree.as_ref().map(|a| a.borrow());
+    let tree = set.avoid.now();
     let args = SymbolPlacementArgs {
         avoid: tree.as_deref(),
         padding: set.avoid.padding(),
@@ -418,7 +418,7 @@ fn write_line(msg: &str, at: Vec2, settings: Map, text: &TextSource) -> RhaiResu
     let (placed, unplaced) = place_text(set.symbols.clone(), &line, &args, &set.mode);
     if !unplaced.is_empty() {
         return Err(format!("{}: {} of {} glyphs didn't fit on the line{}", CALLER, unplaced.len(), placed.len() + unplaced.len(),
-            if set.avoid.tree.is_some() { "; avoid less" } else { "" }).into());
+            if set.avoid.is_some() { "; avoid less" } else { "" }).into());
     }
     Ok(set.draw(placed, &text.1))
 }

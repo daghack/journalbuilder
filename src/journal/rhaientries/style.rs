@@ -109,6 +109,7 @@ impl Settings for BrushStyle {
             "color" => match &self.color {
                 StrokeColor::Solid(color) => color.into(),
                 StrokeColor::Gradient(g) => Dynamic::from(g.clone()),
+                StrokeColor::Image(paint) => Dynamic::from(paint.clone()),
             },
             "brush" => self.brush.clone().into(),
             "brush_size" => self.brush_size.into(),
@@ -291,7 +292,6 @@ impl Style {
     pub(super) fn color_jitter(&self) -> f32 {
         self.brush.color_jitter as f32
     }
-    #[cfg(test)]
     pub(super) fn color(&self) -> &StrokeColor {
         &self.brush.color
     }

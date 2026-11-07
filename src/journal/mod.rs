@@ -7,6 +7,7 @@ pub mod distribute;
 pub mod fonts;
 pub mod free_regions;
 pub mod gradient;
+pub mod image_paint;
 pub mod symbol;
 pub mod parchment;
 pub mod paths;

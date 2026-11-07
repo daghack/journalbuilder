@@ -481,6 +481,12 @@ impl Pen<'_> {
             .fold((f32::MAX, f32::MIN), |(top, bottom), s| (top.min(s.point.y), bottom.max(s.point.y)));
         let mut points = Vec::new();
         for (i, samples) in substrokes.into_iter().enumerate() {
+            // In a picture, each substroke is the picture's colour halfway
+            // along it.
+            let colour = match &style.color {
+                StrokeColor::Image(paint) if !white => paint.stroke_colour(samples.iter().map(|s| s.point)),
+                _ => colour,
+            };
             // Darkly seeds each stroke's random brush texture from the wall
             // clock by default; numbering the strokes instead makes renders
             // reproducible while keeping neighbouring strokes distinct. (A
