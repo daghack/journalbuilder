@@ -31,19 +31,13 @@
                 "output": "wasm"
               },
               {
-                "glob": "flowsim_bg.wasm",
-                "input": "wasm-pkg",
-                "output": "wasm"
-              },
-              {
                 "glob": "*",
                 "input": "generated/journals",
                 "output": "journals"
               }
             ],
             "styles": [
-              "src/styles.scss",
-              "../../tools/flowsim/web/src/style.css"
+              "src/styles.scss"
             ],
             "webWorkerTsConfig": "tsconfig.worker.json"
           },

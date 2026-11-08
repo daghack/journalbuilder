@@ -9,8 +9,6 @@ use noise::{NoiseFn, Perlin};
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
 use parry2d::bounding_volume;
-use std::sync::Arc;
-use crate::journal::fluid::{self, Fluid, StrokeFluid};
 
 pub mod textbox;
 pub mod wander;
@@ -101,11 +99,6 @@ fn svg_gradient(gradient: &Gradient, id: &str) -> String {
 /// `ALONG_PIECE_MIN` units.
 const ALONG_PIECES: f32 = 48.0;
 const ALONG_PIECE_MIN: f32 = 1.5;
-/// The most samples a piece of a stroke a fluid colours or fades is long,
-/// so its colour follows the fluid's.
-const FLUID_PIECE_SAMPLES: usize = 8;
-/// How long pieces of a plain stroke a fluid shades are, at most.
-const FLUID_PIECE: f32 = 4.0;
 
 #[derive(Clone, Debug)]
 pub struct StrokeStyle {
@@ -339,20 +332,6 @@ impl StrokeStyle {
             StrokeColor::Image(paint) => Ok(paint.average),
         }
     }
-    /// The colour this style paints at `p`, `t` of the way along its
-    /// subpath and `down` of the way down its path: a gradient's there, a
-    /// picture's there, or its solid colour (black if that doesn't parse).
-    pub fn colour_at(&self, p: Vec2, t: f32, down: f32) -> [f32; 4] {
-        match &self.color {
-            StrokeColor::Solid(c) => parse_color(c).unwrap_or([0.0, 0.0, 0.0, 1.0]),
-            StrokeColor::Gradient(g) => match g.kind {
-                GradientKind::Along => g.at(t),
-                GradientKind::Vertical => g.at(down),
-                _ => g.at_point(p).unwrap_or_else(|| g.first()),
-            },
-            StrokeColor::Image(paint) => paint.at_point(p),
-        }
-    }
     /// How far a stroke's marks reach either side of its line: half the
     /// wider of its width at its heaviest (in SVG output) and its brush (in
     /// Darkly's).
@@ -388,9 +367,6 @@ fn plain_path(stroke: &ColoredStroke, id: &str) -> String {
     let ColoredStroke { path, style, ink, .. } = stroke;
     let line = |d: &dyn std::fmt::Display, paint: &str, width: f32, cap: &str| format!(
         "<path d=\"{}\" style=\"fill:none;stroke:{};stroke-width:{};{}\" />", d, paint, width, cap);
-    if fluid::shades(&stroke.fluids) {
-        return fluid_plain_path(stroke);
-    }
     match &style.color {
         // Jittered, running dry or in a picture, each subpath its own
         // colour and width, as at its middle.
@@ -471,62 +447,6 @@ fn plain_path(stroke: &ColoredStroke, id: &str) -> String {
     }
 }
 
-/// A stroke fluids weight, fade or colour, as plain SVG: each subpath in
-/// pieces, each as wide and in the colour the fluids make it at its middle.
-fn fluid_plain_path(stroke: &ColoredStroke) -> String {
-    let ColoredStroke { path, style, ink, fluids, .. } = stroke;
-    let mut svg = String::new();
-    let subpaths = path.flattened(0.1);
-    let whole: f32 = match ink {
-        Some(_) => subpaths.iter().map(|(points, _)| points.windows(2).map(|w| w[0].distance(w[1])).sum::<f32>()).sum(),
-        None => 0.0,
-    };
-    let (top, bottom) = top_and_bottom(subpaths.iter().flat_map(|(points, _)| points.iter().copied()));
-    let mut before = 0.0;
-    for (k, (points, closed)) in subpaths.into_iter().enumerate() {
-        // Long straight lines are cut too, so the fluid changes along them.
-        let mut points = fluid::resample(&points, closed, FLUID_PIECE / 2.0);
-        if closed && points.len() > 1 {
-            points.push(points[0]);
-        }
-        let lengths: Vec<f32> = std::iter::once(0.0).chain(points.windows(2).scan(0.0, |total, w| {
-            *total += w[0].distance(w[1]);
-            Some(*total)
-        })).collect();
-        let total = *lengths.last().expect("a subpath has a point");
-        let start = before;
-        before += total;
-        if total <= 0.0 {
-            continue;
-        }
-        let mut i = 0;
-        while i + 1 < points.len() {
-            let mut end = i + 1;
-            while end + 1 < points.len() && lengths[end] - lengths[i] < FLUID_PIECE {
-                end += 1;
-            }
-            let mut d = StrokePath::new().move_to(points[i].x, points[i].y);
-            for p in &points[i + 1..=end] {
-                d = d.line_to(p.x, p.y);
-            }
-            let middle = (lengths[i] + lengths[end]) / 2.0;
-            let at = points[i].lerp(points[end], 0.5);
-            let strength = match ink {
-                Some(ink) if whole > 0.0 => ink.at((start + middle) / whole),
-                _ => 1.0,
-            };
-            let base = style.colour_at(at, middle / total, down(at.y, top, bottom));
-            let colour = style.inked(fluid::colour(fluids, at, base), k, strength * fluid::opacity(fluids, at));
-            let width = style.width * strength * fluid::weight(fluids, at);
-            svg.push_str(&format!(
-                "<path d=\"{}\" style=\"fill:none;stroke:{};stroke-width:{};stroke-linecap:round;stroke-linejoin:round;\" />",
-                d, css(colour), width));
-            i = end;
-        }
-    }
-    svg
-}
-
 #[derive(Clone, Debug)]
 pub struct ColoredStroke {
     pub path: StrokePath,
@@ -538,20 +458,6 @@ pub struct ColoredStroke {
     pub seed: Option<u32>,
     /// How dry its pen is over it, if its pen runs dry.
     pub ink: Option<InkRun>,
-    /// Fluids that weight, fade or colour it point by point as it's drawn
-    /// (see `fluid::Fluid::apply`).
-    pub fluids: Vec<Arc<StrokeFluid>>,
-}
-
-impl ColoredStroke {
-    /// How far its marks reach either side of its line, at their heaviest.
-    pub fn reach(&self) -> f32 {
-        self.style.reach() * self.heaviest()
-    }
-    /// The most its fluids weight it anywhere.
-    pub fn heaviest(&self) -> f32 {
-        self.fluids.iter().map(|f| f.heaviest()).product()
-    }
 }
 
 /// How the SVG output draws strokes: roughened, sampled every
@@ -897,39 +803,7 @@ impl Canvas {
             style,
             seed,
             ink,
-            fluids: Vec::new(),
         });
-    }
-    /// Distorts each stroke by the fluids `fluids` gives for it (by its
-    /// index), in order (see `Fluid::apply`), and works out the bounds
-    /// again. Each stroke keeps the texture's seed it had.
-    pub fn apply_fluids(&mut self, fluids: impl Fn(usize) -> Vec<Arc<Fluid>>) {
-        let seeds = self.stroke_seeds();
-        let mut any = false;
-        for (i, (stroke, seed)) in self.strokes.iter_mut().zip(seeds).enumerate() {
-            let list = fluids(i);
-            if list.is_empty() {
-                continue;
-            }
-            any = true;
-            stroke.seed = Some(seed);
-            for fluid in list {
-                fluid.apply(stroke, seed);
-            }
-        }
-        if any {
-            self.bounds = bounding_volume::Aabb::new_invalid();
-            let mut bounds = self.bounds;
-            for stroke in &self.strokes {
-                let width_vec = Vec2::splat(stroke.style.width * stroke.heaviest());
-                stroke.path.for_each_point(|pos| {
-                    bounds.take_point(pos);
-                    bounds.take_point(pos + width_vec);
-                    bounds.take_point(pos - width_vec);
-                });
-            }
-            self.bounds = bounds;
-        }
     }
     pub fn strokes(&self) -> &Vec<ColoredStroke> {
         &self.strokes
@@ -963,7 +837,7 @@ impl Canvas {
         if !any {
             return false;
         }
-        let reach = reach + stroke.reach() * 2.0;
+        let reach = reach + stroke.style.reach() * 2.0;
         !(lo.x - reach > max.x || lo.y - reach > max.y || hi.x + reach < min.x || hi.y + reach < min.y)
     }
     /// The strokes that might reach into the box from `min` to `max`, and
@@ -1159,9 +1033,7 @@ impl Canvas {
             let heavier: Vec<f32> = samples.iter().enumerate().map(|(i, sample)| {
                 along += if i > 0 { samples[i - 1].point.distance(sample.point) } else { 0.0 };
                 let strength = ink.at(k, along);
-                // A fluid's opacity fades only the colour; its weight
-                // widens.
-                strengths.push(strength * fluid::opacity(&stroke.fluids, sample.point));
+                strengths.push(strength);
                 // A pointed pen's width follows its pressure; the other
                 // profiles keep the trailed-off width.
                 let pointed = brush.filter(|b| b.pressure_profile == PressureProfile::Pointed && b.max_pressure > 0.0)
@@ -1169,7 +1041,6 @@ impl Canvas {
                 pointed * brush.map_or(1.0, |b| b.pooling(sample.point.y, top, bottom))
                     * variation.as_ref().map_or(1.0, |v| v.at(along))
                     * strength
-                    * fluid::weight(&stroke.fluids, sample.point)
             }).collect();
             // Reversed, the right side's trail runs from the other end.
             let n = samples.len();
@@ -1186,27 +1057,6 @@ impl Canvas {
             points
         };
         match &stroke.style.color {
-            _ if fluid::colours(&stroke.fluids) || fluid::fades(&stroke.fluids) => {
-                // Pieces a few samples long, as along a gradient, each in
-                // its colour at its middle as the fluids colour and fade it.
-                let mut marks = Vec::new();
-                for (k, _, sides, strengths) in &outlines {
-                    let last = (sides.len() - 1) as f32;
-                    let step = ((sides.len() as f32 / ALONG_PIECES).ceil() as usize).clamp(2, FLUID_PIECE_SAMPLES);
-                    let mut i = 0;
-                    while i + 1 < sides.len() {
-                        let end = (i + step).min(sides.len() - 1);
-                        let middle = (i + end) / 2;
-                        let (l, r) = sides[middle];
-                        let at = l.lerp(r, 0.5);
-                        let base = stroke.style.colour_at(at, middle as f32 / last, down(at.y, top, bottom));
-                        let paint = css(stroke.style.inked(fluid::colour(&stroke.fluids, at, base), *k, strengths[middle]));
-                        marks.push(Mark { defs: String::new(), outlines: vec![outline(None, &sides[i..=end])], paint, width: Some(ALONG_PIECE_OVERLAP) });
-                        i = end;
-                    }
-                }
-                marks
-            }
             StrokeColor::Gradient(gradient) if gradient.per_stroke() => {
                 // Pieces a few samples long, overlapping by one so they
                 // meet, each in the colour at its middle: how far along

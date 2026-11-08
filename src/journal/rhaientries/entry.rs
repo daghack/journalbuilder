@@ -9,8 +9,6 @@ use parry2d::math::Vec2 as PVec;
 use crate::journal::canvas::Canvas as JournalCanvas;
 use crate::journal::canvas::{SvgStyle, Frame};
 use crate::journal::stable_hash;
-use crate::journal::fluid::Fluid;
-use std::sync::Arc;
 
 #[derive(Debug, Default, Clone, CustomType)]
 #[rhai_type(extra = Self::build_extra)]
@@ -115,10 +113,6 @@ pub struct Page {
     /// strokes.
     #[rhai_type(skip)]
     pub(super) size: Option<PVec>,
-    /// Fluids that distort everything on the page when it's rendered, in
-    /// the order they were added (`page.add(fluid)`).
-    #[rhai_type(skip)]
-    pub(super) fluids: Vec<Arc<Fluid>>,
 }
 
 impl Default for Page {
@@ -129,7 +123,6 @@ impl Default for Page {
             svg_style: Some(SvgStyle::DEFAULT),
             margin: None,
             size: None,
-            fluids: Vec::new(),
         }
     }
 }
@@ -149,70 +142,6 @@ impl Page {
     pub fn canvases(&self) -> &Vec<CanvasData> {
         &self.canvases
     }
-    /// `page.add(fluid)`: the fluid distorts everything on the page when
-    /// it's rendered, canvases added later too. Returns the page.
-    pub fn add_fluid(&mut self, fluid: Fluid) -> Page {
-        self.fluids.push(Arc::new(fluid));
-        self.clone()
-    }
-    /// The names of the fluids anywhere on the page.
-    pub fn fluid_names(&self) -> std::collections::BTreeSet<String> {
-        let canvases = self.canvases.iter().flat_map(|c| c.fluids.iter().chain(c.strokes.iter().flat_map(|s| s.fluids.iter())));
-        self.fluids.iter().chain(canvases).map(|f| f.name.clone()).collect()
-    }
-    /// Puts `with` in place of every fluid named `name` on the page (on
-    /// it, its canvases and their strokes), or takes them away with
-    /// `None`. Whether there were any.
-    pub fn replace_fluid(&mut self, name: &str, with: Option<&Arc<Fluid>>) -> bool {
-        let mut found = false;
-        let lists = std::iter::once(&mut self.fluids).chain(self.canvases.iter_mut().flat_map(|c| c.fluids_mut()));
-        for list in lists {
-            found |= list.iter().any(|f| f.name == name);
-            match with {
-                Some(with) => list.iter_mut().filter(|f| f.name == name).for_each(|f| *f = with.clone()),
-                None => list.retain(|f| f.name != name),
-            }
-        }
-        found
-    }
-    /// Adds `fluid` to the canvas labelled `canvas` (see
-    /// `CanvasData::label`), or to the page with none.
-    pub fn add_fluid_to(&mut self, fluid: Arc<Fluid>, canvas: Option<&str>) -> Result<(), String> {
-        match canvas {
-            None => self.fluids.push(fluid),
-            Some(label) => {
-                let found = self.canvases.iter_mut().enumerate().find(|(i, c)| c.label(*i) == label)
-                    .ok_or_else(|| format!("the page has no canvas named '{}'", label))?;
-                found.1.fluids.push(fluid);
-            }
-        }
-        Ok(())
-    }
-    /// Where the fluid named `name` is added: whether to the page itself,
-    /// and the labels of the canvases it's added to (or to strokes on them).
-    pub fn fluid_places(&self, name: &str) -> (bool, Vec<String>) {
-        let on_page = self.fluids.iter().any(|f| f.name == name);
-        let canvases = self.canvases.iter().enumerate()
-            .filter(|(_, c)| c.fluids.iter().chain(c.strokes.iter().flat_map(|s| s.fluids.iter())).any(|f| f.name == name))
-            .map(|(i, c)| c.label(i))
-            .collect();
-        (on_page, canvases)
-    }
-    /// A copy of the page with `fluid` wherever one of its name is added,
-    /// or, if none is, added to the canvas labelled `target` (the page with
-    /// none). With no `fluid`, a copy with every fluid named `name` left out.
-    pub fn with_fluid(&self, name: &str, fluid: Option<Arc<Fluid>>, target: Option<&str>) -> Result<Page, String> {
-        let mut page = self.clone();
-        let found = page.replace_fluid(name, fluid.as_ref());
-        if let Some(fluid) = fluid.filter(|_| !found) {
-            page.add_fluid_to(fluid, target)?;
-        }
-        Ok(page)
-    }
-    /// Its set size (`page.size`), if it has one.
-    pub fn fixed_size(&self) -> Option<PVec> {
-        self.size
-    }
     /// The canvases with something to render, as they're rendered (see
     /// `render_canvas`), with their names in output.
     pub fn rendered_canvases(&self) -> impl Iterator<Item = (String, JournalCanvas)> + '_ {
@@ -227,11 +156,6 @@ impl Page {
     /// `None` if there's nothing to render.
     pub fn render_canvas(&self, canvas: &CanvasData) -> Option<JournalCanvas> {
         let mut rendered: JournalCanvas = canvas.into();
-        // Fluids distort the strokes whole, before a tile cuts them off, so
-        // they carry on across its edges.
-        if canvas.has_fluids(&self.fluids) {
-            rendered.apply_fluids(canvas.stroke_fluids(&self.fluids));
-        }
         if rendered.frame().is_none() {
             if !rendered.has_strokes() {
                 return None;
@@ -440,7 +364,6 @@ impl Page {
                     margin: self.margin,
                     // Each tile is framed to its part of the page.
                     size: None,
-                    fluids: self.fluids.clone(),
                 };
                 for (i, canvas) in &seeded {
                     let mut part = canvas.clone();
@@ -470,7 +393,6 @@ impl Page {
     fn build_extra(builder: &mut TypeBuilder<Self>) {
         builder
             .with_fn("add", Self::add_canvas)
-            .with_fn("add", Self::add_fluid)
             .with_fn("new_page", Self::default)
             .with_fn("new_page", |ctx: NativeCallContext, options: Map| apply_props(&ctx, "new_page", Page::default(), options, &PAGE_PROPS))
             .with_get_set("name", Self::get_name, Self::set_name)

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = [".", "webapp/wasm", "tools/flowsim/sim"]
+members = [".", "webapp/wasm"]
 
 [features]
 # Compile the layout and lock files and fonts/ into the library
@@ -21,9 +21,6 @@ embedded-assets = []
 # Pinned to a commit, so a `cargo update` can't change how journals render.
 darkly = { git = "https://github.com/daghack/darkly.git", rev = "1c43f6b4ee86e3aa7ccb8c41550aa1287506836b" }
 flate2 = "1.1"
-# The flow simulator, for the fields fluids distort strokes by (its
-# `field` module): one format, written by the simulator and read here.
-flowsim = { path = "tools/flowsim/sim" }
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "rayon"] }
 noise = "0.9.0"
 parry2d = "0.26.1"

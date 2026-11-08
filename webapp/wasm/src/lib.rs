@@ -19,17 +19,15 @@
 //! `styleChoices`.
 
 use scribe::journal::darkly;
-use scribe::journal::fluid::{self, Fluid, FluidField};
 use scribe::journal::fonts::FontBook;
 use scribe::journal::pdf::PdfWriter;
 use scribe::journal::publish::{self, Render};
-use scribe::journal::rhaientries::{brush_names, Entry, JournalEngine, LockLibrary, Page, Resources};
+use scribe::journal::rhaientries::{brush_names, Entry, JournalEngine, LockLibrary, Resources};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
-use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 
 thread_local! {
@@ -141,7 +139,6 @@ fn journal_files<'a>(files: impl IntoIterator<Item = (&'a str, &'a str)>) -> Res
             // Pictures as data URLs.
             ("images", "png") => &mut journal.png_images,
             ("images", "jpg") => &mut journal.jpg_images,
-            ("fluids", "json") => &mut journal.fluids,
             _ => continue,
         };
         *sources = sources.clone().with_overlay([(name.to_string(), text.to_string())]);
@@ -293,129 +290,6 @@ pub fn preview_svg(source: &str, files: Option<String>) -> String {
         "missingGlyphs": evaluation.missing_glyphs, "error": error.map(|e| json!({ "message": e.message, "line": e.line, "column": e.column })),
     });
     preview.to_string()
-}
-
-/// The page the Fluid tab works on (`fluidPrepare`).
-struct FluidPage {
-    /// As the entry makes it, and with the tab's fluid left out.
-    page: Page,
-    original: Page,
-    label: String,
-    /// The fluid the tab edits.
-    name: String,
-    /// The last field `fluidApply` was given, and what's worked out from
-    /// it, so changing only the settings keeps that.
-    field: Option<(RawField, Arc<FluidField>)>,
-}
-
-#[derive(PartialEq)]
-struct RawField {
-    nx: usize,
-    ny: usize,
-    h: f32,
-    arrays: [Vec<f32>; 4],
-}
-
-thread_local! {
-    static FLUID_PAGE: RefCell<Option<FluidPage>> = const { RefCell::new(None) };
-}
-
-fn error_json(message: impl Into<String>) -> Value {
-    json!({ "message": message.into() })
-}
-
-/// Run the journal entry `source` and keep its page `index` for the Fluid
-/// tab, which edits the fluid `name`. As JSON: `{ pages: [{ index, label
-/// }], label, size, canvases: [{ label, bounds }], uses: { page, canvases
-/// }, svg, view, warnings, error }`: the page `size` it's set to, if it is;
-/// its canvases' `bounds` (`[x, y, width, height]`, with their margins);
-/// where the entry adds the fluid (to the page, to which canvases); and
-/// the page as SVG with the fluid left out (with its `view`, as `pageSvg`).
-#[wasm_bindgen(js_name = fluidPrepare)]
-pub fn fluid_prepare(source: &str, index: usize, name: &str) -> String {
-    FLUID_PAGE.set(None);
-    let (entry, evaluation) = run(source);
-    let entry = match entry {
-        Ok(entry) => entry,
-        Err(e) => return json!({ "pages": [], "warnings": evaluation.warnings, "error": { "message": e.message, "line": e.line, "column": e.column } }).to_string(),
-    };
-    let pages: Vec<Value> = entry.selected_pages(None).map(|(i, page)| json!({ "index": i, "label": page.label(i) })).collect();
-    let Some((index, page)) = entry.selected_pages(None).nth(index) else {
-        let message = format!("there's no page {}; the entry has {}", index, entry.page_count());
-        return json!({ "pages": pages, "warnings": evaluation.warnings, "error": error_json(message) }).to_string();
-    };
-    let label = page.label(index);
-    let original = page.with_fluid(name, None, None).expect("leaving a fluid out can't fail");
-    let canvases: Vec<Value> = original.canvases().iter().enumerate().map(|(i, canvas)| {
-        let bounds = original.render_canvas(canvas).map(|rendered| {
-            let b = rendered.bounds();
-            [b.mins.x, b.mins.y, b.maxs.x - b.mins.x, b.maxs.y - b.mins.y]
-        });
-        json!({ "label": canvas.label(i), "bounds": bounds })
-    }).collect();
-    let (on_page, on_canvases) = page.fluid_places(name);
-    let svg = publish::page_svg(&original, &label);
-    let answer = json!({
-        "pages": pages,
-        "label": label,
-        "size": original.fixed_size().map(|s| [s.x, s.y]),
-        "canvases": canvases,
-        "uses": { "page": on_page, "canvases": on_canvases },
-        "svg": svg.as_ref().map(|(svg, _)| svg),
-        "view": svg.as_ref().map(|(_, view)| view),
-        "warnings": evaluation.warnings,
-        "error": null,
-    });
-    FLUID_PAGE.set(Some(FluidPage { page: page.clone(), original, label, name: name.to_string(), field: None }));
-    answer.to_string()
-}
-
-/// The ink of the canvases labelled `canvases` on the page `fluidPrepare`
-/// kept (with its fluid left out), as an alpha raster `nx` by `ny`, row by
-/// row, over the box at (`x`, `y`) of `width` by `height` canvas units: for
-/// the flow simulator's `set_mask`.
-#[wasm_bindgen(js_name = fluidMask)]
-pub fn fluid_mask(canvases: Vec<String>, x: f32, y: f32, width: f32, height: f32, nx: usize, ny: usize) -> Result<Vec<u8>, JsError> {
-    FLUID_PAGE.with_borrow(|kept| {
-        let kept = kept.as_ref().ok_or_else(|| JsError::new("no page to mask: call fluidPrepare first"))?;
-        let page = &kept.original;
-        let rendered: Vec<_> = page.canvases().iter().enumerate()
-            .filter(|(i, canvas)| canvases.contains(&canvas.label(*i)))
-            .filter_map(|(_, canvas)| page.render_canvas(canvas))
-            .collect();
-        fluid::ink_mask(&rendered, [x, y], [width, height], nx, ny).map_err(|e| JsError::new(&e))
-    })
-}
-
-/// The page `fluidPrepare` kept, distorted by its fluid: its field from the
-/// flow simulator's raw arrays (`nx` by `ny` cells `h` across: `u`, `v`,
-/// `pressure`, `dye`, as `Field::from_raw` takes them) and its box and
-/// effects from `settings`, a fluid file's text. Where the entry adds the
-/// fluid, this stands in for it; where it doesn't, it's added to the
-/// canvas labelled `target`, or the page with none. `live` draws it
-/// quickly, coarser, for a flow that's running. As JSON: `{ svg, view,
-/// error }`.
-#[wasm_bindgen(js_name = fluidApply)]
-#[allow(clippy::too_many_arguments)]
-pub fn fluid_apply(nx: usize, ny: usize, h: f32, u: Vec<f32>, v: Vec<f32>, pressure: Vec<f32>, dye: Vec<f32>, settings: &str, target: Option<String>, live: bool) -> String {
-    let answer = FLUID_PAGE.with_borrow_mut(|kept| -> Result<Value, String> {
-        let kept = kept.as_mut().ok_or("no page to distort: call fluidPrepare first")?;
-        let raw = RawField { nx, ny, h, arrays: [u, v, pressure, dye] };
-        let field = match &kept.field {
-            Some((last, field)) if *last == raw => field.clone(),
-            _ => {
-                let [u, v, pressure, dye] = &raw.arrays;
-                let field = Arc::new(FluidField::from_raw(nx, ny, h, u, v, pressure, dye)?);
-                kept.field = Some((raw, field.clone()));
-                field
-            }
-        };
-        let fluid = Fluid { live, ..Fluid::with_settings(&kept.name, field, settings)? };
-        let page = kept.page.with_fluid(&kept.name, Some(Arc::new(fluid)), target.as_deref())?;
-        let svg = publish::page_svg(&page, &kept.label);
-        Ok(json!({ "svg": svg.as_ref().map(|(svg, _)| svg), "view": svg.as_ref().map(|(_, view)| view), "error": null }))
-    });
-    answer.unwrap_or_else(|e| json!({ "svg": null, "view": null, "error": error_json(e) })).to_string()
 }
 
 /// Every file of the compiled-in library, as JSON: `{ path: text }`, paths
@@ -730,56 +604,20 @@ struct RenderOptions {
     /// For PDFs, how many pages side by side to a PDF page (as
     /// `journalbuild --pdf --stitch`); none for a page each.
     stitch: Option<usize>,
-    /// For a page, a fluid to add where the entry doesn't add it already,
-    /// as the Fluid tab previews it.
-    fluid: Option<FluidTarget>,
-}
-
-/// The fluid `name` (from the journal's `fluids/`), added to the canvas
-/// labelled `target`, or the page with none.
-#[derive(Deserialize)]
-struct FluidTarget {
-    name: String,
-    target: Option<String>,
-}
-
-impl FluidTarget {
-    /// `page` with the fluid, or as it is if the entry adds it already.
-    fn on(&self, page: &Page) -> Result<Option<Page>, JsError> {
-        let (on_page, on_canvases) = page.fluid_places(&self.name);
-        if on_page || !on_canvases.is_empty() {
-            return Ok(None);
-        }
-        let fluids = resources(&[]).fluids;
-        if !fluids.has(&self.name) {
-            return Err(JsError::new(&format!("the journal has no fluid named '{}'", self.name)));
-        }
-        let text = fluids.read(&self.name).map_err(|e| JsError::new(&format!("fluids/{}.json: {}", self.name, e)))?;
-        let fluid = Fluid::from_file(&self.name, &text).map_err(|e| JsError::new(&e))?;
-        page.with_fluid(&self.name, Some(Arc::new(fluid)), self.target.as_deref()).map(Some).map_err(|e| JsError::new(&e))
-    }
 }
 
 impl Default for RenderOptions {
     fn default() -> Self {
-        RenderOptions { scale: 1.0, supersample: 3.0, parchment: false, stitch: None, fluid: None }
+        RenderOptions { scale: 1.0, supersample: 3.0, parchment: false, stitch: None }
     }
 }
 
 impl RenderOptions {
-    fn from_js(options: JsValue) -> Result<(Render, Option<FluidTarget>), JsError> {
-        let options = Self::parse(options)?;
-        Ok((options.render(), options.fluid))
+    fn from_js(options: JsValue) -> Result<Render, JsError> {
+        Self::with_stitch(options).map(|(render, _)| render)
     }
-    /// How to render, and how many pages to a stitch.
+    /// `from_js`, and how many pages to a stitch.
     fn with_stitch(options: JsValue) -> Result<(Render, Option<usize>), JsError> {
-        let options = Self::parse(options)?;
-        Ok((options.render(), options.stitch))
-    }
-    fn render(&self) -> Render {
-        Render { scale: self.scale, supersample: self.supersample.max(1.0), parchment: self.parchment }
-    }
-    fn parse(options: JsValue) -> Result<RenderOptions, JsError> {
         let options: RenderOptions = if options.is_undefined() || options.is_null() {
             RenderOptions::default()
         } else {
@@ -791,7 +629,7 @@ impl RenderOptions {
         if options.stitch == Some(0) {
             return Err(JsError::new("stitch must be at least 1"));
         }
-        Ok(options)
+        Ok((Render { scale: options.scale, supersample: options.supersample.max(1.0), parchment: options.parchment }, options.stitch))
     }
 }
 
@@ -844,9 +682,7 @@ impl Renderer {
     }
 
     /// Page `index` of the journal `source` makes, rendered with `options`
-    /// (`{ scale, supersample, parchment, fluid }`; `fluid: { name, target
-    /// }` adds the journal's fluid `name` to the canvas labelled `target`,
-    /// or the page with none, unless the entry adds it) as a PNG's bytes, or
+    /// (`{ scale, supersample, parchment }`) as a PNG's bytes, or
     /// `undefined` if nothing's drawn on it. `progress(fraction)` is called
     /// as it goes.
     #[wasm_bindgen(js_name = renderPage)]
@@ -854,16 +690,11 @@ impl Renderer {
         let state = self.state.clone();
         let render = RenderOptions::from_js(options);
         wasm_bindgen_futures::future_to_promise(async move {
-            let (render, fluid) = render?;
+            let render = render?;
             let mut state = state.try_borrow_mut().map_err(|_| busy())?;
             let entry = state.entry(&source)?;
             let page = entry.selected_pages(None).nth(index).map(|(_, page)| page)
                 .ok_or_else(|| JsError::new(&format!("there's no page {}; the journal has {}", index, entry.page_count())))?;
-            let with_fluid = match &fluid {
-                Some(fluid) => fluid.on(page)?,
-                None => None,
-            };
-            let page = with_fluid.as_ref().unwrap_or(page);
             let image = publish::page_image_async(page, &page.label(index), &mut state.engine, &render, &mut |done| report(&progress, &[done as f64])).await
                 .map_err(|e| JsError::new(&e))?;
             match image {
