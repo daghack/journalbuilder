@@ -7,6 +7,7 @@ mod entry;
 mod generate;
 mod glyphs;
 mod gradient;
+mod fluids;
 mod images;
 mod layout;
 mod locks;
@@ -288,6 +289,7 @@ impl JournalEngine {
         text_styles::register(&mut engine, text_styles.clone());
         content::register(&mut engine, resources.clone());
         images::register(&mut engine, resources.clone());
+        fluids::register(&mut engine, resources.clone());
 
         JournalEngine {
             engine,

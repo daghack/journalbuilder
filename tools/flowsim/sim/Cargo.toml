@@ -1,0 +1,30 @@
+[package]
+name = "flowsim"
+version = "0.1.0"
+edition = "2024"
+description = "The flow simulator's engine: a 2-D incompressible flow, objects that shape it, and particles traced through it, written out as SVG."
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# The page's bindings (`wasm`), for `wasm-pack build --features bindings`.
+# Off for crates that only read fields, like the journal renderer, so they
+# don't export `FlowSim` from their own wasm.
+bindings = ["dep:console_error_panic_hook", "dep:js-sys", "dep:wasm-bindgen"]
+
+[dependencies]
+base64 = "0.22"
+flate2 = "1.1"
+serde = { version = "1.0.140", features = ["derive"] }
+serde_json = "1.0.140"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+console_error_panic_hook = { version = "0.1", optional = true }
+js-sys = { version = "0.3", optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+
+[dev-dependencies]
+# Only to check that the SVG's path data is what journals' path parser reads.
+journalbuilder = { path = "../../.." }

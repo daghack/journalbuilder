@@ -118,7 +118,7 @@ doc += para("Every call has one shape: what it needs, in order, then one map of 
 doc += para("Units: coordinates are canvas units, one pixel at --scale 1, with y running down the page. Angles are radians; PI() is rhai's, and degrees(d) converts. Numbers can be whole or decimal anywhere a number is taken, and must be finite; a whole number is needed only where the values say so. Colours are CSS colours: a name, #rgb, #rrggbb, rgb(), rgba(), hsl() or hsla().");
 doc += para("Shared values: paths, glyphs, canvases and avoidance trees are shared. Assigning one, passing it or looping over it gives the same value, so changes through any copy reach it; copy() makes an independent one. Their transforms change the value and return it, so calls chain: p.move_to(a).line_to(b). Vecs, glyphsets, styles (of every kind) and pages are plain values: changing one changes that copy only.");
 doc += para("Randomness is seeded: random(), glyph variant picks, text layout, hatching, point distributions and random spanning trees all draw on one generator with a fixed seed, so a journal renders the same every run. So does the handwriting that strokes are added to canvases in, and the procedural art when it isn't given a seed of its own.");
-doc += para("Sections: the entry and its pages; canvases and strokes; vectors and angles; paths; styles; gradients; images; glyphsets and glyphs; text; keeping text clear; randomness and messages; generators; balanced ternary; procedural art; books; page layouts; marked-up text; locks; journals and their files; lock, illustration, layout and style files; building.");
+doc += para("Sections: the entry and its pages; canvases and strokes; vectors and angles; paths; styles; gradients; images; fluids; glyphsets and glyphs; text; keeping text clear; randomness and messages; generators; balanced ternary; procedural art; books; page layouts; marked-up text; locks; journals and their files; lock, illustration, layout and style files; building.");
 
 // ---- the entry and its pages ----
 
@@ -517,6 +517,83 @@ doc += api("new_image_paint(image), new_image_paint(image, options)", "Image pai
 	opt("options.avoid_tolerance", "0.1", "How near a colour must be to one avoided, as a distance in OKLab: 0 matches it exactly; about 0.1 takes its shades.", "a number of at least 0."),
 ]);
 doc += api("image_paint.to_string(), image_paint.to_debug()", "The image paint as text, its picture and where it's laid, for print and debug.");
+
+// ---- fluids ----
+
+doc += heading("Fluids");
+doc += para("A journal's fluids are its fluids/ files, NAME.json, the journal's own or the library's, each made in the web editor's Fluid tab by running the flow simulator over a page and freezing it. A fluid holds the frozen flow's field (its velocity, pressure and dye) and its effects, and is laid over a box of the canvas, its field stretched to fit. Added to a canvas, it distorts that canvas's strokes when the page is rendered; added to a page, every canvas's. It acts only on what's inside its box, and moves no point outside it. A stroke is distorted by its own canvas's fluids, then the page's, in the order they were added; a canvas added to another takes its fluids with its strokes, and a page's tiles (page.split) are each distorted as the whole page is, so their seams still meet. Position and jitter move points; weight, opacity and colour change the ink point by point as it's drawn, in SVG and in Darkly alike.");
+doc += para("Every effect but position is as strong at a point as its channel is there: one of speed, vorticity (how the flow spins, one way above 0 and the other below), pressure and dye, scaled to 0..1 over range (by default the field's own: 0 to the fastest speed, the strongest spin either way, and the lowest to the highest pressure or dye) and raised to the power curve. A channel of () makes it the same everywhere, as at the top of its range.");
+doc += api("fluid(name), fluid(name, options)", "A fluid, fluids/NAME.json, decoded once however often it's asked for, with the file's box and effects; the options set its properties (below) over them, as setting them does.", [
+	arg("name", "Which fluid.", "a fluid file's name without .json."),
+	opt("options.at", "the file's, or vec2(0, 0)", "As fluid.at.", "as fluid.at."),
+	opt("options.size", "the file's, or the field's own size", "As fluid.size.", "as fluid.size."),
+	opt("options.position_distort", "the file's", "As fluid.position_distort.", "as fluid.position_distort."),
+	opt("options.jitter_distort", "the file's", "As fluid.jitter_distort.", "as fluid.jitter_distort."),
+	opt("options.weight_distort", "the file's", "As fluid.weight_distort.", "as fluid.weight_distort."),
+	opt("options.opacity_distort", "the file's", "As fluid.opacity_distort.", "as fluid.opacity_distort."),
+	opt("options.color_distort", "the file's", "As fluid.color_distort.", "as fluid.color_distort."),
+]);
+doc += api("page.add(fluid)", "Distorts every canvas on the page, those added after it too, by the fluid as it is now (later changes to it don't reach the page). Returns the page.", [
+	arg("fluid", "The fluid.", "a fluid, from fluid."),
+]);
+doc += api("canvas.add(fluid)", "Distorts the canvas's strokes, those added after it too, by the fluid as it is now; the page's other canvases are left alone. Returns the canvas.", [
+	arg("fluid", "The fluid.", "a fluid, from fluid."),
+]);
+doc += api("fluid.name", "Read only: the fluid's file's name.");
+doc += api("fluid.at = point", "The top-left corner of the box the fluid is laid over.", [
+	vec_arg("point", "The corner, in canvas units."),
+]);
+doc += api("fluid.size = size", "How big the box is: the field is stretched to fit it, and its velocities with it.", [
+	arg("size", "The box's width and height, in canvas units.", "a vec whose parts are positive and finite."),
+]);
+doc += para("Each effect reads back as a map of all its settings, or () when it's off. Setting it to a map turns it on: the keys given go over its settings (its defaults, below, when it was off), so a script can change one setting of a file's effect. Setting it to () turns it off. Settings it doesn't have are an error.");
+doc += api("fluid.position_distort = settings", "Moves each point of a stroke, put step apart along it first, so a stroke bends smoothly; closed shapes stay closed.", [
+	arg("settings", "Its settings, or () for off.", "a map of the keys below, or ()."),
+	opt("by", "\"advect\"", "How points move: advect carries each along the flow for amount seconds; offset moves it by the velocity there times amount; gradient moves it up channel's slope, amount canvas units where the slope is steepest.", "\"advect\", \"offset\" or \"gradient\"."),
+	opt("amount", "1", "How far, as by says: seconds for advect and offset, canvas units for gradient. Below 0 goes the other way.", "a number."),
+	opt("channel", "\"dye\"", "The channel gradient climbs.", "\"speed\", \"vorticity\", \"pressure\" or \"dye\"."),
+	opt("step", "2", "How far apart points are put along strokes before they're moved, in canvas units.", "a positive number."),
+]);
+doc += api("fluid.jitter_distort = settings", "A smooth wobble, as strong as the channel is, the same in every render of the stroke.", [
+	arg("settings", "Its settings, or () for off.", "a map of the keys below, or ()."),
+	opt("channel", "\"speed\"", "What sets how strong it is.", "\"speed\", \"vorticity\", \"pressure\" or \"dye\", or () for the same everywhere."),
+	opt("amount", "3", "How far points stray where the channel is at its top, in canvas units.", "a number."),
+	opt("length", "20", "About how far apart its turns are, in canvas units.", "a positive number."),
+	opt("range", "the field's own", "The channel's values scaled to 0..1.", "an array of two numbers, [low, high]."),
+	opt("curve", "1", "The power the scaled channel is raised to: above 1 keeps the effect to where the channel is high.", "a positive number."),
+]);
+doc += api("fluid.weight_distort = settings", "How heavy the ink is: its width, or its pressure in Darkly, multiplied by from where the channel is at the bottom of its range, to to at its top.", [
+	arg("settings", "Its settings, or () for off.", "a map of the keys below, or ()."),
+	opt("channel", "\"speed\"", "What sets the multiple.", "\"speed\", \"vorticity\", \"pressure\" or \"dye\", or () for to everywhere."),
+	opt("from", "1", "The multiple at the bottom of the range.", "a number of at least 0."),
+	opt("to", "2", "The multiple at its top.", "a number of at least 0."),
+	opt("range", "the field's own", "As jitter_distort's.", "an array of two numbers, [low, high]."),
+	opt("curve", "1", "As jitter_distort's.", "a positive number."),
+]);
+doc += api("fluid.opacity_distort = settings", "How strong the ink is, multiplied by from where the channel is at the bottom of its range, to to at its top.", [
+	arg("settings", "Its settings, or () for off.", "a map of the keys below, or ()."),
+	opt("channel", "\"speed\"", "What sets the multiple.", "\"speed\", \"vorticity\", \"pressure\" or \"dye\", or () for to everywhere."),
+	opt("from", "0.3", "The multiple at the bottom of the range.", "a number of at least 0."),
+	opt("to", "1", "The multiple at its top.", "a number of at least 0."),
+	opt("range", "the field's own", "As jitter_distort's.", "an array of two numbers, [low, high]."),
+	opt("curve", "1", "As jitter_distort's.", "a positive number."),
+]);
+doc += api("fluid.color_distort = settings", "The ink's colour, mixed toward the colours' at each point: the first where the channel is at the bottom of its range, the last at its top, and the rest evenly between. A colour's alpha says how far it's mixed in; the ink keeps its own alpha.", [
+	arg("settings", "Its settings, or () for off.", "a map of the keys below, or ()."),
+	opt("channel", "\"dye\"", "What picks the colour.", "\"speed\", \"vorticity\", \"pressure\" or \"dye\", or () for the last colour everywhere."),
+	opt("colors", "[\"#1d1d1f\", \"#c0392b\"]", "The colours, from low to high.", "a non-empty array of colours as text: #rgb, #rrggbb, #rrggbbaa, rgb(...) or a CSS colour name."),
+	opt("mix", "1", "How far the ink goes toward them: 0 not at all, 1 all the way.", "a number from 0 to 1."),
+	opt("range", "the field's own", "As jitter_distort's.", "an array of two numbers, [low, high]."),
+	opt("curve", "1", "As jitter_distort's.", "a positive number."),
+]);
+doc += api("fluid.sample(channel, point)", "The channel's value at a point, as the field has it (not scaled to a range), smoothly between its cells; 0 outside the box.", [
+	arg("channel", "Which channel.", "\"speed\", \"vorticity\", \"pressure\" or \"dye\"."),
+	vec_arg("point", "Where, in canvas units."),
+]);
+doc += api("fluid.velocity(point)", "The flow's velocity at a point, in canvas units a second, as a vec; vec2(0, 0) outside the box.", [
+	vec_arg("point", "Where, in canvas units."),
+]);
+doc += api("fluid.to_string(), fluid.to_debug()", "The fluid as text, its name, its box and the effects that are on, for print and debug.");
 
 // ---- glyphsets and glyphs ----
 
@@ -1228,7 +1305,7 @@ doc += api("art::sketch(value)", "A value kind's default drawing as a parts map 
 // ---- journals ----
 
 doc += heading("Journals and Their Files");
-doc += para("A journal is a directory: its manifest, journal.json; its entries, entries/NAME.rhai, each a script building a journal_entry of pages; and files of its own, each kind in a directory of its own: locks/, helpers/, layouts/, illustrations/, chains/ and lib/ (rhai files), styles/ and glyphsets/ (NAME.json), content/ (NAME.txt, a String; NAME.md, Markdown; or NAME.json, Symbols: { base, text }, with strict: true or not, or { base, symbols }), and images/ (NAME.png or NAME.jpg, pictures for image(name)). They stand in front of the built-in library's, webapp/library/, which has the same directories: a journal's file stands in for the library's of the same name. Each entry runs on its own, sharing the journal's files but not code with the other entries.");
+doc += para("A journal is a directory: its manifest, journal.json; its entries, entries/NAME.rhai, each a script building a journal_entry of pages; and files of its own, each kind in a directory of its own: locks/, helpers/, layouts/, illustrations/, chains/ and lib/ (rhai files), styles/ and glyphsets/ (NAME.json), content/ (NAME.txt, a String; NAME.md, Markdown; or NAME.json, Symbols: { base, text }, with strict: true or not, or { base, symbols }), images/ (NAME.png or NAME.jpg, pictures for image(name)), and fluids/ (NAME.json, frozen flows for fluid(name), made in the web editor's Fluid tab). They stand in front of the built-in library's, webapp/library/, which has the same directories: a journal's file stands in for the library's of the same name. Each entry runs on its own, sharing the journal's files but not code with the other entries.");
 doc += listing("journal.json: the journal's manifest, a JSON object.", [
 	req("version", "Which manifest format.", "1."),
 	req("title", "The journal's title.", "a string."),
@@ -1243,6 +1320,13 @@ doc += listing("glyphsets/NAME.json: a glyphset, a JSON object. Glyph units span
 	opt("fallback", "none", "The glyphset to look in for characters this one hasn't.", "a glyphset's name."),
 	opt("glyph_padding", "none", "Room some glyphs keep on top of character_padding, in glyph scales.", "an object of glyphs to numbers of at least 0."),
 	opt("joins", "none", "Joins words up, as glyphset.joined says: enter and leave, the glyphs that join the glyph before and the glyph after; leave_high, those left high, after which a variant entered high is drawn; x_height and baseline, the heights a variant's entry is told high or low by, and between them the x-height how far apart glyphs join is measured in.", "an object: enter, leave and leave_high (default none), strings of glyphs; x_height and baseline, glyph units, x_height less than baseline."),
+]);
+doc += listing("fluids/NAME.json: a fluid, a JSON object, as the Fluid tab writes it; the tab keeps its own settings there too (scene, obstacles and preview), which scripts don't read.", [
+	req("version", "Which fluid format.", "1."),
+	req("field", "The frozen flow: its grid, nx by ny cells h canvas units across, and each channel's values (u and v, the velocity across and down, then pressure and dye) quantised to 16 bits over its range, deflated and in base64.", "an object of nx, ny, h, channels (each a name, lo and hi) and data, as the flow simulator encodes it."),
+	opt("at", "[0, 0]", "As fluid.at.", "an array of two numbers."),
+	opt("size", "the field's own size", "As fluid.size.", "an array of two positive numbers."),
+	opt("position_distort, jitter_distort, weight_distort, opacity_distort, color_distort", "off", "The effects that are on, with the settings given, as the fluid's properties take them; settings left out are their defaults.", "objects, or null for off."),
 ]);
 doc += api("text_style(name), text_style(name, options)", "A text style file's bundle, styles/NAME.json, the journal's or the library's: #{ style, type, paragraph, spans }, the style, type and paragraph whole (a map's settings over default_style(), no type and the default paragraph), and spans if it gives any. It's a role for typeset, and the settings map of any text call, which ignores spans unless it sets marked-up text.", [
 	arg("name", "Which style file.", "a style file's name without .json."),

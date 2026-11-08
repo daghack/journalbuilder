@@ -7,7 +7,7 @@
 import { strFromU8, strToU8, unzipSync, zipSync, type Zippable } from 'fflate';
 
 /** The kinds of file a journal has, each in a directory of its own. */
-export type Kind = 'entries' | 'chains' | 'locks' | 'helpers' | 'illustrations' | 'layouts' | 'styles' | 'content' | 'glyphsets' | 'lib' | 'images';
+export type Kind = 'entries' | 'chains' | 'locks' | 'helpers' | 'illustrations' | 'layouts' | 'styles' | 'content' | 'glyphsets' | 'lib' | 'images' | 'fluids';
 
 /** The kinds the resource editor edits. */
 export const RESOURCE_KINDS: readonly Kind[] = ['locks', 'helpers', 'illustrations', 'layouts', 'lib'];
@@ -35,6 +35,7 @@ export const KINDS: KindInfo[] = [
   { kind: 'glyphsets', label: 'Glyphsets', exts: ['json'], library: true },
   { kind: 'lib', label: 'Lib', exts: ['rhai'], library: true },
   { kind: 'images', label: 'Images', exts: ['png', 'jpg'], library: true },
+  { kind: 'fluids', label: 'Fluids', exts: ['json'], library: true },
 ];
 
 export const KIND_INFO = new Map(KINDS.map((k) => [k.kind, k]));

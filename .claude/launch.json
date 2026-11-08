@@ -18,6 +18,15 @@
         "cd webapp/frontend && . \"${NVM_DIR:-$HOME/.nvm}/nvm.sh\" && nvm use >/dev/null && npm run examples && npx ng serve --port 4201"
       ],
       "port": 4201
+    },
+    {
+      "name": "flowsim",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "cd tools/flowsim/web && . \"${NVM_DIR:-$HOME/.nvm}/nvm.sh\" && nvm use >/dev/null && npm run dev"
+      ],
+      "port": 5180
     }
   ]
 }

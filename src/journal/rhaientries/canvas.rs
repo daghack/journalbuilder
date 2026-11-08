@@ -13,6 +13,8 @@ use super::{check_finite, check_name, Canvas, Path, Style, Vec2};
 use std::collections::HashMap;
 
 use crate::journal::canvas::Canvas as JournalCanvas;
+use crate::journal::fluid::Fluid;
+use std::sync::Arc;
 use crate::journal::canvas::InkRun;
 use crate::journal::canvas::Frame;
 use crate::journal::paths::StrokePath;
@@ -21,6 +23,9 @@ use crate::journal::symbol::Symbol;
 #[derive(Debug, Default, Clone)]
 pub struct CanvasData {
     pub strokes: Vec<Stroke>,
+    /// Fluids that distort everything on it when it's rendered, in the
+    /// order they were added (`canvas.add(fluid)`).
+    pub fluids: Vec<Arc<Fluid>>,
     /// Its output files are named after this, or its index on the page.
     pub(super) name: Option<String>,
     /// For a tile of a split page, the part of the page it renders.
@@ -43,7 +48,31 @@ impl CanvasData {
         // Only a jittered colour draws its seed, so other strokes leave the
         // generator as it was.
         let color_seed = if style.color_jitter() > 0.0 { rng.next_u64() } else { 0 };
-        self.strokes.push(Stroke { path, style: style.clone(), seed: None, color_seed, text });
+        self.strokes.push(Stroke { path, style: style.clone(), seed: None, color_seed, text, fluids: Vec::new() });
+    }
+    /// Its strokes, each with the canvas's fluids as its own, to go on
+    /// another canvas and be distorted there as they would be here.
+    fn strokes_with_fluids(&self) -> Vec<Stroke> {
+        self.strokes.iter().map(|stroke| {
+            let mut stroke = stroke.clone();
+            stroke.fluids.extend(self.fluids.iter().cloned());
+            stroke
+        }).collect()
+    }
+    /// The fluids each stroke is distorted by, its own then the canvas's,
+    /// then `outer`'s (the page's), by the stroke's index.
+    pub fn stroke_fluids<'a>(&'a self, outer: &'a [Arc<Fluid>]) -> impl Fn(usize) -> Vec<Arc<Fluid>> + 'a {
+        move |i| self.strokes[i].fluids.iter().chain(&self.fluids).chain(outer).cloned().collect()
+    }
+    /// Whether anything on it is distorted, `outer` being the page's
+    /// fluids.
+    pub fn has_fluids(&self, outer: &[Arc<Fluid>]) -> bool {
+        !outer.is_empty() && !self.strokes.is_empty() || !self.fluids.is_empty() || self.strokes.iter().any(|s| !s.fluids.is_empty())
+    }
+    /// Every fluid on it or its strokes, mutably, to put another in place
+    /// of one.
+    pub fn fluids_mut(&mut self) -> impl Iterator<Item = &mut Vec<Arc<Fluid>>> {
+        std::iter::once(&mut self.fluids).chain(self.strokes.iter_mut().map(|s| &mut s.fluids))
     }
     fn transform(&mut self, f: impl Fn(&mut StrokePath)) {
         for stroke in &mut self.strokes {
@@ -77,9 +106,14 @@ pub(super) fn register(engine: &mut Engine, rng: SharedRng) {
             Ok(c.update(|data| data.add_path(path, &style, &mut *r.borrow_mut())))
         })
         .register_fn("add", |c: &mut Canvas, other: Canvas| -> Canvas {
-            // Copy first: `c.add(c)` shares one value.
-            let strokes = other.borrow().strokes.clone();
+            // Copy first: `c.add(c)` shares one value. Its strokes take its
+            // fluids with them.
+            let strokes = other.borrow().strokes_with_fluids();
             c.update(|data| data.strokes.extend(strokes))
+        })
+        // A fluid distorts everything on the canvas when it's rendered.
+        .register_fn("add", |c: &mut Canvas, fluid: Fluid| -> Canvas {
+            c.update(|data| data.fluids.push(Arc::new(fluid)))
         })
         .register_fn("add", |c: &mut Canvas, canvases: rhai::Array| -> RhaiResult<Canvas> {
             // An array of canvases, as fill_with_text gives.
@@ -88,7 +122,7 @@ pub(super) fn register(engine: &mut Engine, rng: SharedRng) {
                 let type_name = item.type_name();
                 let other = item.try_cast::<Canvas>()
                     .ok_or_else(|| format!("canvas.add: item {} is a {}, not a canvas (glyphs need a style: canvas.add(glyphs, style))", i, type_name))?;
-                strokes.extend(other.borrow().strokes.iter().cloned());
+                strokes.extend(other.borrow().strokes_with_fluids());
             }
             Ok(c.update(|data| data.strokes.extend(strokes)))
         })
@@ -159,6 +193,9 @@ pub struct Stroke {
     pub(super) color_seed: u64,
     /// What text it writes, for its pen to run dry by.
     pub(super) text: TextRun,
+    /// Fluids it brought from the canvas it was drawn on, which distort it
+    /// wherever it goes.
+    pub(super) fluids: Vec<Arc<Fluid>>,
 }
 
 /// What a stroke writes: how many glyphs (none, for a path that isn't
