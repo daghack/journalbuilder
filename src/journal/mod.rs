@@ -5,7 +5,6 @@ pub mod clip;
 pub mod compose;
 pub mod distribute;
 pub mod fonts;
-pub mod fluid;
 pub mod free_regions;
 pub mod gradient;
 pub mod image_paint;

@@ -193,31 +193,6 @@ base (picked beside them) as they're read: in capitals, what the base
 can't write dropped. Strict, the text must be written in the base
 already. Nobody edits the JSON a symbols file is kept as.
 
-## Fluids
-
-A fluid, `fluids/NAME.json`, is a frozen flow that distorts what a page
-draws: where strokes sit, their jitter, how heavy and how strong the ink
-is, and its colour, each by the flow's speed, spin, pressure or dye
-(`fluid(name)` in the API reference). The Files sidebar's + by Fluids
-makes an empty one, and the Fluid tab shapes it over a page of an entry, picked on the left with
-the canvas it's added to, if not the whole page. In the middle, side by
-side: the flow simulator (`tools/flowsim/`) over the page, the page faint
-beneath, to run, stir and freeze, with its tools on its left and its
-settings on the right; and the page distorted by the flow, redrawn as the
-fluid moves, in SVG, or rendered with Darkly on demand. While the flow
-runs, the page is redrawn from a coarser copy of it (64 cells across), to
-keep up; frozen, from the whole field. New fluids start at the
-simulator's coarsest grid, 64 across. The two zoom
-together, to the same place: Ctrl or ⌘ and scroll (or pinch) over either
-zooms there, scrolling moves about, and so does dragging the result.
-The box it lies over fits the page or the canvas, any canvases' strokes
-can stand in the flow as obstacles, and each effect is switched on and
-set beside them, with the line to put in the entry
-(`page.add(fluid("NAME"))` or `canvas.add(...)`). Where the entry adds
-the fluid already, the live one stands in for it there (without the
-options the script gives it). Freezing saves the field to the file, with
-the simulator's scene, to carry on from; a field is 150 to 250 KB.
-
 ## Running it
 
 You need Rust with the `wasm32-unknown-unknown` target, [wasm-pack], and
@@ -236,8 +211,7 @@ cd webapp/frontend && npm start
 ```
 
 `npm start` builds the engine (`npm run wasm`, a release build that takes
-a few minutes the first time, and the flow simulator's, for the Fluid
-tab) and serves the editor at
+a few minutes the first time) and serves the editor at
 http://localhost:4200. After changing only the frontend, `npm run serve`
 skips the wasm build. `npm run build` puts a static site in
 `webapp/frontend/dist/journal-editor/browser`, which any static file
@@ -260,9 +234,7 @@ docker run --rm -p 8080:80 journal-editor
 ```
 
 Then open http://localhost:8080. Browsers offer WebGPU (for Darkly) only on
-localhost or over HTTPS, so anywhere else, serve it behind TLS. The flow
-simulator (`tools/flowsim/`) is served beside it, at
-http://localhost:8080/flow/. The first
+localhost or over HTTPS, so anywhere else, serve it behind TLS. The first
 build compiles the whole crate for wasm and takes a while; later builds
 reuse BuildKit's caches.
 
@@ -270,16 +242,15 @@ reuse BuildKit's caches.
 
 | path | what's there |
 |---|---|
-| `wasm/` | `scribe-wasm`, the engine for the browser: the `scribe` library with the built-in library (`library/`) compiled in (its `embedded-assets` feature). `setJournal(files)` gives it the journal's own files, by path, in front of the library's. `evaluate(source)` runs an entry and lists its pages, `pageSvg(i)` draws one as SVG, and `Renderer` renders pages with Darkly (`renderPage`, `exportPdf`). For the other editors: `previewSvg`, `libraryFiles`, `usedLibrary` (what an export bundles), `lockTypes`, `lockPorts`, `lockExamples`, `chainTypes`, `runChain`, `readChain`, `valueKinds`, `illustrationTypes`, `illustrationPorts`, `illustrationPreview`, `layoutTypes`, `layoutPreview`, `styleTypes` and `stylePreview`. For the Fluid tab: `fluidPrepare` runs an entry and keeps a page, `fluidMask` rasterises its canvases' strokes as obstacles, and `fluidApply` draws it distorted by a live field. |
+| `wasm/` | `scribe-wasm`, the engine for the browser: the `scribe` library with the built-in library (`library/`) compiled in (its `embedded-assets` feature). `setJournal(files)` gives it the journal's own files, by path, in front of the library's. `evaluate(source)` runs an entry and lists its pages, `pageSvg(i)` draws one as SVG, and `Renderer` renders pages with Darkly (`renderPage`, `exportPdf`). For the other editors: `previewSvg`, `libraryFiles`, `usedLibrary` (what an export bundles), `lockTypes`, `lockPorts`, `lockExamples`, `chainTypes`, `runChain`, `readChain`, `valueKinds`, `illustrationTypes`, `illustrationPorts`, `illustrationPreview`, `layoutTypes`, `layoutPreview`, `styleTypes` and `stylePreview`. |
 | `frontend/` | the Angular app (standalone components, signals, no zone.js) |
 | `frontend/src/app/journal/` | the journal as files by path (`journal-files.ts`: kinds, the manifest, zips; `journal-folder.ts`: journals' directories), new files' templates, symbols content, and the entry editor |
-| `frontend/src/app/workers/` | the web workers the engine runs in. `eval.worker` runs the entry as you type, sends its pages, then sends each page's SVG, the page shown first. `darkly.worker` renders with Darkly. `tools.worker` answers the other editors. `fluid.worker` keeps the Fluid tab's page and redraws it as the flow changes. Typing never waits on any of them. |
+| `frontend/src/app/workers/` | the web workers the engine runs in. `eval.worker` runs the entry as you type, sends its pages, then sends each page's SVG, the page shown first. `darkly.worker` renders with Darkly. `tools.worker` answers the other editors. Typing never waits on any of them. |
 | `frontend/src/app/services/` | `JournalStore` (the journal, kept in IndexedDB), `JournalIoService` (open, import, export), `LibraryService` (the library's files), `JournalService` (the entry shown, its pages), `RenderService` (the script and Darkly workers), `ToolsService` (the tools worker), `FileService` (picking files and directories, downloads) |
 | `frontend/src/app/shell/`, `layout/` | the journal bar, the files sidebar, which file shows, and the three resizable columns the editors have |
 | `frontend/src/app/fonts/` | the glyphset editor. `font-file.ts` reads and writes glyphset files; `glyph-path.ts` reads and writes path data; `glyph-edit.ts` is what the canvas does to a path. |
 | `frontend/src/app/locks/` | the chain editor. `chain-model.ts` is the graph and its rules; `chain-source.ts` writes it as a chain file. |
 | `frontend/src/app/resources/` | the lock, illustration, layout, style and helper editor, the content editor, and the library banner |
-| `frontend/src/app/fluids/` | the Fluid tab. `fluid-file.ts` reads and writes fluid files; the flow simulator's view and engine come from `tools/flowsim/web` (`@flowsim/*` in `tsconfig.json`; its wasm is copied into `wasm-pkg/`). |
 | `frontend/src/app/editor/` | the CodeMirror editor and its rhai highlighting (`rhai-language.ts`) |
 | `frontend/scripts/examples.mjs` | copies the built-in journals, `showcase` and `api_reference` (their manifests and files), into `generated/journals/` for the Open menu, and the repository files the unit tests check against into `generated/fixtures/` |
 

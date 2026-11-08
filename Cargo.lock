@@ -761,20 +761,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "98de4bbd547a563b716d8dfa9aad1cb19bfab00f4fa09a6a4ed21dbcf44ce9c4"
 
 [[package]]
-name = "flowsim"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "console_error_panic_hook",
- "flate2",
- "journalbuilder",
- "js-sys",
- "serde",
- "serde_json",
- "wasm-bindgen",
-]
-
-[[package]]
 name = "foldhash"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1310,7 +1296,6 @@ version = "0.1.0"
 dependencies = [
  "darkly",
  "flate2",
- "flowsim",
  "getrandom 0.3.4",
  "image",
  "js-sys",

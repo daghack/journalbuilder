@@ -9,7 +9,6 @@ use parry2d::math::Vec2;
 use rayon::prelude::*;
 use crate::journal::paths::{CurveSample};
 use crate::journal::canvas::{Canvas, ColoredStroke, InkAlong, StrokeColor};
-use crate::journal::fluid;
 use crate::journal::compose::{self, Placed};
 use crate::journal::canvas::color_jitter::{shifted, Shift};
 use crate::journal::gradient::{colorize, Along, GradientKind};
@@ -367,8 +366,8 @@ async fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, page_origin: 
     let mut pen = Pen { engine, page_origin, offset, ratio, brush_scale, loaded_name: None, loaded_size: None, drawn: 0, warned_colors: HashSet::new(), warned_saturation: HashSet::new() };
     let mut rendered: Option<Placed> = None;
     let mut done = 0;
-    for pass in strokes.chunk_by(|a, b| layer_gradient(a.0) == layer_gradient(b.0)) {
-        let gradient = layer_gradient(pass[0].0);
+    for pass in strokes.chunk_by(|a, b| a.0.style.color.gradient() == b.0.style.color.gradient()) {
+        let gradient = pass[0].0.style.color.gradient();
         let layer = pen.engine.add_raster_layer(None);
         let mut along = Vec::new();
         let mut reach: f32 = 0.0;
@@ -405,13 +404,6 @@ async fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, page_origin: 
             export(pen.engine, layer).await
         }
     }
-}
-
-/// The gradient a stroke is coloured by after it's drawn (in white, on a
-/// layer of its own), if it is: a stroke a fluid colours is drawn in its
-/// colours point by point instead.
-fn layer_gradient(stroke: &ColoredStroke) -> Option<&crate::journal::gradient::Gradient> {
-    stroke.style.color.gradient().filter(|_| !fluid::colours(&stroke.fluids))
 }
 
 /// Draws strokes into the engine, keeping track of the brush it has
@@ -507,10 +499,7 @@ impl Pen<'_> {
             self.drawn = self.drawn.wrapping_add(1);
             let variation = brush.variation(stroke_seed);
             let shift = style.color_jitter.map_or([0.0; 3], |j| j.shift(i));
-            let [mut cr, mut cg, mut cb, ca] = if white { colour } else { shifted(colour, shift) };
-            // Fluids colour, fade and weight it point by point.
-            let fluids = &stroke.fluids;
-            let fluid_colours = !white && fluid::colours(fluids);
+            let [cr, cg, cb, ca] = if white { colour } else { shifted(colour, shift) };
             // One Darkly stroke per substroke. With no frame drawn between
             // its points, Darkly draws the whole stroke at once when it ends.
             self.engine.begin_stroke(layer).expect("begin_stroke failed");
@@ -526,17 +515,7 @@ impl Pen<'_> {
                 let pressure = (brush.pressure_profile.at(t_param, normal) * pressure_range + pressure_min)
                     * brush.pooling(point.y, top, bottom)
                     * variation.as_ref().map_or(1.0, |v| v.at(distance))
-                    * strength
-                    * fluid::weight(fluids, point);
-                let faded = strength * fluid::opacity(fluids, point);
-                if fluid_colours {
-                    let base = match &style.color {
-                        // A picture's colour stays the substroke's.
-                        StrokeColor::Image(_) => colour,
-                        _ => style.colour_at(point, i as f32 / (sample_count - 1).max(1) as f32, if bottom > top { (point.y - top) / (bottom - top) } else { 0.5 }),
-                    };
-                    [cr, cg, cb, _] = shifted(fluid::colour(fluids, point, base), shift);
-                }
+                    * strength;
                 // Where it is in the whole page's render, less the offset:
                 // a whole number, so a tile's strokes land exactly where the
                 // page's would.
@@ -556,7 +535,7 @@ impl Pen<'_> {
                     cr,
                     cg,
                     cb,
-                    ca: ca * faded,
+                    ca: ca * strength,
                 });
             }
             self.engine.end_stroke();

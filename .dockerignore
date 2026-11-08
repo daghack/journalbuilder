@@ -9,5 +9,3 @@ webapp/frontend/dist
 webapp/frontend/wasm-pkg
 webapp/frontend/generated
 webapp/frontend/.angular
-tools/flowsim/web/dist
-tools/flowsim/web/wasm-pkg

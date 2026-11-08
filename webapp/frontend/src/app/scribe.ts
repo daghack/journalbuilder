@@ -37,8 +37,6 @@ export interface RenderOptions {
   parchment: boolean;
   /** For PDFs, how many pages side by side to a PDF page; none for a page each. */
   stitch?: number;
-  /** For a page, the journal's fluid `name` added to the canvas labelled `target` (the page if null), unless the entry adds it already. */
-  fluid?: { name: string; target: string | null };
 }
 
 // ---- the eval worker ----
@@ -227,60 +225,3 @@ export interface ChainFile {
 export interface ToolError {
   error: string;
 }
-
-// ---- the fluid worker: the Fluid tab's page, distorted live ----
-
-/** A box of canvas units, `[x, y, width, height]`. */
-export type Box = [number, number, number, number];
-
-/** The page the Fluid tab works on, as fluidPrepare gives it. */
-export interface FluidPrepared {
-  pages: { index: number; label: string }[];
-  label?: string;
-  /** The size the page is set to (page.size), if it is. */
-  size?: [number, number] | null;
-  /** Its canvases, with their bounds (margins and all); null if nothing's drawn on one. */
-  canvases?: { label: string; bounds: Box | null }[];
-  /** Where the entry adds the fluid: to the page, and to which canvases. */
-  uses?: { page: boolean; canvases: string[] };
-  /** The page with the fluid left out, as SVG in canvas units showing `view`. */
-  svg?: string | null;
-  view?: Box | null;
-  warnings: string[];
-  error: ScriptError | { message: string } | null;
-}
-
-/** The page distorted by the live fluid. */
-export interface FluidResult {
-  svg: string | null;
-  view: Box | null;
-  error: { message: string } | null;
-}
-
-/** The fluid as the flow simulator has it: `nx` by `ny` cells `h` across. */
-export interface RawField {
-  nx: number;
-  ny: number;
-  h: number;
-  u: Float32Array;
-  v: Float32Array;
-  pressure: Float32Array;
-  dye: Float32Array;
-}
-
-export type FluidRequest =
-  | { type: 'init'; wasmUrl: string }
-  | { type: 'journal'; files: JournalPayload }
-  | { type: 'prepare'; id: number; source: string; page: number; name: string }
-  | { type: 'mask'; id: number; canvases: string[]; box: Box; nx: number; ny: number }
-  | { type: 'apply'; id: number; field: RawField; settings: string; target: string | null; live: boolean };
-
-export type FluidReply =
-  | { type: 'ready' }
-  | { type: 'failed'; message: string }
-  | { type: 'prepared'; id: number; prepared: FluidPrepared }
-  | { type: 'mask'; id: number; alpha: Uint8Array }
-  | { type: 'applied'; id: number; result: FluidResult }
-  | { type: 'error'; id: number; message: string }
-  /** The renderer panicked: the worker has to be replaced. */
-  | { type: 'crashed'; message: string };
