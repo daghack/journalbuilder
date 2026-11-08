@@ -31,6 +31,9 @@ const DEFAULT_VIEW: ViewSettings = {
   particles: true,
   objects: true,
   brush: 40,
+  record: true,
+  rainbow: false,
+  rainbowPeriod: 6,
 };
 
 /** The elements a view builds its parts in. Each gets the class `flowsim`
@@ -84,8 +87,8 @@ const BUTTONS: Record<string, { label: string; title: string; primary?: boolean 
   export: { label: 'Export SVG', title: 'Export the paths as SVG', primary: true },
 };
 
-const FULL_BAR = ['run', 'step', 'reset', '|', 'bake', 'clear-paths', 'clear-particles', '|', 'undo', 'redo', '-', 'new', 'open', 'save', 'export'];
-const FLUID_BAR = ['run', 'step', 'reset', '|', 'clear-paths', 'clear-particles', '|', 'undo', 'redo'];
+const FULL_BAR = ['run', 'step', 'reset', '|', 'record', 'bake', 'clear-paths', 'clear-particles', '|', 'undo', 'redo', '-', 'new', 'open', 'save', 'export'];
+const FLUID_BAR = ['run', 'step', 'reset', '|', 'record', 'clear-paths', 'clear-particles', '|', 'undo', 'redo'];
 
 function sceneState(json: string): SceneState {
   const s = JSON.parse(json) as SceneState & { paths?: unknown };
@@ -127,6 +130,7 @@ export class FlowSimView implements PanelHost {
   private toastTimer = 0;
   private exporter: Exporter | null = null;
   private buttons: Record<string, HTMLButtonElement> = {};
+  private recordBox: HTMLInputElement | null = null;
   private backdrop: Backdrop | null = null;
   private frameId = 0;
   private resize: ResizeObserver;
@@ -159,6 +163,7 @@ export class FlowSimView implements PanelHost {
     if (options.files) this.exporter = new Exporter(() => this.sim, FlowSim.default_svg_options());
     this.buildRail();
     this.buildBar(parts.bar);
+    this.applyViewToSim();
     this.wireCanvas();
     this.keys.addEventListener('keydown', this.onKey as EventListener);
     this.resize = new ResizeObserver(() => (this.dirty = true));
@@ -299,10 +304,18 @@ export class FlowSimView implements PanelHost {
     begin: () => {},
     change: () => {
       save(VIEW_KEY, this.view);
+      this.applyViewToSim();
       this.fieldStale = true;
       this.dirty = true;
     },
   };
+
+  /** What of the view settings the engine keeps: recording, and stirring's colour. */
+  private applyViewToSim(): void {
+    this.sim.set_recording(this.view.record);
+    this.sim.set_stir_color(this.view.stirColor);
+    if (this.recordBox) this.recordBox.checked = this.view.record;
+  }
 
   deleteSelection(): void {
     if (this.selection !== null) {
@@ -444,6 +457,22 @@ export class FlowSimView implements PanelHost {
     for (const id of this.options.files ? FULL_BAR : FLUID_BAR) {
       if (id === '|' || id === '-') {
         bar.append(Object.assign(document.createElement('span'), { className: id === '|' ? 'sep' : 'grow' }));
+        continue;
+      }
+      if (id === 'record') {
+        const label = Object.assign(document.createElement('label'), {
+          className: 'toggle',
+          title: 'Keep each particle’s trail as a recorded path when it ends. Off, particles keep only a short tail to draw, so watching them doesn’t fill memory',
+        });
+        const box = Object.assign(document.createElement('input'), { type: 'checkbox', checked: this.view.record });
+        box.addEventListener('change', () => {
+          this.view.record = box.checked;
+          this.viewEdit.change();
+          this.toast(box.checked ? 'Recording paths' : 'Not recording paths: particles leave only a short tail');
+        });
+        label.append(box, ' Record paths');
+        this.recordBox = box;
+        bar.append(label);
         continue;
       }
       const { label, title, primary } = BUTTONS[id];
@@ -787,7 +816,7 @@ export class FlowSimView implements PanelHost {
     if (pv !== this.versions.paths) {
       this.versions.paths = pv;
       const set = sim.recorded_paths();
-      this.recorded = bundle({ points: set.points, offsets: set.offsets, closed: set.closed });
+      this.recorded = bundle({ points: set.points, offsets: set.offsets, closed: set.closed, times: set.times });
       set.free();
       if (this.selectedPath !== null && this.selectedPath + 1 >= this.recorded.offsets.length) {
         this.selectedPath = null;
@@ -816,7 +845,7 @@ export class FlowSimView implements PanelHost {
         this.heads = null;
       } else {
         const set = sim.particle_trails(n <= 40 ? 1_000_000 : 60);
-        this.trails = bundle({ points: set.points, offsets: set.offsets, closed: set.closed });
+        this.trails = bundle({ points: set.points, offsets: set.offsets, closed: set.closed, times: set.times });
         set.free();
         this.heads = sim.particle_positions();
       }
@@ -891,6 +920,7 @@ export class FlowSimView implements PanelHost {
         live: this.view.live,
         particles: this.view.particles,
         objects: this.view.objects,
+        rainbow: this.view.rainbow ? Math.max(0.1, this.view.rainbowPeriod) : null,
       },
       brush,
     });

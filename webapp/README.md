@@ -204,7 +204,10 @@ the canvas it's added to, if not the whole page. In the middle, side by
 side: the flow simulator (`tools/flowsim/`) over the page, the page faint
 beneath, to run, stir and freeze, with its tools on its left and its
 settings on the right; and the page distorted by the flow, redrawn as the
-fluid moves, in SVG, or rendered with Darkly on demand. The two zoom
+fluid moves, in SVG, or rendered with Darkly on demand. While the flow
+runs, the page is redrawn from a coarser copy of it (64 cells across), to
+keep up; frozen, from the whole field. New fluids start at the
+simulator's coarsest grid, 64 across. The two zoom
 together, to the same place: Ctrl or ⌘ and scroll (or pinch) over either
 zooms there, scrolling moves about, and so does dragging the result.
 The box it lies over fits the page or the canvas, any canvases' strokes

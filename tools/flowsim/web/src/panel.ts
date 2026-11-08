@@ -1,7 +1,7 @@
 // The side panel: the selection's properties, then the view, particle and
 // flow settings.
 
-import { type Edit, check, el, numberBox, select, slider } from './form';
+import { type Edit, check, colour, el, numberBox, select, slider } from './form';
 import { type Edge, type FlowSettings, type Obj, type ParticleSettings, label } from './model';
 import { TOOLS, type ToolName } from './tools';
 
@@ -15,6 +15,13 @@ export interface ViewSettings {
   particles: boolean;
   objects: boolean;
   brush: number;
+  /** Whether particles' trails become recorded paths when they end. */
+  record: boolean;
+  /** Paths coloured by how old their particle was there, the hue round once a `rainbowPeriod` seconds. */
+  rainbow: boolean;
+  rainbowPeriod: number;
+  /** The dye stirring pours; none for the plain dye. */
+  stirColor?: string;
 }
 
 export interface PanelHost {
@@ -88,6 +95,7 @@ function selectionSection(host: PanelHost): HTMLElement {
   if (host.tool === 'stir') {
     s.append(
       slider('Brush', () => host.view.brush, (v) => (host.view.brush = v), { min: 5, max: 300, step: 1 }, host.viewEdit),
+      colour('Dye', () => host.view.stirColor, (v) => (host.view.stirColor = v), host.viewEdit, 'The colour of the dye stirring pours; colours mix where they meet'),
     );
   }
   return s;
@@ -129,8 +137,9 @@ function objectRows(o: Obj, e: Edit): HTMLElement[] {
       ];
     case 'source':
       return [
-        slider('Flow', () => o.speed, (v) => (o.speed = v), { min: -300, max: 300, step: 1, title: 'How fast fluid crosses its radius: out when positive, in when negative (a sink)' }, e),
+        slider('Flow', () => o.speed, (v) => (o.speed = v), { min: -500, max: 500, step: 1, title: 'How fast fluid crosses its radius: out when positive, in when negative (a sink)' }, e),
         radius(() => o.radius, (v) => (o.radius = v), 'Radius', 300),
+        dye(() => o.color, (v) => (o.color = v), e),
         moves(() => !!o.moving, (v) => (o.moving = v), e),
       ];
     case 'attractor':
@@ -158,6 +167,13 @@ function objectRows(o: Obj, e: Edit): HTMLElement[] {
   }
 }
 
+function dye(get: () => string | undefined, set: (v: string | undefined) => void, e: Edit): HTMLElement {
+  return colour('Dye', get, (v) => {
+    if (v === undefined) set(undefined);
+    else set(v);
+  }, e, 'The colour of the dye it pours; colours mix where they meet');
+}
+
 function moves(get: () => boolean, set: (v: boolean) => void, e: Edit): HTMLElement {
   return check('Moves like a particle', get, set, e, 'Carried by the flow and pulled by attractors (moving ones too), leaving no path; it bounces off walls and obstacles, and goes when it leaves through an open edge');
 }
@@ -176,6 +192,8 @@ function viewSection(host: PanelHost, open: Record<string, boolean>): HTMLElemen
     ], e),
     check('Velocity arrows', () => v.arrows, (x) => (v.arrows = x), e),
     check('Recorded paths', () => v.recorded, (x) => (v.recorded = x), e),
+    check('Colour paths by time', () => v.rainbow, (x) => (v.rainbow = x), e, 'Each particle draws a rainbow of its own, starting red where it was released, the hue going round as it ages'),
+    slider('Rainbow', () => v.rainbowPeriod, (x) => (v.rainbowPeriod = x), { min: 0.5, max: 60, step: 0.5, unit: 's', title: 'Seconds for the hue to go round once' }, e),
     check('Live paths (frozen seeds)', () => v.live, (x) => (v.live = x), e),
     check('Moving particles', () => v.particles, (x) => (v.particles = x), e),
     check('Objects', () => v.objects, (x) => (v.objects = x), e),
@@ -236,6 +254,8 @@ function flowSection(host: PanelHost, open: Record<string, boolean>): HTMLElemen
     edge('Bottom', 'bottom'),
     el('div', 'sub', 'Domain'),
     select('Resolution', () => f.resolution, (v) => (f.resolution = v), [
+      [64, '64 across (fastest)'],
+      [96, '96 across'],
       [128, '128 across (fast)'],
       [192, '192 across'],
       [256, '256 across'],

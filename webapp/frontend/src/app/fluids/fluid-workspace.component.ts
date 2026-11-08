@@ -20,6 +20,64 @@ let flowsimReady: Promise<unknown> | null = null;
 const MASK_CELLS = 400;
 /** The least time between distorting the page while the fluid runs. */
 const APPLY_EVERY_MS = 80;
+/** The most cells across the field the page is distorted by while the
+ * fluid runs, for speed; frozen, it's distorted by the whole field. */
+const LIVE_CELLS = 64;
+/** Cells across a new fluid's simulator: few, for speed. */
+const NEW_RESOLUTION = 64;
+
+/** `field` averaged down to at most `cells` cells across (the few past a
+ * whole number of coarse cells dropped), or itself if it's no wider. */
+function coarsened(field: RawField, cells: number): RawField {
+  const k = Math.ceil(field.nx / cells);
+  if (k <= 1) return field;
+  const { nx, ny } = field;
+  const cx = Math.max(2, Math.floor(nx / k));
+  const cy = Math.max(2, Math.floor(ny / k));
+  const share = 1 / (k * k);
+  const pressure = new Float32Array(cx * cy);
+  const dye = new Float32Array(cx * cy);
+  for (let j = 0; j < cy; j++) {
+    for (let i = 0; i < cx; i++) {
+      let p = 0;
+      let d = 0;
+      for (let b = 0; b < k; b++) {
+        const row = (j * k + b) * nx + i * k;
+        for (let a = 0; a < k; a++) {
+          p += field.pressure[row + a];
+          d += field.dye[row + a];
+        }
+      }
+      pressure[i + j * cx] = p * share;
+      dye[i + j * cx] = d * share;
+    }
+  }
+  // Faces: the mean of the fine faces along each coarse one.
+  const u = new Float32Array((cx + 1) * cy);
+  for (let j = 0; j < cy; j++) {
+    for (let i = 0; i <= cx; i++) {
+      let sum = 0;
+      for (let b = 0; b < k; b++) sum += field.u[i * k + (j * k + b) * (nx + 1)];
+      u[i + j * (cx + 1)] = sum / k;
+    }
+  }
+  const v = new Float32Array(cx * (cy + 1));
+  for (let j = 0; j <= cy; j++) {
+    for (let i = 0; i < cx; i++) {
+      let sum = 0;
+      for (let a = 0; a < k; a++) sum += field.v[i * k + a + j * k * nx];
+      v[i + j * cx] = sum / k;
+    }
+  }
+  return { nx: cx, ny: cy, h: field.h * k, u, v, pressure, dye };
+}
+
+/** The simulator's default scene, at a new fluid's resolution. */
+function newScene(): string {
+  const scene = JSON.parse(FlowSim.default_scene());
+  scene.flow.resolution = NEW_RESOLUTION;
+  return JSON.stringify(scene);
+}
 /** The zoom buttons' steps, times closer than fitting. */
 const ZOOMS = [1, 1.5, 2, 3, 4, 6, 8, 12, 16];
 const MAX_ZOOM = 16;
@@ -403,7 +461,7 @@ export class FluidWorkspaceComponent implements OnDestroy {
     const view = this.view;
     const d = this.doc();
     if (!view || !d) return;
-    view.loadScene(d.scene ? JSON.stringify(d.scene) : FlowSim.default_scene());
+    view.loadScene(d.scene ? JSON.stringify(d.scene) : newScene());
     if (d.size) view.setDomain(d.size[0], d.size[1]);
     if (d.field) {
       try {
@@ -569,11 +627,12 @@ export class FluidWorkspaceComponent implements OnDestroy {
     if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
     this.lastApply = performance.now();
     const snapshot = view.sim.field_raw();
-    const field: RawField = { nx: snapshot.nx, ny: snapshot.ny, h: snapshot.h, u: snapshot.u, v: snapshot.v, pressure: snapshot.pressure, dye: snapshot.dye };
+    const raw: RawField = { nx: snapshot.nx, ny: snapshot.ny, h: snapshot.h, u: snapshot.u, v: snapshot.v, pressure: snapshot.pressure, dye: snapshot.dye };
     snapshot.free();
+    const field = view.frozen ? raw : coarsened(raw, LIVE_CELLS);
     let result: FluidResult;
     try {
-      result = await this.engine.apply(field, fluidSettings(this.doc() ?? d), this.doc()?.preview.target ?? null);
+      result = await this.engine.apply(field, fluidSettings(this.doc() ?? d), this.doc()?.preview.target ?? null, !view.frozen);
     } catch (err) {
       result = { svg: null, view: null, error: { message: err instanceof Error ? err.message : String(err) } };
     }

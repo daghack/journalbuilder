@@ -168,3 +168,62 @@ export function text(label: string, get: () => string, set: (v: string) => void,
   r.append(t);
   return r;
 }
+
+/** Dye colours to pick from: bright ones, which mix brightly. */
+export const DYE_SWATCHES = ['#ff3d6e', '#ff9a3c', '#ffe14d', '#6dff7a', '#3ce0ff', '#4f7dff', '#b45cff', '#ff5ce1'];
+
+/** A dye colour: a swatch, any other, or none for the plain dye. */
+export function colour(label: string, get: () => string | undefined, set: (v: string | undefined) => void, edit: Edit, title?: string): HTMLElement {
+  const r = el('div', 'row colour');
+  if (title) r.title = title;
+  r.append(el('span', 'name', label));
+  const swatches = el('span', 'swatches');
+  const buttons: [HTMLButtonElement, string | undefined][] = [];
+  const pick = el('input');
+  pick.type = 'color';
+  const show = () => {
+    const now = get();
+    for (const [b, value] of buttons) b.classList.toggle('on', value === now);
+    pick.value = now ?? '#78d6dc';
+    pick.classList.toggle('on', !!now && !DYE_SWATCHES.includes(now));
+  };
+  const choose = (value: string | undefined) => {
+    edit.begin();
+    set(value);
+    edit.change();
+    show();
+  };
+  const plain = el('button', 'plain', 'Plain');
+  plain.type = 'button';
+  plain.title = 'The plain dye';
+  plain.addEventListener('click', () => choose(undefined));
+  buttons.push([plain, undefined]);
+  swatches.append(plain);
+  for (const value of DYE_SWATCHES) {
+    const b = el('button', 'swatch');
+    b.type = 'button';
+    b.style.background = value;
+    b.title = value;
+    b.addEventListener('click', () => choose(value));
+    buttons.push([b, value]);
+    swatches.append(b);
+  }
+  let picking = false;
+  pick.title = 'Any colour';
+  pick.addEventListener('input', () => {
+    if (!picking) {
+      edit.begin();
+      picking = true;
+    }
+    set(pick.value);
+    edit.change();
+  });
+  pick.addEventListener('change', () => {
+    picking = false;
+    show();
+  });
+  swatches.append(pick);
+  r.append(swatches);
+  show();
+  return r;
+}

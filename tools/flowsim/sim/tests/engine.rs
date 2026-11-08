@@ -247,7 +247,7 @@ fn moving_attractors_pull_each_other_together() {
 
 #[test]
 fn a_moving_source_rides_the_flow_and_leaves_no_path() {
-    let source = Object { id: 1, kind: Kind::Source { pos: v2(150.0, 200.0), speed: 30.0, radius: 20.0, moving: true } };
+    let source = Object { id: 1, kind: Kind::Source { pos: v2(150.0, 200.0), speed: 30.0, radius: 20.0, color: None, moving: true } };
     let mut sim = Sim::new(scene_with(vec![source], FlowSettings { perturbation: 0.0, ..small_flow() }));
     for _ in 0..1200 {
         sim.tick(1.0 / 60.0);
@@ -262,7 +262,7 @@ fn a_moving_source_rides_the_flow_and_leaves_no_path() {
 
 #[test]
 fn moving_sources_and_sinks_keep_their_radii_apart() {
-    let source = |id, x, y, speed, moving| Object { id, kind: Kind::Source { pos: v2(x, y), speed, radius: 20.0, moving } };
+    let source = |id, x, y, speed, moving| Object { id, kind: Kind::Source { pos: v2(x, y), speed, radius: 20.0, color: None, moving } };
     let objects = vec![
         // A moving sink draws a moving source in...
         source(1, 170.0, 200.0, 40.0, true),
@@ -321,8 +321,8 @@ fn closed_tanks_and_sources_stay_bounded() {
     flow.edges.left = Edge::Wall;
     flow.edges.right = Edge::Wall;
     let objects = vec![
-        Object { id: 1, kind: Kind::Source { pos: v2(200.0, 200.0), speed: 60.0, radius: 20.0, moving: false } },
-        Object { id: 2, kind: Kind::Source { pos: v2(600.0, 200.0), speed: -60.0, radius: 20.0, moving: false } },
+        Object { id: 1, kind: Kind::Source { pos: v2(200.0, 200.0), speed: 60.0, radius: 20.0, color: None, moving: false } },
+        Object { id: 2, kind: Kind::Source { pos: v2(600.0, 200.0), speed: -60.0, radius: 20.0, color: None, moving: false } },
         Object { id: 3, kind: Kind::Vortex { pos: v2(400.0, 200.0), spin: 80.0, radius: 50.0 } },
         Object { id: 4, kind: Kind::Jet { pos: v2(400.0, 100.0), angle: 90.0, speed: 100.0, radius: 20.0 } },
     ];
@@ -384,7 +384,7 @@ fn scenes_survive_a_json_round_trip() {
         Object { id: 3, kind: Kind::Wall { points: vec![v2(1.0, 1.0), v2(2.5, 3.25)], thickness: 6.0 } },
         Object { id: 4, kind: Kind::Jet { pos: v2(5.0, 5.0), angle: -45.0, speed: 100.0, radius: 20.0 } },
         Object { id: 5, kind: Kind::Vortex { pos: v2(5.0, 5.0), spin: -50.0, radius: 20.0 } },
-        Object { id: 6, kind: Kind::Source { pos: v2(5.0, 5.0), speed: -10.0, radius: 20.0, moving: false } },
+        Object { id: 6, kind: Kind::Source { pos: v2(5.0, 5.0), speed: -10.0, radius: 20.0, color: None, moving: false } },
         Object {
             id: 7,
             kind: Kind::Attractor {
@@ -403,7 +403,7 @@ fn scenes_survive_a_json_round_trip() {
     ];
     let scene = Scene {
         objects,
-        paths: vec![RecordedPath { points: vec![v2(1.25, 2.5), v2(3.0, 4.75)], closed: true }],
+        paths: vec![RecordedPath { points: vec![v2(1.25, 2.5), v2(3.0, 4.75)], closed: true, times: Vec::new() }],
         ..Scene::default()
     };
     let json = Sim::new(scene.clone()).scene_json();

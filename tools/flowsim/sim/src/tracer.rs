@@ -298,6 +298,11 @@ pub struct Particle {
     pub vel: V2,
     pub inertia: f32,
     pub trail: Vec<V2>,
+    /// How old it was at each of its trail's points: seconds since it was
+    /// released.
+    pub times: Vec<f32>,
+    /// Seconds since it was released.
+    pub age: f32,
     /// A moving source or attractor, which goes on until it leaves.
     pub mover: bool,
     /// How far it has gone since its trail began.
@@ -314,6 +319,8 @@ impl Particle {
             vel,
             inertia: inertia.max(0.0),
             trail: vec![pos],
+            times: vec![0.0],
+            age: 0.0,
             mover: false,
             length: 0.0,
             stalled_for: 0.0,
@@ -327,12 +334,24 @@ impl Particle {
         Particle { mover: true, ..Particle::new(pos, vel, inertia) }
     }
 
-    /// Starts its trail afresh where it is, giving the old one.
-    pub fn restart_trail(&mut self) -> Vec<V2> {
+    /// Starts its trail afresh where it is.
+    pub fn restart_trail(&mut self) {
         self.length = 0.0;
         self.start = self.pos;
         self.start_dir = self.vel.normalized();
-        std::mem::replace(&mut self.trail, vec![self.pos])
+        self.trail = vec![self.pos];
+        self.times = vec![self.age];
+    }
+
+    /// Keeps only about the last `keep` points of its trail.
+    pub fn trim_trail(&mut self, keep: usize) {
+        let keep = keep.max(2);
+        if self.trail.len() > 2 * keep {
+            let from = self.trail.len() - keep;
+            self.trail.drain(..from);
+            let from = self.times.len().saturating_sub(keep);
+            self.times.drain(..from);
+        }
     }
 
     pub fn into_path(self, end: End) -> Path {
@@ -355,6 +374,7 @@ impl Particle {
     }
 
     fn substep<F: Flow>(&mut self, env: &Env<F>, s: &ParticleSettings, dt: f32) -> Option<End> {
+        self.age += dt;
         let step = s.step.max(0.05);
         let p = self.pos;
         let target = |q: V2| env.target(q);
@@ -422,6 +442,7 @@ impl Particle {
         let last = *self.trail.last().unwrap_or(&p);
         if last.dist(next) >= step {
             self.trail.push(next);
+            self.times.push(self.age);
         }
         if env.attractors.captures(next) {
             self.finish_at(next);
@@ -454,6 +475,7 @@ impl Particle {
     fn finish_at(&mut self, p: V2) {
         if self.trail.last().is_none_or(|l| l.dist(p) > 1e-3) {
             self.trail.push(p);
+            self.times.push(self.age);
         }
         self.pos = p;
     }
@@ -462,6 +484,12 @@ impl Particle {
     pub fn trail_with_head(&self) -> impl Iterator<Item = V2> + '_ {
         let head = (self.trail.last() != Some(&self.pos)).then_some(self.pos);
         self.trail.iter().copied().chain(head)
+    }
+
+    /// When it was at each point `trail_with_head` gives.
+    pub fn times_with_head(&self) -> impl Iterator<Item = f32> + '_ {
+        let head = (self.trail.last() != Some(&self.pos)).then_some(self.age);
+        self.times.iter().copied().chain(head)
     }
 }
 

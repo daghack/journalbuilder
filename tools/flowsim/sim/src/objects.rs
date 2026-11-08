@@ -52,12 +52,15 @@ pub enum Kind {
     /// radius, clockwise when positive.
     Vortex { pos: V2, spin: f32, radius: f32 },
     /// Pours fluid out (or, with a negative `speed`, draws it in): `speed`
-    /// is how fast it crosses the circle of `radius`. A `moving` one moves
-    /// like a particle.
+    /// is how fast it crosses the circle of `radius`. `color` is the dye it
+    /// pours (`#rrggbb`; none for the plain dye). A `moving` one moves like
+    /// a particle.
     Source {
         pos: V2,
         speed: f32,
         radius: f32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        color: Option<String>,
         #[serde(default, skip_serializing_if = "is_false")]
         moving: bool,
     },
@@ -177,6 +180,14 @@ impl Kind {
     pub fn set_pos(&mut self, p: V2) {
         if let Kind::Source { pos, .. } | Kind::Attractor { pos, .. } = self {
             *pos = p;
+        }
+    }
+
+    /// The colour of the dye it pours, if it's given one.
+    pub fn color(&self) -> Option<&str> {
+        match self {
+            Kind::Source { color, .. } => color.as_deref(),
+            _ => None,
         }
     }
 

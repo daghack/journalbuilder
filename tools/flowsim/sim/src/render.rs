@@ -1,6 +1,8 @@
 //! The field drawn as an image, one pixel a cell, for the page to scale up.
 
+use crate::colour::mixed;
 use crate::grid::Grid;
+use crate::solver::Tint;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum View {
@@ -70,9 +72,26 @@ fn spread(values: &[f32], solid: &[bool]) -> f32 {
     if n == 0 { 1.0 } else { (3.0 * (sum / n as f64).sqrt()).max(1e-6) as f32 }
 }
 
+/// Dye of mixed colours over the water: its colour, faint where there's
+/// little, with a sheen where it's thick.
+fn tinted(tint: &Tint, c: usize, amount: f32) -> Rgb {
+    if amount < 2e-3 {
+        return WATER;
+    }
+    let ch = &tint.channels;
+    let rgb = mixed([ch[0][c], ch[1][c], ch[2][c], ch[3][c]]).map(|x| x * 255.0);
+    let x = (amount * 1.5).min(1.0);
+    let t = x * (2.0 - x);
+    let sheen = ((amount - 0.7) / 0.3).clamp(0.0, 1.0) * 0.3;
+    std::array::from_fn(|i| {
+        let over = WATER[i] + (rgb[i] - WATER[i]) * t;
+        over + (255.0 - over) * sheen
+    })
+}
+
 /// Fills `out` with RGBA, `nx` × `ny`. `reference_speed` is what counts as
-/// fast in the speed view.
-pub fn render(g: &Grid, view: View, reference_speed: f32, scratch: &mut Vec<f32>, out: &mut Vec<u8>) {
+/// fast in the speed view; `tint` is the dye's colour, if it's coloured.
+pub fn render(g: &Grid, tint: Option<&Tint>, view: View, reference_speed: f32, scratch: &mut Vec<f32>, out: &mut Vec<u8>) {
     let (nx, ny) = (g.nx, g.ny);
     out.clear();
     out.resize(nx * ny * 4, 255);
@@ -103,7 +122,10 @@ pub fn render(g: &Grid, view: View, reference_speed: f32, scratch: &mut Vec<f32>
             SOLID
         } else {
             match view {
-                View::Dye => ramp(&DYE, g.dye[c]),
+                View::Dye => match tint {
+                    Some(t) => tinted(t, c, g.dye[c]),
+                    None => ramp(&DYE, g.dye[c]),
+                },
                 View::Speed => ramp(&SPEED, scratch[c] / scale),
                 View::Vorticity | View::Pressure => ramp(&DIVERGING, scratch[c] / scale),
                 View::Plain => WATER,

@@ -33,6 +33,12 @@ impl PathSet {
     pub fn offsets(&self) -> Vec<u32> {
         self.flat.offsets.clone()
     }
+    /// When each point was reached, by the sim's clock (NaN where that
+    /// isn't known).
+    #[wasm_bindgen(getter)]
+    pub fn times(&self) -> Vec<f32> {
+        self.flat.times.clone()
+    }
     #[wasm_bindgen(getter)]
     pub fn closed(&self) -> Vec<u8> {
         self.flat.closed.clone()
@@ -152,6 +158,20 @@ impl FlowSim {
 
     pub fn stir(&mut self, x: f32, y: f32, vx: f32, vy: f32, radius: f32) {
         self.sim.stir(v2(x, y), v2(vx, vy), radius);
+    }
+
+    /// The colour stirring pours (`#rrggbb`); `undefined` for plain dye.
+    pub fn set_stir_color(&mut self, color: Option<String>) {
+        self.sim.set_stir_color(color.as_deref());
+    }
+
+    /// Whether particles' trails become recorded paths when they end.
+    pub fn set_recording(&mut self, on: bool) {
+        self.sim.set_recording(on);
+    }
+
+    pub fn recording(&self) -> bool {
+        self.sim.recording()
     }
 
     pub fn drop_particle(&mut self, x: f32, y: f32) -> bool {
