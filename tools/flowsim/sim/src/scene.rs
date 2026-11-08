@@ -160,13 +160,31 @@ impl Default for ParticleSettings {
     }
 }
 
-/// A path kept: points in domain units, and whether it closes.
+/// A path kept: points in domain units, whether it closes, and how old
+/// its particle was at each point (seconds since it was released), if it
+/// was a particle's.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RecordedPath {
     #[serde(serialize_with = "rounded_points")]
     pub points: Vec<V2>,
     #[serde(default)]
     pub closed: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty", serialize_with = "rounded_times")]
+    pub times: Vec<f32>,
+}
+
+fn rounded_times<S: serde::Serializer>(times: &[f32], s: S) -> Result<S::Ok, S::Error> {
+    use serde::ser::SerializeSeq;
+    let mut seq = s.serialize_seq(Some(times.len()))?;
+    for t in times {
+        seq.serialize_element(&((t * 100.0).round() / 100.0))?;
+    }
+    seq.end()
+}
+
+fn known_objects<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<Object>, D::Error> {
+    let values: Vec<serde_json::Value> = Deserialize::deserialize(d)?;
+    Ok(values.into_iter().filter_map(|v| serde_json::from_value(v).ok()).collect())
 }
 
 fn rounded_points<S: serde::Serializer>(points: &[V2], s: S) -> Result<S::Ok, S::Error> {
@@ -184,6 +202,8 @@ pub struct Scene {
     pub version: u32,
     pub flow: FlowSettings,
     pub particles: ParticleSettings,
+    /// Objects of kinds this doesn't know are left out.
+    #[serde(deserialize_with = "known_objects")]
     pub objects: Vec<Object>,
     pub paths: Vec<RecordedPath>,
 }

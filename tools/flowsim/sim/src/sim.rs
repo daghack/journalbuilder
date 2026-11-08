@@ -25,21 +25,29 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 /// Paths as flat arrays, for the page: every point's x and y in turn;
-/// where each path starts, in points, with the total last; and whether
-/// each closes.
+/// where each path starts, in points, with the total last; whether each
+/// closes; and when each point was reached (NaN where that isn't known).
 #[derive(Clone, Debug, Default)]
 pub struct Flat {
     pub points: Vec<f32>,
     pub offsets: Vec<u32>,
     pub closed: Vec<u8>,
+    pub times: Vec<f32>,
 }
 
 impl Flat {
-    fn push(&mut self, points: impl Iterator<Item = V2>, closed: bool) {
-        self.offsets.push((self.points.len() / 2) as u32);
+    fn push(&mut self, points: impl Iterator<Item = V2>, times: &[f32], closed: bool) {
+        let from = self.points.len() / 2;
+        self.offsets.push(from as u32);
         for p in points {
             self.points.push(p.x);
             self.points.push(p.y);
+        }
+        let n = self.points.len() / 2 - from;
+        if times.len() == n {
+            self.times.extend_from_slice(times);
+        } else {
+            self.times.extend(std::iter::repeat_n(f32::NAN, n));
         }
         self.closed.push(closed as u8);
     }
@@ -71,6 +79,9 @@ pub struct Stats {
     pub divergence: f32,
     pub ends: HashMap<&'static str, usize>,
 }
+
+/// How many points of trail a particle keeps while paths aren't recorded.
+const TAIL_KEPT: usize = 400;
 
 /// A moving source or attractor, and the particle that carries it.
 struct Mover {
@@ -124,6 +135,10 @@ pub struct Sim {
     pub live_version: u32,
     /// Bumped when movers move or leave: the objects changed here.
     pub objects_version: u32,
+    /// The colour stirring pours, as dye channels; none for plain dye.
+    stir_tint: Option<[f32; 4]>,
+    /// Whether particles' trails are kept as recorded paths when they end.
+    recording: bool,
     rgba: Vec<u8>,
     scratch: Vec<f32>,
 }
@@ -163,6 +178,8 @@ impl Sim {
             paths_version: 1,
             live_version: 1,
             objects_version: 1,
+            stir_tint: None,
+            recording: true,
             rgba: Vec::new(),
             scratch: Vec::new(),
         };
@@ -189,11 +206,14 @@ impl Sim {
         .unwrap_or_default()
     }
 
-    /// Replaces everything, and starts the flow afresh, running. The mask
-    /// stays.
+    /// Replaces everything, and starts the flow afresh, running. The mask,
+    /// whether paths are recorded and stirring's colour stay.
     pub fn set_scene(&mut self, scene: Scene) {
         let mask = self.mask.take();
+        let (recording, stir_tint) = (self.recording, self.stir_tint);
         *self = Sim::new(scene);
+        self.recording = recording;
+        self.stir_tint = stir_tint;
         if mask.is_some() {
             self.use_mask(mask);
         }
@@ -273,6 +293,7 @@ impl Sim {
             }
         }
         self.fluid.zero_solid_faces();
+        self.fluid.plain_tint();
         self.particles.clear();
         self.freeze();
     }
@@ -288,13 +309,24 @@ impl Sim {
     /// Takes the objects; `reshape` rasterises obstacles and sources even if
     /// they haven't changed.
     fn apply_objects(&mut self, objects: Vec<Object>, reshape: bool) {
+        // What changes the flow: obstacles and sources, less their colours.
         let shaping = |list: &[Object]| -> Vec<Object> {
             list.iter()
                 .filter(|o| o.kind.family() == Family::Obstacle || matches!(o.kind, Kind::Source { .. }))
                 .cloned()
+                .map(|mut o| {
+                    if let Kind::Source { color, .. } = &mut o.kind {
+                        *color = None;
+                    }
+                    o
+                })
                 .collect()
         };
+        let colours = |list: &[Object]| -> Vec<(u32, Option<String>)> {
+            list.iter().filter_map(|o| o.kind.color().map(|c| (o.id, Some(c.to_string())))).collect()
+        };
         let reshaped = reshape || shaping(&objects) != shaping(&self.objects);
+        let recoloured = colours(&objects) != colours(&self.objects);
         self.objects = objects;
         self.obstacles = Obstacles::new(&self.objects).with_mask(self.mask.as_ref(), 0.0);
         self.attractors = Attractors::new(&self.objects);
@@ -306,6 +338,8 @@ impl Sim {
                 self.reproject = true;
             }
             self.field_version += 1;
+        } else if recoloured {
+            self.fluid.set_sources(&self.objects);
         }
         let ids: Vec<u32> = self.objects.iter().map(|o| o.id).collect();
         self.emit.retain(|id, _| ids.contains(id));
@@ -330,12 +364,29 @@ impl Sim {
         }
     }
 
-    /// Keeps a trail as a recorded path, if it's long enough to draw.
-    fn keep_trail(&mut self, points: Vec<V2>, closed: bool) {
-        if points.len() >= 2 && crate::svg::length(&points) >= 2.0 * self.particle_settings.step {
-            self.paths.push(Rc::new(RecordedPath { points, closed }));
+    /// Keeps a trail as a recorded path, if it's long enough to draw and
+    /// paths are being recorded.
+    fn keep_trail(&mut self, points: Vec<V2>, times: Vec<f32>, closed: bool) {
+        if self.recording && points.len() >= 2 && crate::svg::length(&points) >= 2.0 * self.particle_settings.step {
+            let times = if times.len() == points.len() { times } else { Vec::new() };
+            self.paths.push(Rc::new(RecordedPath { points, closed, times }));
             self.paths_version += 1;
         }
+    }
+
+    /// Whether particles' trails become recorded paths when they end. Off,
+    /// particles keep only their last stretch of trail, to draw.
+    pub fn set_recording(&mut self, on: bool) {
+        self.recording = on;
+        if !on {
+            for p in &mut self.particles {
+                p.trim_trail(TAIL_KEPT);
+            }
+        }
+    }
+
+    pub fn recording(&self) -> bool {
+        self.recording
     }
 
     /// Holds a mover still (while it's dragged), or none.
@@ -424,13 +475,18 @@ impl Sim {
             }
             self.frozen = false;
         }
+        self.run_fluid(dt);
+        if was {
+            self.freeze();
+        }
+    }
+
+    /// Runs the fluid `dt` seconds on, stirring and all.
+    fn run_fluid(&mut self, dt: f32) {
         let mut pushes = self.pushes.clone();
         pushes.append(&mut self.stirs);
         self.fluid.step(dt, &self.flow, &pushes);
         self.field_version += 1;
-        if was {
-            self.freeze();
-        }
     }
 
     /// Stills the fluid. Frozen, this leaves the flow the edges and
@@ -451,7 +507,12 @@ impl Sim {
     /// Pushes the fluid at `pos` toward `velocity`, at the next tick. Frozen,
     /// this reshapes the frozen flow.
     pub fn stir(&mut self, pos: V2, velocity: V2, radius: f32) {
-        self.stirs.push(Push::stir(pos, velocity, radius));
+        self.stirs.push(Push::stir(pos, velocity, radius, self.stir_tint));
+    }
+
+    /// The colour stirring pours (`#rrggbb`), or none for plain dye.
+    pub fn set_stir_color(&mut self, color: Option<&str>) {
+        self.stir_tint = color.and_then(crate::colour::parse_hex).map(crate::colour::dye_channels);
     }
 
     /// Releases a particle at `pos`, if it isn't in an obstacle or out of
@@ -514,10 +575,7 @@ impl Sim {
                 self.retrace();
             }
         } else if dt > 0.0 {
-            let mut pushes = self.pushes.clone();
-            pushes.append(&mut self.stirs);
-            self.fluid.step(dt, &self.flow, &pushes);
-            self.field_version += 1;
+            self.run_fluid(dt);
             self.emit_from_seeds(dt);
         }
         self.stirs.clear();
@@ -617,20 +675,26 @@ impl Sim {
                 }
             }
             env.skip = None;
+            let recording = self.recording;
             self.particles.retain_mut(|p| match p.advance(&env, &s, dt) {
                 Some(end) => {
-                    finished.push((std::mem::take(&mut p.trail), end == End::Closed));
+                    finished.push((std::mem::take(&mut p.trail), std::mem::take(&mut p.times), end == End::Closed));
                     false
                 }
-                None => true,
+                None => {
+                    if !recording {
+                        p.trim_trail(TAIL_KEPT);
+                    }
+                    true
+                }
             });
         }
         if !self.movers.is_empty() || !gone.is_empty() {
             self.separate_sources(&gone);
             self.place_movers(&gone);
         }
-        for (points, closed) in finished {
-            self.keep_trail(points, closed);
+        for (points, times, closed) in finished {
+            self.keep_trail(points, times, closed);
         }
     }
 
@@ -763,7 +827,7 @@ impl Sim {
     pub fn bake(&mut self) -> usize {
         let n = self.live.len();
         self.paths
-            .extend(self.live.iter().map(|p| Rc::new(RecordedPath { points: p.points.clone(), closed: p.closed })));
+            .extend(self.live.iter().map(|p| Rc::new(RecordedPath { points: p.points.clone(), closed: p.closed, times: Vec::new() })));
         if n > 0 {
             self.paths_version += 1;
             self.baked_live = self.live_version;
@@ -822,7 +886,7 @@ impl Sim {
     pub fn live_paths(&self) -> Flat {
         let mut f = Flat::default();
         for p in &self.live {
-            f.push(p.points.iter().copied(), p.closed);
+            f.push(p.points.iter().copied(), &[], p.closed);
         }
         f.finish()
     }
@@ -830,7 +894,7 @@ impl Sim {
     pub fn recorded_paths(&self) -> Flat {
         let mut f = Flat::default();
         for p in &self.paths {
-            f.push(p.points.iter().copied(), p.closed);
+            f.push(p.points.iter().copied(), &p.times, p.closed);
         }
         f.finish()
     }
@@ -841,8 +905,10 @@ impl Sim {
         let mut f = Flat::default();
         for p in &self.particles {
             let all: Vec<V2> = p.trail_with_head().collect();
+            let times: Vec<f32> = p.times_with_head().collect();
             let from = all.len().saturating_sub(tail.max(2));
-            f.push(all[from..].iter().copied(), false);
+            let times = if times.len() == all.len() { &times[from..] } else { &[] };
+            f.push(all[from..].iter().copied(), times, false);
         }
         f.finish()
     }
@@ -879,7 +945,7 @@ impl Sim {
     /// The field as RGBA, a pixel a cell.
     pub fn render(&mut self, view: View) -> &[u8] {
         let reference = self.pushes.iter().map(|p| p.speed()).fold(self.flow.inflow_speed.abs(), f32::max).max(40.0);
-        render(&self.fluid.g, view, reference, &mut self.scratch, &mut self.rgba);
+        render(&self.fluid.g, self.fluid.tint(), view, reference, &mut self.scratch, &mut self.rgba);
         &self.rgba
     }
 

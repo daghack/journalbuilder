@@ -162,7 +162,7 @@ pub struct FluidField {
     pub field: Field,
     /// Displacement maps by how long points are carried, and the steepest
     /// slope of each channel.
-    advected: Mutex<HashMap<u32, Arc<Vec<Vec2>>>>,
+    advected: Mutex<HashMap<(u32, bool), Arc<Vec<Vec2>>>>,
     steepest: Mutex<HashMap<&'static str, f32>>,
 }
 
@@ -186,7 +186,14 @@ pub struct Fluid {
     pub at: Vec2,
     pub size: Vec2,
     pub effects: Effects,
+    /// Drawn live, as the Fluid tab draws a running flow: strokes thinned
+    /// to a point every `LIVE_STEP` canvas units and carried along the
+    /// flow in coarser steps, to keep up.
+    pub live: bool,
 }
+
+/// How far apart a live fluid keeps the points of strokes it moves.
+const LIVE_STEP: f32 = 3.0;
 
 fn pv(p: flowsim::V2) -> Vec2 {
     Vec2::new(p.x, p.y)
@@ -211,7 +218,7 @@ impl Fluid {
         let size = field.size();
         let at = file.at.map_or(Vec2::ZERO, |[x, y]| Vec2::new(x, y));
         let size = file.size.map_or(Vec2::new(size.x, size.y), |[w, h]| Vec2::new(w, h));
-        let fluid = Fluid { name: name.to_string(), field: Arc::new(FluidField::new(field)), at, size, effects: file.effects };
+        let fluid = Fluid { name: name.to_string(), field: Arc::new(FluidField::new(field)), at, size, effects: file.effects, live: false };
         fluid.check()?;
         Ok(fluid)
     }
@@ -227,6 +234,7 @@ impl Fluid {
             at: file.at.map_or(Vec2::ZERO, |[x, y]| Vec2::new(x, y)),
             size: file.size.map_or(Vec2::new(size.x, size.y), |[w, h]| Vec2::new(w, h)),
             effects: file.effects,
+            live: false,
         };
         fluid.check()?;
         Ok(fluid)
@@ -234,7 +242,7 @@ impl Fluid {
 
     /// A fluid of a field given whole, as the Fluid tab sends it live.
     pub fn from_field(name: &str, field: Field, at: Vec2, size: Vec2, effects: Effects) -> Result<Fluid, String> {
-        let fluid = Fluid { name: name.to_string(), field: Arc::new(FluidField::new(field)), at, size, effects };
+        let fluid = Fluid { name: name.to_string(), field: Arc::new(FluidField::new(field)), at, size, effects, live: false };
         fluid.check()?;
         Ok(fluid)
     }
@@ -323,6 +331,7 @@ impl Fluid {
         let e = &self.effects;
         if e.position_distort.is_some() || e.jitter_distort.is_some() {
             let step = e.position_distort.as_ref().map_or(2.0, |p| p.step);
+            let (step, tolerance) = if self.live { (step.max(LIVE_STEP), 1.0) } else { (step, 0.25) };
             let advected = e.position_distort.as_ref().filter(|p| p.by == By::Advect).map(|p| self.advected(p.amount));
             let steepest = e.position_distort.as_ref().filter(|p| p.by == By::Gradient).map(|p| self.steepest(p.channel));
             let jitter = e.jitter_distort.as_ref().map(|j| {
@@ -330,7 +339,8 @@ impl Fluid {
                 (j, Perlin::new(hash ^ seed.wrapping_mul(0x9e37_79b9)), Perlin::new(hash.rotate_left(16) ^ seed.wrapping_add(0x51ed_270b)))
             });
             let mut path = StrokePath::new();
-            for (points, closed) in stroke.path.flattened(0.25) {
+            for (points, closed) in stroke.path.flattened(tolerance) {
+                let points = if self.live { thinned(&points, LIVE_STEP) } else { points };
                 let points = resample(&points, closed, step);
                 for (i, p) in points.into_iter().enumerate() {
                     let mut p = p;
@@ -369,7 +379,7 @@ impl Fluid {
     /// worked out once for the field (RK4, steps no longer than half a
     /// cell), and read between centres for each point.
     fn advected(&self, time: f32) -> Arc<Vec<Vec2>> {
-        let key = time.to_bits();
+        let key = (time.to_bits(), self.live);
         if let Some(map) = self.field.advected.lock().expect("no panics holding it").get(&key) {
             return map.clone();
         }
@@ -378,7 +388,9 @@ impl Fluid {
         let top = (0..ny).flat_map(|j| (0..nx).map(move |i| (i, j)))
             .map(|(i, j)| field.grid().cell_velocity(i, j).len())
             .fold(0.0f32, f32::max);
-        let steps = ((time.abs() * top / (0.5 * h)).ceil() as usize).clamp(1, 400);
+        // Each step moves a point at most half a cell, or two live.
+        let reach = if self.live { 2.0 * h } else { 0.5 * h };
+        let steps = ((time.abs() * top / reach).ceil() as usize).clamp(1, 400);
         let dt = time / steps as f32;
         let size = field.size();
         let inside = |p: flowsim::V2| p.x >= 0.0 && p.y >= 0.0 && p.x <= size.x && p.y <= size.y;
@@ -467,6 +479,18 @@ pub fn ink_mask<'a>(canvases: impl IntoIterator<Item = &'a Canvas>, at: [f32; 2]
         pixmap.stroke_path(&path, &paint, &pen, transform, None);
     }
     Ok(pixmap.data().chunks_exact(4).map(|px| px[3]).collect())
+}
+
+/// A polyline's points at least `step` apart, its ends kept.
+fn thinned(points: &[Vec2], step: f32) -> Vec<Vec2> {
+    let mut out: Vec<Vec2> = Vec::with_capacity(points.len());
+    for (i, &p) in points.iter().enumerate() {
+        match out.last() {
+            Some(&last) if i + 1 < points.len() && last.distance(p) < step => {}
+            _ => out.push(p),
+        }
+    }
+    out
 }
 
 /// A polyline's points no further apart than `step`, its own points kept.
@@ -627,6 +651,18 @@ pub(crate) mod tests {
             assert!((points[points.len() - 1] - Vec2::new(50.0, 25.0)).length() < 0.5, "{:?}", by);
             assert!(points.len() >= 6, "resampled every 2 units: {}", points.len());
         }
+    }
+
+    #[test]
+    fn a_live_fluid_thins_strokes_it_moves() {
+        let mut f = fluid(Effects { position_distort: Some(PositionDistort { by: By::Offset, ..Default::default() }), ..Default::default() });
+        f.live = true;
+        let dense = (1..=20).fold(StrokePath::new().move_to(20.0, 25.0), |path, i| path.line_to(20.0 + i as f32 * 0.5, 25.0));
+        let mut s = stroke(dense);
+        f.apply(&mut s, 0);
+        let points = s.path.points_within();
+        assert!(points.len() <= 5, "a point every 3 units: {}", points.len());
+        assert!((points[points.len() - 1] - Vec2::new(40.0, 25.0)).length() < 0.5, "its end kept: {:?}", points[points.len() - 1]);
     }
 
     #[test]

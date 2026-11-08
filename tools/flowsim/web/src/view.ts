@@ -9,9 +9,45 @@ export interface PathBundle {
   points: Float32Array;
   offsets: Uint32Array;
   closed: Uint8Array;
+  /** When each point was reached (NaN where that isn't known). */
+  times: Float32Array | null;
+  /** Its segments by hue, for a rainbow of `period` seconds. */
+  hues?: { period: number; paths: Path2D[] };
 }
 
-export function bundle(set: { points: Float32Array; offsets: Uint32Array; closed: Uint8Array }): PathBundle {
+/** How many hues a rainbow is drawn in. */
+const HUES = 48;
+
+/** A bundle's segments by how old their particle was there, a hue for each
+ * share of `period`, and last those whose age isn't known. */
+export function hueBuckets(b: PathBundle, period: number): Path2D[] {
+  if (b.hues && b.hues.period === period) return b.hues.paths;
+  const paths = Array.from({ length: HUES + 1 }, () => new Path2D());
+  const { points, offsets, closed, times } = b;
+  const bucket = (t: number) => {
+    if (!Number.isFinite(t)) return HUES;
+    const turn = t / period - Math.floor(t / period);
+    return Math.min(HUES - 1, Math.floor(turn * HUES));
+  };
+  for (let i = 0; i + 1 < offsets.length; i++) {
+    const start = offsets[i];
+    const end = offsets[i + 1];
+    let last = -1;
+    const segment = (a: number, k: number) => {
+      const which = bucket(times ? times[k] : NaN);
+      const p = paths[which];
+      if (which !== last) p.moveTo(points[2 * a], points[2 * a + 1]);
+      p.lineTo(points[2 * k], points[2 * k + 1]);
+      last = which;
+    };
+    for (let k = start + 1; k < end; k++) segment(k - 1, k);
+    if (closed[i] && end - start > 2) segment(end - 1, start);
+  }
+  b.hues = { period, paths };
+  return paths;
+}
+
+export function bundle(set: { points: Float32Array; offsets: Uint32Array; closed: Uint8Array; times?: Float32Array }): PathBundle {
   const { points, offsets, closed } = set;
   const path = new Path2D();
   for (let i = 0; i + 1 < offsets.length; i++) {
@@ -22,7 +58,7 @@ export function bundle(set: { points: Float32Array; offsets: Uint32Array; closed
     for (let k = start + 1; k < end; k++) path.lineTo(points[2 * k], points[2 * k + 1]);
     if (closed[i]) path.closePath();
   }
-  return { path, points, offsets, closed };
+  return { path, points, offsets, closed, times: set.times ?? null };
 }
 
 export function onePath(b: PathBundle, i: number): Path2D {
@@ -57,7 +93,8 @@ export interface DrawState {
   trails: PathBundle | null;
   heads: Float32Array | null;
   arrows: Arrows | null;
-  show: { recorded: boolean; live: boolean; particles: boolean; objects: boolean };
+  /** `rainbow`: paths coloured by their particles' age, round the hues once this many seconds. */
+  show: { recorded: boolean; live: boolean; particles: boolean; objects: boolean; rainbow?: number | null };
   brush: { pos: Vec; radius: number } | null;
 }
 
@@ -169,10 +206,10 @@ export class Renderer {
     if (s.arrows) this.drawArrows(s.arrows, dw, dh);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
+    const rainbow = s.show.rainbow ?? null;
     if (s.show.recorded && s.recorded) {
-      ctx.strokeStyle = C.recorded;
       ctx.lineWidth = 1.1 * px;
-      ctx.stroke(s.recorded.path);
+      this.strokeBundle(s.recorded, C.recorded, rainbow);
     }
     if (s.show.live && s.live) {
       ctx.strokeStyle = C.live;
@@ -187,9 +224,8 @@ export class Renderer {
       ctx.setLineDash([]);
     }
     if (s.show.particles && s.trails) {
-      ctx.strokeStyle = C.trail;
       ctx.lineWidth = 1.2 * px;
-      ctx.stroke(s.trails.path);
+      this.strokeBundle(s.trails, C.trail, rainbow);
     }
     if (s.show.particles && s.heads && s.heads.length) {
       ctx.fillStyle = C.head;
@@ -255,6 +291,23 @@ export class Renderer {
       }
     }
     ctx.stroke();
+  }
+
+  /** Strokes paths in `colour`, or by time round the hues once a `rainbow` seconds. */
+  private strokeBundle(b: PathBundle, colour: string, rainbow: number | null): void {
+    const ctx = this.ctx;
+    if (!rainbow || !b.times) {
+      ctx.strokeStyle = colour;
+      ctx.stroke(b.path);
+      return;
+    }
+    const paths = hueBuckets(b, rainbow);
+    for (let i = 0; i < HUES; i++) {
+      ctx.strokeStyle = `hsl(${((i + 0.5) / HUES) * 360} 100% 62%)`;
+      ctx.stroke(paths[i]);
+    }
+    ctx.strokeStyle = colour;
+    ctx.stroke(paths[HUES]);
   }
 
   private ring(pos: Vec, r: number, colour: string, dashed: boolean, width = 1.2): void {
@@ -378,6 +431,7 @@ export class Renderer {
           ctx.lineTo(o.pos[0], o.pos[1] + s);
         }
         ctx.stroke();
+        if (o.color) this.dot([o.pos[0], o.pos[1] + 11 * px], 3 * px, o.color);
         if (o.moving) this.puck(o.pos, colour);
         break;
       }

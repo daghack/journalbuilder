@@ -49,7 +49,7 @@ function handle(data: Exclude<FluidRequest, { type: 'init' }>) {
     }
     case 'apply': {
       const f = data.field;
-      post({ type: 'applied', id: data.id, result: JSON.parse(fluidApply(f.nx, f.ny, f.h, f.u, f.v, f.pressure, f.dye, data.settings, data.target ?? undefined)) });
+      post({ type: 'applied', id: data.id, result: JSON.parse(fluidApply(f.nx, f.ny, f.h, f.u, f.v, f.pressure, f.dye, data.settings, data.target ?? undefined, data.live)) });
       break;
     }
   }

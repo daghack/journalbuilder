@@ -392,11 +392,12 @@ pub fn fluid_mask(canvases: Vec<String>, x: f32, y: f32, width: f32, height: f32
 /// `pressure`, `dye`, as `Field::from_raw` takes them) and its box and
 /// effects from `settings`, a fluid file's text. Where the entry adds the
 /// fluid, this stands in for it; where it doesn't, it's added to the
-/// canvas labelled `target`, or the page with none. As JSON: `{ svg, view,
+/// canvas labelled `target`, or the page with none. `live` draws it
+/// quickly, coarser, for a flow that's running. As JSON: `{ svg, view,
 /// error }`.
 #[wasm_bindgen(js_name = fluidApply)]
 #[allow(clippy::too_many_arguments)]
-pub fn fluid_apply(nx: usize, ny: usize, h: f32, u: Vec<f32>, v: Vec<f32>, pressure: Vec<f32>, dye: Vec<f32>, settings: &str, target: Option<String>) -> String {
+pub fn fluid_apply(nx: usize, ny: usize, h: f32, u: Vec<f32>, v: Vec<f32>, pressure: Vec<f32>, dye: Vec<f32>, settings: &str, target: Option<String>, live: bool) -> String {
     let answer = FLUID_PAGE.with_borrow_mut(|kept| -> Result<Value, String> {
         let kept = kept.as_mut().ok_or("no page to distort: call fluidPrepare first")?;
         let raw = RawField { nx, ny, h, arrays: [u, v, pressure, dye] };
@@ -409,7 +410,7 @@ pub fn fluid_apply(nx: usize, ny: usize, h: f32, u: Vec<f32>, v: Vec<f32>, press
                 field
             }
         };
-        let fluid = Fluid::with_settings(&kept.name, field, settings)?;
+        let fluid = Fluid { live, ..Fluid::with_settings(&kept.name, field, settings)? };
         let page = kept.page.with_fluid(&kept.name, Some(Arc::new(fluid)), target.as_deref())?;
         let svg = publish::page_svg(&page, &kept.label);
         Ok(json!({ "svg": svg.as_ref().map(|(svg, _)| svg), "view": svg.as_ref().map(|(_, view)| view), "error": null }))

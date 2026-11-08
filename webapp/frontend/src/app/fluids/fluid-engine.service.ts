@@ -43,9 +43,9 @@ export class FluidEngine implements OnDestroy {
     return reply.alpha;
   }
 
-  /** The kept page distorted by `field`, with `settings` (a fluid file's text), added to `target` if the entry doesn't add it. */
-  async apply(field: RawField, settings: string, target: string | null): Promise<FluidResult> {
-    const reply = await this.call({ type: 'apply', id: 0, field, settings, target });
+  /** The kept page distorted by `field`, with `settings` (a fluid file's text), added to `target` if the entry doesn't add it; `live` draws it quickly, coarser, for a running flow. */
+  async apply(field: RawField, settings: string, target: string | null, live: boolean): Promise<FluidResult> {
+    const reply = await this.call({ type: 'apply', id: 0, field, settings, target, live });
     return reply.type === 'applied' ? reply.result : { svg: null, view: null, error: { message: 'no page came back' } };
   }
 

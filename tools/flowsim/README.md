@@ -40,8 +40,8 @@ the journal editor.
 
 The whole plane is fluid, incompressible and seen from above. The domain
 is 1600 × 900 units by default, and objects, paths and the SVG are in
-those units. The grid it is simulated on is a setting of its own (128 to
-512 cells across), so changing it moves nothing.
+those units. The grid it is simulated on is a setting of its own (64 to
+512 cells across; 64 is the fastest), so changing it moves nothing.
 
 Each edge of the domain is a wall, an inflow or open. A new scene (**New**)
 is a blank slate: an empty **Closed tank**, every edge a wall, so only
@@ -65,7 +65,7 @@ divergence-free, so paths traced through it don't bunch up. While frozen:
 | family | objects | what they do |
 |---|---|---|
 | Obstacles | pebble, block, wall | The fluid flows round them. Particles stop at them, or bounce (a particle setting). |
-| Stirrers | jet, vortex, source, sink | Push the fluid: a jet along its direction, a vortex round its centre, a source out of it, a sink into it. |
+| Stirrers | jet, vortex, source, sink | Push the fluid: a jet along its direction, a vortex round its centre, a source out of it, a sink into it. A source's flow runs from −500 (it draws in) to 500, and it can pour dye of a colour of its own (**Dye**). |
 | Forces | attractor, repeller | Pull or push particles, never the fluid. Each has a strength, radius, falloff (inverse-square or Gaussian), an optional spin that sends particles round it, and a capture radius where paths end. |
 | Seeds | seed, rake, ring | Where particles start: a point, a line of them, or a ring. Frozen, they trace live paths; running, they emit particles at their emit rate. |
 | Moving | attract, repel, source, sink | Sources, sinks, attractors and repellers that move like particles (or tick **Moves like a particle** on one placed already). |
@@ -105,6 +105,20 @@ The other tools are on the left. Obstacles, stirrers, forces, rakes and
 rings are dragged out; walls are drawn freehand. The panel on the right
 sets the selected object, what's shown (dye, speed, vorticity, pressure,
 velocity arrows), the particles and the flow.
+
+Dye with no colour of its own is the dye view's sea-green. Colours poured
+by sources, or by the stir brush (its **Dye** row), mix as light does
+rather than paint: two meeting keep the hue between them and stay bright,
+so red and yellow make orange, not brown.
+
+**Record paths** in the top bar keeps particles' paths as they go. Untick
+it to let a run go on without filling memory: particles keep only a short
+tail and nothing new is recorded; what's recorded already stays.
+
+**Colour paths by time** (View) draws every particle's path in a rainbow
+of its own: red where the particle was released, the hue running round
+once every **Rainbow** seconds of its life. Paths recorded before paths
+kept their times are drawn plainly.
 
 **Clear paths** clears every path on the stage: the recorded ones, the
 trails of particles on their way (which go on, starting new ones), and the

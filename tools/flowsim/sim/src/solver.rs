@@ -1,8 +1,9 @@
 //! The incompressible flow: advection, forcing, and the pressure projection
 //! that keeps it divergence-free.
 
+use crate::colour::{DEFAULT_DYE, dye_channels, parse_hex};
 use crate::geom::{Rng, V2, v2};
-use crate::grid::{Grid, Layout, sample_linear, sample_linear_bounds};
+use crate::grid::{Grid, Layout, coords, sample_linear, sample_linear_bounds};
 use crate::objects::{Kind, Mask, Object, Obstacles};
 use std::rc::Rc;
 use crate::scene::{DyeInflow, Edge, Edges, FlowSettings};
@@ -20,8 +21,10 @@ pub struct Push {
     pub kind: PushKind,
     /// A share a second.
     pub response: f32,
-    /// Whether it leaves dye.
+    /// Whether it leaves dye, and its colour's dye channels (none for the
+    /// plain dye).
     pub dye: bool,
+    pub tint: Option<[f32; 4]>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -33,8 +36,8 @@ pub enum PushKind {
 }
 
 impl Push {
-    pub fn stir(pos: V2, velocity: V2, radius: f32) -> Self {
-        Push { pos, radius: radius.max(1.0), kind: PushKind::Toward(velocity), response: STIR_RESPONSE, dye: true }
+    pub fn stir(pos: V2, velocity: V2, radius: f32, tint: Option<[f32; 4]>) -> Self {
+        Push { pos, radius: radius.max(1.0), kind: PushKind::Toward(velocity), response: STIR_RESPONSE, dye: true, tint }
     }
 
     /// The stirrers among the objects (sources aside: they set divergence).
@@ -48,6 +51,7 @@ impl Push {
                     kind: PushKind::Toward(v2(1.0, 0.0).rotated(angle.to_radians()) * speed),
                     response: STIRRER_RESPONSE,
                     dye: false,
+                    tint: None,
                 }),
                 Kind::Vortex { pos, spin, radius } => Some(Push {
                     pos,
@@ -55,6 +59,7 @@ impl Push {
                     kind: PushKind::Spin(spin),
                     response: STIRRER_RESPONSE,
                     dye: false,
+                    tint: None,
                 }),
                 _ => None,
             })
@@ -77,6 +82,32 @@ impl Push {
     }
 }
 
+/// The dye's colour, once coloured dye has been poured: each cell's dye
+/// channels (`colour::dye_channels`), the mean of the dye in it. It's
+/// carried with the dye as the mean of where the dye came from, weighted by
+/// how much there was, so a cell's colour is always a mix of colours
+/// poured.
+#[derive(Clone, Debug, Default)]
+pub struct Tint {
+    pub channels: [Vec<f32>; 4],
+    prev: [Vec<f32>; 4],
+}
+
+/// Raises a cell's dye to at least `w`, the dye added of `colour` (dye
+/// channels), and turns what was there toward it by `w`.
+fn pour(dye: &mut [f32], tint: Option<&mut Tint>, idx: usize, w: f32, colour: [f32; 4]) {
+    let d = dye[idx].max(0.0);
+    let to = d.max(w);
+    if let Some(t) = tint {
+        let fresh = if to > 1e-6 { (to - d) / to } else { 1.0 };
+        let share = 1.0 - (1.0 - fresh) * (1.0 - w.clamp(0.0, 1.0));
+        for (ch, target) in t.channels.iter_mut().zip(colour) {
+            ch[idx] += (target - ch[idx]) * share;
+        }
+    }
+    dye[idx] = to;
+}
+
 #[derive(Clone, Debug)]
 pub struct Fluid {
     pub g: Grid,
@@ -85,8 +116,13 @@ pub struct Fluid {
     d0: Vec<f32>,
     scratch: Vec<f32>,
     scratch2: Vec<f32>,
-    /// Where sources pour dye in: cell and amount.
-    source_dye: Vec<(usize, f32)>,
+    /// Where sources pour dye in: cell, amount, and its colour's dye
+    /// channels.
+    source_dye: Vec<(usize, f32, [f32; 4])>,
+    /// The dye's colour, once coloured dye has been poured.
+    tint: Option<Tint>,
+    /// Plain dye's channels.
+    plain: [f32; 4],
     rng: Rng,
     sway: f32,
     pcg: Pcg,
@@ -106,6 +142,8 @@ impl Fluid {
             scratch: Vec::new(),
             scratch2: Vec::new(),
             source_dye: Vec::new(),
+            tint: None,
+            plain: dye_channels(DEFAULT_DYE),
             rng: Rng::new(0x5eed_f10e),
             sway: 0.0,
             pcg: Pcg::default(),
@@ -143,8 +181,12 @@ impl Fluid {
         g.div_target.iter_mut().for_each(|d| *d = 0.0);
         self.source_dye.clear();
         let h = g.h;
+        let mut coloured = false;
         for o in objects {
             let Kind::Source { pos, speed, radius, .. } = o.kind else { continue };
+            let colour = o.kind.color().and_then(parse_hex).map(dye_channels);
+            coloured |= colour.is_some() && speed > 0.0;
+            let colour = colour.unwrap_or(self.plain);
             let r = radius.max(h * 0.5);
             // The flux out of the circle at `speed`, spread over a Gaussian.
             let flux = speed * std::f32::consts::TAU * r;
@@ -177,10 +219,37 @@ impl Fluid {
             for (idx, w) in cells {
                 g.div_target[idx] += flux * w / (total * h * h);
                 if speed > 0.0 {
-                    self.source_dye.push((idx, w));
+                    self.source_dye.push((idx, w, colour));
                 }
             }
         }
+        if coloured {
+            self.use_tint();
+        }
+    }
+
+    /// Starts keeping the dye's colour: the dye there is plain.
+    pub fn use_tint(&mut self) {
+        if self.tint.is_some() {
+            return;
+        }
+        let n = self.g.dye.len();
+        let plain = self.plain;
+        self.tint = Some(Tint { channels: std::array::from_fn(|i| vec![plain[i]; n]), prev: Default::default() });
+    }
+
+    /// Makes the dye's colour plain everywhere, if it's kept.
+    pub fn plain_tint(&mut self) {
+        let plain = self.plain;
+        if let Some(t) = &mut self.tint {
+            for (ch, p) in t.channels.iter_mut().zip(plain) {
+                ch.iter_mut().for_each(|x| *x = p);
+            }
+        }
+    }
+
+    pub fn tint(&self) -> Option<&Tint> {
+        self.tint.as_ref()
     }
 
     /// Fills faces that were solid under `was_solid` (a cell mask) but are
@@ -238,6 +307,7 @@ impl Fluid {
         g.q.iter_mut().for_each(|x| *x = 0.0);
         g.dye.iter_mut().for_each(|x| *x = 0.0);
         self.sway = 0.0;
+        self.plain_tint();
     }
 
     /// One step of `dt` seconds, split in a few if the flow is fast.
@@ -348,6 +418,11 @@ impl Fluid {
 
     /// Relaxes the fluid near a push toward its target velocity.
     pub fn push(&mut self, p: &Push, dt: f32) {
+        if p.dye && p.tint.is_some() {
+            self.use_tint();
+        }
+        let plain = self.plain;
+        let tint = &mut self.tint;
         let g = &mut self.g;
         let h = g.h;
         let reach = p.radius * 2.5;
@@ -395,7 +470,9 @@ impl Fluid {
                     }
                     let d = v2((i as f32 + 0.5) * h, (j as f32 + 0.5) * h) - p.pos;
                     let w = (-d.len2() / r2).exp();
-                    g.dye[idx] = g.dye[idx].max(w.min(1.0));
+                    if w > 1e-3 {
+                        pour(&mut g.dye, tint.as_mut(), idx, w.min(1.0), p.tint.unwrap_or(plain));
+                    }
                 }
             }
         }
@@ -414,6 +491,9 @@ impl Fluid {
         maccormack(&flow, &self.u0, &mut self.g.u, ul, h, dt, &mut self.scratch, &mut self.scratch2);
         maccormack(&flow, &self.v0, &mut self.g.v, vl, h, dt, &mut self.scratch, &mut self.scratch2);
         maccormack(&flow, &self.d0, &mut self.g.dye, cl, h, dt, &mut self.scratch, &mut self.scratch2);
+        if let Some(t) = &mut self.tint {
+            carry_tint(&flow, &self.d0, t, cl, h, dt);
+        }
     }
 
     /// Vorticity confinement: a push round each swirl's core, which numerical
@@ -473,11 +553,22 @@ impl Fluid {
 
     fn dye(&mut self, dt: f32, s: &FlowSettings) {
         let g = &mut self.g;
+        let plain = self.plain;
         let fade = (1.0 - s.dye_fade.max(0.0) * dt).clamp(0.0, 1.0);
         g.dye.iter_mut().for_each(|d| *d *= fade);
-        for &(idx, w) in &self.source_dye {
-            g.dye[idx] = g.dye[idx].max(w);
+        for &(idx, w, colour) in &self.source_dye {
+            pour(&mut g.dye, self.tint.as_mut(), idx, w, colour);
         }
+        // Inflow stripes are plain dye.
+        let tint = &mut self.tint;
+        let mut set = |dye: &mut [f32], k: usize, on: f32| {
+            dye[k] = on;
+            if let Some(t) = tint.as_mut() {
+                for (ch, p) in t.channels.iter_mut().zip(plain) {
+                    ch[k] = p;
+                }
+            }
+        };
         if s.dye == DyeInflow::Stripes {
             let (nx, ny) = (g.nx, g.ny);
             let band_y = (ny / 24).max(2);
@@ -487,22 +578,22 @@ impl Fluid {
                 let on = if (j / band_y) % 2 == 0 { 1.0 } else { 0.0 };
                 if e.left == Edge::Inflow {
                     let k = g.ci(0, j);
-                    g.dye[k] = on;
+                    set(&mut g.dye, k, on);
                 }
                 if e.right == Edge::Inflow {
                     let k = g.ci(nx - 1, j);
-                    g.dye[k] = on;
+                    set(&mut g.dye, k, on);
                 }
             }
             for i in 0..nx {
                 let on = if (i / band_x) % 2 == 0 { 1.0 } else { 0.0 };
                 if e.top == Edge::Inflow {
                     let k = g.ci(i, 0);
-                    g.dye[k] = on;
+                    set(&mut g.dye, k, on);
                 }
                 if e.bottom == Edge::Inflow {
                     let k = g.ci(i, ny - 1);
-                    g.dye[k] = on;
+                    set(&mut g.dye, k, on);
                 }
             }
         }
@@ -832,6 +923,38 @@ impl Frozen<'_> {
     fn trace(&self, p: V2, dt: f32) -> V2 {
         let mid = p - self.at(p) * (0.5 * dt);
         p - self.at(mid) * dt
+    }
+}
+
+/// The dye's colour carried along by `flow` for `dt`: each cell's the
+/// mean of the four it came from, weighted by their share of the dye
+/// before the step (`dye`). Where none came, it stays.
+fn carry_tint(flow: &Frozen, dye: &[f32], t: &mut Tint, l: Layout, h: f32, dt: f32) {
+    let inv_h = 1.0 / h;
+    for (prev, ch) in t.prev.iter_mut().zip(&t.channels) {
+        prev.clone_from(ch);
+    }
+    for j in 0..l.rows {
+        for i in 0..l.w {
+            let p = v2((i as f32 + l.ox) * h, (j as f32 + l.oy) * h);
+            let (ci, cj, tx, ty) = coords(l, inv_h, flow.trace(p, dt));
+            let a = cj * l.w + ci;
+            let b = a + l.w;
+            let w = [
+                (a, (1.0 - tx) * (1.0 - ty) * dye[a].max(0.0)),
+                (a + 1, tx * (1.0 - ty) * dye[a + 1].max(0.0)),
+                (b, (1.0 - tx) * ty * dye[b].max(0.0)),
+                (b + 1, tx * ty * dye[b + 1].max(0.0)),
+            ];
+            let total: f32 = w.iter().map(|(_, x)| x).sum();
+            if total <= 1e-6 {
+                continue;
+            }
+            let k = i + j * l.w;
+            for (prev, ch) in t.prev.iter().zip(t.channels.iter_mut()) {
+                ch[k] = w.iter().map(|&(c, x)| prev[c] * x).sum::<f32>() / total;
+            }
+        }
     }
 }
 

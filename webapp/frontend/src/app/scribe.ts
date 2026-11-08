@@ -273,7 +273,7 @@ export type FluidRequest =
   | { type: 'journal'; files: JournalPayload }
   | { type: 'prepare'; id: number; source: string; page: number; name: string }
   | { type: 'mask'; id: number; canvases: string[]; box: Box; nx: number; ny: number }
-  | { type: 'apply'; id: number; field: RawField; settings: string; target: string | null };
+  | { type: 'apply'; id: number; field: RawField; settings: string; target: string | null; live: boolean };
 
 export type FluidReply =
   | { type: 'ready' }

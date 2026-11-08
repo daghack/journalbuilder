@@ -144,8 +144,10 @@ impl Grid {
     }
 }
 
+/// The sample below and left of `p` and how far `p` is past it, clamped
+/// to the field's edges.
 #[inline]
-fn coords(l: Layout, inv_h: f32, p: V2) -> (usize, usize, f32, f32) {
+pub fn coords(l: Layout, inv_h: f32, p: V2) -> (usize, usize, f32, f32) {
     let fx = (p.x * inv_h - l.ox).clamp(0.0, (l.w - 1) as f32);
     let fy = (p.y * inv_h - l.oy).clamp(0.0, (l.rows - 1) as f32);
     let i = (fx as usize).min(l.w - 2);

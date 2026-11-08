@@ -9,7 +9,8 @@ export type Obj =
   | { id: number; kind: 'wall'; points: Vec[]; thickness: number }
   | { id: number; kind: 'jet'; pos: Vec; angle: number; speed: number; radius: number }
   | { id: number; kind: 'vortex'; pos: Vec; spin: number; radius: number }
-  | { id: number; kind: 'source'; pos: Vec; speed: number; radius: number; moving?: boolean }
+  | { id: number; kind: 'source'; pos: Vec; speed: number; radius: number; color?: string; moving?: boolean }
+
   | {
       id: number;
       kind: 'attractor';

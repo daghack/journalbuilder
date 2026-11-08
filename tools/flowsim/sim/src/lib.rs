@@ -4,6 +4,7 @@
 //! `tools/flowsim/web` (the `bindings` feature); `field` is what journals
 //! read of it.
 
+pub mod colour;
 pub mod field;
 pub mod geom;
 pub mod grid;
