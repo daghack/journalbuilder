@@ -141,6 +141,9 @@ fn example() {
       return '{\n\t"space_width": 0.5,\n\t"glyphs": {}\n}\n';
     case 'images':
       return '';
+    case 'fluids':
+      // The Fluid tab fills it in: the field, its scene and its effects.
+      return '{\n\t"version": 1\n}\n';
     case 'lib':
       return `// ${name}: shared functions, for import "lib/${name}" as ${name};
 

@@ -1,4 +1,5 @@
 import { Component, computed, inject } from '@angular/core';
+import { FluidWorkspaceComponent } from './fluids/fluid-workspace.component';
 import { FontsWorkspaceComponent } from './fonts/fonts-workspace.component';
 import { RESOURCE_KINDS, splitPath } from './journal/journal-files';
 import { JournalWorkspaceComponent } from './journal/journal-workspace.component';
@@ -22,7 +23,7 @@ import { ShellService } from './shell/shell.service';
 @Component({
   selector: 'app-root',
   imports: [JournalBarComponent, ThreePaneComponent, JournalWorkspaceComponent, FontsWorkspaceComponent, LocksWorkspaceComponent,
-    ResourceEditorComponent, StyleEditorComponent, ContentEditorComponent, ImageViewerComponent, EntryPreviewDialogComponent],
+    ResourceEditorComponent, StyleEditorComponent, ContentEditorComponent, ImageViewerComponent, FluidWorkspaceComponent, EntryPreviewDialogComponent],
   template: `
     <app-journal-bar />
     <main class="editor">
@@ -47,6 +48,9 @@ import { ShellService } from './shell/shell.service';
         }
         @defer (when kind() === 'styles') {
           <app-style-editor class="workspace" [hidden]="kind() !== 'styles'" />
+        }
+        @defer (when kind() === 'fluids') {
+          <app-fluid-workspace class="workspace" [hidden]="kind() !== 'fluids'" />
         }
         @if (kind() === null) {
           <app-three-pane class="workspace" key="none" [right]="false"><p center class="hint waiting">Pick a file in the Files tab, or add one.</p></app-three-pane>

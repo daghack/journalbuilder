@@ -16,6 +16,9 @@
 #   5. Checks the web editor (webapp/): its engine still builds for the
 #      browser and, once its npm packages are installed and its wasm built
 #      (webapp/README.md), its unit tests pass and it builds.
+#   6. Checks the flow simulator (tools/flowsim): its tests pass, it builds
+#      for the browser and, once its npm packages are installed, its page
+#      builds.
 #
 # Renders go to a temporary directory, so the journals' directories are untouched.
 # It is deleted afterwards unless something fails or --keep is passed.
@@ -141,7 +144,8 @@ render showcase showcase/darkly_01_title_0.png showcase/darkly_02_contents_0.png
 	showcase/darkly_35_text_0.png showcase/darkly_36_text_0.png showcase/darkly_37_text_0.png showcase/darkly_38_text_0.png showcase/darkly_39_text_0.png showcase/darkly_40_text_0.png showcase/darkly_41_text_0.png showcase/darkly_42_text_0.png \
 	showcase/darkly_43_text_0.png showcase/darkly_44_text_0.png showcase/darkly_45_text_0.png showcase/darkly_46_locks_ciphers.png showcase/darkly_47_locks_0.png showcase/darkly_48_locks_0.png showcase/darkly_49_locks_0.png showcase/darkly_50_locks_0.png \
 	showcase/darkly_51_locks_0.png showcase/darkly_52_locks_0.png showcase/darkly_53_locks_0.png showcase/darkly_54_locks_0.png showcase/darkly_55_locks_0.png showcase/darkly_56_locks_0.png showcase/darkly_57_locks_0.png \
-	showcase/darkly_58_spread_0.png showcase/darkly_59_spread_0.png showcase/darkly_60_layouts_0.png showcase/darkly_62_layouts_0.png showcase/darkly_65_layouts_0.png showcase/darkly_66_files_0.png showcase/darkly_67_files_0.png \
+	showcase/darkly_58_spread_0.png showcase/darkly_59_spread_0.png showcase/darkly_60_fluids_0.png showcase/darkly_61_fluids_0.png \
+	showcase/darkly_62_layouts_0.png showcase/darkly_64_layouts_0.png showcase/darkly_67_layouts_0.png showcase/darkly_68_files_0.png showcase/darkly_69_files_0.png \
 	-- showcase --strict-glyphs --scale 0.25
 
 for journal in journals/*/ webapp/journals/*/; do
@@ -174,13 +178,37 @@ else
 	FAILURES=$((FAILURES + 1))
 fi
 FRONTEND=webapp/frontend
-if [[ ! -d $FRONTEND/node_modules || ! -f $FRONTEND/wasm-pkg/scribe_wasm.js ]]; then
+# npm run wasm builds the renderer and, for the Fluid tab, the flow simulator.
+if [[ ! -d $FRONTEND/node_modules || ! -f $FRONTEND/wasm-pkg/scribe_wasm.js || ! -f tools/flowsim/web/wasm-pkg/flowsim.js ]]; then
 	echo "skip the editor's frontend: run npm install and npm run wasm in $FRONTEND first"
 elif web_output=$(cd $FRONTEND && { npm run --silent examples && npx ng test --watch=false && npx ng build; } 2>&1); then
 	echo "ok   the editor's unit tests pass and it builds"
 else
 	echo "FAIL the editor's frontend"
 	grep -iE "error|fail" <<<"$web_output" | head -n 10 | sed 's/^/     /' || true
+	FAILURES=$((FAILURES + 1))
+fi
+
+echo "== flow simulator"
+if flow_output=$(cargo test --release --quiet -p flowsim 2>&1); then
+	echo "ok   the flow simulator's tests pass"
+else
+	echo "FAIL the flow simulator's tests"
+	grep -E "FAILED|panicked|failed:|^error" <<<"$flow_output" | sed 's/^/     /' || true
+	FAILURES=$((FAILURES + 1))
+fi
+FLOW_WEB=tools/flowsim/web
+if ! rustup target list --installed 2>/dev/null | grep -q wasm32-unknown-unknown; then
+	echo "skip the wasm32-unknown-unknown target isn't installed"
+elif ! command -v wasm-pack >/dev/null; then
+	echo "skip the flow simulator's page: wasm-pack isn't installed"
+elif [[ ! -d $FLOW_WEB/node_modules ]]; then
+	echo "skip the flow simulator's page: run npm install in $FLOW_WEB first"
+elif flow_output=$(cd $FLOW_WEB && npm run --silent build 2>&1); then
+	echo "ok   the flow simulator's page builds"
+else
+	echo "FAIL the flow simulator's page"
+	grep -iE "error|fail" <<<"$flow_output" | head -n 10 | sed 's/^/     /' || true
 	FAILURES=$((FAILURES + 1))
 fi
 

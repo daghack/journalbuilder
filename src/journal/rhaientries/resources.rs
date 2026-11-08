@@ -18,6 +18,7 @@
 //! content/NAME.json        symbols, #{ base, symbols }, for content(name)
 //! images/NAME.png          pictures, for image(name)
 //! images/NAME.jpg          pictures, for image(name)
+//! fluids/NAME.json         fluid fields and how they distort, for fluid(name)
 //! ```
 //!
 //! Pictures are read as text like the rest, as data URLs
@@ -46,7 +47,7 @@ pub const BUILT_IN_JOURNALS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/we
 pub const DEFAULT_JOURNALS_DIRS: [&str; 2] = [DEFAULT_JOURNALS_DIR, BUILT_IN_JOURNALS_DIR];
 
 /// Every kind of resource: its directory, and its files' extension.
-pub const KINDS: [(&str, &str); 13] = [
+pub const KINDS: [(&str, &str); 14] = [
     ("locks", "rhai"),
     ("helpers", "rhai"),
     ("layouts", "rhai"),
@@ -60,6 +61,7 @@ pub const KINDS: [(&str, &str); 13] = [
     ("content", "json"),
     ("images", "png"),
     ("images", "jpg"),
+    ("fluids", "json"),
 ];
 
 /// A journal's resources, each kind in front of the library's.
@@ -81,6 +83,8 @@ pub struct Resources {
     /// Pictures: PNGs and JPEGs.
     pub png_images: Sources,
     pub jpg_images: Sources,
+    /// Fluids: a fluid's field, and how it distorts what's drawn.
+    pub fluids: Sources,
 }
 
 impl Resources {
@@ -122,6 +126,7 @@ impl Resources {
             symbols: sources("content", "json"),
             png_images: sources("images", "png"),
             jpg_images: sources("images", "jpg"),
+            fluids: sources("fluids", "json"),
         }
     }
 
@@ -141,6 +146,7 @@ impl Resources {
             symbols: self.symbols.over(under.symbols),
             png_images: self.png_images.over(under.png_images),
             jpg_images: self.jpg_images.over(under.jpg_images),
+            fluids: self.fluids.over(under.fluids),
         }
     }
 
@@ -168,12 +174,13 @@ impl Resources {
             symbols: record(self.symbols),
             png_images: record(self.png_images),
             jpg_images: record(self.jpg_images),
+            fluids: record(self.fluids),
         };
         (resources, used)
     }
 
     /// Every kind's files, in `KINDS`' order, with their directory's name.
-    pub fn kinds(&self) -> [(&'static str, &Sources); 13] {
+    pub fn kinds(&self) -> [(&'static str, &Sources); 14] {
         [
             ("locks", &self.locks),
             ("helpers", &self.helpers),
@@ -188,6 +195,7 @@ impl Resources {
             ("content", &self.symbols),
             ("images", &self.png_images),
             ("images", &self.jpg_images),
+            ("fluids", &self.fluids),
         ]
     }
 

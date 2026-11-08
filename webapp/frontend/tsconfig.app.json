@@ -6,10 +6,12 @@
     "types": []
   },
   "include": [
-    "src/**/*.ts"
+    "src/**/*.ts",
+    "../../tools/flowsim/web/src/*.ts"
   ],
   "exclude": [
     "src/**/*.spec.ts",
-    "src/**/*.worker.ts"
+    "src/**/*.worker.ts",
+    "../../tools/flowsim/web/src/main.ts"
   ]
 }

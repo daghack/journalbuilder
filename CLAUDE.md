@@ -8,8 +8,9 @@ else goes there): `journal.json` (title,
 description, its entries in order), its entries in `entries/NAME.rhai`,
 and files of its own in `locks/`, `helpers/`, `layouts/`,
 `illustrations/`, `chains/`, `styles/`, `lib/`, `glyphsets/`,
-`content/` and `images/` (PNG and JPEG pictures, which the web editor
-and the compiled-in library hold as data URLs). These stand in
+`content/`, `images/` (PNG and JPEG pictures, which the web editor
+and the compiled-in library hold as data URLs) and `fluids/` (frozen
+flows, made in the web editor's Fluid tab). These stand in
 front of the built-in library, `webapp/library/`, which has the same
 directories; a journal's file stands in for the library's of the same
 name. Anything any journal might use goes in the library; what only one

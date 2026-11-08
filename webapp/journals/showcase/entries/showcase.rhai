@@ -31,6 +31,11 @@
 //             illustrations drawing a chain's values as canvases, or run
 //             on their own
 //   spread    one drawing across two pages: a page split into tiles
+//   fluids    a frozen fluid (made in the editor's Fluid tab) distorting
+//             what's drawn in its box: where strokes go (carried along
+//             the flow, pushed by it, up a channel's slope), jitter,
+//             weight, opacity and colour, on a canvas or a whole page;
+//             its channels and velocity read at points
 //   layouts   pages typeset from layouts: an inline one, flex styles, the
 //             layout files (the title page is one too), and marked-up
 //             text, markdown(), with named spans
@@ -2109,6 +2114,85 @@ assert(wide.margin == 30 && wide.size == vec2(2 * W, H), "page settings read bac
 let tiles = wide.split(#{ columns: 2 });
 assert(tiles[1].tile.column == 1, "tiles know their place");
 book.add("spread", tiles);
+
+// ---- fluids: what's drawn distorted by a frozen flow ----
+//
+// A journal's fluids/NAME.json holds a fluid's field (its velocity,
+// pressure and dye, frozen) and its effects; the editor's Fluid tab makes
+// them, running the flow simulator over a page. fluid(name, #{ ... })
+// reads one, its options over the file's: at and size, the box of canvas
+// units it lies over (its field stretched to fit), and the effects, each
+// a map of settings over its defaults, or () for off. Added to a canvas,
+// it distorts that canvas's strokes; added to a page, everything on it.
+// It acts only inside its box. A channel (speed, vorticity, pressure, dye)
+// sets how strong an effect is, scaled to 0..1 over its range (the
+// field's own unless range: [lo, hi] is given) and bent by curve.
+
+let fluids = sheet("fluids");
+fluids.add(subhead("distorted by a fluid", TOP));
+fluids.add(caption("fluid(\"ripples\", #{ at, size, ... }): fluids/ripples.json's frozen flow, stretched over each box below;", TOP + 50));
+fluids.add(caption("canvas.add(fluid): that canvas's strokes distorted (here, each block of text on a canvas of its own)", TOP + 85));
+let effects = [
+	["as written: no fluid", #{}],
+	["position_distort: #{ by: \"advect\", amount: 0.12 }", #{ position_distort: #{ by: "advect", amount: 0.12 } }],
+	["position_distort: #{ by: \"offset\", amount: 0.06 }", #{ position_distort: #{ by: "offset", amount: 0.06, step: 3 } }],
+	["position_distort: #{ by: \"gradient\", channel: \"dye\", amount: 14 }", #{ position_distort: #{ by: "gradient", channel: "dye", amount: 14 } }],
+	["jitter_distort: #{ channel: \"speed\", amount: 5, length: 24 }", #{ jitter_distort: #{ channel: "speed", amount: 5, length: 24 } }],
+	["weight_distort: #{ channel: \"speed\", from: 0.5, to: 3, curve: 0.6 }", #{ weight_distort: #{ channel: "speed", from: 0.5, to: 3, curve: 0.6 } }],
+	["opacity_distort: #{ channel: \"dye\", from: 0.15, to: 1 }", #{ opacity_distort: #{ channel: "dye", from: 0.15, to: 1, range: [0, 0.5] } }],
+	["color_distort: #{ channel: \"vorticity\", colors: [blue, ink, red] }", #{ color_distort: #{ channel: "vorticity", colors: [BLUE, INK, RED], mix: 1 } }],
+];
+let panel_w = (RIGHT - LEFT - 40) / 2;
+for (effect, i) in effects {
+	let x = LEFT + (i % 2) * (panel_w + 40);
+	let y = TOP + 140 + (i / 2) * 290;
+	fluids.add(write_in(effect[0], x, y, 15, CAPTION, PLAIN));
+	let block = write_block(LOREM, vec2(x, y + 30), panel_w, #{ style: TEXT, type: new_type_style(PLAIN, 22), paragraph: #{ line_height: 1.3 } });
+	let options = effect[1];
+	if options.len() > 0 {
+		options.at = vec2(x, y + 20);
+		options.size = vec2(panel_w, 240);
+		block.canvas.add(fluid("ripples", options));
+	}
+	fluids.add(block.canvas);
+}
+book.bind("fluids", fluids);
+
+// page.add(fluid): every canvas on the page, those added after it too,
+// within the fluid's box; here the top half, so the text below stays as
+// written. A fluid's settings read back, and can be set.
+let fluids = sheet("fluids");
+fluids.add(subhead("a fluid over a page", TOP));
+fluids.add(caption("page.add(fluid(\"ripples\", #{ at, size, position_distort, color_distort })): everything in its box, on every canvas", TOP + 50));
+let ripples = fluid("ripples", #{ at: vec2(0, TOP + 70), size: vec2(W, 300), position_distort: #{ amount: 0.08 }, color_distort: #{ channel: "dye", colors: [INK, RED], range: [0, 0.4] } });
+assert(ripples.name == "ripples" && ripples.at == vec2(0, TOP + 70) && ripples.size == vec2(W, 300), "a fluid's box reads back");
+assert(ripples.position_distort.by == "advect" && ripples.position_distort.amount == 0.08, "its effects read back, with their defaults");
+ripples.weight_distort = #{ channel: "speed", from: 0.8, to: 2.5 };
+ripples.weight_distort = ();
+assert(ripples.weight_distort == (), "an effect turned off");
+let lorem = LOREM + LOREM;
+let block = write_block(lorem, vec2(LEFT, TOP + 110), RIGHT - LEFT, #{ style: TEXT, type: new_type_style(PLAIN, 26), paragraph: #{ line_height: 1.35 } });
+fluids.add(block.canvas);
+let y = TOP + 560;
+fluids.add(new_line(vec2(LEFT, y - 25), vec2(RIGHT, y - 25)), CAPTION);
+fluids.add(caption("fluid.sample(channel, point): a channel's value there; fluid.velocity(point): the flow's (canvas units a second);", y + 10));
+fluids.add(caption("here sampled from a fluid over this box, not the page's: circles as wide as the speed, ticks along the flow", y + 45));
+let probe = fluid("ripples", #{ at: vec2(LEFT, y + 80), size: vec2(RIGHT - LEFT, 550) });
+let grid = new_canvas();
+for row in 0..11 {
+	for col in 0..20 {
+		let p = vec2(LEFT + 25 + col * 50, y + 105 + row * 50);
+		let speed = probe.sample("speed", p);
+		let dye = probe.sample("dye", p);
+		let r = if speed > 216 { 18.0 } else { speed / 12 };
+		grid.add(new_circle(p, 2 + r), if dye > 0.2 { pen(RED) } else { TEXT });
+		let v = probe.velocity(p);
+		grid.add(new_line(p, p + v * 0.08), LINE);
+	}
+}
+fluids.add(grid);
+fluids.add(write_in(`${book.next}`, W / 2 - 8, H - 80, 24, CAPTION, PLAIN));
+book.add("fluids", new_page(#{ size: vec2(W, H) }).add(fluids).add(ripples));
 
 // ---- layouts: pages typeset from flexbox layouts ----
 //
