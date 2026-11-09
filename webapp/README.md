@@ -18,8 +18,7 @@ the tabs; another journal starts them over.
 ## The journal
 
 - **New** starts a journal of one blank entry, with the library. **Open**
-  loads one of the two journals built in, the showcase and the API
-  reference (`webapp/journals/`).
+  loads the journal built in, the showcase (`webapp/journals/`).
 - **Import** loads a journal in place of this one: a zipped journal, or
   a journal's directory as journalbuild reads it (one of the repository's
   `journals/`, say). **Export** downloads
@@ -185,10 +184,11 @@ or out from a point).
 
 ## Content
 
-New content asks for its name and its type: String, Markdown or Symbols
-(kept as `.txt`, `.md` and `.json`; nobody types the extension). Strings
-and Markdown are typed beside a page writing them in the library's plain
-hand. Symbols are typed as text, kept as typed, and made to fit their
+New content asks for its name and its type: String, Markdown, Symbols or
+Graph (kept as `.txt`, `.md`, `.json` and `.graph`; nobody types the
+extension). Strings and Markdown are typed beside a page writing them in
+the library's plain hand, and a Graph beside the map the library's
+`graph_map` draws of it. Symbols are typed as text, kept as typed, and made to fit their
 base (picked beside them) as they're read: in capitals, what the base
 can't write dropped. Strict, the text must be written in the base
 already. Nobody edits the JSON a symbols file is kept as.
@@ -252,7 +252,7 @@ reuse BuildKit's caches.
 | `frontend/src/app/locks/` | the chain editor. `chain-model.ts` is the graph and its rules; `chain-source.ts` writes it as a chain file. |
 | `frontend/src/app/resources/` | the lock, illustration, layout, style and helper editor, the content editor, and the library banner |
 | `frontend/src/app/editor/` | the CodeMirror editor and its rhai highlighting (`rhai-language.ts`) |
-| `frontend/scripts/examples.mjs` | copies the built-in journals, `showcase` and `api_reference` (their manifests and files), into `generated/journals/` for the Open menu, and the repository files the unit tests check against into `generated/fixtures/` |
+| `frontend/scripts/examples.mjs` | copies the built-in journal, `showcase` (its manifest and files), into `generated/journals/` for the Open menu, and the repository files the unit tests check against into `generated/fixtures/` |
 
 While one script runs, only the newest edit waits to run next. A script
 that runs for more than 20 seconds (an endless loop, say) is stopped and

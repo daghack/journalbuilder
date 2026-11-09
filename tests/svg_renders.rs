@@ -15,7 +15,9 @@
 //! UPDATE_SVG_RENDERS=1 cargo test --release --test svg_renders
 //! ```
 
-use image::{Rgba, RgbaImage};
+mod common;
+
+use common::compare;
 use scribe::journal::publish::page_svg_renders;
 use scribe::journal::rhaientries::{Journal, Resources};
 use std::collections::BTreeSet;
@@ -26,18 +28,6 @@ const ROOT: &str = env!("CARGO_MANIFEST_DIR");
 /// Passed to `page_svg_renders` like `journalbuild --scale`: a tenth of full
 /// size keeps the committed images small but strokes still visible.
 const SCALE: f32 = 0.1;
-
-/// A pixel matches another when no channel (composited on white) is off
-/// by more than this...
-const PIXEL_TOLERANCE: u8 = 32;
-/// ...and differs when it matches nothing this many pixels or fewer away
-/// in the other image, either way round. Floats come out a last bit
-/// different on other machines and builds (their sin and cos differ), and
-/// a few scripts' choices turn that into a shift of a few units, a pixel
-/// or less here; strokes moved further, missing or restyled still differ.
-const SHIFT_PX: i64 = 1;
-/// An image differs when more than this fraction of its pixels do.
-const MAX_DIFFERING: f64 = 0.0005;
 
 /// Which pages of each entry to render: all, or only some (big journals
 /// would make slow tests and large images).
@@ -137,56 +127,6 @@ fn committed(dir: &Path) -> BTreeSet<String> {
     }).unwrap_or_default()
 }
 
-/// Why `actual` doesn't match `expected`, if it doesn't; then a diff image
-/// (`{name}.diff.png`) goes in `diff_dir`.
-fn compare(expected: &RgbaImage, actual: &RgbaImage, diff_dir: &Path, name: &str) -> Option<String> {
-    if expected.dimensions() != actual.dimensions() {
-        return Some(format!("size changed from {:?} to {:?}", expected.dimensions(), actual.dimensions()));
-    }
-    let (width, height) = actual.dimensions();
-    let (expected, actual) = (white_backed(expected), white_backed(actual));
-    let at = |image: &[[u8; 3]], x: i64, y: i64| image[(y * width as i64 + x) as usize];
-    let matches = |p: [u8; 3], q: [u8; 3]| (0..3).all(|c| p[c].abs_diff(q[c]) <= PIXEL_TOLERANCE);
-    // Whether pixel (x, y) of `one` matches a pixel near it in `other`.
-    let near = |one: &[[u8; 3]], other: &[[u8; 3]], x: i64, y: i64| {
-        let p = at(one, x, y);
-        (-SHIFT_PX..=SHIFT_PX).any(|dy| (-SHIFT_PX..=SHIFT_PX).any(|dx| {
-            let (nx, ny) = (x + dx, y + dy);
-            nx >= 0 && ny >= 0 && nx < width as i64 && ny < height as i64 && matches(p, at(other, nx, ny))
-        }))
-    };
-    let mut diff = RgbaImage::new(width, height);
-    let mut differing = 0usize;
-    for (x, y, d) in diff.enumerate_pixels_mut() {
-        let (x, y) = (x as i64, y as i64);
-        let a = at(&actual, x, y);
-        if !matches(at(&expected, x, y), a) && !(near(&actual, &expected, x, y) && near(&expected, &actual, x, y)) {
-            differing += 1;
-            *d = Rgba([255, 0, 0, 255]);
-        } else {
-            // The render, faded, to show where the changes are.
-            let grey = ((a[0] as u32 + a[1] as u32 + a[2] as u32) / 3 / 4 + 191) as u8;
-            *d = Rgba([grey, grey, grey, 255]);
-        }
-    }
-    let fraction = differing as f64 / (width * height) as f64;
-    if fraction <= MAX_DIFFERING {
-        return None;
-    }
-    std::fs::create_dir_all(diff_dir).unwrap();
-    diff.save(diff_dir.join(format!("{}.diff.png", name))).unwrap();
-    Some(format!("{:.2}% of pixels differ (at most {:.2}% may)", fraction * 100.0, MAX_DIFFERING * 100.0))
-}
-
-/// The image's pixels composited on white, row by row.
-fn white_backed(image: &RgbaImage) -> Vec<[u8; 3]> {
-    image.pixels().map(|p| {
-        let alpha = p[3] as u32;
-        let blend = |c: u8| ((c as u32 * alpha + 255 * (255 - alpha)) / 255) as u8;
-        [blend(p[0]), blend(p[1]), blend(p[2])]
-    }).collect()
-}
-
 #[test]
 fn smoke_fixture() {
     check("tests/smoke_journals", "smoke", Pages::All);
@@ -195,11 +135,6 @@ fn smoke_fixture() {
 #[test]
 fn showcase() {
     check("webapp/journals", "showcase", Pages::All);
-}
-
-#[test]
-fn api_reference() {
-    check("webapp/journals", "api_reference", Pages::Only(&[0]));
 }
 
 /// Page 0 of every entry of the repository's journals, in journals/, as
@@ -232,7 +167,7 @@ first_pages!(
 
 #[test]
 fn every_journal_is_checked() {
-    let checked = [CHECKED_JOURNALS, &["showcase", "api_reference"]].concat();
+    let checked = [CHECKED_JOURNALS, &["showcase"]].concat();
     let missing: Vec<String> = ["journals", "webapp/journals"].iter()
         .flat_map(|dir| std::fs::read_dir(format!("{}/{}", ROOT, dir)).unwrap())
         .filter_map(|entry| {

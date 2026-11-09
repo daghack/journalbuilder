@@ -31,7 +31,7 @@ export const KINDS: KindInfo[] = [
   { kind: 'illustrations', label: 'Illustrations', exts: ['rhai'], library: true },
   { kind: 'layouts', label: 'Layouts', exts: ['rhai'], library: true },
   { kind: 'styles', label: 'Styles', exts: ['json'], library: true },
-  { kind: 'content', label: 'Content', exts: ['txt', 'md', 'json'], library: true },
+  { kind: 'content', label: 'Content', exts: ['txt', 'md', 'json', 'graph'], library: true },
   { kind: 'glyphsets', label: 'Glyphsets', exts: ['json'], library: true },
   { kind: 'lib', label: 'Lib', exts: ['rhai'], library: true },
   { kind: 'images', label: 'Images', exts: ['png', 'jpg'], library: true },
@@ -47,9 +47,10 @@ export const CONTENT_TYPES = [
   { ext: 'txt', label: 'String', about: 'plain text, read as a string' },
   { ext: 'md', label: 'Markdown', about: 'marked-up text: markdown(content(name)) styles it' },
   { ext: 'json', label: 'Symbols', about: 'text read as symbols in a base, for a lock' },
+  { ext: 'graph', label: 'Graph', about: 'places and the ways between them, for graph_map' },
 ] as const;
 
-/** What a content file's extension makes it: String, Markdown or Symbols. */
+/** What a content file's extension makes it: String, Markdown, Symbols or Graph. */
 export function contentType(ext: string): string {
   return CONTENT_TYPES.find((t) => t.ext === ext)?.label ?? ext;
 }

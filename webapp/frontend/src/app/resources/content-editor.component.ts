@@ -12,9 +12,12 @@ import { LibraryBannerComponent } from './library-banner.component';
 /** How long typing pauses before the preview is drawn again. */
 const PREVIEW_DELAY_MS = 350;
 
-/** An entry script writing content `name` (marked up, if `markdown`) in the library's plain hand. */
-function previewScript(name: string, markdown: boolean): string {
-  const text = markdown ? `markdown(content(${JSON.stringify(name)}))` : `content(${JSON.stringify(name)})`;
+/** An entry script writing content `name` (marked up, if `ext` is md) in the library's plain hand, or drawing it, a graph, with graph_map. */
+function previewScript(name: string, ext: string): string {
+  if (ext === 'graph') {
+    return `journal_entry.add(new_page(#{ size: vec2(1200, 900) }).add(illustration("graph_map").run(#{ graph: content(${JSON.stringify(name)}) })[0]));`;
+  }
+  const text = ext === 'md' ? `markdown(content(${JSON.stringify(name)}))` : `content(${JSON.stringify(name)})`;
   return `journal_entry.add(new_layout("content", |n, info| column([flow("text", #{ flex: #{ grow: 1 } })], #{ flex: #{ padding: 70 } })).typeset(#{
   width: 1100, height: 1500, max_pages: 500,
   flows: #{ text: ${text} },
@@ -24,8 +27,9 @@ function previewScript(name: string, markdown: boolean): string {
 
 /**
  * A content file: plain or marked-up text, typed, and drawn as an entry
- * would write it; or symbols, typed as text and made to fit their base
- * (unless strict). Nobody edits the JSON a symbols file is kept as.
+ * would write it; a graph, typed, and drawn by graph_map; or symbols,
+ * typed as text and made to fit their base (unless strict). Nobody edits
+ * the JSON a symbols file is kept as.
  */
 @Component({
   selector: 'app-content-editor',
@@ -59,12 +63,16 @@ function previewScript(name: string, markdown: boolean): string {
         <section class="preview" aria-label="Preview">
           @if (previewUrl(); as url) { <img [src]="url" alt="The content, written" /> }
           @if (preview()?.error; as error) { <p class="error">{{ error.message }}</p> }
-          <p class="hint">Written in the library's plain_hand. An entry reads it with content("{{ name() }}"){{ ext() === 'md' ? ', and sets it marked up with markdown(content("' + name() + '"))' : '' }}.</p>
+          @if (ext() === 'graph') {
+            <p class="hint">Drawn by the library's graph_map. A line is a place, <code>Name</code> or <code>Name: glyph glyph</code>, or a way between two, <code>A -> B</code> one way or <code>A -- B</code> both, then <code>: text</code> if it has any; an indented line carries on the line above, and <code>#</code> starts a comment. An entry reads it with content("{{ name() }}"): a Graph.</p>
+          } @else {
+            <p class="hint">Written in the library's plain_hand. An entry reads it with content("{{ name() }}"){{ ext() === 'md' ? ', and sets it marked up with markdown(content("' + name() + '"))' : '' }}.</p>
+          }
         </section>
     }
     </section>
     @if (ext() !== 'json') {
-      <textarea right class="text" spellcheck="true" aria-label="The text" [value]="text()" (input)="setText($any($event.target).value)"></textarea>
+      <textarea right class="text" [class.mono]="ext() === 'graph'" [spellcheck]="ext() !== 'graph'" aria-label="The text" [value]="text()" (input)="setText($any($event.target).value)"></textarea>
     }
     </app-three-pane>
   `,
@@ -165,7 +173,7 @@ export class ContentEditorComponent {
       if (!path || ext === 'json' || !showing || (this.drawn?.path === path && this.drawn.text === text)) return;
       this.timer = setTimeout(() => {
         this.drawn = { path, text };
-        void this.draw(path, text, ext === 'md');
+        void this.draw(path, text, ext);
       }, PREVIEW_DELAY_MS);
     });
     effect(() => {
@@ -175,9 +183,9 @@ export class ContentEditorComponent {
     });
   }
 
-  private async draw(path: string, text: string, markdown: boolean) {
+  private async draw(path: string, text: string, ext: string) {
     const asked = ++this.asked;
-    const preview = await this.tools.preview(previewScript(this.name(), markdown), { [path]: text })
+    const preview = await this.tools.preview(previewScript(this.name(), ext), { [path]: text })
       .catch((err: Error) => ({ svg: null, view: null, warnings: [], missingGlyphs: null, error: { message: err.message } }));
     if (asked === this.asked) this.preview.set(preview);
   }

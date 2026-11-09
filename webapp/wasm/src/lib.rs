@@ -136,6 +136,7 @@ fn journal_files<'a>(files: impl IntoIterator<Item = (&'a str, &'a str)>) -> Res
             ("content", "txt") => &mut journal.text,
             ("content", "md") => &mut journal.markdown,
             ("content", "json") => &mut journal.symbols,
+            ("content", "graph") => &mut journal.graphs,
             // Pictures as data URLs.
             ("images", "png") => &mut journal.png_images,
             ("images", "jpg") => &mut journal.jpg_images,

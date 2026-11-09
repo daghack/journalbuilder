@@ -1,5 +1,5 @@
 import { strToU8, zipSync } from 'fflate';
-import { blankJournal, checkManifest, journalHash, manifestText, packZip, snakeCase, splitPath, unpackZip, type JournalData } from './journal-files';
+import { blankJournal, checkManifest, contentType, journalHash, manifestText, packZip, snakeCase, splitPath, unpackZip, type JournalData } from './journal-files';
 
 const journal: JournalData = {
   name: 'letters',
@@ -17,6 +17,8 @@ describe('a journal', () => {
     expect(splitPath('content/note.md')).toEqual({ kind: 'content', name: 'note', ext: 'md' });
     expect(splitPath('locks/swap.json')).toBeNull();
     expect(splitPath('journal.json')).toBeNull();
+    expect(splitPath('content/routes.graph')).toEqual({ kind: 'content', name: 'routes', ext: 'graph' });
+    expect(contentType('graph')).toBe('Graph');
   });
 
   it('checks its manifest', () => {

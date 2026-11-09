@@ -35,9 +35,8 @@ WORKDIR /src/webapp/frontend
 COPY webapp/frontend/package.json webapp/frontend/package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
 COPY webapp/frontend ./
-# The journals built into the editor; it opens the rest from a folder.
+# The journal built into the editor; it opens the rest from a folder.
 COPY webapp/journals/showcase /src/webapp/journals/showcase
-COPY webapp/journals/api_reference /src/webapp/journals/api_reference
 # examples.mjs also copies the library's files, for the unit tests' fixtures.
 COPY webapp/library /src/webapp/library
 COPY --from=wasm /out/wasm-pkg wasm-pkg

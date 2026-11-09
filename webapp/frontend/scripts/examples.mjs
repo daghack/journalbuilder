@@ -16,7 +16,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const journals = join(here, '../../journals');
 const out = join(here, '../generated/journals');
 /** The journals the editor has built in. */
-const builtIn = ['showcase', 'api_reference'];
+const builtIn = ['showcase'];
 
 /** Every file under `dir`, as paths from it. */
 function walk(dir, root = dir) {

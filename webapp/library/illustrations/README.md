@@ -114,6 +114,6 @@ The lock editor's palette lists every illustration. Wire a chain's value to
 one to see what it draws of the test run; New and Edit open an illustration
 file in the middle, drawing its example as you type. An illustration written
 there is used, by chains and journals in this browser, as soon as it
-draws; to add it to the repository, put the file here, give it an example
-on the showcase's illustrations page and an entry in the API reference, and
-rebuild the illustration.
+draws; to add it to the repository, put the file here, give it a page in
+the showcase's appendix and an entry in docs/api.md, and rebuild the
+illustration.

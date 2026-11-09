@@ -3,8 +3,8 @@
 ## Journals and the library
 
 A journal is a directory in `journals/`, or in `webapp/journals/` for the
-two built into the web editor (`showcase` and `api_reference`; nothing
-else goes there): `journal.json` (title,
+one built into the web editor (`showcase`; nothing else goes there):
+`journal.json` (title,
 description, its entries in order), its entries in `entries/NAME.rhai`,
 and files of its own in `locks/`, `helpers/`, `layouts/`,
 `illustrations/`, `chains/`, `styles/`, `lib/`, `glyphsets/`,
@@ -21,42 +21,50 @@ renders into `NAME_output/ENTRY/`.
 `webapp/journals/showcase` is a journal of everything journals can draw with: a
 page each for pens (Darkly brushes, pressure profiles, widths, colours),
 glyphsets, every glyph, art tools, text layout, locks, pages typeset from
-layouts, and a journal's files (text styles, content, helpers). It's the reference for what's available, so it must never fall
-behind.
+layouts, and a journal's files (text styles, content, helpers), then an
+appendix of what's been added since. It's what's available, drawn, so it
+must never fall behind.
 
-Whenever a change adds or changes a capability, update the showcase in
+It's only appended to. A new capability gets a page, or more, at the end
+of the appendix (after the last appendix page, before `// ---- the title
+page and the contents`): a `sheet(topic)` bound with
+`book.bind("appendix", canvas)`. Earlier pages, their numbers and their
+reference images stay as they are, unless a change alters what they draw;
+don't fit new examples into them. The page list at the top names what
+the appendix holds.
+
+Whenever a change adds or changes a capability, add it to the appendix in
 the same change:
 
 - **A function scripts can call** (a constructor, a method, an option on
   an existing function, an `art::` tool, anything registered with the rhai
-  engine): add a labelled example on the page it belongs to, or a new page
-  if nothing fits. New options deserve an example too, even though the
-  test below can't see them.
-- **A glyphset or symbol set** (added to `webapp/library/glyphsets/`):
-  add it to the glyphsets pages with its alphabet and a line. The glyphs
-  pages draw every glyph of every glyphset by themselves.
+  engine): a labelled example. New options deserve an example too, even
+  though the test below can't see them.
+- **A glyphset or symbol set** (added to `webapp/library/glyphsets/`): its
+  alphabet and a line. The glyphs pages draw every glyph of every
+  glyphset by themselves.
 - **A brush**: the pens page draws every `brush_names()` entry by itself;
   add examples only for new brush settings.
-- **A lock type** (`webapp/library/locks/*.rhai`): add a row to the
-  locks page.
-- **A helper type** (`webapp/library/helpers/*.rhai`): add a row to the
-  locks page, among the helpers.
+- **A lock or helper type** (`webapp/library/locks/`, `helpers/`): a row
+  locking and unlocking an example.
 - **An illustration** (`webapp/library/illustrations/*.rhai`): attach it
-  on the locks pages and draw what it gives.
+  and draw what it gives.
 - **A chain file** (`webapp/library/chains/*.rhai`): use it with
-  `chain(name)` on the locks pages.
+  `chain(name)`.
 - **A layout, text style or content file** (`webapp/library/layouts/`,
   `styles/`, `content/`): use it with `layout(name)`, `text_style(name)`
   or `content(name)`. Library layouts also define `example()`, and styles
   can give an `example`, which their tests preview.
-- **A new kind of page or output** (layouts, splitting, ...): show it on
-  its own page, and update the page list at the top of the showcase.
+- **A new kind of page or output** (layouts, splitting, ...): a page of
+  its own.
 
 The showcase is a sample book: every page is `W` x `H`, drawn on a
 `sheet(section)` (running head) and bound with `book.bind(section,
 canvas)` (folio, then `new_book`'s `book.add`: name, contents entry);
 typeset pages go in with `book.add(section, pages)`. When a page fills
-up, bind it and start another sheet; the contents follow.
+up, bind it and start another sheet. The title page and the contents are
+drawn last, from a `seed` of their own, so pages added before them leave
+their ink alone.
 
 `tests/showcase.rs` fails when a function scripts can call, or a
 built-in (a library lock or helper type, illustration, chain, layout, text style,
@@ -65,14 +73,24 @@ Files of a journal's own needn't be. Don't
 silence it by adding to its `NOT_SHOWN` list unless the function truly
 isn't a capability (printing, auto-generated fields).
 
-Then check the showcase still renders, with every character having a
-glyph, and look at the pages you changed:
+Then check it quickly. Every page, every character having a glyph, as
+SVG on the CPU (2s):
 
 ```bash
-./target/release/journalbuild showcase --strict-glyphs --output-dir /tmp/showcase
+./target/release/journalbuild showcase --strict-glyphs --svg --scale 0.1 --output-dir /tmp/showcase
 ```
 
-(Renders land in `/tmp/showcase/showcase/`, the entry's directory.)
+and the pages you added, by name, in Darkly at half scale (2s), to look
+at:
+
+```bash
+./target/release/journalbuild showcase --page 73_appendix,74_appendix --scale 0.5 --supersample 1 --output-dir /tmp/showcase
+```
+
+(Renders land in `/tmp/showcase/showcase/`, the entry's directory.) Add
+only the new pages' reference images:
+`UPDATE_SVG_RENDERS=1 cargo test --release --test svg_renders showcase`,
+which should add images and change none.
 
 Conventions there: labels and body text are in plain (`PLAIN`), which
 has capitals, digits and punctuation, and headings in loche (`LOCHE`);
@@ -101,37 +119,38 @@ options should too:
 Lock-file option types (`integer(3)`, `one_of(choices, default)`) keep
 their default positional: `default` is a reserved word in rhai.
 
-## Keep the API reference up to date
+## Keep docs/api.md up to date
 
-`webapp/journals/api_reference` is a book with an entry for every function
-journal scripts can call: its signature, its arguments and options with
-their defaults, and what it gives back. The showcase shows what calls
-draw; the reference says what they take. It must match the API exactly.
+`docs/api.md` is the API reference: an entry for every function journal
+scripts can call, each a `###` heading with its signature in code, what
+it does and gives back, and tables of its arguments and options with
+their defaults and the values they take, in the section it belongs to.
+The showcase shows what calls draw; the reference says what they take. It
+must match the API exactly.
 
 Whenever a change adds, removes or changes anything scripts can call (a
 function, a method, an overload, an argument, an option or its default,
 a property, an operator, an `art::` tool, layout box styles or role
 settings, markdown span settings, what lock, illustration, layout, style
 or chain files define or can call, an illustration or its options, what
-a journal's directory or manifest holds, or a `journalbuild` flag), update its `api("signature",
-"description")` entry in the same change, or add one in the section it
-belongs to. Remove entries for what's gone. Signatures can't contain a
-double quote, and both parts are written as plain text (markdown marks
-are escaped for you).
+a journal's directory or manifest holds, a library file, or a
+`journalbuild` flag), update its entry in the same change, or add one.
+Remove entries for what's gone.
 
-`tests/api_reference.rs` fails when a function scripts can call isn't in
-any entry's signature, but it can't see options, defaults or changed
-behaviour: keep those right by hand.
-
-Then render it and look at the pages you changed (it uses only `plain`
-and `loche`, so every character must have a glyph):
+A call that draws gets a short example: a ```` ```rhai render=NAME ````
+block drawing on `page` (the doc's ```` ```rhai prelude ```` sets it and
+the inks up), followed by its image, `![NAME](images/NAME.svg)`. Make or
+remake the images with:
 
 ```bash
-./target/release/journalbuild api_reference --strict-glyphs --parchment --output-dir /tmp/api_reference
+UPDATE_DOC_IMAGES=1 cargo test --release --test api_doc
 ```
 
-Body text is plain at size 26 with a constant-pressure pen: smaller, the
-plain font's dots and colons don't render.
+and look at the ones you changed (`rsvg-convert docs/images/NAME.svg -o
+/tmp/NAME.png`). `tests/api_doc.rs` fails when a function scripts can call
+isn't in any entry's heading, a library file isn't named in the doc, or
+an example no longer runs or draws what its image shows; it can't see
+options, defaults or changed behaviour: keep those right by hand.
 
 ## Checking changes
 

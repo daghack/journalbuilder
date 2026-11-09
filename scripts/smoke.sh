@@ -6,7 +6,8 @@
 #      --check-locks`: the library's, and each journal's own.
 #   3. Renders the small fixture in tests/smoke_journals at full scale, one
 #      page of it supersampled, and all of it on parchment and as a PDF at
-#      reduced scale, and every page of webapp/journals/showcase at reduced scale.
+#      reduced scale, and every page of webapp/journals/showcase at reduced scale
+#      (one image a page, as many as it rendered).
 #   4. Renders page 0 of every entry of every other journal, in journals/
 #      and webapp/journals/, at reduced scale, Darkly output only.
 #      Steps 3 and 4 need a GPU and are skipped without one (journalbuild
@@ -134,15 +135,18 @@ render fixture-paper smoke/darkly_page_0.png smoke/darkly_page_1.png smoke/darkl
 	-- smoke --journals-dir tests/smoke_journals --parchment --scale 0.5
 render fixture-pdf smoke/smoke.pdf \
 	-- smoke --journals-dir tests/smoke_journals --pdf --scale 0.25
-# Every page of the showcase, every character with a glyph.
-render showcase showcase/darkly_01_title_0.png showcase/darkly_02_contents_0.png showcase/darkly_03_pens_brushes.png showcase/darkly_05_pens_0.png showcase/darkly_06_pens_0.png showcase/darkly_07_pens_0.png showcase/darkly_08_pens_0.png \
-	showcase/darkly_09_pens_0.png showcase/darkly_10_pens_0.png showcase/darkly_11_pens_image_paint.png showcase/darkly_12_glyphsets_0.png showcase/darkly_13_glyphsets_0.png showcase/darkly_15_glyphsets_0.png showcase/darkly_18_glyphs_0.png showcase/darkly_21_art_0.png showcase/darkly_25_art_0.png \
-	showcase/darkly_26_art_0.png showcase/darkly_27_art_0.png showcase/darkly_28_art_0.png showcase/darkly_29_art_0.png showcase/darkly_30_generators_0.png showcase/darkly_31_generators_0.png showcase/darkly_32_generators_0.png showcase/darkly_33_text_0.png \
-	showcase/darkly_35_text_0.png showcase/darkly_36_text_0.png showcase/darkly_37_text_0.png showcase/darkly_38_text_0.png showcase/darkly_39_text_0.png showcase/darkly_40_text_0.png showcase/darkly_41_text_0.png showcase/darkly_42_text_0.png \
-	showcase/darkly_43_text_0.png showcase/darkly_44_text_0.png showcase/darkly_45_text_0.png showcase/darkly_46_locks_ciphers.png showcase/darkly_47_locks_0.png showcase/darkly_48_locks_0.png showcase/darkly_49_locks_0.png showcase/darkly_50_locks_0.png \
-	showcase/darkly_51_locks_0.png showcase/darkly_52_locks_0.png showcase/darkly_53_locks_0.png showcase/darkly_54_locks_0.png showcase/darkly_55_locks_0.png showcase/darkly_56_locks_0.png showcase/darkly_57_locks_0.png \
-	showcase/darkly_58_spread_0.png showcase/darkly_59_spread_0.png showcase/darkly_60_layouts_0.png showcase/darkly_62_layouts_0.png showcase/darkly_65_layouts_0.png showcase/darkly_66_files_0.png showcase/darkly_67_files_0.png \
-	-- showcase --strict-glyphs --scale 0.25
+# Every page of the showcase, every character with a glyph, quickly: as
+# many Darkly images as journalbuild says it rendered pages, so a page added
+# to the showcase needs nothing here.
+render showcase -- showcase --strict-glyphs --scale 0.25 --supersample 1
+if grep -q "^Rendered" "$OUT/showcase.log" 2>/dev/null; then
+	pages=$(sed -n 's/^Rendered \([0-9]*\) pages* of showcase.*/\1/p' "$OUT/showcase.log")
+	images=$(find "$OUT/showcase/showcase" -name 'darkly_*.png' -size +0 2>/dev/null | wc -l | tr -d ' ')
+	if [[ "$images" -ne "$pages" ]]; then
+		echo "FAIL showcase: $images Darkly images for $pages rendered pages"
+		FAILURES=$((FAILURES + 1))
+	fi
+fi
 
 for journal in journals/*/ webapp/journals/*/; do
 	name=$(basename "$journal")

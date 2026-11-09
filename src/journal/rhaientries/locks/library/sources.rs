@@ -111,7 +111,7 @@ fn text(mut text: String) -> String {
 }
 
 impl LockLibrary {
-    /// The type of `source`'s value: symbols or String for content,
+    /// The type of `source`'s value: symbols, String or Graph for content,
     /// TextStyle, Glyphset or Layout for the rest. Fails if its file isn't
     /// there.
     pub fn source_type(&self, source: &SourceSpec) -> Result<InfoVarType, String> {
@@ -121,10 +121,6 @@ impl LockLibrary {
             if names.is_empty() { "none".to_string() } else { names.join(", ") }));
         match source.kind {
             SourceKind::Content => {
-                if source.base.is_some() {
-                    self.content(source).map_err(at)?;
-                    return Ok(InfoVarType::BaseNSymbol(source.base.unwrap()));
-                }
                 Ok(self.source_value(source)?.var_type)
             }
             SourceKind::Style if resources.styles.has(&source.name) => Ok(InfoVarType::Named("TextStyle".to_string())),
@@ -144,6 +140,7 @@ impl LockLibrary {
             ["txt"] => &resources.text,
             ["md"] => &resources.markdown,
             ["json"] => &resources.symbols,
+            ["graph"] => &resources.graphs,
             [] => {
                 let names = resources.content_names();
                 return Err(format!("there's no content named '{}'; content: {}", source.name, if names.is_empty() { "none".to_string() } else { names.join(", ") }));
@@ -155,7 +152,7 @@ impl LockLibrary {
     }
 
     /// Content `source`'s value, as lock files see values: symbols as an
-    /// array of whole numbers, text as a string. Only content is data: the
+    /// array of whole numbers, text as a string, a graph as a Graph. Only content is data: the
     /// other sources fail, being things only illustrations draw with.
     pub fn source_value(&self, source: &SourceSpec) -> Result<InfoVar, String> {
         let at = |e: String| format!("sources: '{}': {}", source.id, e);
@@ -176,6 +173,11 @@ impl LockLibrary {
                     return Err(at(format!("content/{}.json: symbol {} (item {}) is outside base {}'s 0-{}", source.name, symbol, i, base, base - 1)));
                 }
                 Ok(symbols(base, values))
+            }
+            ("graph", Some(_)) => Err(at(format!("content/{}.graph is a graph: only text content takes a base", source.name))),
+            ("graph", None) => {
+                let graph = crate::journal::kinds::graph::parse(&text).map_err(|e| at(format!("content/{}.graph: {}", source.name, e)))?;
+                Ok(InfoVar::new(InfoVarType::Named("Graph".to_string()), Dynamic::from_map(graph)))
             }
             (_, Some(base)) => {
                 let fitted = super::super::lenient_text(base, &text);

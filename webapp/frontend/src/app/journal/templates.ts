@@ -4,6 +4,15 @@ import { BLANK_ENTRY, type Kind } from './journal-files';
 import { DEFAULT_STYLE, styleFile } from './style-builder';
 
 /** A new file of `kind`, called `name`, with extension `ext`. */
+/** A new graph content file: two places and a way between them. */
+const GRAPH_TEMPLATE = `# A place is a line of its own, its glyphs after a colon;
+# a way joins two, -> one way or -- both, its text after a colon.
+Paper Mazes: basic_eye
+Saint's Rest
+
+Paper Mazes -> Saint's Rest: Follow the red thread
+`;
+
 export function template(kind: Kind, name: string, ext: string): string {
   switch (kind) {
     case 'entries':
@@ -136,7 +145,8 @@ fn example() {
     case 'styles':
       return styleFile(DEFAULT_STYLE);
     case 'content':
-      return ext === 'json' ? '{ "base": 27, "text": "" }\n' : '';
+      if (ext === 'json') return '{ "base": 27, "text": "" }\n';
+      return ext === 'graph' ? GRAPH_TEMPLATE : '';
     case 'glyphsets':
       return '{\n\t"space_width": 0.5,\n\t"glyphs": {}\n}\n';
     case 'images':

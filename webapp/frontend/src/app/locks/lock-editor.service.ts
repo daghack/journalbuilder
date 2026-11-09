@@ -610,12 +610,12 @@ export class LockEditorService {
   sourcePath(source: Pick<SourceNode, 'kind' | 'name'>): string | null {
     const files = this.store.files();
     const library = this.library.files();
-    const candidates = source.kind === 'content' ? ['txt', 'md', 'json'].map((ext) => pathOf('content', source.name, ext))
+    const candidates = source.kind === 'content' ? ['txt', 'md', 'json', 'graph'].map((ext) => pathOf('content', source.name, ext))
       : [pathOf(chain.sourceDir(source.kind), source.name)];
     return candidates.find((path) => path in files || path in library) ?? null;
   }
 
-  /** A source's port, as the engine types it: symbols or String for content, TextStyle, Glyphset or Layout. */
+  /** A source's port, as the engine types it: symbols, String or Graph for content, TextStyle, Glyphset or Layout. */
   private sourcePorts(source: SourceNode): { inputs: [string, string][]; outputs: [string, string][]; options: Record<string, unknown> } | { error: string } {
     const path = this.sourcePath(source);
     if (!path) return { error: `there's no ${source.kind} named '${source.name}'` };
@@ -629,6 +629,9 @@ export class LockEditorService {
         } catch {
           return { error: `${path} isn't symbols` };
         }
+      } else if (path.endsWith('.graph')) {
+        if (source.base !== undefined) return { error: `${path} is a graph: only text content takes a base` };
+        type = 'Graph';
       } else {
         type = source.base !== undefined ? `Base${source.base}Symbol` : 'String';
       }
