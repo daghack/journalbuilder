@@ -94,6 +94,7 @@ files do: `symbols(27, "HI")` is an array, and value kinds' functions
 (`huffman::code`) work. Its illustrations only load when a journal uses it,
 in the journal's engine.
 
-To add one to the repository, put it here and use it in the showcase
-(`tests/showcase.rs` checks); the web editor needs the illustration rebuilt
+To add one to the repository, put it here, use it on a page of the
+showcase's appendix (`tests/showcase.rs` checks) and name it in docs/api.md's
+library section (`tests/api_doc.rs` checks); the web editor needs the illustration rebuilt
 (`npm run wasm`) to have it compiled in.

@@ -37,12 +37,16 @@
 //   files     a journal's files besides its entries: text styles, content,
 //             a layout's options, and helpers imported from lib/; the
 //             library's and the showcase's own
+//   appendix  what journals have gained since, a page or more each, newest
+//             last: markdown in every text call; graphs (graph::parse,
+//             .graph content, graph::layout) and graph_map
 //
 // Pages are bound with new_book: numbered, named and listed in the
 // contents.
 //
 // When journals gain a capability (a function, an art tool, a brush, a
-// glyphset, a lock type), it gets a labelled example here: see CLAUDE.md.
+// glyphset, a lock type), it gets a labelled example on a new page at the
+// end of the appendix: see CLAUDE.md.
 // tests/showcase.rs fails when a function scripts can call, or a built-in
 // (anything in webapp/library/), isn't in this file. Render it on parchment to see it as a book:
 // journalbuild showcase --parchment (or --pdf).
@@ -2393,7 +2397,115 @@ for page in layout("two_column_article", #{ gap: 90, folios: false }).typeset(#{
 	book.add("files", page);
 }
 
+// ---- the appendix: what journals have gained since, newest last ----
+//
+// New capabilities get their pages here, after everything else, each page
+// a sheet named for what it shows and bound in the appendix, so the pages
+// before keep their numbers, and the contents its lines.
+
+// Every text call takes marked-up text, markdown(text), where it takes a
+// string, and names spans in its settings' spans, as roles do.
+let marked = sheet("markdown");
+marked.add(caption("every text call takes markdown(text) where it takes a string, and #{ spans } in its settings", TOP));
+let warn = #{ warn: #{ style: #{ color: RED, passes: 2, pass_end_jitter: 1.2 } } };
+let y = TOP + 70;
+marked.add(caption("write_line(markdown(text), at, #{ style, type, spans })", y));
+marked.add(write_line(markdown("Lorem _ipsum_ **dolor** [sit]{color: #9b2318} [amet]{underline}, ~~consectetur~~ [adipiscing]{warn}"), vec2(LEFT, y + 60), #{ style: TEXT, type: new_type_style(PLAIN, 30), spans: warn }));
+let y = y + 130;
+marked.add(caption("write_block(markdown(text), at, width, settings): the underline breaks where the lines do", y));
+let block = write_block(markdown("Lorem ipsum _dolor sit amet_, [consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua]{underline: {style: {color: #9b2318}}}. Ut enim **ad minim** veniam, quis [nostrud]{warn} exercitation."), vec2(LEFT, y + 60), 1000, #{ style: TEXT, type: new_type_style(PLAIN, 26), spans: warn });
+marked.add(block.canvas);
+let y = block.bottom + 30;
+marked.add(caption("write_inside_path(markdown(text), path, settings) and path.fit_text(markdown(text), settings)", y));
+let ring = new_circle(vec2(LEFT + 190, y + 230), 150);
+marked.add(ring, CAPTION);
+marked.add(write_inside_path(markdown("Lorem ipsum *dolor sit amet*, consectetur [adipiscing elit]{color: #9b2318}, sed do **eiusmod** tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis [nostrud exercitation]{underline} ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur."), ring, #{ style: TEXT, type: new_type_style(PLAIN, 22) }).canvas);
+let arc = new_arc(vec2(LEFT + 730, y + 400), 250, 3.6, 5.8);
+marked.add(arc.fit_text(markdown("lorem _ipsum_ [dolor]{color: #9b2318} [sit]{underline} amet"), #{ style: TEXT, type: #{ glyphset: PLAIN } }));
+let y = y + 470;
+marked.add(caption("path.fill_with_text(markdown(text), settings), art::spiral_text(markdown(text), center, radius, settings),", y));
+marked.add(caption("and canvas.scatter_notes(notes, ...), each note a string or markdown(text)", y + 34));
+let swell = wave(LEFT, LEFT + 360, y + 160, 160);
+marked.add(swell.fill_with_text(markdown("lorem *ipsum* [dolor]{color: #9b2318} sit amet, consectetur **adipiscing** elit, sed do eiusmod tempor "), #{ style: TEXT, type: new_type_style(PLAIN, 22) })[0]);
+marked.add(art::spiral_text(markdown("Lorem ipsum _dolor sit amet_, [consectetur adipiscing elit]{color: #9b2318}, sed do **eiusmod** tempor incididunt ut labore et dolore magna aliqua."), vec2(LEFT + 560, y + 170), 110, #{ style: TEXT, type: #{ glyphset: PLAIN } }));
+let board = new_canvas().add(new_rectangle(vec2(LEFT + 880, y + 170), 260, 240), CAPTION);
+marked.add(board);
+marked.add(board.scatter_notes([markdown("lorem _ipsum_"), "dolor sit", markdown("[amet]{color: #9b2318}"), markdown("**consectetur**")], [140, 180], [22, 26], #{
+	style: TEXT, type: new_type_style(PLAIN, 20), paragraph: #{ clearance: 10, layout: "words" }, max_attempts: 100,
+}));
+book.bind("appendix", marked);
+
+// Graphs: places and the ways between them, as a .graph content file or
+// graph::parse(text) gives them, laid out by forces with graph::layout,
+// and drawn by the library's graph_map.
+let graphs = sheet("graphs");
+graphs.add(caption("graph::parse(text): a Graph, #{ kind, nodes: [#{ name, glyphs }], edges: [#{ from, to, directed, text }] }", TOP));
+let routes = content("routes");
+graphs.add(caption(`content("routes"), the showcase's content/routes.graph: ${routes.nodes.len()} places and ${routes.edges.len()} ways`, TOP + 40));
+graphs.add(caption("art::sketch(graph): its default drawing, the places boxed, the ways' texts across their lines", TOP + 80));
+graphs.add(draw_sketch(art::sketch(routes), #{ boxes: LINE, glyphs: LINE, lines: LINE, arrows: LINE }, vec2(LEFT, TOP + 120), RIGHT - LEFT, 480));
+let y = TOP + 680;
+graphs.add(caption("graph::layout(graph, sizes, #{ labels, label_place, gap, width, height, seed, iterations }):", y));
+graphs.add(caption("#{ points, size, edges: [#{ start, end, label, angle, pieces }] }; here the boxes, labels and pieces, by label_place", y + 34));
+let small = graph::parse("Paper Mazes -> Saint's Rest: lorem ipsum dolor\nSaint's Rest -> Paper Mazes: sit amet\nSaint's Rest -- The Cloister: consectetur\nThe Cloister -> Paper Mazes");
+assert(small.kind == "Graph" && !small.edges[2].directed && small.edges[3].text == "", "a graph is plain data");
+let sizes = small.nodes.map(|n| [n.name.len() * 14.0 + 30.0, 60.0]);
+let labels = small.edges.map(|e| if e.text == "" { () } else { [e.text.len() * 11.0, 30.0] });
+for (place, i) in ["along", "beside", "upright"] {
+	let laid = graph::layout(small, sizes, #{ labels: labels, label_place: place, gap: 12, width: 600, height: 640, seed: 1 });
+	let c = new_canvas();
+	for (p, k) in laid.points {
+		c.add(new_rectangle(vec2(p[0], p[1]), sizes[k][0], sizes[k][1]), LINE);
+	}
+	for (edge, e) in laid.edges {
+		for piece in edge.pieces { c.add(new_line(vec2(piece[0][0], piece[0][1]), vec2(piece[1][0], piece[1][1])), LINE); }
+		if labels[e] != () {
+			let at = vec2(edge.label[0], edge.label[1]);
+			c.add(new_rectangle(at, labels[e][0], labels[e][1]).rotate_around(at, edge.angle), CAPTION);
+		}
+		if small.edges[e].directed { c.add(new_circle(vec2(edge.end[0], edge.end[1]), 6), CAPTION); }
+	}
+	let fit = 300.0 / laid.size[0];
+	graphs.add(c.scale_by(fit).translate_by(vec2(LEFT + i * 350, y + 90)));
+	graphs.add(write(`label_place: "${place}"`, LEFT + i * 350, y + 140 + laid.size[1] * fit, 20));
+}
+book.bind("appendix", graphs);
+
+// graph_map draws a Graph: each place boxed, its glyphs under its name,
+// each way a line with an arrowhead where it goes one way and its text
+// set along it, beside it or upright across it.
+let maps = sheet("graphs");
+maps.add(caption("illustration(\"graph_map\", #{ label_place, width, height, seed }).run(#{ graph }): content(\"routes\") drawn", TOP));
+for (place, i) in ["along", "beside"] {
+	let y = TOP + 50 + i * 620;
+	maps.add(caption(`#{ label_place: "${place}" }`, y));
+	let map = illustration("graph_map", #{ label_place: place, width: 1000.0, height: 560.0, seed: 1 }).run(#{ graph: routes })[0];
+	maps.add(map.translate_by(vec2(LEFT, y + 30)));
+}
+book.bind("appendix", maps);
+
+let maps = sheet("graphs");
+maps.add(caption("#{ label_place: \"upright\" }, and name_style, edge_style, glyph_style, box_style and line_style: TextStyles", TOP));
+let styles = #{
+	name_style: #{ style: pen(BLUE), type: new_type_style(PLAIN, 34) },
+	edge_style: #{ style: pen(GREEN), type: new_type_style(PLAIN, 20), paragraph: #{ align: "center" } },
+	box_style: #{ style: pen(GOLD) },
+};
+let map = illustration("graph_map", #{ label_place: "upright", width: 1000.0, height: 560.0, seed: 2 }).run(styles + #{ graph: routes })[0];
+maps.add(map.translate_by(vec2(LEFT, TOP + 80)));
+let y = TOP + 700;
+maps.add(caption("a chain: new_lock(name).source(\"ways\", \"content\", \"routes\").attach(\"map\", \"graph_map\", options)", y));
+maps.add(caption(".connect(\"ways.value\", \"map.graph\"): a .graph content source gives a Graph", y + 34));
+let lock = new_lock("routes").source("ways", "content", "routes")
+	.attach("map", "graph_map", #{ width: 1000.0, height: 560.0, seed: 3, gap: 18.0 }).connect("ways.value", "map.graph");
+maps.add(lock.run().canvases("map")[0].translate_by(vec2(LEFT, y + 100)));
+book.bind("appendix", maps);
+
 // ---- the title page and the contents, which go first ----
+
+// Drawn from a seed of their own, so pages added to the appendix before
+// them leave their ink as it is.
+seed(1);
 
 // layouts/bordered_title.rhai, a framed title page.
 let leaf = new_path().move_to(vec2(0, -22)).quad_to(vec2(14, -4), vec2(0, 22)).quad_to(vec2(-14, -4), vec2(0, -22));

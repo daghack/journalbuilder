@@ -1,0 +1,11 @@
+# The ways between the places: a graph, for content("routes").
+Paper Mazes: basic_eye archangel_3
+Saint's Rest: ploughdiem
+The Cloister: archangel_0
+
+Paper Mazes -> Saint's Rest: Follow the red thread until you find
+  _To Fall Endlessly_, then use the crawlspace beneath the broken shelf
+Saint's Rest -> Paper Mazes: back the way you came
+Saint's Rest -- The Cloister: down the bell stair
+The Cloister -> The Orchard: out by the [gate]{color: #9b2318}
+The Orchard -> Paper Mazes: over the **low** wall

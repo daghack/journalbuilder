@@ -1,10 +1,11 @@
-//! Content files, `content/<name>.txt`, `.md` or `.json` (a journal's over
-//! the library's), for `content(name)`: text kept apart from the entries
-//! that write it. Plain text (`.txt`) and marked-up text (`.md`) are given
-//! back as strings, without the newline that ends the file
-//! (`markdown(content(name))` styles the latter as it's set); symbols
+//! Content files, `content/<name>.txt`, `.md`, `.json` or `.graph` (a
+//! journal's over the library's), for `content(name)`: text kept apart
+//! from the entries that write it. Plain text (`.txt`) and marked-up text
+//! (`.md`) are given back as strings, without the newline that ends the
+//! file (`markdown(content(name))` styles the latter as it's set); symbols
 //! (`.json`) as a value of symbols, as `symbols(base, text)` makes, for a
-//! lock. A symbols file holds its text, `{ "base": 27, "text": "Hello,
+//! lock; a graph (`.graph`) as a Graph, as `graph::parse(text)` makes
+//! (`kinds/graph.rs` has its format). A symbols file holds its text, `{ "base": 27, "text": "Hello,
 //! world" }`, made to fit the base as it's read (`HELLO WORLD`), or, with
 //! `"strict": true`, written in the base already; or the symbols
 //! themselves, `{ "base": 27, "symbols": [7, 4, 11, ...] }`.
@@ -36,6 +37,12 @@ fn content(resources: &Resources, name: &str) -> RhaiResult<Dynamic> {
             read_symbols(&read(&resources.symbols)?)
                 .and_then(|(base, symbols)| symbols_value(base, &symbols))
                 .map(Dynamic::from)
+                .map_err(|e| format!("content: {}: {}", path.display(), e).into())
+        }
+        ["graph"] => {
+            let path = resources.graphs.path(name);
+            crate::journal::kinds::graph::parse(&read(&resources.graphs)?)
+                .map(Dynamic::from_map)
                 .map_err(|e| format!("content: {}: {}", path.display(), e).into())
         }
         several => Err(format!("content: '{}' is ambiguous: there's {}; rename one", name,
@@ -102,11 +109,16 @@ mod tests {
             ("too_strict", r#"{ "base": 27, "text": "Hi, there", "strict": true }"#),
             ("mixed", r#"{ "base": 27, "text": "HI", "symbols": [8, 9] }"#),
         ]));
+        resources.graphs = resources.graphs.with_overlay(files(&[
+            ("routes", "Paper Mazes: basic_eye\nPaper Mazes -> Saint's Rest: Follow\n  the red thread\n"),
+            ("tangled", "A\nB -> B"),
+            ("both", "A -> B"),
+        ]));
         JournalEngine::with_resources(Rc::new(FontBook::from_file(DEFAULT_GLYPHSETS).unwrap()), resources)
     }
 
     #[test]
-    fn content_is_text_or_symbols() {
+    fn content_is_text_symbols_or_a_graph() {
         let result = engine().build_entry_str(r#"
             assert(content("note") == "a note", "plain text");
             assert(content("marked") == "a *marked* note", "marked-up text, as written");
@@ -114,14 +126,18 @@ mod tests {
             assert(secret.base == 27 && secret.text() == "HI", "symbols");
             assert(content("written").text() == "ITS HI", "text made to fit");
             assert(content("strict").text() == "HI THERE", "strict text");
+            let routes = content("routes");
+            assert(routes.kind == "Graph" && routes.nodes[1].name == "Saint's Rest", "a graph");
+            assert(routes.edges[0].text == "Follow the red thread" && routes.edges[0].directed, "its edge");
         "#);
         assert!(result.is_ok(), "{:?}", result.err());
         for (script, want) in [
             (r#"content("nope")"#, "content: no content named 'nope'; content: "),
-            (r#"content("both")"#, "content: 'both' is ambiguous: there's both.txt and both.md"),
+            (r#"content("both")"#, "content: 'both' is ambiguous: there's both.txt and both.md and both.graph"),
             (r#"content("bad")"#, "bad.json: symbols: symbol 4 (item 0) is outside Base3's 0-2"),
             (r#"content("too_strict")"#, "too_strict.json: symbols (strict): ',' isn't a base-27 symbol"),
             (r#"content("mixed")"#, "mixed.json: should have its text or its symbols, not both or neither"),
+            (r#"content("tangled")"#, "tangled.graph: line 2: B -> B joins B to itself"),
         ] {
             let err = engine().build_entry_str(script).expect_err(script);
             assert!(err.contains(want), "{}\n  wanted: {}\n  got: {}", script, want, err);

@@ -54,10 +54,12 @@
 use parry2d::bounding_volume::Aabb;
 use parry2d::math::Vec2 as PVec;
 use rand::Rng;
-use rhai::{Array, Dynamic, Engine, EvalAltResult, Map};
+use rhai::{Array, Dynamic, Engine, Map};
 use std::rc::Rc;
 
-use super::glyphs::{add_glyphs, glyph_array, Glyph};
+use super::glyphs::{glyph_array, Glyph};
+use super::markdown::{FlowText, Markdown, Styled};
+use super::path::plain;
 use super::random::SharedRng;
 use super::{Canvas, CanvasData, Path, Vec2};
 use crate::journal::canvas::artistic::{jitter_symbols, scatter_notes, ScatterOptions};
@@ -242,7 +244,7 @@ const SCATTER_KEYS: [&str; 2] = ["max_attempts", "avoid"];
 fn splat(canvas: &Canvas, msgs: Array, width_range: Dynamic, height_range: Dynamic, settings: Map, symdict: &FontBook, rng: &SharedRng) -> RhaiResult<Canvas> {
     const CALLER: &str = "scatter_notes";
     let text = TextSettings::read(CALLER, settings, &SCATTER_KEYS)?;
-    let font = text.type_.glyphset(CALLER)?;
+    text.type_.glyphset(CALLER)?;
     if canvas.borrow().strokes.is_empty() {
         // Messages are placed in boxes within the canvas's bounds.
         return Err(format!("{}: the canvas is empty, so there's nowhere to place messages; draw on it first", CALLER).into());
@@ -275,27 +277,35 @@ fn splat(canvas: &Canvas, msgs: Array, width_range: Dynamic, height_range: Dynam
     let (rotation_jitter, scale_jitter) = (hand.glyph_rotation_jitter() as f32, hand.glyph_scale_jitter() as f32);
     let after = Jitter::of(&text.style).position_only();
     let msgs = msgs.into_iter().enumerate().map(|(i, msg)| {
-        msg.into_immutable_string()
-            .map_err(|type_name| -> Box<EvalAltResult> { format!("{}: message {} is a {}, not a string", CALLER, i, type_name).into() })
+        if msg.is_string() || msg.is::<Markdown>() {
+            FlowText::from_dynamic(CALLER, msg)
+        } else {
+            Err(format!("{}: message {} is a {}, not a string or markdown(...)", CALLER, i, msg.type_name()).into())
+        }
     }).collect::<RhaiResult<Vec<_>>>()?;
 
     let mut rng = rng.borrow_mut();
-    let symbol_msgs: Vec<Vec<Symbol>> = msgs.iter().map(|msg| {
-        let mut symbols = font.build(msg, symdict, &mut *rng);
+    let mut styled = Vec::with_capacity(msgs.len());
+    let mut symbol_msgs: Vec<Vec<Symbol>> = Vec::with_capacity(msgs.len());
+    for msg in &msgs {
+        let note = Styled::of_text(CALLER, msg, &text.type_, text.spans.as_ref(), symdict, &mut *rng)?;
+        let mut symbols = note.glyphs.clone();
         jitter_symbols(&mut symbols, rotation_jitter, scale_jitter, &mut *rng);
-        symbols
-    }).collect();
+        symbol_msgs.push(symbols);
+        styled.push(note);
+    }
     let journal_canvas: JournalCanvas = canvas.into();
     let tree = avoid.now();
     let placed = scatter_notes(&journal_canvas, tree.as_deref(), &symbol_msgs, &opts, &mut *rng)
         .map_err(|err| format!("{}: {}", CALLER, err))?;
 
     let mut splatted = CanvasData::default();
-    // Each note's first glyph, which doesn't join the last note.
-    let firsts: Vec<usize> = placed.iter().scan(0, |at, note| { let first = *at; *at += note.len(); Some(first) }).collect();
-    let mut placed: Vec<Symbol> = placed.into_iter().flatten().collect();
-    after.apply(&mut placed, &mut *rng);
-    add_glyphs(&mut splatted, &placed, |k| firsts.contains(&k), &text.style, &mut *rng)?;
+    // Each note in its own text's looks; notes don't join each other.
+    let tree = if styled.iter().any(Styled::has_rules) { avoid.now() } else { None };
+    for (mut note, styled) in placed.into_iter().zip(&styled) {
+        after.apply(&mut note, &mut *rng);
+        styled.draw_row(CALLER, &mut splatted, &note, 0, &text.style, tree.as_deref(), avoid.padding(), &mut *rng)?;
+    }
     Ok(Canvas::new(splatted))
 }
 
@@ -309,10 +319,10 @@ const BLOCK_KEYS: [&str; 1] = ["avoid"];
 /// up and down from straight by up to the hand's `baseline_wander`, words
 /// kept whole unless the paragraph's `layout` is "flat". Gives
 /// `#{ canvas, bottom }`, `bottom` being where a line after them would go.
-fn write_block(msg: &str, at: Vec2, width: Dynamic, settings: Map, symdict: &FontBook, rng: &SharedRng) -> RhaiResult<Map> {
+fn write_block(msg: &FlowText, at: Vec2, width: Dynamic, settings: Map, symdict: &FontBook, rng: &SharedRng) -> RhaiResult<Map> {
     const CALLER: &str = "write_block";
     let text = TextSettings::read(CALLER, settings, &BLOCK_KEYS)?;
-    let font = text.type_.glyphset(CALLER)?;
+    text.type_.glyphset(CALLER)?;
     let size = text.type_.size(CALLER)?;
     let width = super::options::float(CALLER, "the width", &width)? as f32;
     if !(width > 0.0) {
@@ -333,14 +343,17 @@ fn write_block(msg: &str, at: Vec2, width: Dynamic, settings: Map, symdict: &Fon
         options.insert("center".into(), Dynamic::from(Vec2::new((at.x + width / 2.0) as f64, y as f64)));
         options.insert("width".into(), Dynamic::from(width as f64));
         options.insert("height".into(), Dynamic::from((size * 0.5) as f64));
-        let line_text = TextSettings { style: text.style.clone(), type_: text.type_.clone(), paragraph: line_paragraph.clone(), options };
+        let line_text = TextSettings { style: text.style.clone(), type_: text.type_.clone(), paragraph: line_paragraph.clone(), spans: None, options };
         let mut line = TextBox::from_settings(CALLER, &line_text)?;
         line.contain = false;
         (line.wander, line.line_gap_jitter) = (0.0, 0.0);
         Ok(line)
     };
     let mut r = rng.borrow_mut();
-    let mut to_place = font.build(msg, symdict, &mut *r);
+    let styled = Styled::of_text(CALLER, msg, &text.type_, text.spans.as_ref(), symdict, &mut *r)?;
+    let mut to_place = styled.glyphs.clone();
+    // The text's glyph the next line starts at.
+    let mut first = 0;
     let pitch = paragraph.line_height() * size;
     let mut canvas = CanvasData::default();
     // How far lines have strayed from their even spacing, all told.
@@ -351,7 +364,9 @@ fn write_block(msg: &str, at: Vec2, width: Dynamic, settings: Map, symdict: &Fon
             drift += r.random_range(-line_gap_jitter..line_gap_jitter);
         }
         let tb = line_box(at.y + lines as f32 * pitch + drift)?;
+        let given = to_place.len();
         let (mut row, rest) = tb.with_core(|core| core.fill_bounds_with(std::mem::take(&mut to_place), &mut *r));
+        debug_assert_eq!(row.len() + rest.len(), given, "a line places a prefix of its glyphs");
         if row.is_empty() {
             return Err(format!("{}: {} glyph(s) don't fit a line {} wide", CALLER, rest.len(), width).into());
         }
@@ -362,7 +377,9 @@ fn write_block(msg: &str, at: Vec2, width: Dynamic, settings: Map, symdict: &Fon
             Wander::new(wander, size, width + size * 2.0, &mut *r).bend(&mut row, at.x);
         }
         tb.jitter.apply(&mut row, &mut *r);
-        add_glyphs(&mut canvas, &row, |_| false, &text.style, &mut *r)?;
+        let tree = if styled.has_rules() { tb.avoid.now() } else { None };
+        styled.draw_row(CALLER, &mut canvas, &row, first, &text.style, tree.as_deref(), tb.padding, &mut *r)?;
+        first += row.len();
     }
     let rows = lines;
     let mut out = Map::new();
@@ -388,16 +405,17 @@ const FIT_STEPS: usize = 20;
 /// starts with trimmed). With the paragraph's `fit`, the glyphs are as big
 /// as they can be (to within 1%), up to the type's glyph_scale, and still
 /// all fit, so `rest` is empty.
-fn write_inside_path(msg: &str, path: &Path, settings: Map, symdict: &FontBook, rng: &SharedRng) -> RhaiResult<Map> {
+fn write_inside_path(msg: &FlowText, path: &Path, settings: Map, symdict: &FontBook, rng: &SharedRng) -> RhaiResult<Map> {
     const CALLER: &str = "write_inside_path";
     let text = TextSettings::read(CALLER, settings, &INSIDE_KEYS)?;
     let fit = text.paragraph.fit();
-    let font = text.type_.glyphset(CALLER)?;
+    text.type_.glyphset(CALLER)?;
     let size = text.type_.size(CALLER)?;
     let shape = shape_rings(CALLER, "the path", path, size)?;
     let mut tb = TextBox::with_shape(CALLER, &text, shape)?;
     let mut r = rng.borrow_mut();
-    let symbols = font.build(msg, symdict, &mut *r);
+    let styled = Styled::of_text(CALLER, msg, &text.type_, text.spans.as_ref(), symdict, &mut *r)?;
+    let symbols = styled.glyphs.clone();
     let set = |tb: &TextBox, r: &mut dyn rand::RngCore| tb.with_core(|core| core.fill_bounds_with(symbols.clone(), r));
     let (mut placed, unplaced) = set(&tb, &mut *r);
     if fit && !unplaced.is_empty() {
@@ -424,12 +442,13 @@ fn write_inside_path(msg: &str, path: &Path, settings: Map, symdict: &FontBook, 
         placed = at;
     }
     let rest: String = if fit { String::new() } else {
-        let chars: Vec<char> = msg.chars().collect();
+        let chars: Vec<char> = msg.text().chars().collect();
         chars[chars.len() - unplaced.len().min(chars.len())..].iter().collect::<String>().trim_start().to_string()
     };
     tb.jitter.apply(&mut placed, &mut *r);
     let mut canvas = CanvasData::default();
-    add_glyphs(&mut canvas, &placed, |_| false, &text.style, &mut *r)?;
+    let tree = if styled.has_rules() { tb.avoid.now() } else { None };
+    styled.draw_row(CALLER, &mut canvas, &placed, 0, &text.style, tree.as_deref(), tb.padding, &mut *r)?;
     let mut out = Map::new();
     out.insert("canvas".into(), Dynamic::from(Canvas::new(canvas)));
     out.insert("rest".into(), rest.into());
@@ -461,16 +480,23 @@ pub fn register(engine: &mut Engine, symdict: Rc<FontBook>, rng: SharedRng) {
     engine.register_fn("scatter_notes", move |canvas: &mut Canvas, msgs: Array, width_range: Dynamic, height_range: Dynamic, settings: Map| -> RhaiResult<Canvas> {
         splat(canvas, msgs, width_range, height_range, settings, &book, &r)
     });
-    let r = rng.clone();
-    let book = symdict.clone();
+    // Each text call takes a string or markdown(...).
+    let (r, book) = (rng.clone(), symdict.clone());
     engine.register_fn("write_block", move |text: &str, at: Vec2, width: Dynamic, settings: Map| -> RhaiResult<Map> {
-        write_block(text, at, width, settings, &book, &r)
+        write_block(&plain(text), at, width, settings, &book, &r)
+    });
+    let (r, book) = (rng.clone(), symdict.clone());
+    engine.register_fn("write_block", move |text: Markdown, at: Vec2, width: Dynamic, settings: Map| -> RhaiResult<Map> {
+        write_block(&FlowText::Marked(text), at, width, settings, &book, &r)
+    });
+    let (r, book) = (rng.clone(), symdict.clone());
+    engine.register_fn("write_inside_path", move |text: &str, path: Path, settings: Map| -> RhaiResult<Map> {
+        write_inside_path(&plain(text), &path, settings, &book, &r)
     });
     let r = rng.clone();
-    engine.register_fn("write_inside_path", move |text: &str, path: Path, settings: Map| -> RhaiResult<Map> {
-        write_inside_path(text, &path, settings, &symdict, &r)
+    engine.register_fn("write_inside_path", move |text: Markdown, path: Path, settings: Map| -> RhaiResult<Map> {
+        write_inside_path(&FlowText::Marked(text), &path, settings, &symdict, &r)
     });
-
 }
 
 #[cfg(test)]

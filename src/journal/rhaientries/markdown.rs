@@ -1,5 +1,10 @@
-//! Marked-up text for page layouts: `markdown(text)` makes a flow whose
-//! text is styled as it's set, each stretch in its own style and type.
+//! Marked-up text: `markdown(text)` makes text styled as it's set, each
+//! stretch in its own style and type, for a page layout's flows and for
+//! every call that writes text (`write_line`, `write_block`,
+//! `write_inside_path`, `path.fit_text`, `path.fill_with_text`,
+//! `art::spiral_text`, and each of `canvas.scatter_notes`' notes), which
+//! take a string or `markdown(...)` alike. Text calls name spans in their
+//! settings' `spans`, as roles do.
 //!
 //! ```rhai
 //! let body = markdown("Plain writing, *emphasis*, **strong**, ~~struck out~~, "
@@ -52,7 +57,7 @@ use crate::journal::avoid::AvoidanceTree;
 use crate::journal::fonts::FontBook;
 use crate::journal::markup::{Markup, SpanKind, Value};
 use crate::journal::symbol::{joined_paths, Symbol};
-use crate::journal::typeset::{marked_runs, rule_path, Lines, Rule, Setting};
+use crate::journal::typeset::{marked_runs, rule_path, Lines, Place, Rule, Setting};
 
 /// How a span changes the text it covers: a style, a type, each whole or
 /// a map of some settings over the text's.
@@ -199,6 +204,52 @@ impl Markdown {
     pub(super) fn text(&self) -> &str {
         &self.markup.text
     }
+}
+
+/// How far a glyph turns from the last before lines under and through text
+/// break there, in radians: along a curve, they go in straight pieces.
+const RULE_TURN: f32 = 0.35;
+
+/// A row of placed glyphs' non-blank ones, each with the line and the
+/// straight stretch of it that it's on, as lines under and through text
+/// need: a new line where the text jumps back, or off to the side, from
+/// the way the last glyph faced (more than a quarter, or more than six
+/// tenths, of its size); a new stretch where it has turned by more than
+/// `RULE_TURN` since the stretch began.
+fn row_places(row: &[Symbol]) -> Vec<(usize, usize, usize)> {
+    let mut out = Vec::new();
+    let (mut line, mut stretch) = (0, 0);
+    let mut last: Option<&Symbol> = None;
+    // Which way the stretch's first glyph faces.
+    let mut facing = 0.0;
+    for (k, glyph) in row.iter().enumerate() {
+        if glyph.is_blank() {
+            continue;
+        }
+        if let Some(prev) = last {
+            // A placed glyph's scale is its size.
+            let size = prev.scale();
+            let (sin, cos) = prev.rotation_rad().sin_cos();
+            let d = glyph.position() - prev.position();
+            let (along, across) = (d.x * cos + d.y * sin, d.y * cos - d.x * sin);
+            if along < -0.25 * size || across.abs() > 0.6 * size {
+                (line, stretch, facing) = (line + 1, 0, glyph.rotation_rad());
+            } else if turn(facing, glyph.rotation_rad()).abs() > RULE_TURN {
+                (stretch, facing) = (stretch + 1, glyph.rotation_rad());
+            }
+        } else {
+            facing = glyph.rotation_rad();
+        }
+        out.push((k, line, stretch));
+        last = Some(glyph);
+    }
+    out
+}
+
+/// How far `to` is turned from `from`, the short way round: -pi to pi.
+fn turn(from: f32, to: f32) -> f32 {
+    use std::f32::consts::{PI, TAU};
+    (to - from + PI).rem_euclid(TAU) - PI
 }
 
 /// Text in a flow or label: plain, or marked up.
@@ -402,9 +453,53 @@ impl Styled {
         Ok(Styled { glyphs, look_of, looks, rules })
     }
 
+    /// What a text call writes, a string or `markdown(...)`, set in
+    /// `type_`: marked-up text styled by the spans it names, from `spans`
+    /// (the call's settings' `spans`, which plain text ignores) and the
+    /// markdown's own.
+    pub(super) fn of_text(caller: &str, text: &FlowText, type_: &TypeStyle, spans: Option<&Dynamic>, symdict: &FontBook, rng: &mut dyn rand::RngCore) -> RhaiResult<Styled> {
+        let spans = match (text, spans) {
+            (FlowText::Marked(_), Some(spans)) => Spans::from_dynamic(&format!("{} 'spans'", caller), spans)?,
+            _ => Spans::default(),
+        };
+        Styled::new(caller, text, type_, &spans, symdict, rng)
+    }
+
     /// Glyph `k`'s look.
     pub(super) fn look(&self, k: usize) -> &Look {
         &self.looks[self.look_of[k]]
+    }
+
+    /// Whether any of it has lines under or through it.
+    pub(super) fn has_rules(&self) -> bool {
+        !self.rules.is_empty()
+    }
+
+    /// Draw a row of placed glyphs, `row`, which are glyphs `first..` of
+    /// the text in order, blanks and all, as every placer gives them: each
+    /// in its look over `style`, joined up but not where the look changes,
+    /// then the lines under and through them, kept `clearance` clear of
+    /// `avoid`. Those lines are straight, so they break where the text
+    /// does: at a new line, and where it turns (along a curve). Plain text
+    /// draws exactly as its glyphs would on their own in `style`.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn draw_row(&self, caller: &str, canvas: &mut CanvasData, row: &[Symbol], first: usize, style: &Style, avoid: Option<&AvoidanceTree>, clearance: f32, rng: &mut dyn rand::RngCore) -> RhaiResult<()> {
+        if first + row.len() > self.glyphs.len() {
+            return Err(format!("{}: {} glyphs from glyph {} run past the text's {}", caller, row.len(), first, self.glyphs.len()).into());
+        }
+        let look_at = |k: usize| self.look_of[first + k];
+        for (glyphs, path) in joined_paths(row, |k| look_at(k) != look_at(k - 1)) {
+            check_finite(caller, &path)?;
+            let ink = self.look(first + glyphs.start).ink.on(caller, style)?;
+            canvas.add_text_path(path, TextRun::of(row, glyphs), &ink, rng);
+        }
+        if !self.has_rules() {
+            return Ok(());
+        }
+        let (placed, places) = row_places(row).into_iter()
+            .map(|(k, line, stretch)| (row[k].clone(), Place { index: first + k, line, stretch }))
+            .unzip();
+        self.draw_rules(caller, canvas, &Setting { placed, places, ..Setting::default() }, 0, style, avoid, clearance, rng)
     }
 
     /// Draw text set from glyph `start` on: each glyph in its look over
@@ -421,6 +516,12 @@ impl Styled {
             let ink = self.look(start + setting.places[glyphs.start].index).ink.on(CALLER, style)?;
             canvas.add_text_path(path, TextRun::of(placed, glyphs), &ink, rng);
         }
+        self.draw_rules(CALLER, canvas, setting, start, style, Some(avoid), clearance, rng)
+    }
+
+    /// The lines under and through text set from glyph `start` on.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_rules(&self, caller: &str, canvas: &mut CanvasData, setting: &Setting, start: usize, style: &Style, avoid: Option<&AvoidanceTree>, clearance: f32, rng: &mut dyn rand::RngCore) -> RhaiResult<()> {
         for rule in [Rule::Under, Rule::Through] {
             let mark = |k: usize| {
                 let look = self.look(start + k);
@@ -429,9 +530,9 @@ impl Styled {
             for (r, run) in marked_runs(setting, mark) {
                 let glyphs: Vec<&Symbol> = run.iter().map(|&p| &setting.placed[p]).collect();
                 let rule_look = &self.rules[r];
-                let ink = rule_look.ink.on(CALLER, style)?;
-                let path = rule_path(&glyphs, &rule_look.lines, ink.pen_width(), Some(avoid), clearance, rng);
-                check_finite(CALLER, &path)?;
+                let ink = rule_look.ink.on(caller, style)?;
+                let path = rule_path(&glyphs, &rule_look.lines, ink.pen_width(), avoid, clearance, rng);
+                check_finite(caller, &path)?;
                 canvas.add_path(path, &ink, rng);
             }
         }
@@ -667,5 +768,75 @@ mod tests {
         assert!(err.contains("flow 'body' should be a string or markdown(...)"), "{}", err);
         let err = typeset("\"x\"", ", spans: #{ em: #{ style: #{ color: 3 } } }", "").expect_err("bad em");
         assert!(err.contains("'color'") || err.contains("colour"), "{}", err);
+    }
+
+    type Drawn = Vec<(Vec<Vec2>, crate::journal::rhaientries::Stroke)>;
+
+    /// The strokes `script` adds to a canvas `c`, with `ink` and plain
+    /// `text` settings to write in.
+    fn drawn(script: &str) -> Result<Drawn, String> {
+        let entry = engine().build_entry_str(&format!(r#"
+            let ink = new_style(new_brush_style("black", "Ink Pen", 1.0), new_handwriting_style());
+            let text = #{{ style: ink, type: new_type_style(glyphset("plain"), 20) }};
+            let c = new_canvas();
+            {}
+            journal_entry.add(new_page().add(c));
+        "#, script))?;
+        Ok(strokes(&entry))
+    }
+
+    /// Every call that writes text, `TEXT` standing for what it writes.
+    const TEXT_CALLS: [&str; 7] = [
+        "c.add(write_line(TEXT, vec2(0, 0), text));",
+        "c.add(write_block(TEXT, vec2(0, 0), 400, text).canvas);",
+        "c.add(write_inside_path(TEXT, new_rectangle(vec2(200, 100), 420, 200), text).canvas);",
+        "c.add(new_line(vec2(0, 0), vec2(600, 0)).fit_text(TEXT, text));",
+        "c.add(new_line(vec2(0, 0), vec2(600, 0)).fill_with_text(TEXT, text));",
+        "c.add(art::spiral_text(TEXT, vec2(0, 0), 200, text));",
+        "c.add(new_canvas().add(new_rectangle(vec2(0, 0), 900, 900), ink).scatter_notes([TEXT], [320, 400], [60, 120], text));",
+    ];
+
+    #[test]
+    fn every_text_call_writes_markdown_as_plain_text_and_styles_its_spans() {
+        let paths = |s: &Drawn| s.iter().map(|(_, st)| st.path.to_string()).collect::<Vec<_>>();
+        for call in TEXT_CALLS {
+            let with = |t: &str| drawn(&call.replace("TEXT", t)).unwrap_or_else(|e| panic!("{}: {}", call, e));
+            assert_eq!(paths(&with(r#""lorem ipsum dolor""#)), paths(&with(r#"markdown("lorem ipsum dolor")"#)), "{}: marked-up text with no markup draws as a string", call);
+            let colours: Vec<String> = with(r#"markdown("lorem [ipsum]{color: red} dolor")"#).iter().map(|(_, st)| color(st)).collect();
+            let red = colours.iter().filter(|c| *c == "red").count();
+            assert_eq!((red, colours.len() - red), (5, 10), "{}: ipsum in red, {:?}", call, colours);
+            // The settings' spans, which a string ignores.
+            let call_spans = call.replace("text)", "text + #{ spans: #{ warn: #{ style: #{ color: \"blue\" } } } })");
+            let named = drawn(&call_spans.replace("TEXT", r#"markdown("lorem [ipsum]{warn} dolor")"#)).unwrap_or_else(|e| panic!("{}: {}", call_spans, e));
+            assert_eq!(named.iter().filter(|(_, st)| color(st) == "blue").count(), 5, "{}: the settings' spans name spans", call_spans);
+            drawn(&call_spans.replace("TEXT", r#""lorem ipsum dolor""#)).unwrap_or_else(|e| panic!("{}: a string ignores spans: {}", call_spans, e));
+        }
+    }
+
+    #[test]
+    fn emphasis_leans_text_along_a_line() {
+        let plain = drawn(r#"c.add(write_line("ab cd", vec2(0, 0), text));"#).unwrap();
+        let leant = drawn(r#"c.add(write_line(markdown("ab _cd_"), vec2(0, 0), text));"#).unwrap();
+        let path = |s: &Drawn, k: usize| s[k].1.path.to_string();
+        assert_eq!((path(&plain, 0), path(&plain, 1)), (path(&leant, 0), path(&leant, 1)), "ab as it was");
+        assert_ne!(path(&plain, 2), path(&leant, 2), "c leans");
+    }
+
+    #[test]
+    fn lines_under_text_break_where_blocks_wrap_and_paths_turn() {
+        let red = |s: &Drawn| s.iter().filter(|(_, st)| color(st) == "red").count();
+        let under = r#"markdown("[lorem ipsum dolor]{underline: {style: {color: red}}} sit")"#;
+        let block = drawn(&format!("c.add(write_block({}, vec2(0, 0), 130, text).canvas);", under)).unwrap();
+        assert_eq!(red(&block), 2, "one underline a line");
+        let straight = drawn(&format!("c.add(write_line({}, vec2(0, 0), text));", under)).unwrap();
+        assert_eq!(red(&straight), 1, "one along a line");
+        let curve = drawn(&format!("c.add(new_arc(vec2(0, 0), 120, -3.0, 0.0).fit_text({}, text));", under)).unwrap();
+        assert!(red(&curve) >= 3, "in straight pieces round a curve: {}", red(&curve));
+    }
+
+    #[test]
+    fn notes_are_strings_or_markdown() {
+        let err = drawn("c.add(new_canvas().add(new_rectangle(vec2(0, 0), 900, 900), ink).scatter_notes([5], [320, 400], [60, 120], text));").expect_err("a number");
+        assert!(err.contains("scatter_notes: message 0 is a i64, not a string or markdown(...)"), "{}", err);
     }
 }

@@ -191,7 +191,7 @@ function parseValue(text: string, type: string): { value: TestValue; problem: st
           </select>
         </label>
         @if (sourceError(); as error) { <p class="note-error">{{ error }}</p> }
-        @if (source.kind === 'content' && !editor.sourcePath(source)?.endsWith('.json')) {
+        @if (source.kind === 'content' && !editor.sourcePath(source)?.endsWith('.json') && !editor.sourcePath(source)?.endsWith('.graph')) {
           <label class="field">
             <span>As symbols in base</span>
             <input type="number" min="2" max="27" step="1" placeholder="none: text, a String" [value]="source.base ?? ''"

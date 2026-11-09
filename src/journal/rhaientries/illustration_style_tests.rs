@@ -31,8 +31,12 @@ fn engine_with(book: Rc<FontBook>, styles: &[(&str, &str)], illustrations: &[(&s
     let mut resources = Resources::library();
     resources.styles = resources.styles.with_overlay(overlay(styles));
     resources.illustrations = resources.illustrations.with_overlay(overlay(illustrations));
+    resources.graphs = resources.graphs.with_overlay(overlay(&[("routes", ROUTES)]));
     JournalEngine::with_resources(book, resources)
 }
+
+/// A graph content file, `routes`.
+const ROUTES: &str = "Paper Mazes: basic_eye\nSaint's Rest\nPaper Mazes -> Saint's Rest: Follow the red thread\nSaint's Rest -- The Cloister: down the bell stair\n";
 
 /// A style file of just a pen: no type, no paragraph.
 const PEN_ONLY: &str = r#"{ "color": "black", "brush_size": 2.0 }"#;
@@ -318,6 +322,44 @@ fn the_eye_writes_its_iris_and_pupil_as_large_as_its_styles_say_and_room_allows(
     assert_eq!((brush(&pens, GREEN).1, brush(&pens, BLUE).1), (2.0, 2.0));
 }
 
+/// What graph_map draws of the routes content, with `styles` sources.
+fn map(styles: &str, options: &str, wires: &[(&str, &str)]) -> Entry {
+    let mut wires = wires.to_vec();
+    wires.push(("graph", "g.value"));
+    drawn(&format!(r#"new_lock("t").source("g", "content", "routes"){}"#, styles), "graph_map", options, &wires)
+}
+
+#[test]
+fn graph_map_draws_each_part_in_its_own_style() {
+    let styled = |size: f32| source("s", "plain_hand", &format!("#{{ size: {}, color: \"{}\" }}", size, GREEN));
+    // Room enough that the map isn't scaled to fit, and texts upright.
+    let roomy = "#{ width: 3000.0, height: 2400.0, label_place: \"upright\" }";
+    for role in ["name_style", "edge_style"] {
+        let at = |size: f32| map(&styled(size), roomy, &[(role, "s.value")]);
+        scaled(role, tallest(&at(16.0), GREEN, None), tallest(&at(32.0), GREEN, None), 2.0);
+        assert_eq!(brush(&at(16.0), GREEN), ("Ink Pen".to_string(), 1.4), "{}'s pen", role);
+    }
+    // A pen-only style keeps the fallback's glyphs, symbols.
+    let pen = source("s", "pen_only", &format!("#{{ color: \"{}\" }}", GREEN));
+    for role in ["glyph_style", "box_style", "line_style"] {
+        assert!(strokes(&map(&pen, "#{}", &[(role, "s.value")])).any(|s| inked(s, GREEN)), "{} draws in its pen", role);
+    }
+    assert!(strokes(&map("", "#{}", &[])).any(|s| inked(s, RED)), "unwired, the ways' texts are red");
+}
+
+#[test]
+fn graph_map_says_whats_wrong() {
+    let book = Rc::new(FontBook::from_file(DEFAULT_GLYPHSETS).expect("glyphsets load"));
+    for (options, graph, want) in [
+        ("#{ label_place: \"over\" }", "A -> B", "graph_map: label_place should be \"along\", \"beside\" or \"upright\", got \"over\""),
+        ("#{}", "A: nope\nA -> B", "graph_map: A's glyph 'nope' isn't one of its glyphset's"),
+    ] {
+        let script = format!("illustration(\"graph_map\", {}).run(#{{ graph: graph::parse({:?}) }});", options, graph);
+        let err = engine_with(book.clone(), &[], &[]).build_entry_str(&script).expect_err(&script).to_string();
+        assert!(err.contains(want), "wanted: {}\n  got: {}", want, err);
+    }
+}
+
 const MAZE: &str = r#"new_lock("t").add("maze", "maze_lock", #{ input_base: 27 }).set_input("maze.maze_text", symbols(27, "HELLO WORLD")).set_input("maze.random_seed", symbols(10, "4"))"#;
 
 #[test]
@@ -369,6 +411,7 @@ fn every_illustration_writes_in_the_cursive_wherever_it_writes() {
         ("eye", Box::new(|s: &str, w: &[(&str, &str)]| eye(s, "#{}", w)), &["iris_style", "pupil_style"]),
         ("maze_glyphs", Box::new(maze), &["glyph_style"]),
         ("styled_text", Box::new(styled), &["style"]),
+        ("graph_map", Box::new(|s: &str, w: &[(&str, &str)]| map(s, "#{ width: 3000.0, height: 2400.0, label_place: \"upright\" }", w)), &["name_style", "edge_style"]),
         ("symbol_ring", Box::new(|s: &str, w: &[(&str, &str)]| drawn(&format!(r#"new_lock("t"){}"#, s), "symbol_ring", "#{ step: 1 }", w)), &["glyph_style"]),
         ("rearranged_symbol_ring", Box::new(|s: &str, w: &[(&str, &str)]| drawn(&format!(r#"new_lock("t"){}"#, s), "rearranged_symbol_ring", "#{ step: 2 }", w)), &["glyph_style"]),
         ("joined_symbol_ring", Box::new(|s: &str, w: &[(&str, &str)]| drawn(&format!(r#"new_lock("t"){}"#, s), "joined_symbol_ring", "#{ first: 1, second: 2 }", w)), &["glyph_style"]),

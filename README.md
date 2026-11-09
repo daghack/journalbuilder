@@ -77,9 +77,9 @@ cd webapp/frontend && npm install && npm start
 | path | what's there |
 |---|---|
 | `journals/<name>/` | one journal per directory: `journal.json` (its title and entries in order), `entries/<entry>.rhai`, and files of its own in front of the library's (below) |
-| `webapp/journals/` | the two journals built into the web editor, the showcase and the API reference; it imports the others from `journals/` |
-| `webapp/journals/showcase` | a page each of every brush, glyphset, glyph, art tool, text layout and lock type, with the calls that make them |
-| `webapp/journals/api_reference` | the API reference: an entry for every function scripts can call, with its arguments, options and defaults |
+| `webapp/journals/` | the journal built into the web editor, the showcase; it imports the others from `journals/` |
+| `webapp/journals/showcase` | a page each of every brush, glyphset, glyph, art tool, text layout and lock type, with the calls that make them, and an appendix of what's been added since |
+| `docs/api.md` | the API reference: an entry for every function scripts can call, with its arguments, options and defaults, and short examples with what they draw (`docs/images/`) |
 | `webapp/library/` | the built-in library every journal stands in front of, a directory for each kind of file: |
 | `webapp/library/locks/` | lock types (ciphers and puzzles), one rhai file each; see [webapp/library/locks/README.md](webapp/library/locks/README.md) |
 | `webapp/library/helpers/` | helper types, lock files that transform data between locks (split, join, read text as symbols); see [webapp/library/helpers/README.md](webapp/library/helpers/README.md) |
@@ -324,9 +324,8 @@ What to know:
 labelled with the calls that make it: render it with
 `target/release/journalbuild showcase`.
 
-`webapp/journals/api_reference` lists every function scripts can call, with its
-arguments, options and defaults: render it with
-`target/release/journalbuild api_reference --pdf`.
+[docs/api.md](docs/api.md) lists every function scripts can call, with its
+arguments, options and defaults, and short examples with what they draw.
 
 The module docs in `src/journal/rhaientries/` cover each area in more
 detail: `style.rs` (brush, handwriting and stroke styles),

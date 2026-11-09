@@ -24,7 +24,6 @@ const ROOT: &str = env!("CARGO_MANIFEST_DIR");
 const WORKLOADS: &[(&str, &str, bool)] = &[
     ("tests/smoke_journals", "smoke", true),
     ("webapp/journals", "showcase", true),
-    ("webapp/journals", "api_reference", false),
     ("journals", "becoming_us", false),
     ("journals", "black_priests", false),
     ("journals", "copper_letter_1", false),

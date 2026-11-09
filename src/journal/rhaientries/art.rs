@@ -448,8 +448,12 @@ pub(super) fn sketch_parts(sketch: crate::journal::kinds::Sketch) -> Map {
 pub fn register(engine: &mut Engine, text: super::path::TextSource) {
     let rng = text.1.clone();
     let mut module = Module::new();
+    let marked = text.clone();
     module.set_native_fn("spiral_text", move |ctx: NativeCallContext, msg: &str, center: Vec2, radius: Dynamic, settings: Map| -> RhaiResult<Canvas> {
-        super::path::spiral_text(msg, center, &radius, settings, &text).map_err(|err| error(&ctx, err.to_string()))
+        super::path::spiral_text(&super::path::plain(msg), center, &radius, settings, &text).map_err(|err| error(&ctx, err.to_string()))
+    });
+    module.set_native_fn("spiral_text", move |ctx: NativeCallContext, msg: super::markdown::Markdown, center: Vec2, radius: Dynamic, settings: Map| -> RhaiResult<Canvas> {
+        super::path::spiral_text(&super::markdown::FlowText::Marked(msg), center, &radius, settings, &marked).map_err(|err| error(&ctx, err.to_string()))
     });
     module.set_native_fn("moon", |ctx: NativeCallContext, center: Vec2, radius: Dynamic, phase: Dynamic| -> RhaiResult<Map> {
         moon(&ctx, center, &radius, &phase)

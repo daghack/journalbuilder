@@ -20,6 +20,7 @@
 //! never the clock.
 
 pub mod schema;
+pub mod graph;
 pub mod huffman_code;
 pub mod maze;
 mod star_chart;
@@ -85,7 +86,7 @@ impl Sketch {
     }
 }
 
-static KINDS: &[&dyn ValueKind] = &[&huffman_code::HuffmanCode, &maze::Maze, &star_chart::StarChart];
+static KINDS: &[&dyn ValueKind] = &[&graph::Graph, &huffman_code::HuffmanCode, &maze::Maze, &star_chart::StarChart];
 
 pub fn kinds() -> &'static [&'static dyn ValueKind] {
     KINDS

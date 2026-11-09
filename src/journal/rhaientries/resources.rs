@@ -16,6 +16,7 @@
 //! content/NAME.txt         plain text, for content(name)
 //! content/NAME.md          marked-up text, for content(name)
 //! content/NAME.json        symbols, #{ base, symbols }, for content(name)
+//! content/NAME.graph       a graph of places and ways, for content(name)
 //! images/NAME.png          pictures, for image(name)
 //! images/NAME.jpg          pictures, for image(name)
 //! ```
@@ -38,15 +39,14 @@ pub const DEFAULT_LIBRARY_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/weba
 /// The repository's journals.
 pub const DEFAULT_JOURNALS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/journals");
 
-/// The journals built into the web editor: the showcase and the API
-/// reference.
+/// The journal built into the web editor: the showcase.
 pub const BUILT_IN_JOURNALS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/webapp/journals");
 
 /// Where journals are found by name, in order.
 pub const DEFAULT_JOURNALS_DIRS: [&str; 2] = [DEFAULT_JOURNALS_DIR, BUILT_IN_JOURNALS_DIR];
 
 /// Every kind of resource: its directory, and its files' extension.
-pub const KINDS: [(&str, &str); 13] = [
+pub const KINDS: [(&str, &str); 14] = [
     ("locks", "rhai"),
     ("helpers", "rhai"),
     ("layouts", "rhai"),
@@ -58,6 +58,7 @@ pub const KINDS: [(&str, &str); 13] = [
     ("content", "txt"),
     ("content", "md"),
     ("content", "json"),
+    ("content", "graph"),
     ("images", "png"),
     ("images", "jpg"),
 ];
@@ -74,10 +75,11 @@ pub struct Resources {
     pub styles: Sources,
     pub lib: Sources,
     pub glyphsets: Sources,
-    /// Content: plain text, marked-up text and symbols.
+    /// Content: plain text, marked-up text, symbols and graphs.
     pub text: Sources,
     pub markdown: Sources,
     pub symbols: Sources,
+    pub graphs: Sources,
     /// Pictures: PNGs and JPEGs.
     pub png_images: Sources,
     pub jpg_images: Sources,
@@ -120,6 +122,7 @@ impl Resources {
             text: sources("content", "txt"),
             markdown: sources("content", "md"),
             symbols: sources("content", "json"),
+            graphs: sources("content", "graph"),
             png_images: sources("images", "png"),
             jpg_images: sources("images", "jpg"),
         }
@@ -139,6 +142,7 @@ impl Resources {
             text: self.text.over(under.text),
             markdown: self.markdown.over(under.markdown),
             symbols: self.symbols.over(under.symbols),
+            graphs: self.graphs.over(under.graphs),
             png_images: self.png_images.over(under.png_images),
             jpg_images: self.jpg_images.over(under.jpg_images),
         }
@@ -166,6 +170,7 @@ impl Resources {
             text: record(self.text),
             markdown: record(self.markdown),
             symbols: record(self.symbols),
+            graphs: record(self.graphs),
             png_images: record(self.png_images),
             jpg_images: record(self.jpg_images),
         };
@@ -173,7 +178,7 @@ impl Resources {
     }
 
     /// Every kind's files, in `KINDS`' order, with their directory's name.
-    pub fn kinds(&self) -> [(&'static str, &Sources); 13] {
+    pub fn kinds(&self) -> [(&'static str, &Sources); 14] {
         [
             ("locks", &self.locks),
             ("helpers", &self.helpers),
@@ -186,6 +191,7 @@ impl Resources {
             ("content", &self.text),
             ("content", &self.markdown),
             ("content", &self.symbols),
+            ("content", &self.graphs),
             ("images", &self.png_images),
             ("images", &self.jpg_images),
         ]
@@ -208,7 +214,7 @@ impl Resources {
     /// The content called `name`'s files: where there's more than one
     /// (`lorem.txt` and `lorem.md`), content(name) is ambiguous.
     pub fn content_kinds(&self, name: &str) -> Vec<&'static str> {
-        [(&self.text, "txt"), (&self.markdown, "md"), (&self.symbols, "json")].into_iter()
+        [(&self.text, "txt"), (&self.markdown, "md"), (&self.symbols, "json"), (&self.graphs, "graph")].into_iter()
             .filter(|(sources, _)| sources.has(name))
             .map(|(_, ext)| ext)
             .collect()
@@ -222,7 +228,7 @@ impl Resources {
 
     /// Every content name, sorted.
     pub fn content_names(&self) -> Vec<String> {
-        let mut names: Vec<String> = [&self.text, &self.markdown, &self.symbols].into_iter()
+        let mut names: Vec<String> = [&self.text, &self.markdown, &self.symbols, &self.graphs].into_iter()
             .flat_map(|sources| sources.names().unwrap_or_default())
             .collect();
         names.sort();
