@@ -64,7 +64,7 @@ function previewScript(name: string, ext: string): string {
           @if (previewUrl(); as url) { <img [src]="url" alt="The content, written" /> }
           @if (preview()?.error; as error) { <p class="error">{{ error.message }}</p> }
           @if (ext() === 'graph') {
-            <p class="hint">Drawn by the library's graph_map. A line is a place, <code>Name</code> or <code>Name: glyph glyph</code>, or a way between two, <code>A -> B</code> one way or <code>A -- B</code> both, then <code>: text</code> if it has any; an indented line carries on the line above, and <code>#</code> starts a comment. An entry reads it with content("{{ name() }}"): a Graph.</p>
+            <p class="hint">Drawn by the library's graph_map. A line is a place, <code>Name</code>, <code>Name: glyph glyph</code> or <code>Name: glyphset "text"</code> (each character a glyph of that glyphset), or a way between two, <code>A -> B</code> one way or <code>A -- B</code> both, then <code>: text</code> if it has any; an indented line carries on the line above, and <code>#</code> starts a comment. An entry reads it with content("{{ name() }}"): a Graph.</p>
           } @else {
             <p class="hint">Written in the library's plain_hand. An entry reads it with content("{{ name() }}"){{ ext() === 'md' ? ', and sets it marked up with markdown(content("' + name() + '"))' : '' }}.</p>
           }

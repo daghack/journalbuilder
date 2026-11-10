@@ -1,23 +1,25 @@
 // graph_map: a Graph drawn as a map of places and the ways between them,
 // laid out by forces (graph::layout) on one canvas, width by height: each
-// place a box round its name, its glyphs in a row under the name, and
-// each way a line between the boxes, with an arrowhead where it goes one
-// way and its text set on the line. label_place sets the text "along" the
-// line, turned to it, the line breaking for it; "beside" it, above the
-// line; or "upright", across the line, which breaks round it.
+// place its glyphs in a row (a dot, if it has none), from the glyphset it
+// names or glyph_style's, its name boxed beside them on whichever side is
+// clearest, and each way a line between the places' glyphs, with an
+// arrowhead where it goes one way and its text set on the line. label_place sets the text "along" the line,
+// turned to it, the line breaking for it; "beside" it, above the line; or
+// "upright", across the line, which breaks round it.
 //
 // Its styles are TextStyles, a style source's, each drawn whole:
 // name_style writes the places' names, wrapped at name_width, and
 // edge_style the ways' texts, wrapped at text_width (both as marked-up
-// text); glyph_style draws the glyphs, from its glyphset at its size;
-// box_style draws the boxes, and line_style the lines and arrowheads,
-// whose barbs are arrow long. Unwired, they're near-black and red ink
-// pens, the names in plain at name_size and the texts in plain at
-// edge_size, each centred and at a steady pressure, and the glyphs from
-// symbols at glyph_size.
+// text); glyph_style draws the glyphs, from its glyphset at its size, and
+// the dots, dot across; box_style draws the names' boxes, and line_style
+// the lines and arrowheads, whose barbs are arrow long. Unwired, they're
+// near-black and red ink pens, the names in plain at name_size and the
+// texts in plain at edge_size, each centred and at a steady pressure, and
+// the glyphs from symbols at glyph_size.
 //
-// padding is the room in a box round what's in it, and gap the room kept
-// between boxes, texts and lines. seed and iterations go to the layout,
+// padding is the room in a name's box round the name, and gap the room
+// kept between glyphs, names, texts and lines (half of it between a
+// place's glyphs and its name). seed and iterations go to the layout,
 // which takes more room than width by height for a graph too crowded for
 // it; the map is then scaled down to fit.
 
@@ -26,8 +28,8 @@ import "lib/symbol_rings" as rings;
 fn options() {
 	#{
 		width: 1200.0, height: 900.0, label_place: "along", seed: 0, iterations: 300,
-		name_width: 260.0, text_width: 320.0, padding: 16.0, gap: 14.0, arrow: 18.0,
-		name_size: 30.0, edge_size: 20.0, glyph_size: 36.0,
+		name_width: 260.0, text_width: 320.0, padding: 10.0, gap: 14.0, arrow: 18.0,
+		name_size: 30.0, edge_size: 20.0, glyph_size: 36.0, dot: 10.0,
 	}
 }
 
@@ -62,31 +64,48 @@ fn render(o, i) {
 		throw `graph_map: label_place should be "along", "beside" or "upright", got "${o.label_place}"`;
 	}
 	let g = i.graph;
-	// Each place's box's contents, its name over its glyphs, about (0, 0),
-	// and the box's size.
-	let glyphs = i.glyph_style.type.glyphset;
-	let known = glyphs.characters();
+	// Each place's glyphs in a row about (0, 0), or a dot, and their size;
+	// its name about (0, 0) in its box, and the box's size.
 	let glyph_size = size_of(i.glyph_style.type);
-	let contents = [];
+	let sets = glyphset_names();
+	let symbols = [];
 	let sizes = [];
+	let names = [];
+	let name_sizes = [];
 	for node in g.nodes {
-		let c = centred(write_block(markdown(node.name), vec2(0, 0), o.name_width, i.name_style).canvas);
-		if node.glyphs.len() > 0 {
-			let row = new_canvas();
-			for (name, k) in node.glyphs {
-				if !(name in known) {
-					throw `graph_map: ${node.name}'s glyph '${name}' isn't one of its glyphset's`;
-				}
-				row.add(glyphs.glyph(name, #{ scale: glyph_size, position: vec2(k * glyph_size * 1.2, 0) }), i.glyph_style.style);
+		let glyphs = i.glyph_style.type.glyphset;
+		if node.glyphset != () {
+			if !(node.glyphset in sets) {
+				throw `graph_map: ${node.name}'s glyphset '${node.glyphset}' isn't one there is`;
 			}
-			row = centred(row);
-			let below = c.bounds().max.y + o.padding * 0.5 - row.bounds().min.y;
-			c.add(row.translate_by(vec2(0, below)));
-			c = centred(c);
+			glyphs = glyphset(node.glyphset);
 		}
-		let b = c.bounds();
-		contents.push(c);
-		sizes.push([b.max.x - b.min.x + 2.0 * o.padding, b.max.y - b.min.y + 2.0 * o.padding]);
+		let known = glyphs.characters();
+		// Side by side, a fifth of a glyph apart.
+		let row = new_canvas();
+		let x = 0.0;
+		for name in node.glyphs {
+			if !(name in known) {
+				throw `graph_map: ${node.name}'s glyph '${name}' isn't one of its glyphset's`;
+			}
+			let glyph = new_canvas().add(glyphs.glyph(name, #{ scale: glyph_size }), i.glyph_style.style);
+			let b = glyph.bounds();
+			row.add(glyph.translate_by(vec2(x - b.min.x, 0)));
+			x += b.max.x - b.min.x + glyph_size * 0.2;
+		}
+		if node.glyphs.len() == 0 {
+			let dot = new_circle(vec2(0, 0), o.dot / 2.0);
+			row.add(dot, i.glyph_style.style).add(dot.hatch(o.dot / 5.0), i.glyph_style.style);
+		}
+		row = centred(row);
+		let b = row.bounds();
+		symbols.push(row);
+		sizes.push([b.max.x - b.min.x, b.max.y - b.min.y]);
+		let name = centred(write_block(markdown(node.name), vec2(0, 0), o.name_width, i.name_style).canvas);
+		let nb = name.bounds();
+		let size = [nb.max.x - nb.min.x + 2.0 * o.padding, nb.max.y - nb.min.y + 2.0 * o.padding];
+		names.push(name.add(new_rectangle(vec2(0, 0), size[0], size[1]), i.box_style.style));
+		name_sizes.push(size);
 	}
 	// Each way's text about (0, 0), and its size.
 	let labels = [];
@@ -103,14 +122,13 @@ fn render(o, i) {
 		label_sizes.push([b.max.x - b.min.x, b.max.y - b.min.y]);
 	}
 	let laid = graph::layout(g, sizes, #{
-		labels: label_sizes, label_place: o.label_place, gap: o.gap,
+		labels: label_sizes, names: name_sizes, label_place: o.label_place, gap: o.gap,
 		width: o.width, height: o.height, seed: o.seed, iterations: o.iterations,
 	});
 	let map = new_canvas();
-	for (node, k) in g.nodes {
-		let p = point(laid.points[k]);
-		map.add(new_rectangle(p, sizes[k][0], sizes[k][1]), i.box_style.style);
-		map.add(contents[k].translate_by(p));
+	for k in 0..g.nodes.len() {
+		map.add(symbols[k].translate_by(point(laid.points[k])));
+		map.add(names[k].translate_by(point(laid.names[k])));
 	}
 	for (edge, e) in laid.edges {
 		let lines = new_path();
