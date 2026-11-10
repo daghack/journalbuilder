@@ -128,12 +128,13 @@ impl PathCmd {
             PathCmd::ClosePath => PathCmd::ClosePath,
         }
     }
-    pub fn scale_by(&self, s: f32) -> Self {
+    /// Scaled about the origin, by `s.x` across and `s.y` down.
+    pub fn scale_by(&self, s: Vec2) -> Self {
         match self {
-            PathCmd::MoveTo(x, y) => PathCmd::MoveTo(x * s, y * s),
-            PathCmd::LineTo(x, y) => PathCmd::LineTo(x * s, y * s),
-            PathCmd::CubicCurveTo(x1, y1, x2, y2, x, y) => PathCmd::CubicCurveTo(x1 * s, y1 * s, x2 * s, y2 * s, x * s, y * s),
-            PathCmd::QuadraticCurveTo(x1, y1, x, y) => PathCmd::QuadraticCurveTo(x1 * s, y1 * s, x * s, y * s),
+            PathCmd::MoveTo(x, y) => PathCmd::MoveTo(x * s.x, y * s.y),
+            PathCmd::LineTo(x, y) => PathCmd::LineTo(x * s.x, y * s.y),
+            PathCmd::CubicCurveTo(x1, y1, x2, y2, x, y) => PathCmd::CubicCurveTo(x1 * s.x, y1 * s.y, x2 * s.x, y2 * s.y, x * s.x, y * s.y),
+            PathCmd::QuadraticCurveTo(x1, y1, x, y) => PathCmd::QuadraticCurveTo(x1 * s.x, y1 * s.y, x * s.x, y * s.y),
             PathCmd::ClosePath => PathCmd::ClosePath,
         }
     }
@@ -226,13 +227,13 @@ impl StrokePath {
         self.points_within().iter().flat_map(|p| [p.x.to_bits(), p.y.to_bits()])
             .fold(0xcbf29ce484222325, |hash, bits| (hash ^ bits as u64).wrapping_mul(0x100000001b3))
     }
+    /// Scaled about the origin by `s` both ways.
     pub fn scaled_by(mut self, s: f32) -> Self {
-        for cmd in &mut self.commands {
-            *cmd = cmd.scale_by(s);
-        }
+        self.scale_by(Vec2::splat(s));
         self
     }
-    pub fn scale_by(&mut self, s: f32) {
+    /// Scale about the origin, by `s.x` across and `s.y` down.
+    pub fn scale_by(&mut self, s: Vec2) {
         for cmd in &mut self.commands {
             *cmd = cmd.scale_by(s);
         }

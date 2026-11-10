@@ -147,7 +147,7 @@ fn render(o, i) {
 	// A crowded graph took more room: back into width by height.
 	let grown = laid.size[0] / o.width;
 	if grown > 1.0 {
-		map.scale_by(1.0 / grown);
+		map.scale_by(vec2(1.0, 1.0) / grown);
 	}
 	map
 }

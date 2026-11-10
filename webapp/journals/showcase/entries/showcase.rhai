@@ -42,7 +42,8 @@
 //             .graph content, graph::layout) and graph_map; graph::layout's
 //             names, set beside their places; places' glyphs from glyphsets
 //             of their own, and ragged way texts; write_block's align, its
-//             ragged lines aligned too
+//             ragged lines aligned too; scale_by by a vec, across and down
+//             apart, and canvas.size_to, filling a canvas or a page
 //
 // Pages are bound with new_book: numbered, named and listed in the
 // contents.
@@ -775,7 +776,7 @@ art.add(
 		.quad_to(vec2(670, y - 70), vec2(720, y + 50))
 		.cubic_to(vec2(760, y + 110), vec2(660, y + 130), vec2(620, y + 50))
 		.close()
-		.scale_by(1).translate_by(vec2(10, 0)),
+		.scale_by(vec2(1, 1)).translate_by(vec2(10, 0)),
 	pen(BLUE));
 
 // Hatching fills a closed path's inside with lines: hatch(spacing,
@@ -847,7 +848,7 @@ let art = sheet("art");
 art.add(caption("new_maze(width, height, #{ seed, strategy }), maze.width, maze.height", TOP));
 let maze = new_maze(8, 3, #{ seed: 4 });
 assert(maze.width == 15 && maze.height == 5, "a maze's size is its cells'");
-art.add(maze.path().scale_by(30).translate_by(vec2(LEFT + 20, TOP + 50)), LINE);
+art.add(maze.path().scale_by(vec2(30, 30)).translate_by(vec2(LEFT + 20, TOP + 50)), LINE);
 // Shapes from their own constructors, and points spaced along a path.
 art.add(write("new_polygon, new_star, new_ellipse, new_wave, new_polyline", 600, TOP + 40, 20));
 art.add(new_polygon(vec2(640, TOP + 110), 36, 6), LINE);
@@ -888,7 +889,7 @@ let art = sheet("art");
 art.add(caption("art::bramble_along a maze", TOP));
 // Scaled to fit half the page, from its bounds.
 let maze_lines = new_maze(4, 3, #{ seed: 5 }).path();
-maze_lines.scale_by(780 / maze_lines.bounds().width);
+maze_lines.scale_by(vec2(780, 780) / maze_lines.bounds().width);
 art.add(art::bramble_along(maze_lines.copy().translate_by(vec2(LEFT + 110, TOP + 90)), 50, #{ seed: 2 }), BRAMBLE);
 art.add(caption("art::snake_along the same maze", 860));
 art.add(art::snake_along(maze_lines.copy().translate_by(vec2(LEFT + 110, 940)), 40, #{ seed: 2 }), LINE);
@@ -996,7 +997,7 @@ art.add(star, CAPTION);
 // times as wide there, easing to their usual width reach away.
 art.add(caption("art::bramble_along(path, flower_size, #{ seed, origin, thickness, reach }): the origin ringed", TOP + 560));
 let maze_lines = new_maze(5, 3, #{ seed: 8 }).path();
-maze_lines.scale_by(900 / maze_lines.bounds().width);
+maze_lines.scale_by(vec2(900, 900) / maze_lines.bounds().width);
 maze_lines.translate_by(vec2(LEFT + 50, TOP + 720));
 let origin = maze_lines.bounds().min;
 let grown = art::bramble_along(maze_lines, 45, #{ seed: 6, origin: origin, thickness: 10, reach: 1000 });
@@ -1640,7 +1641,7 @@ text.add(caption("right: free_regions_in_canvas(drawing, #{ margin: vec2(30, 25)
 y += 320;
 for (options, i) in [#{ clearance: 8 }, #{ clearance: 8, min_width: 50, outline: "smooth", order: "smallest" }] {
 	let centre = vec2(LEFT + 240 + i * 520, y);
-	let drawing = scribble(centre).scale_by(0.45).translate_by(centre * 0.55);
+	let drawing = scribble(centre).scale_by(vec2(0.45, 0.45)).translate_by(centre * 0.55);
 	text.add(drawing);
 	let regions = if i == 0 {
 		let area = new_rectangle(centre, 480, 280);
@@ -1664,7 +1665,7 @@ book.bind("text", text);
 let text = sheet("text");
 text.add(subhead("free regions in a page", TOP));
 text.add(caption("free_regions_in_page(new_page(#{ size: vec2(W, H) }).add(sheet), #{ margin: vec2(-100, -130), ... })", TOP + 50));
-text.add(scribble(vec2(W / 2.0, TOP + 600)).scale_by(1.1).translate_by(vec2(-W * 0.05, -(TOP + 600) * 0.1)));
+text.add(scribble(vec2(W / 2.0, TOP + 600)).scale_by(vec2(1.1, 1.1)).translate_by(vec2(-W * 0.05, -(TOP + 600) * 0.1)));
 let page = new_page(#{ size: vec2(W, H) }).add(text);
 let rest = "";
 for i in 0..24 { rest += LOREM + " "; }
@@ -1760,7 +1761,7 @@ assert(fixed.run().text("s.cipher_text") == "FWFSZAMPDLAPQFOT", "a fixed chain r
 let cell_size = 70;
 let maze_canvas = new_canvas();
 let grid = result.get("maze.generated_maze").maze();
-maze_canvas.add(grid.path().scale_by(cell_size), pen(RED));
+maze_canvas.add(grid.path().scale_by(vec2(cell_size, cell_size)), pen(RED));
 let ternary = glyphset("balanced_ternary");
 for cell in grid.cells() {
 	maze_canvas.add(ternary.glyph(cell.symbol - 13, #{ scale: cell_size * 0.8, position: vec2(cell.x * cell_size, cell.y * cell_size) }), SAMPLE);
@@ -1795,7 +1796,7 @@ fn draw_sketch(sketch, styles, corner, w, h) {
 	let place = |p| (p - lo + vec2(sketch.label_size, sketch.label_size)) * f + corner;
 	let c = new_canvas();
 	for name in styles.keys() {
-		c.add(sketch[name].copy().translate_by(vec2(sketch.label_size, sketch.label_size) - lo).scale_by(f).translate_by(corner), styles[name]);
+		c.add(sketch[name].copy().translate_by(vec2(sketch.label_size, sketch.label_size) - lo).scale_by(vec2(f, f)).translate_by(corner), styles[name]);
 	}
 	let size = sketch.label_size * f;
 	for label in sketch.labels {
@@ -1874,10 +1875,10 @@ drawn.add(gridded.canvases("drawn")[0].translate_by(vec2(LEFT + 40, TOP + 120)))
 let raven = chain("raven_sky", #{ most_stars: 12 });
 assert(raven.illustrations()["message"] == "trit_message" && raven.illustrations()["pages"] == "star_pages", "a chain file's illustrations come with it");
 let drawn_sky = raven.run(#{ "enc.plain_text": symbols(27, corpus), "msg.plain_text": symbols(27, "EVERY LOCK OPENS") });
-drawn.add(drawn_sky.canvases("message")[0].scale_by(0.42).translate_by(vec2(LEFT + 470, TOP + 70)));
+drawn.add(drawn_sky.canvases("message")[0].scale_by(vec2(0.42, 0.42)).translate_by(vec2(LEFT + 470, TOP + 70)));
 for (page, i) in drawn_sky.canvases("pages") {
 	if i >= 3 { break; }
-	drawn.add(page.scale_by(0.27).translate_by(vec2(LEFT + i * 340, TOP + 430)));
+	drawn.add(page.scale_by(vec2(0.27, 0.27)).translate_by(vec2(LEFT + i * 340, TOP + 430)));
 }
 // eye: two texts in an eye on end, one round its iris, one in its pupil,
 // as Welcome Home draws a substitution cipher's ordering and cipher text.
@@ -1888,7 +1889,7 @@ let watched = new_lock("watched")
 	.connect("sub.ordering", "eye.outer")
 	.connect("sub.cipher_text", "eye.inner")
 	.run(#{ "sub.plain_text": symbols(27, "EVERY LOCK OPENS") });
-drawn.add(watched.canvases("eye")[0].scale_by(0.22).translate_by(vec2(LEFT + 20, TOP + 890)));
+drawn.add(watched.canvases("eye")[0].scale_by(vec2(0.22, 0.22)).translate_by(vec2(LEFT + 20, TOP + 890)));
 // The same eye with its pupil's text in a spiral, at most pupil_size 30,
 // the last turn shrinking to fill the room left, down to a tenth.
 let spiralled = new_lock("spiralled")
@@ -1898,7 +1899,7 @@ let spiralled = new_lock("spiralled")
 	.connect("sub.ordering", "eye.outer")
 	.connect("sub.cipher_text", "eye.inner")
 	.run(#{ "sub.plain_text": symbols(27, "EVERY LOCK OPENS ONCE ITS KEY IS FOUND") });
-drawn.add(spiralled.canvases("eye")[0].scale_by(0.22).translate_by(vec2(LEFT + 200, TOP + 890)));
+drawn.add(spiralled.canvases("eye")[0].scale_by(vec2(0.22, 0.22)).translate_by(vec2(LEFT + 200, TOP + 890)));
 drawn.add(write_in("eye (outer_base, inner_base, length, width, top_ink,", LEFT + 400, TOP + 980, 22, CAPTION, PLAIN));
 drawn.add(write_in("bottom_ink, inner_ink, pupil, pupil_size, pupil_minimum_", LEFT + 400, TOP + 1014, 22, CAPTION, PLAIN));
 drawn.add(write_in("scale): a substitution cipher's ordering round the iris, its", LEFT + 400, TOP + 1048, 22, CAPTION, PLAIN));
@@ -1961,13 +1962,13 @@ let resized = chain("raven_sky", #{ most_stars: 12 })
 		"enc.plain_text": symbols(27, corpus), "msg.plain_text": symbols(27, "EVERY LOCK OPENS"),
 		"maze.maze_text": symbols(27, "HELLO WORLD"), "maze.random_seed": symbols(10, "4"),
 	});
-sized.add(resized.canvases("pages")[0].scale_by(0.4).translate_by(vec2(LEFT, TOP + 80)));
-sized.add(resized.canvases("larger")[0].scale_by(0.4).translate_by(vec2(LEFT + 520, TOP + 80)));
+sized.add(resized.canvases("pages")[0].scale_by(vec2(0.4, 0.4)).translate_by(vec2(LEFT, TOP + 80)));
+sized.add(resized.canvases("larger")[0].scale_by(vec2(0.4, 0.4)).translate_by(vec2(LEFT + 520, TOP + 80)));
 sized.add(caption("unwired, at 44, 24 and 22", TOP + 730));
 sized.add(write_in("#{ heading_size: 64, digit_size: 32, name_size: 30 }", LEFT + 520, TOP + 730, 22, CAPTION, PLAIN));
 sized.add(caption("wired a plain_hand source: maze_glyphs' cells in letters, star_pages' numbers in decimal", TOP + 800));
 sized.add(resized.canvases("letters")[0].translate_by(vec2(LEFT + 40, TOP + 880)));
-sized.add(resized.canvases("decimal")[0].scale_by(0.28).translate_by(vec2(LEFT + 520, TOP + 840)));
+sized.add(resized.canvases("decimal")[0].scale_by(vec2(0.28, 0.28)).translate_by(vec2(LEFT + 520, TOP + 840)));
 book.bind("locks", sized);
 
 // symbol_ring: a base's symbols round a ring, each joined by dashes to the
@@ -2469,7 +2470,7 @@ for (place, i) in ["along", "beside", "upright"] {
 		if small.edges[e].directed { c.add(new_circle(vec2(edge.end[0], edge.end[1]), 6), CAPTION); }
 	}
 	let fit = 300.0 / laid.size[0];
-	graphs.add(c.scale_by(fit).translate_by(vec2(LEFT + i * 350, y + 90)));
+	graphs.add(c.scale_by(vec2(fit, fit)).translate_by(vec2(LEFT + i * 350, y + 90)));
 	graphs.add(write(`label_place: "${place}"`, LEFT + i * 350, y + 140 + laid.size[1] * fit, 20));
 }
 book.bind("appendix", graphs);
@@ -2530,7 +2531,7 @@ for (place, i) in ["along", "beside", "upright"] {
 		if small.edges[e].directed { c.add(new_circle(vec2(edge.end[0], edge.end[1]), 6), CAPTION); }
 	}
 	let fit = 300.0 / laid.size[0];
-	named.add(c.scale_by(fit).translate_by(vec2(LEFT + i * 350, TOP + 90)));
+	named.add(c.scale_by(vec2(fit, fit)).translate_by(vec2(LEFT + i * 350, TOP + 90)));
 	named.add(write(`label_place: "${place}"`, LEFT + i * 350, TOP + 140 + laid.size[1] * fit, 20));
 }
 let y = TOP + 520;
@@ -2579,6 +2580,54 @@ aligned.add(caption("graph_map, edge_style's paragraph: #{ align: \"center\", li
 let centred = ragged + #{ paragraph: #{ align: "center", line_start_jitter: 30, line_gap_jitter: 5 } };
 aligned.add(illustration("graph_map", #{ label_place: "upright", width: 1000.0, height: 560.0, seed: 0, text_width: 240.0 }).run(#{ graph: glyphed, edge_style: centred })[0].translate_by(vec2(LEFT, y + 40)));
 book.bind("appendix", aligned);
+
+// Scaling by a vec, across and down apart; and canvas.size_to, a canvas
+// scaled and moved to fill another canvas's bounds or a page, stretched or
+// in proportion.
+fn motif() {
+	new_canvas()
+		.add(new_circle(vec2(0, 0), 60), global::LINE)
+		.add(new_star(vec2(0, 0), 52, 22, 5), global::SAMPLE)
+		.add(write("Lorem", -38, 92, 26))
+}
+let fitted = sheet("art");
+fitted.add(caption("canvas.scale_by(vec2(across, down)), path.scale_by(vec2(across, down)): scaled about the origin, across", TOP));
+fitted.add(caption("and down apart; vec2(s, s) both ways alike, and a negative flips", TOP + 34));
+let y = TOP + 200;
+for (scale, i) in [[vec2(1, 1), "1, 1"], [vec2(2, 0.6), "2, 0.6"], [vec2(0.6, 1.4), "0.6, 1.4"], [vec2(-1, 1), "-1, 1"]] {
+	let x = LEFT + [70, 330, 540, 690][i];
+	fitted.add(motif().scale_by(scale[0]).translate_by(vec2(x, y)));
+	fitted.add(write(`vec2(${scale[1]})`, x - 55, y + 185, 18));
+}
+fitted.add(new_star(vec2(0, 0), 60, 25, 5).scale_by(vec2(1.6, 0.8)).translate_by(vec2(LEFT + 880, y)), pen(RED));
+fitted.add(write("a path, vec2(1.6, 0.8)", LEFT + 790, y + 185, 18));
+
+y = TOP + 440;
+fitted.add(caption("canvas.size_to(target, #{ padding, keep_proportions }): scaled and moved so its bounds fill the target's less", y));
+fitted.add(caption("the padding: another canvas's (red), stretched to fill, or keep_proportions: true, as big as fits and centred", y + 34));
+y += 110;
+for (frame, i) in [
+	[new_rectangle(vec2(LEFT + 110, y + 170), 220, 340), #{ padding: 20 }],
+	[new_rectangle(vec2(LEFT + 360, y + 170), 220, 340), #{ padding: 20, keep_proportions: true }],
+	[new_rectangle(vec2(LEFT + 770, y + 70), 460, 140), #{ padding: 20 }],
+	[new_rectangle(vec2(LEFT + 770, y + 270), 460, 140), #{ padding: 20, keep_proportions: true }],
+] {
+	let target = new_canvas().add(frame[0], pen(RED));
+	fitted.add(target).add(motif().size_to(target, frame[1]));
+	let b = target.bounds();
+	fitted.add(write(if "keep_proportions" in frame[1] { "keep_proportions: true" } else { "padding: 20" }, b.min.x, b.max.y + 22, 18));
+}
+
+y = TOP + 960;
+fitted.add(caption("canvas.size_to(page, #{ padding: 30 }): a page's size, from the origin (its edge in red, the page moved here)", y));
+let card = new_page(#{ size: vec2(400, 200) });
+for (options, i) in [#{ padding: 30 }, #{ padding: 30, keep_proportions: true }] {
+	let at = vec2(LEFT + 20 + i * 520, y + 60);
+	fitted.add(new_rectangle(vec2(200, 100), 400, 200).translate_by(at), pen(RED));
+	fitted.add(motif().size_to(card, options).translate_by(at));
+	fitted.add(write(if i == 0 { "new_page(#{ size: vec2(400, 200) })" } else { "keep_proportions: true" }, at.x, at.y + 232, 18));
+}
+book.bind("appendix", fitted);
 
 // ---- the title page and the contents, which go first ----
 

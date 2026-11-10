@@ -77,6 +77,7 @@ use super::options::{as_number, check_keys, float, number, positive};
 use super::canvas::bounds_map;
 use super::random::SharedRng;
 use super::{avoid, random, Canvas, CanvasData, Path, Style, Vec2};
+use super::vec::scale_factors;
 use crate::journal::clip::{clip, Keep};
 use crate::journal::hatch::{FillRule, HatchOptions};
 use crate::journal::canvas::textbox::TextBoxLineMode;
@@ -778,8 +779,8 @@ pub(super) fn register(engine: &mut Engine, text: TextSource) {
             path.borrow().subpaths().into_iter().map(|p| Dynamic::from(Path::new(p))).collect()
         })
         .register_fn("scale_by", |path: &mut Path, scale: Dynamic| -> RhaiResult<Path> {
-            let scale = float("scale_by", "the scale", &scale)?;
-            Ok(path.update(|p| p.scale_by(scale as f32)))
+            let scale = scale_factors("path.scale_by", scale)?;
+            Ok(path.update(|p| p.scale_by(scale)))
         })
         .register_fn("translate_by", |path: &mut Path, translate: Vec2| -> Path {
             path.update(|p| p.translate_by(translate.into()))

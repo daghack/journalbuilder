@@ -30,7 +30,7 @@ fn fallbacks(o) {
 
 fn render(o, i) {
 	let c = new_canvas();
-	c.add(i.maze.path().scale_by(o.cell), i.corridor_style.style);
+	c.add(i.maze.path().scale_by(vec2(o.cell, o.cell)), i.corridor_style.style);
 	let t = i.glyph_style.type;
 	let scale = min(t.glyph_scale * t.glyph_scale_factor, o.cell * 0.8);
 	let digits = "-13" in t.glyphset.characters();

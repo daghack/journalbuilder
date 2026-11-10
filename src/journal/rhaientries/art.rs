@@ -48,7 +48,7 @@
 //! touch grow separate vines.
 //!
 //! ```rhai
-//! let path = new_maze(9, 7, #{ seed: 7 }).path().scale_by(70.0);
+//! let path = new_maze(9, 7, #{ seed: 7 }).path().scale_by(vec2(70.0, 70.0));
 //! let plant = art::bramble_along(path, 38.0, #{ seed: 3 });   // flowers 38 across
 //! ```
 //!
@@ -592,7 +592,7 @@ mod tests {
     #[test]
     fn bramble_along_follows_a_path() {
         let script = r##"
-            let path = new_maze(3, 2, #{ seed: 2 }).path().scale_by(70.0);
+            let path = new_maze(3, 2, #{ seed: 2 }).path().scale_by(vec2(70.0, 70.0));
             let plant = art::bramble_along(path, 40.0, #{ seed: 1 });
             let ink = |colour| new_style(new_brush_style(colour, "Ink Pen", 1.0), new_handwriting_style());
             let c = new_canvas();
@@ -615,7 +615,7 @@ mod tests {
     #[test]
     fn brambles_thicken_toward_their_origin() {
         let ok: bool = engine().engine.eval(r#"
-            let path = new_maze(3, 2, #{ seed: 2 }).path().scale_by(70.0);
+            let path = new_maze(3, 2, #{ seed: 2 }).path().scale_by(vec2(70.0, 70.0));
             let plain = art::bramble_along(path, 40.0, #{ seed: 1 }).vines;
             let thick = art::bramble_along(path, 40.0, #{ seed: 1, origin: vec2(0, 0), thickness: 4, reach: 120 }).vines;
             let free = art::bramble(vec2(0, 0), 400.0, #{ angle: -PI() / 2.0, flower_size: 80.0, seed: 2, origin: vec2(0, 0) }).vines;
@@ -637,7 +637,7 @@ mod tests {
     #[test]
     fn snake_along_follows_a_path() {
         let script = r##"
-            let path = new_maze(3, 2, #{ seed: 2 }).path().scale_by(70.0);
+            let path = new_maze(3, 2, #{ seed: 2 }).path().scale_by(vec2(70.0, 70.0));
             let c = new_canvas();
             c.add(art::snake_along(path, 30.0, #{ seed: 1 }), new_style(new_brush_style("#f2ead8", "Ink Pen", 1.0), new_handwriting_style()));
             if c.bounds().width < 140.0 { throw "the serpent should cross the maze: " + c.bounds(); }

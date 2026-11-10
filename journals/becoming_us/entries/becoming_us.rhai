@@ -138,7 +138,8 @@ fn draw_eye(center, length, look_at, seed) {
 	canvas.add(eye.accent, new_style(new_brush_style(colour.call(0.6), "Ink Pen", 1.2, #{ min_pressure: 0.2, max_pressure: 0.6, color_jitter: global::EYE_JITTER }), global::STEADY));
 	for p in 0..global::EYE_PASSES {
 		let lines = eye.lines.copy();
-		lines.translate_by(-center).scale_by(1.0 + random_range(-global::EYE_SCALE, global::EYE_SCALE)).translate_by(center);
+		let grown = 1.0 + random_range(-global::EYE_SCALE, global::EYE_SCALE);
+		lines.translate_by(-center).scale_by(vec2(grown, grown)).translate_by(center);
 		lines.rotate_around(center, random_range(-global::EYE_TURN, global::EYE_TURN));
 		lines.translate_by(vec2(random_range(-1.0, 1.0), random_range(-1.0, 1.0)) * global::EYE_SHIFT);
 		canvas.add(lines, global::EYE_INK);

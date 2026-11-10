@@ -228,11 +228,44 @@ Moves every stroke. Returns the canvas.
 
 ### `canvas.scale_by(factor)`
 
-Scales every stroke about the origin; brush sizes stay as they are. Returns the canvas.
+Scales every stroke about the origin, across and down separately; brush sizes stay as they are. Returns the canvas.
 
 | argument | what it does | takes |
 |---|---|---|
-| `factor` | How many times bigger: below 1 shrinks, and negative flips through the origin. | a number. |
+| `factor` | How many times bigger, across and down: below 1 shrinks, and negative flips through the origin. vec2(s, s) scales both ways alike. | a vec. |
+
+```rhai render=canvas_scale_by
+let ring = new_canvas().add(new_circle(vec2(30, 30), 25), PEN);
+page.add(ring.copy());
+page.add(ring.copy().scale_by(vec2(3, 1)).translate_by(vec2(50, 0)));
+page.add(ring.copy().scale_by(vec2(0.6, 1.6)).translate_by(vec2(222, 0)));
+```
+
+![canvas_scale_by](images/canvas_scale_by.svg)
+
+### `canvas.size_to(target), canvas.size_to(target, options)`
+
+Scales the canvas about the origin and moves it so that what its strokes cover, their widths included (as canvas.bounds() gives), fills the target's box less the padding: stretched across and down separately, or, keeping its proportions, as big as fits and centred. Brush sizes stay as they are, so its lines are scaled to leave room for them. Lines with no extent one way, as a straight line across, can't be stretched that way and are centred. Returns the canvas. Fails for an empty canvas or target, a page with no size, or padding that leaves no room.
+
+| argument | what it does | takes |
+|---|---|---|
+| `target` | What to fill: a page from the origin to its page.size, or another canvas's bounds. | a page with a size, or a canvas with strokes (this one included). |
+
+| option | default | what it does | takes |
+|---|---|---|---|
+| `options.padding` | 0 | Room left inside the target's edges, all round. | a number of at least 0. |
+| `options.keep_proportions` | false | Scale both ways alike, as big as fits, and centre it, instead of stretching it to fill. | true or false. |
+
+```rhai render=canvas_size_to
+let star = new_canvas().add(new_star(vec2(0, 0), 10, 4, 5), PEN);
+for (keep, i) in [false, true] {
+	let frame = new_canvas().add(new_rectangle(vec2(90 + i * 200, 55), 170, 100), RED_PEN);
+	page.add(frame);
+	page.add(star.copy().size_to(frame, #{ padding: 10, keep_proportions: keep }));
+}
+```
+
+![canvas_size_to](images/canvas_size_to.svg)
 
 ### `canvas.rotate_around(point, angle)`
 
@@ -625,11 +658,11 @@ Moves the path.
 
 ### `path.scale_by(factor)`
 
-Scales the path about the origin.
+Scales the path about the origin, across and down separately.
 
 | argument | what it does | takes |
 |---|---|---|
-| `factor` | How many times bigger: below 1 shrinks, and negative flips through the origin. | a number. |
+| `factor` | How many times bigger, across and down: below 1 shrinks, and negative flips through the origin. vec2(s, s) scales both ways alike. | a vec. |
 
 ### `path.rotate_around(point, angle)`
 
@@ -2698,7 +2731,7 @@ A maze of width by height nodes, in a grid of 2w - 1 by 2h - 1 cells, as a Maze 
 | `options.strategy` | LeftHanded | The order its cells are walked in. | LeftHanded or RightHanded. |
 
 ```rhai render=maze
-page.add(new_maze(8, 3, #{ seed: 4 }).path().scale_by(30), PEN);
+page.add(new_maze(8, 3, #{ seed: 4 }).path().scale_by(vec2(30, 30)), PEN);
 ```
 
 ![maze](images/maze.svg)

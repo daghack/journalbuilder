@@ -91,7 +91,7 @@ fn fallbacks(o) {
 
 fn render(o, i) {
 	let c = new_canvas();
-	c.add(i.maze.path().scale_by(o.cell), i.corridor_style.style);
+	c.add(i.maze.path().scale_by(vec2(o.cell, o.cell)), i.corridor_style.style);
 	let t = i.glyph_style.type;
 	// ... a glyph of t.glyphset in each of i.maze.cells(), at its size (no
 	// bigger than a cell holds), in i.glyph_style.style
