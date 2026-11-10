@@ -43,7 +43,9 @@
 //             names, set beside their places; places' glyphs from glyphsets
 //             of their own, and ragged way texts; write_block's align, its
 //             ragged lines aligned too; the symbols_to_string helper,
-//             symbols written out as a string
+//             symbols written out as a string; the hidden_message
+//             illustration, a secret picked out of a plain text in a
+//             style of its own
 //
 // Pages are bound with new_book: numbered, named and listed in the
 // contents.
@@ -2626,6 +2628,49 @@ y += 60;
 written.add(write(`"${result.text("w.text").to_lower()}"`, LEFT, y, 22));
 written.add(write(`"${opened.text("r.text")}"`, 760, y, 22));
 book.bind("appendix", written);
+
+// The hidden_message illustration: a secret picked out of a plain text,
+// its letters in order wherever they come, written in a style of its own:
+// unwired, then placed first and spread, then in other secret styles, and
+// in a chain, its secret a string from symbols_to_string.
+let hidden = sheet("locks");
+hidden.add(subhead("hidden message", TOP));
+hidden.add(caption("illustration(\"hidden_message\").run(#{ plain_text, secret }): the secret's letters found in order in", TOP + 50));
+hidden.add(caption("the plain text, in either case, its spaces skipped, in secret_style (unwired, red, a line under)", TOP + 84));
+let hm = illustration("hidden_message", #{ width: 1000.0 });
+hidden.add(hm.run(#{ plain_text: "Sects return to the stones each winter.", secret: "secret" })[0].translate_by(vec2(LEFT, TOP + 120)));
+hidden.add(caption("placement: \"first\", each letter the first that fits, and \"spread\", spaced through the text: \"SECRET\" in lorem", TOP + 230));
+let lorem_part = LOREM.sub_string(0, 200);
+for (placement, i) in ["first", "spread"] {
+	let x = LEFT + i * 520;
+	hidden.add(write(`placement: "${placement}"`, x, TOP + 290, 18));
+	hidden.add(hm.run(#{ plain_text: lorem_part, secret: "SECRET" }, #{ width: 480.0, plain_size: 20.0, placement: placement })[0].translate_by(vec2(x, TOP + 310)));
+}
+hidden.add(caption("run(#{ plain_text, secret, secret_style }): its pen, whole, and what its type sets over the plain", TOP + 490));
+hidden.add(caption("text's, so its glyphs and size are the text's unless it gives its own", TOP + 524));
+let y = TOP + 590;
+for row in [
+	[`#{ style: #{ color: INK, brush: "Ink Pen", brush_size: 2.4 }, type: #{} }: bold`, "dolor amet", #{ style: #{ color: INK, brush: "Ink Pen", brush_size: 2.4 }, type: #{} }],
+	[`#{ type: #{ strike: "scribble" } }`, "ipsum dolor", #{ type: #{ strike: "scribble" } }],
+	[`#{ type: #{} }: red alone, no line under`, "magna", #{ type: #{} }],
+	[`#{ type: #{ glyphset: glyphset("loche_lower"), underline: 2 } }`, "elit sed", #{ type: #{ glyphset: glyphset("loche_lower"), underline: 2 } }],
+] {
+	hidden.add(write(row[0], LEFT, y, 18));
+	hidden.add(hm.run(#{ plain_text: LOREM.sub_string(0, 150), secret: row[1], secret_style: row[2] }, #{ plain_size: 22.0 })[0].translate_by(vec2(LEFT, y + 16)));
+	y += 112;
+}
+// A chain: the library's lorem as the plain text, and a string from
+// symbols_to_string as the secret, spread through it.
+hidden.add(caption("a chain: .source(\"cover\", \"content\", \"lorem\") into plain_text, symbols_to_string's text into secret,", TOP + 1050));
+hidden.add(caption(".attach(\"hid\", \"hidden_message\", #{ placement: \"spread\" }), run with \"w.symbols\": symbols(27, \"SECRET MESSAGE\")", TOP + 1084));
+let hiding = new_lock("hiding")
+	.source("cover", "content", "lorem")
+	.add("w", "symbols_to_string", #{ base: 27 })
+	.attach("hid", "hidden_message", #{ width: 1000.0, plain_size: 20.0, placement: "spread" })
+	.connect("cover.value", "hid.plain_text")
+	.connect("w.text", "hid.secret");
+hidden.add(hiding.run(#{ "w.symbols": symbols(27, "SECRET MESSAGE") }).canvases("hid")[0].translate_by(vec2(LEFT, TOP + 1110)));
+book.bind("appendix", hidden);
 
 // ---- the title page and the contents, which go first ----
 

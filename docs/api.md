@@ -2821,6 +2821,7 @@ Illustrations: the files in illustrations/, with the options lock.attach or illu
 | `graph_map` | A Graph as a map of places and the ways between them, laid out by forces (graph::layout): each place its glyphs in a row (a dot, if it has none), from the glyphset it names or glyph_style's, its name boxed beside them on whichever side is clearest, and each way a line between the places' glyphs, an arrowhead where it goes one way, its text set on the line along, beside or upright. One canvas, width by height, the map scaled down to fit if the graph needed more room. Draws graph, a Graph, in name_style (the names, wrapped at name_width), edge_style (the ways' texts, wrapped at text_width), glyph_style (the glyphs, from its glyphset unless a place names one, at its size, and the dots), box_style (the names' boxes) and line_style (the lines and arrowheads), TextStyles, each whole; names and texts are marked up. Unwired, near-black and red ink pens, the names and texts in plain, centred and at a steady pressure, the glyphs from symbols. | options: width and height (1200 and 900); label_place (along); seed (0) and iterations (300), as graph::layout's; name_width and text_width (260 and 320); padding (10), the room in a name's box round the name; gap (14), the room kept between glyphs, names, texts and lines (half of it between a place's glyphs and its name); arrow (18), how long an arrowhead's barbs are; dot (10), how wide a place with no glyphs' dot is; name_size, edge_size and glyph_size (30, 20 and 36), the unwired styles' sizes. |
 | `styled_text` | Text written in a text style, wrapped into a block: a chain's content in the hand a style source gives it, drawn whole (its pen and hand, its glyphs at its size, its paragraph), the first line a glyph scale down. One canvas. Draws text, a String, in style, a TextStyle. | options: width (900), the block's width. |
 | `trit_message` | Symbols in balanced-ternary marks, row after row under a heading, each shifted to sit round 0 and written in as many trits as its base needs. One canvas. Draws message, symbols in base, in heading_style (the title, in its glyphs at its size, and the rule under it), mark_style (the marks, reaching its glyph scale from their lines, the rows three of them apart) and line_style, TextStyles, each whole. Unwired, red and near-black ink pens, the heading in loche_upper. | options: base (3), the symbols' base, a whole number from 2 to 27; title (MESSAGE), the heading; per_row (36), marks a row; width (1200), the canvas's width; heading_size and mark_size (44 and 30), the unwired heading's and marks' sizes. |
+| `hidden_message` | A secret picked out of a plain text: the secret's letters found in order wherever they come ("secret" in "SECts RETurn"), in either case, its blanks skipped, and the plain text written as a block, the secret's letters in a style of their own; each run of them is one span, blanks between them included, so lines under or through them run on across it. One canvas, width across, the first line a glyph scale down. Draws plain_text and secret, Strings, in plain_style (the text, its pen, glyphs, size and paragraph; its spans too) and secret_style (the secret's letters), TextStyles: plain_style whole, secret_style's pen whole and what its type sets over the plain text's, so the secret keeps the text's glyphs and size unless it gives its own; the text's own marks are written as they are. A secret the text doesn't hold is an error naming the letter it ran out at; a blank secret marks nothing. Unwired, near-black and red ink pens in plain, the secret underlined. | options: width (900), the block's width; placement (first): first, each letter the first that fits after the last, or spread, each the first at or past its share of the text that leaves room for the rest; plain_size (30), the unwired plain text's size; plain_ink and secret_ink (#2b1d12 and #9b2318), the inks of the styles' fallbacks. |
 
 ```rhai render=graph_map
 let g = graph::parse("Paper Mazes: basic_eye\nSaint's Rest: ploughdiem\nPaper Mazes -> Saint's Rest: follow the _red thread_\nSaint's Rest -- The Cloister: down the bell stair");
@@ -2828,6 +2829,14 @@ page.add(illustration("graph_map", #{ width: 700.0, height: 420.0, seed: 2 }).ru
 ```
 
 ![graph_map](images/graph_map.svg)
+
+```rhai render=hidden_message
+let hm = illustration("hidden_message", #{ width: 600.0, plain_size: 24.0 });
+page.add(hm.run(#{ plain_text: "Sects return to the stones each winter.", secret: "secret" })[0]);
+page.add(hm.run(#{ plain_text: "Lorem ipsum dolor sit amet, consectetur adipiscing elit.", secret: "dolor sit", secret_style: #{ type: #{ strike: "scribble" } } })[0].translate_by(vec2(0, 60)));
+```
+
+![hidden_message](images/hidden_message.svg)
 
 ### `graph::parse(text)`
 
@@ -3217,7 +3226,7 @@ The built-in library, webapp/library/, holds what any journal can use; a journal
 |---|---|
 | `locks/doublering`, `keyed_doublering`, `huffman`, `huffman_apply`, `huffman_encode`, `maze_lock`, `shift_cipher`, `shift_vigenere`, `star_chart`, `substitution_cipher`, `vigenere_cipher` | Lock types (see Locks for each's options). |
 | `helpers/merge_alpha`, `split_symbols`, `string_to_symbols`, `symbols_to_string` | Helper types, lock files that join, cut and convert values between locks. |
-| `illustrations/eye`, `graph_map`, `joined_symbol_ring`, `maze_glyphs`, `rearranged_symbol_ring`, `star_pages`, `styled_text`, `symbol_ring`, `trit_message` | Illustrations (see Value Kinds for what each draws). |
+| `illustrations/eye`, `graph_map`, `hidden_message`, `joined_symbol_ring`, `maze_glyphs`, `rearranged_symbol_ring`, `star_pages`, `styled_text`, `symbol_ring`, `trit_message` | Illustrations (see Value Kinds for what each draws). |
 | `chains/raven_sky` | A chain: a message locked with a text's Huffman code, and the code drawn as a sky of named stars cut into constellations, a page each: the pages are the key. |
 | `layouts/bordered_title` | A title page: the title, a flourish and the credits centred in a ruled frame, inside a border of ornamental bands. |
 | `layouts/captioned_figure` | A figure filling the page, with its caption centred beneath it. |
