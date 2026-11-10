@@ -392,6 +392,48 @@ fn styled_text_writes_in_its_style_whole() {
     assert!(top > 30.0 * 0.2 && top < 30.0, "the first line a glyph scale down: its ink from {}", top);
 }
 
+/// hidden_message with `options`, the library's lorem its plain text and
+/// `secret` (base-27 letters, written out by symbols_to_string) its
+/// secret, `styles` sources and `wires` connected too.
+fn hidden(styles: &str, secret: &str, options: &str, wires: &[(&str, &str)]) -> Entry {
+    let mut wires = wires.to_vec();
+    wires.push(("plain_text", "w.value"));
+    wires.push(("secret", "x.text"));
+    let chain = format!(
+        r#"new_lock("t"){}.source("w", "content", "lorem").add("x", "symbols_to_string", #{{ base: 27 }}).set_input("x.symbols", symbols(27, "{}"))"#,
+        styles, secret);
+    drawn(&chain, "hidden_message", options, &wires)
+}
+
+#[test]
+fn hidden_message_writes_the_secret_in_its_style() {
+    let inks = format!("#{{ plain_ink: \"{}\", secret_ink: \"{}\" }}", BLUE, GREEN);
+    let lowest = |entry: &Entry, color: &str| in_color(entry, color, None).iter().map(|s| bounds(s).maxs.y).fold(f32::MIN, f32::max);
+    // The secret's letters in its pen, the rest in the text's: placed
+    // first, LOREM is the text's first word, on its first line; spread,
+    // it reaches down the text.
+    let first = hidden("", "LOREM", &inks, &[]);
+    let spread = hidden("", "LOREM", &format!("#{{ plain_ink: \"{}\", secret_ink: \"{}\", placement: \"spread\" }}", BLUE, GREEN), &[]);
+    assert!(lowest(&first, GREEN) < 30.0 * 1.6, "placed first, the secret's on the first line: down to {}", lowest(&first, GREEN));
+    assert!(lowest(&spread, GREEN) > lowest(&first, GREEN) + 30.0 * 3.0, "spread, the secret reaches down the text: {} and {}", lowest(&spread, GREEN), lowest(&first, GREEN));
+    assert!(lowest(&first, BLUE) > 30.0 * 3.0, "the rest of the text in its own pen");
+    // A blank secret marks nothing.
+    assert!(!strokes(&hidden("", "   ", &inks, &[])).any(|s| inked(s, GREEN)), "a blank secret marks nothing");
+    // The secret keeps the text's glyphs and size unless its style gives
+    // its own: a pen-only style wired, its letters are the text's size.
+    let pen = hidden(&source("s", "pen_only", &format!("#{{ color: \"{}\" }}", GREEN)), "LOREM", &format!("#{{ plain_ink: \"{}\", plain_size: 40.0 }}", BLUE), &[("secret_style", "s.value")]);
+    scaled("a pen-only secret's letters at the text's size", tallest(&first, GREEN, None), tallest(&pen, GREEN, None), 40.0 / 30.0);
+    // A secret the text doesn't hold, or a placement it doesn't know.
+    for (run, wanted) in [
+        (r#"#{ plain_text: "sects return", secret: "secrets" }"#, r#"the plain text doesn't hold the secret "secrets": no 's' for its letter 7"#),
+        (r#"#{ plain_text: "sects return", secret: "s" }, #{ placement: "middle" }"#, r#"placement should be "first" or "spread", got "middle""#),
+    ] {
+        let script = format!(r#"illustration("hidden_message").run({});"#, run);
+        let err = engine(&[], &[]).build_entry_str(&script).expect_err(&script).to_string();
+        assert!(err.contains(wanted), "{}", err);
+    }
+}
+
 #[test]
 fn every_illustration_writes_in_the_cursive_wherever_it_writes() {
     let maze = |styles: &str, wires: &[(&str, &str)]| {
@@ -411,6 +453,7 @@ fn every_illustration_writes_in_the_cursive_wherever_it_writes() {
         ("eye", Box::new(|s: &str, w: &[(&str, &str)]| eye(s, "#{}", w)), &["iris_style", "pupil_style"]),
         ("maze_glyphs", Box::new(maze), &["glyph_style"]),
         ("styled_text", Box::new(styled), &["style"]),
+        ("hidden_message", Box::new(|s: &str, w: &[(&str, &str)]| hidden(s, "LOREM", "#{}", w)), &["plain_style", "secret_style"]),
         ("graph_map", Box::new(|s: &str, w: &[(&str, &str)]| map(s, "#{ width: 3000.0, height: 2400.0, label_place: \"upright\" }", w)), &["name_style", "edge_style"]),
         ("symbol_ring", Box::new(|s: &str, w: &[(&str, &str)]| drawn(&format!(r#"new_lock("t"){}"#, s), "symbol_ring", "#{ step: 1 }", w)), &["glyph_style"]),
         ("rearranged_symbol_ring", Box::new(|s: &str, w: &[(&str, &str)]| drawn(&format!(r#"new_lock("t"){}"#, s), "rearranged_symbol_ring", "#{ step: 2 }", w)), &["glyph_style"]),
