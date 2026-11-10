@@ -543,6 +543,66 @@ mod tests {
     }
 
     #[test]
+    fn write_block_aligns_its_lines() {
+        let ok: bool = eval(r#"
+            let line = "the quick brown fox";
+            // Seeded alike, so glyphs that vary are the same glyphs each time.
+            let set = |text, width, align, jitter| { seed(1); write_block(text, vec2(0, 0), width, #{ style: style, type: new_type_style(font, 10.0), paragraph: #{ align: align, line_start_jitter: jitter } }).canvas.bounds() };
+            let left = set.call(line, 300.0, "left", 0.0);
+            let bearing = left.min.x;
+            let right = set.call(line, 300.0, "right", 0.0);
+            if (right.max.x - (300.0 - bearing)).abs() > 0.5 { throw `right should end the line its bearing short of the width: ${right.max.x}`; }
+            if (right.width - left.width).abs() > 1e-3 { throw `aligning shouldn't change a line's glyphs: ${left.width}, ${right.width}`; }
+            let centre = set.call(line, 300.0, "center", 0.0);
+            if ((centre.min.x + centre.max.x) / 2.0 - 150.0).abs() > 0.5 { throw `centre should centre it: ${centre.min.x}..${centre.max.x}`; }
+            let last = set.call(line, 300.0, "justify", 0.0);
+            if (last.min.x - left.min.x).abs() > 1e-3 || (last.max.x - left.max.x).abs() > 1e-3 { throw "a justified text's last line is set left"; }
+            let ragged = set.call(text, 100.0, "left", 0.0);
+            let just = set.call(text, 100.0, "justify", 0.0);
+            if (just.max.x - (100.0 - bearing)).abs() > 0.5 || !(ragged.max.x < just.max.x - 0.5) { throw `justify should spread lines to the width: ${ragged.max.x}, ${just.max.x}`; }
+            true
+        "#);
+        assert!(ok);
+    }
+
+    #[test]
+    fn write_block_aligns_jagged_lines() {
+        let ok: bool = eval(r#"
+            let line = "the quick brown fox";
+            let set = |text, width, align, jitter| write_block(text, vec2(0, 0), width, #{ style: style, type: new_type_style(font, 10.0), paragraph: #{ align: align, line_start_jitter: jitter } }).canvas.bounds();
+            let bearing = set.call(line, 300.0, "left", 0.0).min.x;
+            let lefts = [];
+            let rights = [];
+            let centres = [];
+            for s in 0..12 {
+                seed(s);
+                let b = set.call(line, 300.0, "left", 40.0);
+                if b.min.x < bearing - 1e-3 || b.min.x > bearing + 40.0 { throw `a jagged left line starts up to the jitter in: ${b.min.x}`; }
+                lefts.push(b.min.x);
+                seed(s);
+                let b = set.call(line, 300.0, "right", 40.0);
+                if b.max.x > 300.0 - bearing + 0.5 || b.max.x < 300.0 - bearing - 40.5 { throw `a jagged right line ends up to the jitter in: ${b.max.x}`; }
+                rights.push(b.max.x);
+                seed(s);
+                let b = set.call(line, 300.0, "center", 40.0);
+                let c = (b.min.x + b.max.x) / 2.0;
+                if b.min.x < -0.5 || b.max.x > 300.5 || (c - 150.0).abs() > 20.5 { throw `a jagged centred line strays up to half the jitter: ${b.min.x}..${b.max.x}`; }
+                centres.push(c);
+                seed(s);
+                let b = set.call(text, 100.0, "justify", 40.0);
+                if (b.max.x - (100.0 - bearing)).abs() > 0.5 { throw `jagged justified lines still end at the width: ${b.max.x}`; }
+            }
+            let spread = |xs| { let lo = xs[0]; let hi = xs[0]; for x in xs { lo = lo.min(x); hi = hi.max(x); } hi - lo };
+            if spread.call(lefts) < 5.0 || spread.call(rights) < 5.0 || spread.call(centres) < 3.0 { throw "jagged lines should vary"; }
+            let off = 0;
+            for c in centres { if c < 149.5 { off -= 1; } else if c > 150.5 { off += 1; } }
+            if off.abs() == centres.len() { throw "jagged centred lines should stray either way"; }
+            true
+        "#);
+        assert!(ok);
+    }
+
+    #[test]
     fn baseline_wander_bends_lines_within_bounds() {
         let ok: bool = eval(r#"
             let hand = #{ style: style, type: new_type_style(font, 10.0) };

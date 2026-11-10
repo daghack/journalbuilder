@@ -1435,7 +1435,7 @@ Extra room between paragraphs, in lines (default 0.5); and how much further in a
 
 ### `paragraph_style.align = name`
 
-Where each line's glyphs go along it: from its start; moved along as far as they still fit, or half that; or spread so the last goes as far as it fits (at the blanks, with layout: words), all but the text's last line.
+Where each line's glyphs go along it: from its start; moved along as far as they still fit, or half that; or spread so the last goes as far as it fits (at the blanks, with layout: words), all but the text's last line. In write_block, a line's room is its width: its glyphs go as far along as leaves the room after the last's ink what's before the first's, or half that, or spread so the last does.
 
 | argument | what it does | takes |
 |---|---|---|
@@ -1500,7 +1500,7 @@ How far glyphs keep from what they avoid, on top of any margin a tree was built 
 
 ### `paragraph_style.line_start_jitter = number, paragraph_style.line_gap_jitter = number`
 
-How much further each line starts, at most, at random; and how much each line's distance from the last varies, at most, either way (write_block, text boxes, write_inside_path and typeset text).
+How much further each line starts, at most, at random; and how much each line's distance from the last varies, at most, either way (write_block, text boxes, write_inside_path and typeset text). In a text box, a line that starts further in isn't aligned. In write_block, it's aligned within what's left: a line set right ends up to that much short of the width instead, and a centred one starts in or ends short, either, at random, so its middle strays up to half that from the width's.
 
 | argument | what it does | takes |
 |---|---|---|
@@ -1602,7 +1602,7 @@ page.add(write_line("Lorem ipsum dolor sit amet", vec2(0, 0), TEXT));
 
 ### `write_block(text, at, width, settings)`
 
-The text wrapped into lines width long, the first from at (on its line, as write_line sets it) and each line_height glyph scales below the last (give or take line_gap_jitter), each wandering by the hand's baseline_wander, the left edges ragged by line_start_jitter, words kept whole unless the paragraph's layout is flat or it has break_words. Gives #{ canvas, bottom }: the text, and where a line after it would go, for stacking blocks.
+The text wrapped into lines width long, the first from at (on its line, as write_line sets it) and each line_height glyph scales below the last (give or take line_gap_jitter), each wandering by the hand's baseline_wander, each set as the paragraph's align says, ragged by line_start_jitter (see paragraph_style.line_start_jitter), words kept whole unless the paragraph's layout is flat or it has break_words. Gives #{ canvas, bottom }: the text, and where a line after it would go, for stacking blocks.
 
 | argument | what it does | takes |
 |---|---|---|
@@ -1621,6 +1621,20 @@ page.add(new_line(vec2(0, block.bottom), vec2(500, block.bottom)), RED_PEN);
 ```
 
 ![write_block](images/write_block.svg)
+
+Aligned, and ragged: centred lines each start in or end short by up to line_start_jitter.
+
+```rhai render=write_block_align
+let text = "Follow the red thread until you find To Fall Endlessly, then use the crawlspace beneath the broken shelf.";
+let x = 0;
+for align in ["right", "center", "justify"] {
+	page.add(write_block(text, vec2(x, 0), 260, TEXT + #{ paragraph: #{ align: align, line_start_jitter: 40 } }).canvas);
+	page.add(new_line(vec2(x, -20), vec2(x, 170)), RED_PEN).add(new_line(vec2(x + 260, -20), vec2(x + 260, 170)), RED_PEN);
+	x += 300;
+}
+```
+
+![write_block_align](images/write_block_align.svg)
 
 ### `write_inside_path(text, path, settings)`
 
@@ -2743,7 +2757,7 @@ The kinds and their data.
 |---|---|---|
 | `HuffmanCode` | An M-ary Huffman code as its tree: #{ kind, input_base, output_base, nodes }, nodes an array of #{ parent, digit, symbol }, the root first (its parent and digit ()), then breadth first, each node's children in digit order; a leaf's symbol is the input symbol its digits from the root encode, a branch's (). | sketch: the tree, top down, each leaf's symbol under it. |
 | `Maze` | A maze: #{ kind, width, height, seed, strategy, symbols }: its grid in cells (odd), the seed its corridors come from, the order (LeftHanded or RightHanded) its cells are walked in, and each cell's symbol in that order. | sketch: the corridors, and each cell's symbol as a letter. |
-| `Graph` | Places and the ways between them: #{ kind, nodes, edges }, each node #{ name, glyphs } (its name, marked-up text, unique and not empty, and the names of glyphs that go with it) and each edge #{ from, to, directed, text } (the two different nodes it joins, by index, one way or both, and its text, marked up, "" for none). A .graph content file is one. | sketch: each place a box round its name, the ways' lines, arrowheads on the one-way ones, and their texts. |
+| `Graph` | Places and the ways between them: #{ kind, nodes, edges }, each node #{ name, glyphs, glyphset } (its name, marked-up text, unique and not empty; the names of glyphs that go with it; and the glyphset they're from, or () for the drawing's own, as graph_map's glyph_style gives it) and each edge #{ from, to, directed, text } (the two different nodes it joins, by index, one way or both, and its text, marked up, "" for none). A .graph content file is one. | sketch: each place a ring for each of its glyphs, or a dot, its name boxed beside it, the ways' lines, arrowheads on the one-way ones, and their texts. |
 | `StarChart` | A sky of named stars over pages, as it's drawn: #{ kind, input_base, output_base, pages }, each page #{ name, stars, links }: its stars #{ name, point, size, label } (where it is, how far its mark reaches, where its label goes, points as [x, y]), and its links [parent, child, digit], indices into its stars. A star on more than one page has the same name on each. | sketch: the pages in a grid, each star a ring, its links, its number at its label and the page's name over it. |
 
 ### `huffman::code(symbols, output_base), huffman::code(symbols, output_base, options), huffman::code(symbols, input_base, output_base), huffman::code(symbols, input_base, output_base, options)`
@@ -2803,7 +2817,7 @@ Illustrations: the files in illustrations/, with the options lock.attach or illu
 | `symbol_ring` | A base's symbols in a ring, clockwise from the top, each joined by a dashed line to the symbol step on from it, round and round (base 5, step 2 is a five-pointed star; where base and step share a factor, a figure for each cycle), and in the middle the step's symbol. With bordered, each symbol round the ring is ringed and the dashes run from border to border; with center_bordered, the middle's is; the dashes stop short of the middle's symbol. One canvas, size across and down. Draws no lock value, in glyph_style (the symbols and their borders) and line_style (the dashes), TextStyles, each whole: the glyphs are glyph_style's glyphset's own, never its fallback's, at its size, or smaller if the ring hasn't room, leant as it leans them, the middle's center_scale times that; in balanced-ternary digits, a symbol is its digit shifted to sit round 0 (14 to 26 as -13 to -1), in a glyphset with a whole alphabet its letter, in capitals or else lowercase (0 a space, a gap in the ring, 1 to 26 A to Z), and in any other the glyph that far along its characters, of which it needs at least base. Unwired, ink pens in glyph_ink and line_ink and loche_upper as big as the ring holds. | options: base (27), the symbols, a whole number from 2 to 27; step (5), a whole number from 0 (no lines, and in the middle symbol 0, blank in letters) to base - 1; steps (0), 0 for every line, or how many lines of the walk from the top (0, step, 2 step...) to draw, then half the next, ending in an arrow (stopping short of the middle symbol), a walk back at the top before then drawn closed without one; bordered (true), whether the ring's symbols are ringed; center_bordered (true), whether the middle's is; size (900), the canvas's width and height; center_scale (3), the middle symbol's size over the ring's, at most half the ring's radius; dash and gap (14 and 10), a dash's and a gap's length, stretched so each line ends on a dash; glyph_ink and line_ink (#2b1d12 and #9b2318), the inks of the styles' fallbacks. |
 | `rearranged_symbol_ring` | A base's symbols in a ring as taking step's path rearranges them: clockwise from the top, in the order symbol_ring's walk by step reaches them (0, step, 2 step...), so place k holds symbol k times step round the base (base 5, step 2 is 0 2 4 1 3; where base and step share a factor, the walk is back at the top early and the ring repeats; step 0 takes no path, and leaves every place empty), and in the middle the step's symbol. With bordered, each symbol round the ring is ringed; with center_bordered, the middle's is. It is symbol_ring's ring, with the same options laid out alike. One canvas, size across and down. Draws no lock value, in glyph_style (the symbols and their borders), a TextStyle, whole, its glyphs chosen, sized and leant as symbol_ring's. Unwired, an ink pen in glyph_ink and loche_upper as big as the ring holds. | options: base (27), the symbols, a whole number from 2 to 27; step (5), a whole number from 0 (no path: every place empty, and in the middle symbol 0) to base - 1; bordered (true), whether the ring's symbols are ringed; center_bordered (true), whether the middle's is; size (900), the canvas's width and height; center_scale (3), the middle symbol's size over the ring's, at most half the ring's radius; glyph_ink (#2b1d12), the ink of the style's fallback. |
 | `joined_symbol_ring` | Two paths joined into one: taking first's path and then second's is taking their product's, first times second round the base (base 13, first 3 and second 5 join to 2). Two canvases, each size across and down. The first is symbol_ring's ring with two walks from the top, first's (each line to the symbol first on) in first_style and second's in second_style, and their symbols next to each other in the middle in those styles, first on the left, center_scale times the ring's, at most as big as fit in symbol_ring's middle; where both walks draw the same line (first and second the same, or adding to the base), each is moved a little to its own side. The second is the product's symbol_ring, its walk and middle symbol in joined_style. A step of 0, first, second or their product, takes no path: no lines. With bordered, each symbol round the ring is ringed and the dashes run from border to border; with center_bordered, one circle rings the middle's, both of them on the first canvas; the dashes stop short of the middle's symbols. Draws no lock value, in glyph_style (the ring's symbols and every border) and first_style, second_style and joined_style (each walk's dashes and its middle symbol), TextStyles, each whole; every glyph is glyph_style's, chosen, sized and leant as symbol_ring's. Unwired, ink pens in glyph_ink, first_ink, second_ink and joined_ink, and loche_upper as big as the ring holds. | options: base (27), the symbols, a whole number from 2 to 27; first and second (2 and 5), whole numbers from 0 (no lines, and symbol 0, blank in letters) to base - 1; steps (0), 0 for every line, or how many lines of each walk from the top to draw, then half the next, ending in an arrow, as symbol_ring's; bordered (true), whether the ring's symbols are ringed; center_bordered (true), whether the middle's are; size (900), each canvas's width and height; center_scale (3), the middle symbols' size over the ring's; dash and gap (14 and 10), a dash's and a gap's length, stretched so each line ends on a dash; glyph_ink, first_ink, second_ink and joined_ink (#2b1d12, #9b2318, #23409b and #5f2a6e: near-black, red, blue and their purple), the inks of the styles' fallbacks. |
-| `graph_map` | A Graph as a map of places and the ways between them, laid out by forces (graph::layout): each place a box round its name, its glyphs in a row under the name, and each way a line between the boxes, an arrowhead where it goes one way, its text set on the line along, beside or upright. One canvas, width by height, the map scaled down to fit if the graph needed more room. Draws graph, a Graph, in name_style (the names, wrapped at name_width), edge_style (the ways' texts, wrapped at text_width), glyph_style (the glyphs, its glyphset's at its size), box_style and line_style (the lines and arrowheads), TextStyles, each whole; names and texts are marked up. Unwired, near-black and red ink pens, the names and texts in plain, centred and at a steady pressure, the glyphs from symbols. | options: width and height (1200 and 900); label_place (along); seed (0) and iterations (300), as graph::layout's; name_width and text_width (260 and 320); padding (16), the room in a box round what's in it; gap (14); arrow (18), how long an arrowhead's barbs are; name_size, edge_size and glyph_size (30, 20 and 36), the unwired styles' sizes. |
+| `graph_map` | A Graph as a map of places and the ways between them, laid out by forces (graph::layout): each place its glyphs in a row (a dot, if it has none), from the glyphset it names or glyph_style's, its name boxed beside them on whichever side is clearest, and each way a line between the places' glyphs, an arrowhead where it goes one way, its text set on the line along, beside or upright. One canvas, width by height, the map scaled down to fit if the graph needed more room. Draws graph, a Graph, in name_style (the names, wrapped at name_width), edge_style (the ways' texts, wrapped at text_width), glyph_style (the glyphs, from its glyphset unless a place names one, at its size, and the dots), box_style (the names' boxes) and line_style (the lines and arrowheads), TextStyles, each whole; names and texts are marked up. Unwired, near-black and red ink pens, the names and texts in plain, centred and at a steady pressure, the glyphs from symbols. | options: width and height (1200 and 900); label_place (along); seed (0) and iterations (300), as graph::layout's; name_width and text_width (260 and 320); padding (10), the room in a name's box round the name; gap (14), the room kept between glyphs, names, texts and lines (half of it between a place's glyphs and its name); arrow (18), how long an arrowhead's barbs are; dot (10), how wide a place with no glyphs' dot is; name_size, edge_size and glyph_size (30, 20 and 36), the unwired styles' sizes. |
 | `styled_text` | Text written in a text style, wrapped into a block: a chain's content in the hand a style source gives it, drawn whole (its pen and hand, its glyphs at its size, its paragraph), the first line a glyph scale down. One canvas. Draws text, a String, in style, a TextStyle. | options: width (900), the block's width. |
 | `trit_message` | Symbols in balanced-ternary marks, row after row under a heading, each shifted to sit round 0 and written in as many trits as its base needs. One canvas. Draws message, symbols in base, in heading_style (the title, in its glyphs at its size, and the rule under it), mark_style (the marks, reaching its glyph scale from their lines, the rows three of them apart) and line_style, TextStyles, each whole. Unwired, red and near-black ink pens, the heading in loche_upper. | options: base (3), the symbols' base, a whole number from 2 to 27; title (MESSAGE), the heading; per_row (36), marks a row; width (1200), the canvas's width; heading_size and mark_size (44 and 30), the unwired heading's and marks' sizes. |
 
@@ -2816,7 +2830,7 @@ page.add(illustration("graph_map", #{ width: 700.0, height: 420.0, seed: 2 }).ru
 
 ### `graph::parse(text)`
 
-The Graph a .graph file's text writes, as content(name) reads a content/NAME.graph file. A line is a place, `Name` or `Name: glyph glyph`, or a way, `A -> B` (one way) or `A -- B` (both ways), the arrow with a space either side, then `: text` if it has any; an indented line carries on the line above, # lines are comments, and blank lines are nothing. A way can name a place no line gives; places come in the order they're first named. Names can't hold a colon. Errors name the line: a place given two lines, a way from a place to itself, a line that's neither.
+The Graph a .graph file's text writes, as content(name) reads a content/NAME.graph file. A line is a place, `Name`, `Name: glyph glyph` (its glyphs by name, from the drawing's glyphset) or `Name: glyphset "text"` (each of the text's characters a glyph of that glyphset, blanks left out: `Saint's Rest: thirteen_black_priests "4A0Ef"`), or a way, `A -> B` (one way) or `A -- B` (both ways), the arrow with a space either side, then `: text` if it has any; an indented line carries on the line above, # lines are comments, and blank lines are nothing. A way can name a place no line gives; places come in the order they're first named. Names can't hold a colon. Errors name the line: a place given two lines, a way from a place to itself, a line that's neither.
 
 | argument | what it does | takes |
 |---|---|---|
@@ -2824,7 +2838,7 @@ The Graph a .graph file's text writes, as content(name) reads a content/NAME.gra
 
 ### `graph::layout(graph, sizes), graph::layout(graph, sizes, options)`
 
-A Graph laid out by forces, as graph_map lays out its map: the places' boxes pushed apart and the ways pulled to length, each way long enough for its text, then the best of four seeded starts kept and tidied, so nothing overlaps, and fitted to the box, which grows in proportion if the graph needs more room. Gives #{ points, size, edges }: each box's centre ([x, y]), the size used ([width, height]), and each edge's #{ start, end, label, angle, pieces }: where its line leaves its first box and meets its second (gap short of each), the middle of its text, how far to turn the text (0 upright; otherwise the line's angle, folded so text reads left to right), and the line's pieces, [[x, y], [x, y]] each, broken round any text set over it. Ways joining the same two places are drawn side by side.
+A Graph laid out by forces, as graph_map lays out its map: the places' boxes pushed apart and the ways pulled to length, each way long enough for its text, each place's name, if it's given one, beside its box, then the best of four seeded starts kept and tidied, so nothing overlaps, and fitted to the box, which grows in proportion if the graph needs more room. Gives #{ points, size, edges, names }: each box's centre ([x, y]), the size used ([width, height]), each edge's #{ start, end, label, angle, pieces }: where its line leaves its first box and meets its second (gap short of each), the middle of its text, how far to turn the text (0 upright; otherwise the line's angle, folded so text reads left to right), and the line's pieces, [[x, y], [x, y]] each, broken round any text or name set over it; and each name's centre ([x, y], or () for a place without one). A name goes half a gap from its place's box, on whichever of eight sides (right, left, under, over, then the corners) is clearest of the lines, texts, boxes and other names. Ways joining the same two places are drawn side by side.
 
 | argument | what it does | takes |
 |---|---|---|
@@ -2834,18 +2848,24 @@ A Graph laid out by forces, as graph_map lays out its map: the places' boxes pus
 | option | default | what it does | takes |
 |---|---|---|---|
 | `options.labels` | none | Each way's text's size; () for a way with none. | an array of [width, height] or (), one for each edge. |
+| `options.names` | none | Each place's name's size, to set beside its box; () for a place without one. | an array of [width, height] or (), one for each node. |
 | `options.label_place` | along | Where a way's text goes: along, turned to its line, which breaks for it; beside, above the line; upright, level across the line, which breaks round it. | along, beside or upright. |
-| `options.gap` | 12 | The room kept between boxes, texts and lines. | a number of at least 0. |
+| `options.gap` | 12 | The room kept between boxes, texts, names and lines; half of it between a box and its name. | a number of at least 0. |
 | `options.width`, `options.height` | 1000 and 800 | The box to lay it out in, from (0, 0). | positive numbers. |
 | `options.seed` | 0 | Which layout. | a whole number. |
 | `options.iterations` | 300 | How many steps the forces take. | a whole number up to 5000. |
 
 ```rhai render=graph_layout
 let g = graph::parse("A -> B: north\nB -> C: east\nC -- A: home");
-let sizes = [[60, 40], [60, 40], [60, 40]];
-let laid = graph::layout(g, sizes, #{ labels: [[50, 16], [40, 16], [50, 16]], width: 400, height: 240 });
+let sizes = [[16, 16], [16, 16], [16, 16]];
+let names = [[40, 30], [40, 30], [40, 30]];
+let laid = graph::layout(g, sizes, #{ labels: [[50, 16], [40, 16], [50, 16]], names: names, width: 400, height: 240 });
 for (p, k) in laid.points {
-	page.add(new_rectangle(vec2(p[0], p[1]), sizes[k][0], sizes[k][1]), PEN);
+	page.add(new_circle(vec2(p[0], p[1]), 8), PEN);
+	let at = vec2(laid.names[k][0], laid.names[k][1]);
+	page.add(new_rectangle(at, names[k][0], names[k][1]), PEN);
+	let name = write_line(g.nodes[k].name, vec2(0, 0), TEXT);
+	page.add(name.translate_by(at - name.bounds().center));
 }
 for edge in laid.edges {
 	for piece in edge.pieces {
@@ -2859,7 +2879,7 @@ for edge in laid.edges {
 
 ### `art::sketch(value)`
 
-A value kind's default drawing as a parts map for canvas.add(parts, styles): each part a path (a StarChart's links and stars, a HuffmanCode's links and nodes, a Maze's corridors, a Graph's boxes, glyphs, lines and arrows), plus labels, an array of #{ at, text } to write, and label_size, how big to write them, in the drawing's units.
+A value kind's default drawing as a parts map for canvas.add(parts, styles): each part a path (a StarChart's links and stars, a HuffmanCode's links and nodes, a Maze's corridors, a Graph's name boxes, glyphs, lines and arrows), plus labels, an array of #{ at, text } to write, and label_size, how big to write them, in the drawing's units.
 
 | argument | what it does | takes |
 |---|---|---|

@@ -438,15 +438,29 @@ impl<'a> TextBox<'a> {
     }
 
     /// A line of a box that doesn't keep glyphs inside: along its spans,
-    /// from their starts (or jagged in from them).
+    /// from their starts (or jagged in from them), then, on a line of one
+    /// span, aligned within it (see `align_loose`). A jagged line starts in
+    /// from the left (left, justify), ends in from the right (right), or
+    /// either (centre), by one draw a span whatever the align.
     fn fill_loose_line(&self, symbols: Vec<Symbol>, y_pos: f32, rng: &mut dyn RngCore) -> (Vec<Symbol>, Vec<Symbol>) {
         let mut stroke = StrokePath::new();
+        let jagged = self.jagged_edge * self.symbol_scale;
+        let mut ends = Vec::new();
         for (left, right) in self.band_spans(y_pos) {
-            let offset_x = rng.random::<f32>() * self.jagged_edge * self.symbol_scale;
-            let current_x = left + offset_x;
-            let width = right - left - offset_x;
-            let (start, end) = (self.place(current_x, y_pos), self.place(current_x + width, y_pos));
+            let draw = rng.random::<f32>();
+            let (from, to) = match self.align {
+                Align::Left | Align::Justify => (left + draw * jagged, right),
+                Align::Right => (left, right - draw * jagged),
+                // In from either edge, as far as from one: |2u - 1| is as
+                // even over 0..1 as u.
+                Align::Center => {
+                    let inset = (2.0 * draw - 1.0) * jagged;
+                    if inset >= 0.0 { (left + inset, right) } else { (left, right + inset) }
+                }
+            };
+            let (start, end) = (self.place(from, y_pos), self.place(to, y_pos));
             stroke = stroke.move_to(start.x, start.y).line_to(end.x, end.y);
+            ends.push((from, to));
         }
         let args = SymbolPlacementArgs {
             avoid: self.avoid,
@@ -459,9 +473,35 @@ impl<'a> TextBox<'a> {
             scale_at: None,
             longest_line: None,
         };
-        match self.layout {
+        let (mut placed, rest) = match self.layout {
             TextBoxLineMode::Flat => place_along_path(symbols, &stroke, &args),
             TextBoxLineMode::WordsByBlankSymbol(rules) => place_words_along_path(symbols, &stroke, &args, rules),
+        };
+        if let [(from, to)] = ends[..] {
+            self.align_loose(&mut placed, from, to, rest.is_empty());
+        }
+        (placed, rest)
+    }
+
+    /// Move a loose line's glyphs, set from `from`, along it as `align`
+    /// says, into the room before `to`: the room after the last glyph's
+    /// ink, less as much as there is before the first's, all of it (right),
+    /// half (centre), or each further than the last so the last takes all
+    /// of it (justify; not the text's last line). As far as they fit, if
+    /// something's avoided.
+    fn align_loose(&self, run: &mut [Symbol], from: f32, to: f32, last: bool) {
+        let Some(shares) = self.align_shares(run, last) else { return };
+        // The strokes themselves: a glyph's curves can bulge past its hull.
+        let (min, max) = run.iter().flat_map(|g| g.placed_strokepath().points_within()).map(|p| p.dot(self.along))
+            .fold((f32::MAX, f32::MIN), |(min, max), x| (min.min(x), max.max(x)));
+        let room = to - (min - from).max(0.0) - max;
+        if !(room > 0.0) {
+            return;
+        }
+        let d = self.furthest(run, &shares, room, None);
+        let d = if self.align == Align::Center { d / 2.0 } else { d };
+        if d > 0.0 {
+            run.clone_from_slice(&self.shifted(run, &shares, d, None));
         }
     }
 
@@ -577,10 +617,22 @@ impl<'a> TextBox<'a> {
     /// lines spread at the blanks. On a wandering line (the wander, and
     /// where it starts along the line), they keep to its curve.
     fn align_run(&self, run: &mut [Symbol], last: bool, wander: Option<&(Wander, f32)>) {
-        let shares: Vec<f32> = match self.align {
-            Align::Left => return,
-            Align::Justify if last => return,
-            Align::Right | Align::Center => vec![1.0; run.len()],
+        let Some(shares) = self.align_shares(run, last) else { return };
+        let d = self.furthest(run, &shares, 3.0 * self.symbol_scale, wander);
+        let d = if self.align == Align::Center { d / 2.0 } else { d };
+        if d > 0.0 {
+            run.clone_from_slice(&self.shifted(run, &shares, d, wander));
+        }
+    }
+
+    /// How far along, as a share of the most, each of a line's glyphs goes
+    /// as `align` says: none for a line that stays as it's set (left, a
+    /// justified text's last line, or one with nowhere to spread).
+    fn align_shares(&self, run: &[Symbol], last: bool) -> Option<Vec<f32>> {
+        match self.align {
+            Align::Left => None,
+            Align::Justify if last => None,
+            Align::Right | Align::Center => Some(vec![1.0; run.len()]),
             Align::Justify => {
                 let letters = run.len() - run.iter().rev().take_while(|g| g.is_blank()).count();
                 let words = matches!(self.layout, TextBoxLineMode::WordsByBlankSymbol(_));
@@ -590,39 +642,42 @@ impl<'a> TextBox<'a> {
                 }).collect();
                 let most = gaps.iter().copied().max().unwrap_or(0);
                 if most == 0 {
-                    return;
+                    return None;
                 }
-                gaps.iter().map(|&g| g as f32 / most as f32).collect()
-            }
-        };
-        let moved = |d: f32| -> Vec<Symbol> {
-            run.iter().zip(&shares).map(|(g, share)| {
-                let mut g = g.clone();
-                let step = d * share;
-                let x = g.position().dot(self.along);
-                g.set_position(g.position() + self.along * step);
-                if let Some((w, origin)) = wander {
-                    let x = x - origin;
-                    g.translate_by(self.across * (w.offset(x + step) - w.offset(x)));
-                    g.rotate_rad_by(w.angle(x + step) - w.angle(x));
-                }
-                g
-            }).collect()
-        };
-        // The furthest they go and still fit, closed in on by halving.
-        let (mut low, mut high) = (0.0, 3.0 * self.symbol_scale);
-        if self.fits(&moved(high)) {
-            low = high;
-        } else {
-            for _ in 0..ALIGN_STEPS {
-                let mid = (low + high) / 2.0;
-                if self.fits(&moved(mid)) { low = mid } else { high = mid }
+                Some(gaps.iter().map(|&g| g as f32 / most as f32).collect())
             }
         }
-        let d = if self.align == Align::Center { low / 2.0 } else { low };
-        if d > 0.0 {
-            run.clone_from_slice(&moved(d));
+    }
+
+    /// A line's glyphs each moved along it `d` times its share, keeping to
+    /// a wandering line's curve.
+    fn shifted(&self, run: &[Symbol], shares: &[f32], d: f32, wander: Option<&(Wander, f32)>) -> Vec<Symbol> {
+        run.iter().zip(shares).map(|(g, share)| {
+            let mut g = g.clone();
+            let step = d * share;
+            let x = g.position().dot(self.along);
+            g.set_position(g.position() + self.along * step);
+            if let Some((w, origin)) = wander {
+                let x = x - origin;
+                g.translate_by(self.across * (w.offset(x + step) - w.offset(x)));
+                g.rotate_rad_by(w.angle(x + step) - w.angle(x));
+            }
+            g
+        }).collect()
+    }
+
+    /// The furthest, up to `most`, a line's glyphs go and still fit,
+    /// closed in on by halving.
+    fn furthest(&self, run: &[Symbol], shares: &[f32], most: f32, wander: Option<&(Wander, f32)>) -> f32 {
+        if self.fits(&self.shifted(run, shares, most, wander)) {
+            return most;
         }
+        let (mut low, mut high) = (0.0, most);
+        for _ in 0..ALIGN_STEPS {
+            let mid = (low + high) / 2.0;
+            if self.fits(&self.shifted(run, shares, mid, wander)) { low = mid } else { high = mid }
+        }
+        low
     }
 
     /// A point of the turned shape back where it is on the page.

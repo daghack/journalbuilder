@@ -39,7 +39,10 @@
 //             library's and the showcase's own
 //   appendix  what journals have gained since, a page or more each, newest
 //             last: markdown in every text call; graphs (graph::parse,
-//             .graph content, graph::layout) and graph_map
+//             .graph content, graph::layout) and graph_map; graph::layout's
+//             names, set beside their places; places' glyphs from glyphsets
+//             of their own, and ragged way texts; write_block's align, its
+//             ragged lines aligned too
 //
 // Pages are bound with new_book: numbered, named and listed in the
 // contents.
@@ -2442,7 +2445,7 @@ let graphs = sheet("graphs");
 graphs.add(caption("graph::parse(text): a Graph, #{ kind, nodes: [#{ name, glyphs }], edges: [#{ from, to, directed, text }] }", TOP));
 let routes = content("routes");
 graphs.add(caption(`content("routes"), the showcase's content/routes.graph: ${routes.nodes.len()} places and ${routes.edges.len()} ways`, TOP + 40));
-graphs.add(caption("art::sketch(graph): its default drawing, the places boxed, the ways' texts across their lines", TOP + 80));
+graphs.add(caption("art::sketch(graph): its default drawing, the places' names boxed beside them, the ways' texts across their lines", TOP + 80));
 graphs.add(draw_sketch(art::sketch(routes), #{ boxes: LINE, glyphs: LINE, lines: LINE, arrows: LINE }, vec2(LEFT, TOP + 120), RIGHT - LEFT, 480));
 let y = TOP + 680;
 graphs.add(caption("graph::layout(graph, sizes, #{ labels, label_place, gap, width, height, seed, iterations }):", y));
@@ -2471,9 +2474,9 @@ for (place, i) in ["along", "beside", "upright"] {
 }
 book.bind("appendix", graphs);
 
-// graph_map draws a Graph: each place boxed, its glyphs under its name,
-// each way a line with an arrowhead where it goes one way and its text
-// set along it, beside it or upright across it.
+// graph_map draws a Graph: each place its glyphs, its name boxed beside
+// them, each way a line with an arrowhead where it goes one way and its
+// text set along it, beside it or upright across it.
 let maps = sheet("graphs");
 maps.add(caption("illustration(\"graph_map\", #{ label_place, width, height, seed }).run(#{ graph }): content(\"routes\") drawn", TOP));
 for (place, i) in ["along", "beside"] {
@@ -2497,9 +2500,85 @@ let y = TOP + 700;
 maps.add(caption("a chain: new_lock(name).source(\"ways\", \"content\", \"routes\").attach(\"map\", \"graph_map\", options)", y));
 maps.add(caption(".connect(\"ways.value\", \"map.graph\"): a .graph content source gives a Graph", y + 34));
 let lock = new_lock("routes").source("ways", "content", "routes")
-	.attach("map", "graph_map", #{ width: 1000.0, height: 560.0, seed: 3, gap: 18.0 }).connect("ways.value", "map.graph");
-maps.add(lock.run().canvases("map")[0].translate_by(vec2(LEFT, y + 100)));
+	.attach("map", "graph_map", #{ width: 1000.0, height: 470.0, seed: 3, gap: 18.0 }).connect("ways.value", "map.graph");
+maps.add(lock.run().canvases("map")[0].translate_by(vec2(LEFT, y + 70)));
 book.bind("appendix", maps);
+
+// graph::layout's names: each node's name set beside its box, on the
+// side clearest of lines, labels and the other names.
+let named = sheet("graphs");
+named.add(caption("graph::layout(graph, sizes, #{ names }): names, a size for each node's name, or (); it gives names, each one's middle", TOP));
+named.add(caption("([x, y], or ()), beside its node's box, on whichever side is clearest; here the points, the names and the pieces", TOP + 34));
+let dots = small.nodes.map(|n| [16.0, 16.0]);
+let name_sizes = small.nodes.map(|n| [n.name.len() * 17.0 + 24.0, 50.0]);
+for (place, i) in ["along", "beside", "upright"] {
+	let laid = graph::layout(small, dots, #{ labels: labels, names: name_sizes, label_place: place, gap: 12, width: 600, height: 640, seed: 1 });
+	let c = new_canvas();
+	for (p, k) in laid.points {
+		c.add(new_circle(vec2(p[0], p[1]), 8), LINE);
+		let at = vec2(laid.names[k][0], laid.names[k][1]);
+		c.add(new_rectangle(at, name_sizes[k][0], name_sizes[k][1]), CAPTION);
+		let name = write(small.nodes[k].name, 0, 0, 32);
+		c.add(name.translate_by(at - name.bounds().center));
+	}
+	for (edge, e) in laid.edges {
+		for piece in edge.pieces { c.add(new_line(vec2(piece[0][0], piece[0][1]), vec2(piece[1][0], piece[1][1])), LINE); }
+		if labels[e] != () {
+			let at = vec2(edge.label[0], edge.label[1]);
+			c.add(new_rectangle(at, labels[e][0], labels[e][1]).rotate_around(at, edge.angle), CAPTION);
+		}
+		if small.edges[e].directed { c.add(new_circle(vec2(edge.end[0], edge.end[1]), 6), CAPTION); }
+	}
+	let fit = 300.0 / laid.size[0];
+	named.add(c.scale_by(fit).translate_by(vec2(LEFT + i * 350, TOP + 90)));
+	named.add(write(`label_place: "${place}"`, LEFT + i * 350, TOP + 140 + laid.size[1] * fit, 20));
+}
+let y = TOP + 520;
+named.add(caption("illustration(\"graph_map\") of a busier graph: the names kept clear of the ways that leave each place", y));
+let town = graph::parse("Lorem: basic_eye\nIpsum: ploughdiem\nDolor: archangel_3\nLorem -- Ipsum: sit amet\nIpsum -- Dolor\nIpsum -> Amet: consectetur\nAmet -- Elit\nDolor -- Sed: adipiscing\nSed -> Tempor\nTempor -- Lorem: eiusmod\nIpsum -- Magna\nMagna -> Tempor: incididunt");
+named.add(illustration("graph_map", #{ label_place: "beside", width: 1000.0, height: 680.0, seed: 4 }).run(#{ graph: town })[0].translate_by(vec2(LEFT, y + 40)));
+book.bind("appendix", named);
+
+// A place's glyphs from a glyphset of its own, Name: glyphset "text", and
+// ways' texts written raggedly: write_block's paragraph jitters and the
+// hand's, through graph_map's edge_style.
+let sets = sheet("graphs");
+sets.add(caption("graph::parse(text), a line Name: glyphset \"text\": a place's glyphs from a glyphset of its own, each character a glyph", TOP));
+sets.add(caption("edge_style: write_block's line_start_jitter and line_gap_jitter, a hand's wander and glyph jitters", TOP + 34));
+let glyphed = graph::parse("Lorem: loche_upper \"CBAKMN\"\nIpsum: thirteen_black_priests \"4A0Ef\"\nDolor: eldritch \"cbakmn\"\nSit: basic_eye archangel_3 ploughdiem\nAmet: the_four_divine \"vial\"\nElit: nivelia \"efvbph\"\n"
+	+ "Lorem -> Ipsum: lorem ipsum dolor sit amet, consectetur adipiscing elit\nIpsum -- Dolor: sed do eiusmod tempor incididunt ut labore\nDolor -> Sit: et dolore magna aliqua\n"
+	+ "Sit -- Amet: ut enim ad minim veniam, quis nostrud exercitation\nAmet -> Lorem: ullamco laboris nisi\nIpsum -- Elit: ut aliquip ex ea commodo consequat\nElit -> Sit");
+assert(glyphed.nodes[0].glyphset == "loche_upper" && glyphed.nodes[0].glyphs.len() == 6 && glyphed.nodes[3].glyphset == (), "a glyphset, and its text's characters");
+let ragged_hand = new_handwriting_style(#{ baseline_wander: 3, glyph_position_jitter: 1.5, glyph_rotation_jitter: 0.1, glyph_scale_jitter: 0.1 });
+let ragged = #{
+	style: new_style(new_brush_style(RED, "Ink Pen", 1.2, #{ min_pressure: 0.5, max_pressure: 0.9, pressure_profile: "constant" }), ragged_hand),
+	type: new_type_style(PLAIN, 22),
+	paragraph: #{ line_start_jitter: 30, line_gap_jitter: 5 },
+};
+sets.add(illustration("graph_map", #{ label_place: "upright", width: 1000.0, height: 800.0, seed: 6, text_width: 240.0 }).run(#{ graph: glyphed, edge_style: ragged })[0].translate_by(vec2(LEFT, TOP + 100)));
+book.bind("appendix", sets);
+
+// write_block's lines set as the paragraph's align says, and with
+// line_start_jitter, ragged within their room: graph_map's way texts
+// centred and ragged.
+let aligned = sheet("text");
+aligned.add(caption("write_block(text, at, width, #{ paragraph: #{ align, line_start_jitter } }): each line set as align says, between at", TOP));
+aligned.add(caption("and width (red); jagged, a line starts in (left, justify), ends short (right) or either (center), up to the jitter", TOP + 34));
+let short = LOREM.sub_string(0, 124);
+for (jitter, row) in [0.0, 40.0] {
+	let y = TOP + 100 + row * 270;
+	for (align, i) in ["left", "right", "center", "justify"] {
+		let x = LEFT + i * 260;
+		aligned.add(write(`align: "${align}", line_start_jitter: ${jitter.to_int()}`, x, y, 16));
+		aligned.add(new_line(vec2(x, y + 20), vec2(x, y + 240)), CAPTION).add(new_line(vec2(x + 220, y + 20), vec2(x + 220, y + 240)), CAPTION);
+		aligned.add(write_block(short, vec2(x, y + 50), 220, #{ style: TEXT, type: new_type_style(PLAIN, 20), paragraph: #{ align: align, line_start_jitter: jitter } }).canvas);
+	}
+}
+let y = TOP + 650;
+aligned.add(caption("graph_map, edge_style's paragraph: #{ align: \"center\", line_start_jitter: 30, line_gap_jitter: 5 }", y));
+let centred = ragged + #{ paragraph: #{ align: "center", line_start_jitter: 30, line_gap_jitter: 5 } };
+aligned.add(illustration("graph_map", #{ label_place: "upright", width: 1000.0, height: 560.0, seed: 0, text_width: 240.0 }).run(#{ graph: glyphed, edge_style: centred })[0].translate_by(vec2(LEFT, y + 40)));
+book.bind("appendix", aligned);
 
 // ---- the title page and the contents, which go first ----
 

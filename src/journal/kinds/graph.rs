@@ -2,12 +2,14 @@
 //!
 //! ```rhai
 //! #{ kind: "Graph",
-//!    nodes: [#{ name: "Paper Mazes", glyphs: ["basic_eye"] }, #{ name: "Saint's Rest", glyphs: [] }],
+//!    nodes: [#{ name: "Paper Mazes", glyphs: ["basic_eye"] },
+//!            #{ name: "Saint's Rest", glyphs: ["4", "A", "0"], glyphset: "thirteen_black_priests" }],
 //!    edges: [#{ from: 0, to: 1, directed: true, text: "Follow the red thread" }] }
 //! ```
 //!
 //! Each node is a place: its name, and the names of glyphs that go with
-//! it. Each edge joins two nodes, by index, one way (`directed`) or both,
+//! it, from its `glyphset` if it names one (or `()`, the drawing's own,
+//! as graph_map's glyph_style gives it). Each edge joins two nodes, by index, one way (`directed`) or both,
 //! and its `text` says how ("" for nothing). Names and texts are marked-up
 //! text, as `markdown(...)` reads it.
 //!
@@ -21,13 +23,16 @@
 //! # a comment
 //! Paper Mazes: basic_eye archangel_3
 //! Saint's Rest: ploughdiem
+//! The Cloister: thirteen_black_priests "4A0Ef"
 //!
 //! Paper Mazes -> Saint's Rest: Follow the red thread until you find
 //!   _To Fall Endlessly_, then use the crawlspace beneath the broken shelf
 //! Saint's Rest -- The Cloister
 //! ```
 //!
-//! A line is a node, `Name` or `Name: glyph glyph`, or an edge, `A -> B`
+//! A line is a node, `Name`, `Name: glyph glyph` (glyphs by name) or
+//! `Name: glyphset "text"` (each of the text's characters a glyph of that
+//! glyphset, blanks left out), or an edge, `A -> B`
 //! (one way) or `A -- B` (both ways), then `: text` if it has any. An
 //! indented line carries on the line above; `#` lines are comments, and
 //! blank lines are nothing. An edge can name a node no line gives, and
@@ -36,7 +41,7 @@
 use parry2d::math::Vec2;
 use rhai::{Array, Dynamic, Map, Module, NativeCallContext, INT};
 
-use super::schema::{list, record, Schema};
+use super::schema::{list, optional, record, Schema};
 use super::{check, fail, field, point, read_number, Label, Options, Sketch, ValueKind};
 use crate::journal::art::{lay_out_graph, GraphLayoutSettings, LabelPlace};
 use crate::journal::markup::Markup;
@@ -56,7 +61,7 @@ impl ValueKind for Graph {
     fn schema(&self) -> Schema {
         record(&[
             ("kind", Schema::Kind("Graph")),
-            ("nodes", list(record(&[("name", Schema::Text), ("glyphs", list(Schema::Text))]))),
+            ("nodes", list(record(&[("name", Schema::Text), ("glyphs", list(Schema::Text)), ("glyphset", optional(Schema::Text))]))),
             ("edges", list(record(&[("from", Schema::Int), ("to", Schema::Int), ("directed", Schema::Bool), ("text", Schema::Text)]))),
         ])
     }
@@ -98,7 +103,7 @@ impl ValueKind for Graph {
         });
     }
 
-    /// Each node a box round its name, a ring under it for each glyph;
+    /// Each node a ring for each glyph, or a dot, its name boxed beside it;
     /// each edge its line, an arrowhead if it goes one way, and its text
     /// upright across it, a few words to a line.
     fn sketch(&self, value: &Map) -> Option<Sketch> {
@@ -108,10 +113,8 @@ impl ValueKind for Graph {
         let edges: Vec<Map> = list_of(value, "edges").iter().map(as_map).collect();
         let names: Vec<String> = nodes.iter().map(|n| plain(&text_of(n, "name"))).collect();
         let glyphs: Vec<usize> = nodes.iter().map(|n| list_of(n, "glyphs").len()).collect();
-        let sizes: Vec<(f64, f64)> = names.iter().zip(&glyphs).map(|(name, &g)| {
-            let wide = (name.chars().count() as f64 * 0.6 * s).max(g as f64 * 0.9 * s);
-            (wide + s, if g > 0 { 2.8 * s } else { 1.6 * s })
-        }).collect();
+        let sizes: Vec<(f64, f64)> = glyphs.iter().map(|&g| if g > 0 { (g as f64 * 0.9 * s, 0.6 * s) } else { (0.3 * s, 0.3 * s) }).collect();
+        let named: Vec<Option<(f64, f64)>> = names.iter().map(|name| Some((name.chars().count() as f64 * 0.6 * s + s, 1.6 * s))).collect();
         let texts: Vec<Vec<String>> = edges.iter().map(|e| wrap(&plain(&text_of(e, "text")), 24)).collect();
         let labels: Vec<Option<(f64, f64)>> = texts.iter().map(|lines| {
             let longest = lines.iter().map(|l| l.chars().count()).max()?;
@@ -119,16 +122,20 @@ impl ValueKind for Graph {
         }).collect();
         let ends: Vec<(usize, usize)> = edges.iter().map(|e| (index_of(e, "from"), index_of(e, "to"))).collect();
         let settings = GraphLayoutSettings { width: 1000.0, height: 800.0, gap: 0.5 * s, seed: 0, iterations: 300, place: LabelPlace::Upright };
-        let laid = lay_out_graph(&sizes, &ends, &labels, &settings).ok()?;
+        let laid = lay_out_graph(&sizes, &ends, &labels, &named, &settings).ok()?;
         let (mut boxes, mut rings, mut lines, mut arrows) = (StrokePath::new(), StrokePath::new(), StrokePath::new(), StrokePath::new());
         let mut words = Vec::new();
-        for (k, (&c, &(w, h))) in laid.points.iter().zip(&sizes).enumerate() {
-            boxes.append(StrokePath::rectangle(c, w as f32, h as f32));
-            let name_at = if glyphs[k] > 0 { c - Vec2::new(0.0, 0.6 * SIZE) } else { c };
-            words.push(Label { at: name_at, text: names[k].clone() });
+        for (k, &c) in laid.points.iter().enumerate() {
+            if let (Some(at), Some((w, h))) = (laid.names[k], named[k]) {
+                boxes.append(StrokePath::rectangle(at, w as f32, h as f32));
+                words.push(Label { at, text: names[k].clone() });
+            }
+            if glyphs[k] == 0 {
+                rings.append(StrokePath::circle(c, 0.15 * SIZE));
+            }
             for g in 0..glyphs[k] {
                 let x = (g as f32 - (glyphs[k] as f32 - 1.0) / 2.0) * 0.9 * SIZE;
-                rings.append(StrokePath::circle(c + Vec2::new(x, 0.7 * SIZE), 0.3 * SIZE));
+                rings.append(StrokePath::circle(c + Vec2::new(x, 0.0), 0.3 * SIZE));
             }
         }
         for (e, edge) in laid.edges.iter().enumerate() {
@@ -195,11 +202,12 @@ fn wrap(text: &str, width: usize) -> Vec<String> {
     lines
 }
 
-/// A node as it's read: its name, its glyphs, and the line that gave it,
-/// if one did.
+/// A node as it's read: its name, its glyphs and the glyphset they're
+/// from, if it names one, and the line that gave it, if one did.
 struct Node {
     name: String,
     glyphs: Vec<String>,
+    glyphset: Option<String>,
     line: Option<usize>,
 }
 
@@ -226,7 +234,7 @@ pub fn parse(source: &str) -> Result<Map, String> {
     let mut edges: Vec<(usize, usize, bool, String)> = Vec::new();
     let named = |nodes: &mut Vec<Node>, name: &str| -> usize {
         nodes.iter().position(|n| n.name == name).unwrap_or_else(|| {
-            nodes.push(Node { name: name.to_string(), glyphs: Vec::new(), line: None });
+            nodes.push(Node { name: name.to_string(), glyphs: Vec::new(), glyphset: None, line: None });
             nodes.len() - 1
         })
     };
@@ -257,7 +265,7 @@ pub fn parse(source: &str) -> Result<Map, String> {
                 return Err(at(format!("{} has a line already, line {}", name, m)));
             }
             nodes[k].line = Some(*n);
-            nodes[k].glyphs = tail.unwrap_or("").split_whitespace().map(String::from).collect();
+            (nodes[k].glyphs, nodes[k].glyphset) = glyphs_of(tail.unwrap_or("")).map_err(at)?;
         }
     }
     let mut graph = Map::new();
@@ -266,6 +274,7 @@ pub fn parse(source: &str) -> Result<Map, String> {
         let mut m = Map::new();
         m.insert("name".into(), node.name.into());
         m.insert("glyphs".into(), Dynamic::from_array(node.glyphs.into_iter().map(Dynamic::from).collect()));
+        m.insert("glyphset".into(), node.glyphset.map_or(Dynamic::UNIT, Dynamic::from));
         Dynamic::from_map(m)
     }).collect()));
     graph.insert("edges".into(), Dynamic::from_array(edges.into_iter().map(|(from, to, directed, text)| {
@@ -277,6 +286,22 @@ pub fn parse(source: &str) -> Result<Map, String> {
         Dynamic::from_map(m)
     }).collect()));
     Ok(graph)
+}
+
+/// A place's glyphs, as its line gives them: names, `glyph glyph`, or a
+/// glyphset and a text of its characters, `glyphset "text"`.
+fn glyphs_of(tail: &str) -> Result<(Vec<String>, Option<String>), String> {
+    let Some(open) = tail.find('"') else {
+        return Ok((tail.split_whitespace().map(String::from).collect(), None));
+    };
+    let (set, rest) = (tail[..open].trim(), &tail[open + 1..]);
+    let Some(close) = rest.find('"') else {
+        return Err(format!("a glyph text has no closing quote: {}", tail));
+    };
+    if !rest[close + 1..].trim().is_empty() || set.is_empty() || set.contains(char::is_whitespace) {
+        return Err(format!("a place's glyphs are names, glyph glyph, or a glyphset and a text of its glyphs, glyphset \"text\": not {}", tail));
+    }
+    Ok((rest[..close].chars().filter(|c| !c.is_whitespace()).map(String::from).collect(), Some(set.to_string())))
 }
 
 /// The two ends of an edge and its `->` or `--`, if the line is one.
@@ -304,11 +329,12 @@ fn read_size(value: &Dynamic, what: &str) -> Result<(f64, f64), String> {
     Ok((read_number(&wh[0], what).map_err(|_| wrong())?, read_number(&wh[1], what).map_err(|_| wrong())?))
 }
 
-const LAYOUT_KEYS: [&str; 7] = ["labels", "label_place", "gap", "width", "height", "seed", "iterations"];
+const LAYOUT_KEYS: [&str; 8] = ["labels", "names", "label_place", "gap", "width", "height", "seed", "iterations"];
 
-/// `graph::layout(graph, sizes[, #{ labels, label_place, gap, width, height, seed, iterations }])`:
-/// #{ points, size, edges: [#{ start, end, label, angle, pieces }] }, the
-/// nodes' boxes, of `sizes`, and each edge's line and label.
+/// `graph::layout(graph, sizes[, #{ labels, names, label_place, gap, width, height, seed, iterations }])`:
+/// #{ points, size, edges: [#{ start, end, label, angle, pieces }], names },
+/// the nodes' boxes, of `sizes`, each edge's line and label, and each
+/// node's name beside its box.
 fn layout(ctx: &NativeCallContext, graph: &Map, sizes: &Array, options: &Map) -> Result<Map, Box<rhai::EvalAltResult>> {
     const CALLER: &str = "graph::layout";
     let err = |m: String| fail(ctx, CALLER, m);
@@ -319,12 +345,16 @@ fn layout(ctx: &NativeCallContext, graph: &Map, sizes: &Array, options: &Map) ->
         return Err(err(format!("there are {} sizes for {} nodes", sizes.len(), nodes.len())));
     }
     let sizes = sizes.iter().enumerate().map(|(i, s)| read_size(s, &format!("sizes[{}]", i))).collect::<Result<Vec<_>, _>>().map_err(err)?;
-    let labels = match options.get("labels") {
-        None => vec![None; edges.len()],
-        Some(labels) => labels.read_lock::<Array>().ok_or_else(|| err("'labels' should be an array of sizes [width, height], or () for none".into()))?
-            .iter().enumerate().map(|(e, l)| if l.is_unit() { Ok(None) } else { read_size(l, &format!("labels[{}]", e)).map(Some) })
-            .collect::<Result<Vec<_>, _>>().map_err(err)?,
+    let sizes_or_none = |key: &str, count: usize| -> Result<Vec<Option<(f64, f64)>>, Box<rhai::EvalAltResult>> {
+        match options.get(key) {
+            None => Ok(vec![None; count]),
+            Some(list) => list.read_lock::<Array>().ok_or_else(|| err(format!("'{}' should be an array of sizes [width, height], or () for none", key)))?
+                .iter().enumerate().map(|(e, l)| if l.is_unit() { Ok(None) } else { read_size(l, &format!("{}[{}]", key, e)).map(Some) })
+                .collect::<Result<Vec<_>, _>>().map_err(err),
+        }
     };
+    let labels = sizes_or_none("labels", edges.len())?;
+    let names = sizes_or_none("names", nodes.len())?;
     let place = match options.get("label_place") {
         None => LabelPlace::Along,
         Some(p) => LabelPlace::named(&p.clone().into_string().map_err(|_| err("'label_place' should be a string".into()))?).map_err(err)?,
@@ -338,7 +368,7 @@ fn layout(ctx: &NativeCallContext, graph: &Map, sizes: &Array, options: &Map) ->
         place,
     };
     let ends: Vec<(usize, usize)> = edges.iter().map(|e| { let e = as_map(e); (index_of(&e, "from"), index_of(&e, "to")) }).collect();
-    let laid = lay_out_graph(&sizes, &ends, &labels, &settings).map_err(err)?;
+    let laid = lay_out_graph(&sizes, &ends, &labels, &names, &settings).map_err(err)?;
     let mut out = Map::new();
     out.insert("points".into(), Dynamic::from_array(laid.points.into_iter().map(point).collect()));
     out.insert("size".into(), Dynamic::from_array(vec![Dynamic::from_float(laid.size.0), Dynamic::from_float(laid.size.1)]));
@@ -351,6 +381,7 @@ fn layout(ctx: &NativeCallContext, graph: &Map, sizes: &Array, options: &Map) ->
         m.insert("pieces".into(), Dynamic::from_array(edge.pieces.into_iter().map(|(a, b)| Dynamic::from_array(vec![point(a), point(b)])).collect()));
         Dynamic::from_map(m)
     }).collect()));
+    out.insert("names".into(), Dynamic::from_array(laid.names.into_iter().map(|at| at.map_or(Dynamic::UNIT, point)).collect()));
     Ok(out)
 }
 
@@ -402,6 +433,16 @@ The Cloister -> Paper Mazes: through the
     }
 
     #[test]
+    fn a_place_can_take_its_glyphs_from_a_glyphset_as_text() {
+        let graph = parse("Saint's Rest: thirteen_black_priests \"4A 0E\"\nPaper Mazes: basic_eye").unwrap();
+        check(&Graph, &Dynamic::from_map(graph.clone())).unwrap();
+        assert_eq!(nodes(&graph)[0], ("Saint's Rest".into(), vec!["4".to_string(), "A".into(), "0".into(), "E".into()]));
+        let sets: Vec<Dynamic> = list_of(&graph, "nodes").iter().map(|n| field(&as_map(n), "glyphset").clone()).collect();
+        assert_eq!(sets[0].clone().into_string().unwrap(), "thirteen_black_priests");
+        assert!(sets[1].is_unit(), "names alone take the drawing's glyphset");
+    }
+
+    #[test]
     fn nodes_come_in_the_order_theyre_first_named() {
         let graph = parse("B -> A\nC\nA: basic_eye").unwrap();
         assert_eq!(nodes(&graph), vec![("B".into(), vec![]), ("A".into(), vec!["basic_eye".to_string()]), ("C".into(), vec![])]);
@@ -418,6 +459,9 @@ The Cloister -> Paper Mazes: through the
             ("A --", "line 1: an edge needs a place either side of --"),
             ("A -> B -> C", "line 1: an edge joins two places: give each way a line of its own"),
             ("A -> B: [far]{color: }", "line 1: "),
+            ("A: plain \"AB", "line 1: a glyph text has no closing quote"),
+            ("A: plain \"AB\" basic_eye", "line 1: a place's glyphs are names, glyph glyph, or a glyphset and a text of its glyphs"),
+            ("A: \"AB\"", "line 1: a place's glyphs are names"),
         ] {
             let err = parse(text).err().unwrap_or_default();
             assert!(err.starts_with(want), "{:?}: {}", text, err);
@@ -484,7 +528,7 @@ The Cloister -> Paper Mazes: through the
     }
 
     #[test]
-    fn its_sketch_boxes_the_names_and_writes_the_ways_across_their_lines() {
+    fn its_sketch_boxes_the_names_beside_the_glyphs_and_writes_the_ways_across_their_lines() {
         let sketch = super::super::sketch(&Dynamic::from_map(parse(ROUTES).unwrap())).unwrap().unwrap();
         let names: Vec<&str> = sketch.parts.iter().map(|(n, _)| n.as_str()).collect();
         assert_eq!(names, ["boxes", "glyphs", "lines", "arrows"]);

@@ -1,17 +1,21 @@
-//! A graph laid out by forces: its nodes boxes of the sizes given (a name
-//! and glyphs, say), its edges lines between their borders, each edge's
-//! label a box of the size given set on its line: along it, beside it, or
-//! upright across it.
+//! A graph laid out by forces: its nodes boxes of the sizes given (a
+//! symbol, say), each with a name, a box of the size given, beside it,
+//! its edges lines between their borders, each edge's label a box of the
+//! size given set on its line: along it, beside it, or upright across it.
 //!
 //! Boxes and labels are oriented rectangles; whatever overlaps is pushed
 //! apart along the axis it overlaps least on. Each pair of joined nodes is
 //! pulled or pushed to a length that leaves room between their borders for
-//! the longest of its edges' labels; edges push away the nodes that aren't
-//! theirs (as in PrEd), and labels push away boxes and labels that aren't
-//! theirs. A weak pull to the middle keeps the pieces of a graph together,
-//! and every node is spread from the others by a little of Fruchterman and
-//! Reingold's repulsion, so a graph unfolds rather than crumpling. The
-//! moves cool as they go, from the best of a few seeded starts.
+//! the longest of its edges' labels; edges push away the nodes, and their
+//! names, that aren't theirs (as in PrEd), and labels and names push away
+//! boxes, labels and names that aren't theirs. A name goes on whichever of
+//! eight sides of its box (right, left, under, over, then the corners)
+//! the fewest of its own lines leave by, and, once the forces are done, on
+//! whichever is clearest of everything. A weak pull to the middle keeps
+//! the pieces of a graph together, and every node is spread from the
+//! others by a little of Fruchterman and Reingold's repulsion, so a graph
+//! unfolds rather than crumpling. The moves cool as they go, from the best
+//! of a few seeded starts.
 //!
 //! Only `+ - * /` and square roots are used while it's laid out (no
 //! `hypot`, no trigonometry), so it lays out the same in the browser.
@@ -91,38 +95,47 @@ pub struct GraphLayout {
     /// The box it was laid out in: the one asked for, or bigger.
     pub size: (f64, f64),
     pub edges: Vec<EdgeLayout>,
+    /// The middle of each node's name, beside its box, if it has one.
+    pub names: Vec<Option<Vec2>>,
 }
 
-/// Lay out a graph of nodes of `sizes` (width, height), joined by `edges`
-/// (pairs of indices), each with a label of the size given or none.
-pub fn lay_out_graph(sizes: &[(f64, f64)], edges: &[(usize, usize)], labels: &[Option<(f64, f64)>], s: &GraphLayoutSettings) -> Result<GraphLayout, String> {
-    check(sizes, edges, labels, s)?;
-    let graph = Graph::new(sizes, edges, labels, s);
+/// Where a node's name can go: right of its box, left, under, over, then
+/// at its corners, the earlier the likelier; each a way across and down.
+const SIDES: [(f64, f64); 8] = [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, -1.0), (-1.0, 1.0)];
+
+/// Lay out a graph of nodes of `sizes` (width, height), each with a name
+/// of the size given or none, joined by `edges` (pairs of indices), each
+/// with a label of the size given or none.
+pub fn lay_out_graph(sizes: &[(f64, f64)], edges: &[(usize, usize)], labels: &[Option<(f64, f64)>], names: &[Option<(f64, f64)>], s: &GraphLayoutSettings) -> Result<GraphLayout, String> {
+    check(sizes, edges, labels, names, s)?;
+    let graph = Graph::new(sizes, edges, labels, names, s);
     if sizes.is_empty() {
-        return Ok(GraphLayout { points: Vec::new(), size: (graph.width, graph.height), edges: Vec::new() });
+        return Ok(GraphLayout { points: Vec::new(), size: (graph.width, graph.height), edges: Vec::new(), names: Vec::new() });
     }
-    let mut best: Option<(f64, Vec<V>)> = None;
+    let mut best: Option<(f64, Vec<V>, Vec<usize>)> = None;
     for start in 0..STARTS {
         let mut rng = StdRng::seed_from_u64(s.seed.wrapping_mul(STARTS).wrapping_add(start));
         let mut pos = graph.start(&mut rng);
         graph.relax(&mut pos, s.iterations, &mut rng);
-        graph.tidy(&mut pos);
-        let score = graph.score(&pos);
-        if best.as_ref().is_none_or(|(b, _)| score < *b) {
-            best = Some((score, pos));
+        let sides = graph.tidy(&mut pos);
+        let score = graph.score(&pos, &sides);
+        if best.as_ref().is_none_or(|(b, _, _)| score < *b) {
+            best = Some((score, pos, sides));
         }
     }
-    let (_, mut pos) = best.expect("a start was tried");
-    let size = graph.fit(&mut pos);
+    let (_, mut pos, sides) = best.expect("a start was tried");
+    let size = graph.fit(&mut pos, &sides);
     let lines = graph.lines(&pos);
+    let names = graph.name_boxes(&pos, &sides);
     Ok(GraphLayout {
         points: pos.iter().map(|&p| vec2(p)).collect(),
         size,
-        edges: lines.iter().map(|l| graph.edge_layout(l, &lines)).collect(),
+        edges: lines.iter().map(|l| graph.edge_layout(l, &lines, &names)).collect(),
+        names: names.iter().map(|r| r.map(|r| vec2(r.c))).collect(),
     })
 }
 
-fn check(sizes: &[(f64, f64)], edges: &[(usize, usize)], labels: &[Option<(f64, f64)>], s: &GraphLayoutSettings) -> Result<(), String> {
+fn check(sizes: &[(f64, f64)], edges: &[(usize, usize)], labels: &[Option<(f64, f64)>], names: &[Option<(f64, f64)>], s: &GraphLayoutSettings) -> Result<(), String> {
     if !(s.width > 0.0 && s.width.is_finite() && s.height > 0.0 && s.height.is_finite()) {
         return Err(format!("width and height must be positive numbers, got {} and {}", s.width, s.height));
     }
@@ -150,7 +163,35 @@ fn check(sizes: &[(f64, f64)], edges: &[(usize, usize)], labels: &[Option<(f64, 
     if let Some(e) = labels.iter().position(|l| l.is_some_and(|wh| !size_ok(wh))) {
         return Err(format!("labels[{}] should be a width and height of at least 0, got {:?}", e, labels[e]));
     }
+    if names.len() != sizes.len() {
+        return Err(format!("there are {} names for {} nodes", names.len(), sizes.len()));
+    }
+    if let Some(k) = names.iter().position(|n| n.is_some_and(|wh| !size_ok(wh))) {
+        return Err(format!("names[{}] should be a width and height of at least 0, got {:?}", k, names[k]));
+    }
     Ok(())
+}
+
+/// How much of a line's free part runs over `r`, grown by `grow`.
+fn under(line: &Line, r: &Rect, grow: f64) -> f64 {
+    r.across(line.start, line.u, grow).map_or(0.0, |(a, b)| (b.min(line.free.1) - a.max(line.free.0)).max(0.0))
+}
+
+/// How far `r` would move, and which way, to come `gap` clear of the line
+/// from `from` to `to`, going `u`, and how far along it, from 0 to 1, it's
+/// nearest: `None` if it's that far off already.
+fn off_line(from: V, to: V, u: V, r: &Rect, gap: f64) -> Option<(V, f64, f64)> {
+    let ab = to - from;
+    let t = ((r.c - from).dot(ab) / ab.dot(ab).max(1e-12)).clamp(0.0, 1.0);
+    let off = r.c - (from + ab * t);
+    let away = if norm(off) > 1e-9 { unit(off) } else { u.perp() };
+    let (want, dist) = (r.reach(away) + gap, off.dot(away));
+    if dist < want { Some((away, want - dist, t)) } else { None }
+}
+
+/// How deep `a` and `b` overlap, `margin` apart: 0 if they don't.
+fn depth(a: &Rect, b: &Rect, margin: f64) -> f64 {
+    a.overlap(b, margin).map_or(0.0, |(_, d)| d)
 }
 
 fn vec2(p: V) -> Vec2 {
@@ -271,6 +312,9 @@ struct Graph {
     edges: Vec<(usize, usize)>,
     /// Each edge's label's width and height, halved (zero for none).
     labels: Vec<Option<V>>,
+    /// Each node's name's width and height, halved, and the edges at it.
+    names: Vec<Option<V>>,
+    around: Vec<Vec<usize>>,
     pairs: Vec<Pair>,
     place: LabelPlace,
     gap: f64,
@@ -281,9 +325,15 @@ struct Graph {
 }
 
 impl Graph {
-    fn new(sizes: &[(f64, f64)], edges: &[(usize, usize)], labels: &[Option<(f64, f64)>], s: &GraphLayoutSettings) -> Graph {
+    fn new(sizes: &[(f64, f64)], edges: &[(usize, usize)], labels: &[Option<(f64, f64)>], names: &[Option<(f64, f64)>], s: &GraphLayoutSettings) -> Graph {
         let half: Vec<V> = sizes.iter().map(|&(w, h)| V::new(w / 2.0, h / 2.0)).collect();
         let labels: Vec<Option<V>> = labels.iter().map(|l| l.map(|(w, h)| V::new(w / 2.0, h / 2.0))).collect();
+        let names: Vec<Option<V>> = names.iter().map(|l| l.map(|(w, h)| V::new(w / 2.0, h / 2.0))).collect();
+        let mut around = vec![Vec::new(); sizes.len()];
+        for (e, &(a, b)) in edges.iter().enumerate() {
+            around[a].push(e);
+            around[b].push(e);
+        }
         // Edges between the same two nodes, either way, are a pair, in the
         // order their first edges come.
         let mut pairs: Vec<Pair> = Vec::new();
@@ -294,12 +344,12 @@ impl Graph {
                 None => pairs.push(Pair { a: lo, b: hi, edges: vec![e] }),
             }
         }
-        let mut g = Graph { half, edges: edges.to_vec(), labels, pairs, place: s.place, gap: s.gap, width: s.width, height: s.height, k: 0.0 };
+        let mut g = Graph { half, edges: edges.to_vec(), labels, names, around, pairs, place: s.place, gap: s.gap, width: s.width, height: s.height, k: 0.0 };
         // Room enough for what's in it, spread out: grown in proportion
         // if the box asked for hasn't it.
         let gap = s.gap;
         let boxes: f64 = g.half.iter().map(|h| (2.0 * h.x + 2.0 * gap) * (2.0 * h.y + 2.0 * gap)).sum();
-        let labels: f64 = g.labels.iter().flatten().map(|h| (2.0 * h.x + gap) * (2.0 * h.y + gap)).sum();
+        let labels: f64 = g.labels.iter().chain(&g.names).flatten().map(|h| (2.0 * h.x + gap) * (2.0 * h.y + gap)).sum();
         let need = 2.5 * (boxes + labels);
         let longest = (0..g.pairs.len()).map(|p| g.rest_length(p, V::new(1.0, 0.0)).max(g.rest_length(p, V::new(0.0, 1.0)))).fold(0.0, f64::max);
         let widest = g.half.iter().map(|h| 2.0 * h.x.max(h.y)).fold(0.0, f64::max);
@@ -460,7 +510,7 @@ impl Graph {
 
     /// Move the layout to the middle of its box, growing the box, in
     /// proportion, if it's too big for it: its size.
-    fn fit(&self, pos: &mut [V]) -> (f64, f64) {
+    fn fit(&self, pos: &mut [V], sides: &[usize]) -> (f64, f64) {
         let (mut lo, mut hi) = (V::new(f64::MAX, f64::MAX), V::new(f64::MIN, f64::MIN));
         let mut take = |c: V, reach: V| {
             lo = V::new(lo.x.min(c.x - reach.x), lo.y.min(c.y - reach.y));
@@ -468,6 +518,9 @@ impl Graph {
         };
         for (&c, &half) in pos.iter().zip(&self.half) {
             take(c, half);
+        }
+        for name in self.name_boxes(pos, sides).into_iter().flatten() {
+            take(name.c, name.half);
         }
         for line in self.lines(pos) {
             if let Some((r, _)) = line.label {
@@ -482,6 +535,58 @@ impl Graph {
             *p = *p + by;
         }
         size
+    }
+
+    /// Node `i`'s name's box, if it has one, on `side` of its box about
+    /// `c`, half a gap from it.
+    fn name_box(&self, i: usize, c: V, side: usize) -> Option<Rect> {
+        let (h, s, (x, y), g) = (self.names[i]?, self.half[i], SIDES[side], self.gap / 2.0);
+        Some(Rect::upright(c + V::new(x * (s.x + g + h.x), y * (s.y + g + h.y)), h))
+    }
+
+    fn name_boxes(&self, pos: &[V], sides: &[usize]) -> Vec<Option<Rect>> {
+        (0..pos.len()).map(|i| self.name_box(i, pos[i], sides[i])).collect()
+    }
+
+    /// The side of its box each node's name goes on: the one over the
+    /// least of its own lines and their labels, or, given the sides the
+    /// names `were` on, of every line, label, box and name, chosen node by
+    /// node; the earlier side when they're close.
+    fn sides(&self, pos: &[V], lines: &[Line], were: Option<&[usize]>) -> Vec<usize> {
+        let n = pos.len();
+        let grow = self.gap / 2.0;
+        let mut sides = were.map_or_else(|| vec![0; n], <[usize]>::to_vec);
+        let boxes: Vec<Rect> = if were.is_some() { pos.iter().zip(&self.half).map(|(&c, &h)| Rect::upright(c, h)).collect() } else { Vec::new() };
+        for i in (0..n).filter(|&i| self.names[i].is_some()) {
+            let lines: Vec<&Line> = match were {
+                None => self.around[i].iter().map(|&e| &lines[e]).collect(),
+                Some(_) => lines.iter().collect(),
+            };
+            let mut best = (f64::MAX, 0);
+            for side in 0..SIDES.len() {
+                let Some(r) = self.name_box(i, pos[i], side) else { continue };
+                let mut cost = 0.5 * side as f64;
+                for line in &lines {
+                    cost += under(line, &r, grow);
+                    if let Some((label, _)) = &line.label {
+                        cost += 10.0 * depth(label, &r, grow);
+                    }
+                }
+                if were.is_some() {
+                    for j in (0..n).filter(|&j| j != i) {
+                        cost += 10.0 * depth(&boxes[j], &r, grow);
+                        if let Some(other) = self.name_box(j, pos[j], sides[j]) {
+                            cost += 10.0 * depth(&other, &r, grow);
+                        }
+                    }
+                }
+                if cost < best.0 {
+                    best = (cost, side);
+                }
+            }
+            sides[i] = best.1;
+        }
+        sides
     }
 
     /// The label's box, its middle `along` the line from `from` going `u`;
@@ -529,6 +634,7 @@ impl Graph {
             f[pair.b] = f[pair.b] - u * (0.5 * pull);
         }
         let lines = self.lines(pos);
+        let names = self.name_boxes(pos, &self.sides(pos, &lines, None));
         for line in &lines {
             let (a, b) = self.edges[line.edge];
             let (from, to) = (line.start + line.u * line.free.0, line.start + line.u * line.free.1);
@@ -536,27 +642,35 @@ impl Graph {
                 if k == a || k == b {
                     continue;
                 }
-                // Lines push away the boxes they pass too near, and the
-                // boxes push back.
-                let ab = to - from;
-                let t = ((pos[k] - from).dot(ab) / ab.dot(ab).max(1e-12)).clamp(0.0, 1.0);
-                let near = from + ab * t;
-                let off = pos[k] - near;
-                let away = if norm(off) > 1e-9 { unit(off) } else { line.u.perp() };
-                let want = boxes[k].reach(away) + gap;
-                let dist = off.dot(away);
-                if dist < want {
-                    let push = 0.5 * (want - dist);
-                    f[k] = f[k] + away * push;
-                    f[a] = f[a] - away * (push * (1.0 - t));
-                    f[b] = f[b] - away * (push * t);
+                for r in std::iter::once(&boxes[k]).chain(&names[k]) {
+                    // Lines push away the boxes and names they pass too
+                    // near, and are pushed back.
+                    if let Some((away, depth, t)) = off_line(from, to, line.u, r, gap) {
+                        let push = 0.5 * depth;
+                        f[k] = f[k] + away * push;
+                        f[a] = f[a] - away * (push * (1.0 - t));
+                        f[b] = f[b] - away * (push * t);
+                    }
+                    // Labels push away boxes and names that aren't theirs.
+                    if let Some((label, _)) = &line.label {
+                        if let Some((way, depth)) = label.overlap(r, gap) {
+                            f[k] = f[k] + way * (0.5 * depth);
+                            f[a] = f[a] - way * (0.25 * depth);
+                            f[b] = f[b] - way * (0.25 * depth);
+                        }
+                    }
                 }
-                // Labels push away boxes that aren't theirs.
-                if let Some((label, _)) = &line.label {
-                    if let Some((way, depth)) = label.overlap(&boxes[k], gap) {
-                        f[k] = f[k] + way * (0.5 * depth);
-                        f[a] = f[a] - way * (0.25 * depth);
-                        f[b] = f[b] - way * (0.25 * depth);
+            }
+        }
+        // Names push away the boxes and names that aren't theirs.
+        for i in 0..n {
+            let Some(name) = &names[i] else { continue };
+            for j in (0..n).filter(|&j| j != i) {
+                let others = if j > i { names[j].as_ref() } else { None };
+                for r in std::iter::once(&boxes[j]).chain(others) {
+                    if let Some((way, depth)) = name.overlap(r, gap) {
+                        f[j] = f[j] + way * (0.5 * depth);
+                        f[i] = f[i] - way * (0.5 * depth);
                     }
                 }
             }
@@ -581,11 +695,17 @@ impl Graph {
         let middle = V::new(self.width / 2.0, self.height / 2.0);
         for i in 0..n {
             f[i] = f[i] + (middle - pos[i]) * 0.01;
-            let h = self.half[i];
-            let inward = |p: f64, half: f64, side: f64| {
-                if side <= 2.0 * half { side / 2.0 - p } else { (half - p).max(0.0) - (p + half - side).max(0.0) }
+            // How far the node and its name reach from its middle, back
+            // (left and up) and on.
+            let (mut back, mut on) = (self.half[i], self.half[i]);
+            if let Some(name) = &names[i] {
+                let (lo, hi) = (pos[i] - (name.c - name.half), name.c + name.half - pos[i]);
+                (back, on) = (V::new(back.x.max(lo.x), back.y.max(lo.y)), V::new(on.x.max(hi.x), on.y.max(hi.y)));
+            }
+            let inward = |p: f64, back: f64, on: f64, side: f64| {
+                if side <= back + on { side / 2.0 + (back - on) / 2.0 - p } else { (back - p).max(0.0) - (p + on - side).max(0.0) }
             };
-            f[i] = f[i] + V::new(inward(pos[i].x, h.x, self.width), inward(pos[i].y, h.y, self.height));
+            f[i] = f[i] + V::new(inward(pos[i].x, back.x, on.x, self.width), inward(pos[i].y, back.y, on.y, self.height));
         }
         f
     }
@@ -608,12 +728,30 @@ impl Graph {
         }
     }
 
-    /// Push apart what still overlaps, without the pulls: boxes, labels
-    /// over boxes, and labels over labels.
-    fn tidy(&self, pos: &mut [V]) {
+    /// Set each node's name on the side clearest of everything, and push
+    /// apart what still overlaps, without the pulls; again, a few times,
+    /// while the names change sides: the sides they're on.
+    fn tidy(&self, pos: &mut [V]) -> Vec<usize> {
+        let lines = self.lines(pos);
+        let mut sides = self.sides(pos, &lines, Some(&self.sides(pos, &lines, None)));
+        for _ in 0..3 {
+            self.push_apart(pos, &sides);
+            let again = self.sides(pos, &self.lines(pos), Some(&sides));
+            if again == sides {
+                break;
+            }
+            sides = again;
+        }
+        sides
+    }
+
+    /// Push apart what overlaps, without the pulls: boxes, labels and
+    /// names over boxes, and labels and names over labels and names.
+    fn push_apart(&self, pos: &mut [V], sides: &[usize]) {
         let n = pos.len();
         for _ in 0..100 {
             let boxes: Vec<Rect> = pos.iter().zip(&self.half).map(|(&c, &h)| Rect::upright(c, h)).collect();
+            let names = self.name_boxes(pos, sides);
             let mut f = vec![V::default(); n];
             let mut moved = false;
             for i in 0..n {
@@ -625,15 +763,42 @@ impl Graph {
                     }
                 }
             }
+            for i in 0..n {
+                let Some(name) = &names[i] else { continue };
+                for j in (0..n).filter(|&j| j != i) {
+                    let others = if j > i { names[j].as_ref() } else { None };
+                    for r in std::iter::once(&boxes[j]).chain(others) {
+                        if let Some((way, depth)) = name.overlap(r, self.gap) {
+                            f[j] = f[j] + way * (0.5 * depth + 1e-6);
+                            f[i] = f[i] - way * (0.5 * depth + 1e-6);
+                            moved = true;
+                        }
+                    }
+                }
+            }
             let lines = self.lines(pos);
             for line in &lines {
                 let Some((label, _)) = &line.label else { continue };
                 let (a, b) = self.edges[line.edge];
                 for k in (0..n).filter(|&k| k != a && k != b) {
-                    if let Some((way, depth)) = label.overlap(&boxes[k], self.gap) {
-                        f[k] = f[k] + way * (depth + 1e-6);
-                        moved = true;
+                    for r in std::iter::once(&boxes[k]).chain(&names[k]) {
+                        if let Some((way, depth)) = label.overlap(r, self.gap) {
+                            f[k] = f[k] + way * (depth + 1e-6);
+                            moved = true;
+                        }
                     }
+                }
+            }
+            // Pairs too near for their lines' labels, or for their lines
+            // to show, pushed out to their lengths.
+            for (p, pair) in self.pairs.iter().enumerate() {
+                let d = pos[pair.b] - pos[pair.a];
+                let u = unit(d);
+                let short = self.rest_length(p, u) - norm(d);
+                if short > 1e-6 {
+                    f[pair.a] = f[pair.a] - u * (0.5 * short + 1e-6);
+                    f[pair.b] = f[pair.b] + u * (0.5 * short + 1e-6);
+                    moved = true;
                 }
             }
             // Labels apart, each moved with its edge's nodes.
@@ -661,9 +826,9 @@ impl Graph {
         }
     }
 
-    /// How bad a layout is: what overlaps first, then lines that cross,
-    /// then pairs far from their lengths.
-    fn score(&self, pos: &[V]) -> f64 {
+    /// How bad a layout is: what overlaps first, then lines that cross
+    /// each other or names, then pairs far from their lengths.
+    fn score(&self, pos: &[V], sides: &[usize]) -> f64 {
         let n = pos.len();
         let boxes: Vec<Rect> = pos.iter().zip(&self.half).map(|(&c, &h)| Rect::upright(c, h)).collect();
         let mut overlap = 0.0;
@@ -675,13 +840,29 @@ impl Graph {
         let lines = self.lines(pos);
         let ends = |l: &Line| (l.start + l.u * l.free.0, l.start + l.u * l.free.1);
         let mut crossings = 0.0;
+        let names = self.name_boxes(pos, sides);
+        for (i, name) in names.iter().enumerate() {
+            let Some(name) = name else { continue };
+            for j in (0..n).filter(|&j| j != i) {
+                overlap += depth(name, &boxes[j], 0.0);
+                if let Some(other) = names[j].as_ref().filter(|_| j > i) {
+                    overlap += depth(name, other, 0.0);
+                }
+            }
+            for line in &lines {
+                if let Some((label, _)) = &line.label {
+                    overlap += depth(label, name, 0.0);
+                }
+                if under(line, name, 0.0) > 1e-6 {
+                    crossings += 1.0;
+                }
+            }
+        }
         for (x, lx) in lines.iter().enumerate() {
             let (xa, xb) = self.edges[lx.edge];
             if let Some((label, _)) = &lx.label {
-                for (k, b) in boxes.iter().enumerate() {
-                    if k != xa && k != xb {
-                        overlap += label.overlap(b, 0.0).map_or(0.0, |(_, d)| d);
-                    }
+                for b in &boxes {
+                    overlap += label.overlap(b, 0.0).map_or(0.0, |(_, d)| d);
                 }
             }
             for ly in &lines[x + 1..] {
@@ -705,15 +886,16 @@ impl Graph {
         overlap * 1e6 + crossings * 1e3 + stretch / self.k.max(1.0)
     }
 
-    /// An edge's line as it's drawn, broken wherever a label lies over
-    /// it: its own, unless that's beside it, and any other.
-    fn edge_layout(&self, line: &Line, lines: &[Line]) -> EdgeLayout {
+    /// An edge's line as it's drawn, broken wherever a label or a name
+    /// lies over it: its own label, unless that's beside it, and any other.
+    fn edge_layout(&self, line: &Line, lines: &[Line], names: &[Option<Rect>]) -> EdgeLayout {
         let (leave, enter) = line.free;
         let at = |t: f64| line.start + line.u * t;
         let mut under: Vec<(f64, f64)> = lines.iter()
             .filter(|l| !(l.edge == line.edge && self.place == LabelPlace::Beside))
-            .filter_map(|l| l.label.as_ref())
-            .filter_map(|(rect, _)| rect.across(line.start, line.u, self.gap / 2.0))
+            .filter_map(|l| l.label.as_ref().map(|(rect, _)| rect))
+            .chain(names.iter().flatten())
+            .filter_map(|rect| rect.across(line.start, line.u, self.gap / 2.0))
             .collect();
         under.sort_by(|a, b| a.0.total_cmp(&b.0));
         // Stubs between labels are left out.
@@ -771,7 +953,7 @@ mod tests {
 
     fn lay_out(seed: u64, place: LabelPlace) -> GraphLayout {
         let (sizes, edges, labels) = places();
-        lay_out_graph(&sizes, &edges, &labels, &settings(seed, place)).unwrap()
+        lay_out_graph(&sizes, &edges, &labels, &vec![None; sizes.len()], &settings(seed, place)).unwrap()
     }
 
     fn rect_of(p: Vec2, (w, h): (f64, f64)) -> Rect {
@@ -787,7 +969,7 @@ mod tests {
 
     #[test]
     fn boxes_and_labels_keep_apart_inside_the_box() {
-        let (sizes, edges, labels) = places();
+        let (sizes, _, labels) = places();
         for place in [LabelPlace::Along, LabelPlace::Beside, LabelPlace::Upright] {
             for seed in 0..4 {
                 let l = lay_out(seed, place);
@@ -804,10 +986,9 @@ mod tests {
                     let label = label_rect(edge, (w, h), place);
                     let reach = V::new(label.reach(V::new(1.0, 0.0)), label.reach(V::new(0.0, 1.0)));
                     assert!(label.c.x - reach.x >= -1.0 && label.c.y - reach.y >= -1.0 && label.c.x + reach.x <= l.size.0 + 1.0 && label.c.y + reach.y <= l.size.1 + 1.0, "{:?} seed {}: label {} outside {:?}", place, seed, e, l.size);
+                    // Not over any box, its own ends' either.
                     for (k, b) in boxes.iter().enumerate() {
-                        if k != edges[e].0 && k != edges[e].1 {
-                            assert!(label.overlap(b, 0.0).is_none(), "{:?} seed {}: label {} over box {}", place, seed, e, k);
-                        }
+                        assert!(label.overlap(b, 0.0).is_none(), "{:?} seed {}: label {} over box {}", place, seed, e, k);
                     }
                 }
             }
@@ -887,7 +1068,7 @@ mod tests {
     fn a_crowded_box_grows() {
         let (sizes, edges, labels) = places();
         let small = GraphLayoutSettings { width: 200.0, height: 100.0, ..settings(0, LabelPlace::Along) };
-        let l = lay_out_graph(&sizes, &edges, &labels, &small).unwrap();
+        let l = lay_out_graph(&sizes, &edges, &labels, &vec![None; sizes.len()], &small).unwrap();
         assert!(l.size.0 > 200.0 && (l.size.0 / l.size.1 - 2.0).abs() < 1e-9, "{:?}", l.size);
     }
 
@@ -901,11 +1082,77 @@ mod tests {
             (&sizes[..], &[(0, 1)][..], &[][..], &ok, "there are 0 labels for 1 edges"),
             (&[(-1.0, 2.0)][..], &[][..], &[][..], &ok, "sizes[0] should be a width and height of at least 0"),
         ] {
-            let err = lay_out_graph(sizes, edges, labels, s).err().unwrap_or_default();
+            let err = lay_out_graph(sizes, edges, labels, &vec![None; sizes.len()], s).err().unwrap_or_default();
             assert!(err.contains(want), "{}: {}", want, err);
         }
         let many = GraphLayoutSettings { iterations: 6000, ..settings(0, LabelPlace::Along) };
-        assert!(lay_out_graph(&sizes, &[], &[], &many).unwrap_err().contains("at most 5000"));
+        assert!(lay_out_graph(&sizes, &[], &[], &[None, None], &many).unwrap_err().contains("at most 5000"));
+        assert!(lay_out_graph(&sizes, &[], &[], &[None], &ok).unwrap_err().contains("there are 1 names for 2 nodes"));
+        assert!(lay_out_graph(&sizes, &[], &[], &[None, Some((-3.0, 1.0))], &ok).unwrap_err().contains("names[1] should be a width and height of at least 0"));
         assert!(LabelPlace::named("across").unwrap_err().contains("\"along\", \"beside\" or \"upright\""));
+    }
+
+    /// The places as symbols, each with its name to go beside it.
+    fn named_places() -> (Vec<(f64, f64)>, Vec<(usize, usize)>, Vec<Option<(f64, f64)>>, Vec<Option<(f64, f64)>>) {
+        let (_, edges, labels) = places();
+        let sizes = vec![(80.0, 36.0), (36.0, 36.0), (10.0, 10.0), (120.0, 36.0), (36.0, 36.0)];
+        let names = vec![Some((180.0, 50.0)), Some((160.0, 50.0)), Some((150.0, 50.0)), None, Some((200.0, 80.0))];
+        (sizes, edges, labels, names)
+    }
+
+    #[test]
+    fn names_go_beside_their_boxes_clear_of_everything_else() {
+        let (sizes, edges, labels, names) = named_places();
+        let mut lines_under = 0;
+        for place in [LabelPlace::Along, LabelPlace::Beside, LabelPlace::Upright] {
+            for seed in 0..4 {
+                let l = lay_out_graph(&sizes, &edges, &labels, &names, &settings(seed, place)).unwrap();
+                let boxes: Vec<Rect> = l.points.iter().zip(&sizes).map(|(&p, &s)| rect_of(p, s)).collect();
+                let named: Vec<Option<Rect>> = l.names.iter().zip(&names).map(|(at, size)| at.zip(*size).map(|(p, s)| rect_of(p, s))).collect();
+                assert!(named[3].is_none(), "no name, nowhere to put it");
+                for (i, name) in named.iter().enumerate() {
+                    let Some(name) = name else { continue };
+                    // On one of the sides, half a gap from its box.
+                    let d = name.c - boxes[i].c;
+                    let reach = boxes[i].half + name.half + V::new(5.0, 5.0);
+                    assert!(SIDES.iter().any(|&(x, y)| (d.x - x * reach.x).abs() < 0.01 && (d.y - y * reach.y).abs() < 0.01), "{:?} seed {}: name {} at {:?} from its box", place, seed, i, d);
+                    assert!(name.c.x - name.half.x >= -1.0 && name.c.y - name.half.y >= -1.0 && name.c.x + name.half.x <= l.size.0 + 1.0 && name.c.y + name.half.y <= l.size.1 + 1.0, "{:?} seed {}: name {} outside {:?}", place, seed, i, l.size);
+                    for (j, b) in boxes.iter().enumerate().filter(|&(j, _)| j != i) {
+                        assert!(name.overlap(b, 0.0).is_none(), "{:?} seed {}: name {} over box {}", place, seed, i, j);
+                    }
+                    for (j, other) in named.iter().enumerate().skip(i + 1) {
+                        assert!(other.is_none_or(|o| name.overlap(&o, 0.0).is_none()), "{:?} seed {}: names {} and {} overlap", place, seed, i, j);
+                    }
+                    for (e, edge) in l.edges.iter().enumerate() {
+                        if let Some(size) = labels[e] {
+                            assert!(label_rect(edge, size, place).overlap(name, 0.0).is_none(), "{:?} seed {}: label {} over name {}", place, seed, e, i);
+                        }
+                        // Lines are broken round names, and seldom need to be.
+                        let whole = name.across(V::new(edge.start.x as f64, edge.start.y as f64), unit(V::new((edge.end - edge.start).x as f64, (edge.end - edge.start).y as f64)), -0.5);
+                        lines_under += whole.is_some_and(|(t0, t1)| t1 > 0.0 && t0 < (edge.end - edge.start).length() as f64) as usize;
+                        for &(a, b) in &edge.pieces {
+                            let (a, b) = (V::new(a.x as f64, a.y as f64), V::new(b.x as f64, b.y as f64));
+                            let over = name.across(a, unit(b - a), -0.5);
+                            assert!(over.is_none_or(|(t0, t1)| t1 < 0.0 || t0 > norm(b - a)), "{:?} seed {}: edge {} runs under name {}", place, seed, e, i);
+                        }
+                    }
+                }
+            }
+        }
+        assert!(lines_under <= 2, "{} lines ran under names", lines_under);
+    }
+
+    #[test]
+    fn a_name_goes_where_its_lines_dont() {
+        // A node with lines leaving right and left: its name goes under.
+        let sizes = [(20.0, 20.0), (20.0, 20.0), (20.0, 20.0)];
+        let s = GraphLayoutSettings { width: 600.0, height: 300.0, ..settings(0, LabelPlace::Along) };
+        let l = lay_out_graph(&sizes, &[(0, 1), (1, 2)], &[None, None], &[None, Some((120.0, 30.0)), None], &s).unwrap();
+        let (a, b, c) = (l.points[0], l.points[1], l.points[2]);
+        let name = l.names[1].unwrap();
+        // The name is on neither line's side.
+        let from_b = |p: Vec2| (p - b).normalize();
+        let to_name = (name - b).normalize();
+        assert!(to_name.dot(from_b(a)) < 0.75 && to_name.dot(from_b(c)) < 0.75, "{:?} {:?} {:?} name {:?}", a, b, c, name);
     }
 }
