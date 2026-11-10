@@ -82,7 +82,7 @@ cd webapp/frontend && npm install && npm start
 | `docs/api.md` | the API reference: an entry for every function scripts can call, with its arguments, options and defaults, and short examples with what they draw (`docs/images/`) |
 | `webapp/library/` | the built-in library every journal stands in front of, a directory for each kind of file: |
 | `webapp/library/locks/` | lock types (ciphers and puzzles), one rhai file each; see [webapp/library/locks/README.md](webapp/library/locks/README.md) |
-| `webapp/library/helpers/` | helper types, lock files that transform data between locks (split, join, read text as symbols); see [webapp/library/helpers/README.md](webapp/library/helpers/README.md) |
+| `webapp/library/helpers/` | helper types, lock files that transform data between locks (split, join, read text as symbols, write symbols as text); see [webapp/library/helpers/README.md](webapp/library/helpers/README.md) |
 | `webapp/library/layouts/` | page layouts, one rhai file each; see [webapp/library/layouts/README.md](webapp/library/layouts/README.md) |
 | `webapp/library/illustrations/` | what chains draw their values with; see [webapp/library/illustrations/README.md](webapp/library/illustrations/README.md) |
 | `webapp/library/chains/` | locks wired together, for `chain(name)`; see [webapp/library/chains/README.md](webapp/library/chains/README.md) |

@@ -2,7 +2,8 @@
 
 A helper type is a lock file that transforms data rather than locking it:
 it splits a text into pieces (`split_symbols`), joins texts
-(`merge_alpha`) or reads a string as symbols (`string_to_symbols`). Locks,
+(`merge_alpha`), reads a string as symbols (`string_to_symbols`) or
+writes symbols out as a string (`symbols_to_string`). Locks,
 in `locks/`, are the ciphers and puzzles; helpers are what wires them
 together.
 

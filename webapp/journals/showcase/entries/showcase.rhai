@@ -42,7 +42,8 @@
 //             .graph content, graph::layout) and graph_map; graph::layout's
 //             names, set beside their places; places' glyphs from glyphsets
 //             of their own, and ragged way texts; write_block's align, its
-//             ragged lines aligned too
+//             ragged lines aligned too; the symbols_to_string helper,
+//             symbols written out as a string
 //
 // Pages are bound with new_book: numbered, named and listed in the
 // contents.
@@ -2579,6 +2580,52 @@ aligned.add(caption("graph_map, edge_style's paragraph: #{ align: \"center\", li
 let centred = ragged + #{ paragraph: #{ align: "center", line_start_jitter: 30, line_gap_jitter: 5 } };
 aligned.add(illustration("graph_map", #{ label_place: "upright", width: 1000.0, height: 560.0, seed: 0, text_width: 240.0 }).run(#{ graph: glyphed, edge_style: centred })[0].translate_by(vec2(LEFT, y + 40)));
 book.bind("appendix", aligned);
+
+// The symbols_to_string helper: symbols written out as a string, a letter
+// each, A for 0, or in base 27 a space for 0 then A to Z; unlocking reads
+// the string back. Rows lock and unlock it in a few bases, then a chain
+// ends in one, a cipher's symbols coming out as a string.
+let written = sheet("locks");
+written.add(subhead("symbols to string", TOP));
+written.add(caption("new_lock(name).add(part, \"symbols_to_string\", #{ base }): symbols written out as a string, a letter each, A for 0", TOP + 50));
+written.add(caption("(base 10 too: A to J); in base 27 a space for 0, then A to Z. Unlocking reads the string back.", TOP + 84));
+let y = TOP + 150;
+written.add(caption("base", y).add(write_in("symbols", 220, y, 22, CAPTION, PLAIN)).add(write_in("w.text", 760, y, 22, CAPTION, PLAIN)));
+y += 56;
+for given in [symbols(27, "LOREM IPSUM"), symbols(26, "DOLORSIT"), symbols(10, "108427"), symbols(5, "EADBCA"), symbols(2, "BABBAAB")] {
+	let base = given.base;
+	let lock = new_lock("write").add("w", "symbols_to_string", #{ base: base });
+	let result = lock.run(#{ "w.symbols": given });
+	let back = lock.unlock(result).get("w.symbols").symbols();
+	assert(back == given.symbols(), `symbols_to_string in base ${base} should unlock`);
+	written.add(write(`${base}`, LEFT, y, 22));
+	written.add(write(given.symbols().reduce(|t, s| if t == "" { `${s}` } else { t + " " + s }, ""), 220, y, 22));
+	written.add(write(`"${result.text("w.text")}"`, 760, y, 22));
+	y += 52;
+}
+
+// A chain: a string read as symbols, shifted, and written back out as a
+// string; unlocked from a string written by hand.
+y += 40;
+written.add(caption("string_to_symbols, shift_cipher (shift 3) and symbols_to_string chained: text in, text out", y));
+let shifted = new_lock("shifted")
+	.add("r", "string_to_symbols", #{ base: 27 })
+	.add("s", "shift_cipher", #{ base: 27, shift: 3 })
+	.add("w", "symbols_to_string", #{ base: 27 })
+	.connect("r.symbols", "s.plain_text")
+	.connect("s.cipher_text", "w.symbols");
+let result = shifted.run(#{ "r.text": "Lorem ipsum — dolor!" });
+y += 60;
+written.add(write("\"Lorem ipsum — dolor!\"", LEFT, y, 22));
+written.add(write(`"${result.text("w.text")}"`, 760, y, 22));
+let opened = shifted.unlock(#{ "w.text": result.text("w.text").to_lower() });
+assert(opened.text("r.text") == "LOREM IPSUM DOLOR", "the chain unlocks from a string, in either case");
+y += 70;
+written.add(caption("unlocked from the string in lower case, shifted.unlock(#{ \"w.text\": text }):", y));
+y += 60;
+written.add(write(`"${result.text("w.text").to_lower()}"`, LEFT, y, 22));
+written.add(write(`"${opened.text("r.text")}"`, 760, y, 22));
+book.bind("appendix", written);
 
 // ---- the title page and the contents, which go first ----
 
