@@ -2746,6 +2746,7 @@ Helper types: the files in helpers/, lock files that transform data between lock
 | `merge_alpha` | Texts joined end to end. Takes input_0 to input_N, gives merged_output and location_info, which unlocking splits them by. | options: base_n (required), a whole number from 2 to 27; input_count (required), a whole number of at least 1. |
 | `split_symbols` | A text cut into pieces each as long as the first, the last ones shorter or empty. Takes plain_text, gives output_0 to output_N. | options: base_n (required), a whole number from 2 to 27; output_count (required), a whole number of at least 1. |
 | `string_to_symbols` | A string read as symbols in the base, made to fit it first as symbols' lenient option makes it: in capitals, what the base can't write dropped. Takes text, a String; gives symbols, in the base. Unlocking writes the symbols back out as text, the text as it was fitted. | options: base (required), a whole number from 2 to 27; strict (optional, default false), true or false: the text must be written in the base already, as symbols(base, text) reads it, and text the base can't write is an error. |
+| `symbols_to_string` | Symbols written out as a string, a letter each: in bases up to 26 the base's first letters, A for 0 (base 10 too, A to J, not digits as symbol_text writes it); in base 27 a space for 0, then A to Z. Takes symbols, in the base; gives text, a String. Unlocking reads the string back, its letters in either case; a character the base hasn't is an error. | options: base (required), a whole number from 2 to 27. |
 
 ## Value Kinds
 
@@ -3215,7 +3216,7 @@ The built-in library, webapp/library/, holds what any journal can use; a journal
 | file | what it is |
 |---|---|
 | `locks/doublering`, `keyed_doublering`, `huffman`, `huffman_apply`, `huffman_encode`, `maze_lock`, `shift_cipher`, `shift_vigenere`, `star_chart`, `substitution_cipher`, `vigenere_cipher` | Lock types (see Locks for each's options). |
-| `helpers/merge_alpha`, `split_symbols`, `string_to_symbols` | Helper types, lock files that join, cut and convert values between locks. |
+| `helpers/merge_alpha`, `split_symbols`, `string_to_symbols`, `symbols_to_string` | Helper types, lock files that join, cut and convert values between locks. |
 | `illustrations/eye`, `graph_map`, `joined_symbol_ring`, `maze_glyphs`, `rearranged_symbol_ring`, `star_pages`, `styled_text`, `symbol_ring`, `trit_message` | Illustrations (see Value Kinds for what each draws). |
 | `chains/raven_sky` | A chain: a message locked with a text's Huffman code, and the code drawn as a sky of named stars cut into constellations, a page each: the pages are the key. |
 | `layouts/bordered_title` | A title page: the title, a flourish and the credits centred in a ruled frame, inside a border of ornamental bands. |
