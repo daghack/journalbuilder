@@ -5,6 +5,7 @@ use parry2d::math::Vec2;
 use rayon::prelude::*;
 use std::collections::HashMap;
 
+use crate::journal::affine::Affine;
 use crate::journal::canvas::color_jitter::{shifted, Shift};
 
 /// A run of colours, and how it's laid over strokes.
@@ -13,6 +14,11 @@ pub struct Gradient {
     /// Where each colour is, from 0 to 1 in order, as sRGB RGBA in 0-1.
     pub stops: Vec<(f32, [f32; 4])>,
     pub kind: GradientKind,
+    /// How a gradient across the canvas has been moved since it was laid
+    /// (from where `kind` places it to where it is), as the visual editor
+    /// moves it with the strokes it colours. Gradients over each stroke
+    /// follow their strokes anyway.
+    pub transform: Affine,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -52,6 +58,10 @@ impl Gradient {
     /// How far through the gradient a point is, for gradients laid across
     /// the canvas; `None` for gradients laid over each stroke.
     pub fn t_at(&self, p: Vec2) -> Option<f32> {
+        let p = match self.transform.is_identity() {
+            true => p,
+            false => self.transform.inverse().map_or(p, |back| back.apply(p)),
+        };
         match self.kind {
             GradientKind::Along | GradientKind::Vertical => None,
             GradientKind::Linear { from, to } => {
@@ -70,6 +80,12 @@ impl Gradient {
     /// The first colour: where an along gradient starts.
     pub fn first(&self) -> [f32; 4] {
         self.stops[0].1
+    }
+
+    /// The gradient moved by `m` as well, as the strokes it colours are.
+    pub fn moved(&self, m: &Affine) -> Gradient {
+        let transform = if self.per_stroke() { self.transform } else { self.transform.then(m) };
+        Gradient { transform, ..self.clone() }
     }
 }
 
@@ -161,12 +177,12 @@ mod tests {
     use super::*;
 
     fn red_to_blue(kind: GradientKind) -> Gradient {
-        Gradient { stops: vec![(0.0, [1.0, 0.0, 0.0, 1.0]), (1.0, [0.0, 0.0, 1.0, 0.5])], kind }
+        Gradient { stops: vec![(0.0, [1.0, 0.0, 0.0, 1.0]), (1.0, [0.0, 0.0, 1.0, 0.5])], kind, transform: Default::default() }
     }
 
     #[test]
     fn colours_blend_between_stops() {
-        let g = Gradient { stops: vec![(0.0, [1.0, 0.0, 0.0, 1.0]), (0.25, [0.0, 1.0, 0.0, 1.0]), (1.0, [0.0, 0.0, 1.0, 1.0])], kind: GradientKind::Along };
+        let g = Gradient { stops: vec![(0.0, [1.0, 0.0, 0.0, 1.0]), (0.25, [0.0, 1.0, 0.0, 1.0]), (1.0, [0.0, 0.0, 1.0, 1.0])], kind: GradientKind::Along, transform: Default::default() };
         assert_eq!(g.at(0.0), [1.0, 0.0, 0.0, 1.0]);
         assert_eq!(g.at(-3.0), [1.0, 0.0, 0.0, 1.0]);
         assert_eq!(g.at(0.25), [0.0, 1.0, 0.0, 1.0]);

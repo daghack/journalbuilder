@@ -52,7 +52,9 @@ const USAGE: &str = "Usage: journalbuild <journal> [--entry E[,E...]] [--page N[
                       journal.json, its entries in entries/, and its own
                       resources (locks/, layouts/, illustrations/, chains/,
                       styles/, lib/, glyphsets/, content/, images/) over the
-                      library's. An entry that fails doesn't stop the others
+                      library's, and the visual editor's edits to its
+                      canvases (edits/ENTRY.json), which are applied. An
+                      entry that fails doesn't stop the others
                       rendering: the failures are listed at the end, and the
                       exit status is 1.
   --entry E,...       Build only these entries, by name (default: every

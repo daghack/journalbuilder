@@ -36,7 +36,7 @@ for (const name of builtIn) {
   const manifest = JSON.parse(readFileSync(join(dir, 'journal.json'), 'utf8'));
   const files = {};
   for (const path of walk(dir).sort()) {
-    if (path === 'journal.json' || !/^[a-z]+\/.+\.(rhai|json|txt|md|png|jpg)$/.test(path)) continue;
+    if (path === 'journal.json' || !/^[a-z]+\/.+\.(rhai|json|txt|md|graph|png|jpg)$/.test(path)) continue;
     const image = /\.(png|jpg)$/.exec(path);
     files[path] = image
       ? `data:image/${image[1] === 'png' ? 'png' : 'jpeg'};base64,${readFileSync(join(dir, path)).toString('base64')}`

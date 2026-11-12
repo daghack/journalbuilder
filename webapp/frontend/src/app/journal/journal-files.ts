@@ -7,7 +7,7 @@
 import { strFromU8, strToU8, unzipSync, zipSync, type Zippable } from 'fflate';
 
 /** The kinds of file a journal has, each in a directory of its own. */
-export type Kind = 'entries' | 'chains' | 'locks' | 'helpers' | 'illustrations' | 'layouts' | 'styles' | 'content' | 'glyphsets' | 'lib' | 'images';
+export type Kind = 'entries' | 'chains' | 'locks' | 'helpers' | 'illustrations' | 'layouts' | 'styles' | 'content' | 'glyphsets' | 'lib' | 'images' | 'edits';
 
 /** The kinds the resource editor edits. */
 export const RESOURCE_KINDS: readonly Kind[] = ['locks', 'helpers', 'illustrations', 'layouts', 'lib'];
@@ -20,6 +20,8 @@ export interface KindInfo {
   exts: string[];
   /** Whether the library has files of this kind for a journal's to stand in for. */
   library: boolean;
+  /** Kept by an editor and not listed: the visual editor's edits, an entry's each. */
+  hidden?: boolean;
 }
 
 /** Every kind, in the order the sidebar lists them. */
@@ -35,6 +37,7 @@ export const KINDS: KindInfo[] = [
   { kind: 'glyphsets', label: 'Glyphsets', exts: ['json'], library: true },
   { kind: 'lib', label: 'Lib', exts: ['rhai'], library: true },
   { kind: 'images', label: 'Images', exts: ['png', 'jpg'], library: true },
+  { kind: 'edits', label: 'Edits', exts: ['json'], library: false, hidden: true },
 ];
 
 export const KIND_INFO = new Map(KINDS.map((k) => [k.kind, k]));
@@ -135,6 +138,11 @@ export function pathOf(kind: Kind, name: string, ext = KIND_INFO.get(kind)!.exts
 /** The entry `name`'s path. */
 export function entryPath(name: string): string {
   return pathOf('entries', name);
+}
+
+/** The visual editor's edits to entry `name`'s canvases: edits/NAME.json. */
+export function editsPath(name: string): string {
+  return pathOf('edits', name);
 }
 
 /** `value` as a manifest, or what's wrong with it. */

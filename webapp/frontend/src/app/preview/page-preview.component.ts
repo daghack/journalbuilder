@@ -4,10 +4,13 @@ import { RenderService, type RenderProgress } from '../services/render.service';
 import { hash, kindOf } from '../journal/journal-files';
 import { JournalStore } from '../services/journal-store.service';
 import { ShellService } from '../shell/shell.service';
+import { CanvasOverlayComponent } from './canvas-overlay.component';
 
 /** A Darkly render of a page: its PNG as an object URL, `width` pixels across at `scale` pixels per unit. */
 interface DarklyImage {
   key: string;
+  /** The page's index. */
+  index: number;
   url: string | null;
   scale: number;
   width: number;
@@ -16,17 +19,26 @@ interface DarklyImage {
 const ZOOMS = [0.1, 0.15, 0.25, 0.33, 0.5, 0.67, 0.75, 1, 1.25, 1.5, 2, 3, 4];
 /** Darkly renders kept, newest last. */
 const CACHE_SIZE = 24;
+/** How long a pinned Darkly copy waits for edits to settle before it renders. */
+const SETTLE_MS = 400;
 
-/** The middle: the picked page, large, as SVG or (on demand) rendered with Darkly. */
+/**
+ * The middle: the picked page, large, as SVG or (on demand) rendered with
+ * Darkly; or pinned to one (`fixed`), and with the visual editor over the
+ * SVG if `editing`.
+ */
 @Component({
   selector: 'app-page-preview',
+  imports: [CanvasOverlayComponent],
   template: `
     <div class="bar">
-      <span class="title">{{ page()?.label ?? 'No page' }}</span>
-      <div class="segmented" role="group" aria-label="Preview">
-        <button type="button" [class.on]="mode() === 'svg'" (click)="mode.set('svg')" title="Strokes as SVG, redrawn as you type">SVG</button>
-        <button type="button" [class.on]="mode() === 'darkly'" (click)="mode.set('darkly')" title="Rendered with Darkly's brushes on the GPU">Darkly</button>
-      </div>
+      <span class="title">{{ fixed() === 'darkly' ? 'Darkly' : (page()?.label ?? 'No page') }}</span>
+      @if (!fixed()) {
+        <div class="segmented" role="group" aria-label="Preview">
+          <button type="button" [class.on]="mode() === 'svg'" (click)="ownMode.set('svg')" title="Strokes as SVG, redrawn as you type">SVG</button>
+          <button type="button" [class.on]="mode() === 'darkly'" (click)="ownMode.set('darkly')" title="Rendered with Darkly's brushes on the GPU">Darkly</button>
+        </div>
+      }
       @if (mode() === 'darkly') {
         <label>Scale
           <select (change)="scale.set(+$any($event.target).value)">
@@ -54,7 +66,9 @@ const CACHE_SIZE = 24;
     }
     <div class="stage" #stage (wheel)="onWheel($event)">
       @if (page(); as page) {
-        @if (shown(); as image) {
+        @if (editing() && page.view && page.svg) {
+          <app-canvas-overlay [page]="page" [scale]="unitScale()" />
+        } @else if (shown(); as image) {
           <img [src]="image.url" [alt]="page.label" [class.stale]="image.stale"
                [style.width.px]="image.width" [class.paper]="!image.ownPaper" />
         } @else if (page.view) {
@@ -95,6 +109,10 @@ export class PagePreviewComponent implements OnDestroy {
   private readonly shell = inject(ShellService);
   /** Where it sits: the entry editor's middle, or the preview over any file. */
   readonly placement = input<'workspace' | 'dialog'>('workspace');
+  /** Shows only SVG, or only Darkly, without the choice. */
+  readonly fixed = input<'svg' | 'darkly' | null>(null);
+  /** Whether the visual editor's boxes and handles go over the SVG. */
+  readonly editing = input(false);
   /** Whether it can be seen, so Darkly may render: one copy at a time. */
   private readonly visible = computed(() => this.placement() === 'dialog'
     ? this.shell.previewOpen()
@@ -102,7 +120,8 @@ export class PagePreviewComponent implements OnDestroy {
   private readonly stage = viewChild.required<ElementRef<HTMLElement>>('stage');
 
   protected readonly scales = [0.25, 0.5, 0.75, 1];
-  protected readonly mode = signal<'svg' | 'darkly'>('svg');
+  protected readonly ownMode = signal<'svg' | 'darkly'>('svg');
+  protected readonly mode = computed(() => this.fixed() ?? this.ownMode());
   protected readonly scale = signal(0.5);
   protected readonly parchment = signal(false);
   protected readonly zoom = signal<'fit' | number>('fit');
@@ -116,17 +135,19 @@ export class PagePreviewComponent implements OnDestroy {
   protected readonly darklyError = signal<string | null>(null);
   private readonly cache = signal<DarklyImage[]>([]);
   private rendering: string | null = null;
+  private settling: ReturnType<typeof setTimeout> | null = null;
 
   /** What the current page's Darkly render is keyed by. */
   private readonly darklyKey = computed(() => {
     const page = this.page();
     if (!page) return null;
     const files = this.journalStore.resources();
-    return `${hash(this.journal.shownSource())}|${hash(JSON.stringify(files))}|${page.index}|${this.scale()}|${this.parchment()}`;
+    const edits = this.journal.shownEdits();
+    return `${hash(this.journal.shownSource())}|${edits === null ? '' : hash(edits)}|${hash(JSON.stringify(files))}|${page.index}|${this.scale()}|${this.parchment()}`;
   });
 
   /** Pixels per canvas unit on screen. */
-  private readonly unitScale = computed(() => {
+  protected readonly unitScale = computed(() => {
     const zoom = this.zoom();
     if (zoom !== 'fit') return zoom;
     const view = this.page()?.view;
@@ -139,11 +160,15 @@ export class PagePreviewComponent implements OnDestroy {
   protected readonly shown = computed(() => {
     const page = this.page();
     if (!page) return null;
-    // In Darkly mode, the page's Darkly render once it's done; till then, its SVG.
+    // In Darkly mode, the page's Darkly render once it's done; till then, its
+    // SVG (or, pinned to Darkly, its last Darkly render).
     const key = this.darklyKey();
-    const darkly = this.mode() === 'darkly' ? this.cache().find((c) => c.key === key) : undefined;
+    const cache = this.cache();
+    let darkly = this.mode() === 'darkly' ? cache.find((c) => c.key === key) : undefined;
+    const stale = !darkly && this.fixed() === 'darkly';
+    if (stale) darkly = [...cache].reverse().find((c) => c.index === page.index && c.url !== null);
     if (darkly?.url) {
-      return { url: darkly.url, stale: false, width: darkly.width * this.unitScale() / darkly.scale, ownPaper: this.parchment() };
+      return { url: darkly.url, stale, width: darkly.width * this.unitScale() / darkly.scale, ownPaper: this.parchment() };
     }
     if (!page.svgUrl || !page.view) return null;
     return { url: page.svgUrl, stale: page.stale, width: page.view[2] * this.unitScale(), ownPaper: false };
@@ -155,7 +180,16 @@ export class PagePreviewComponent implements OnDestroy {
     effect(() => {
       if (this.mode() !== 'darkly' || !this.visible()) return;
       const key = this.darklyKey();
-      if (key && !this.cache().some((c) => c.key === key)) untracked(() => this.startDarkly());
+      if (!key || this.cache().some((c) => c.key === key)) return;
+      // Pinned beside the editor, it waits for edits to settle.
+      untracked(() => {
+        if (this.fixed() !== 'darkly') return this.startDarkly();
+        if (this.settling) clearTimeout(this.settling);
+        this.settling = setTimeout(() => {
+          this.settling = null;
+          this.startDarkly();
+        }, SETTLE_MS);
+      });
     });
   }
 
@@ -182,7 +216,7 @@ export class PagePreviewComponent implements OnDestroy {
     const page = this.page();
     if (!key || !page) return;
     if (!page.view) {
-      this.store({ key, url: null, scale: this.scale(), width: 0 });
+      this.store({ key, index: page.index, url: null, scale: this.scale(), width: 0 });
       return;
     }
     this.rendering = key;
@@ -190,12 +224,12 @@ export class PagePreviewComponent implements OnDestroy {
     this.progress.set({ page: 0, pages: 1, fraction: 0 });
     const scale = this.scale();
     let png: Blob | null = null;
-    this.render.renderPages(this.journal.shownSource(), [page.index], { scale, parchment: this.parchment() },
+    this.render.renderPages(this.journal.shownSource(), this.journal.shownEdits(), [page.index], { scale, parchment: this.parchment() },
       (_, image) => (png = image),
       (p) => this.progress.set(p),
     ).then(async () => {
       const width = png ? (await createImageBitmap(png)).width : 0;
-      this.store({ key, url: png ? URL.createObjectURL(png) : null, scale, width });
+      this.store({ key, index: page.index, url: png ? URL.createObjectURL(png) : null, scale, width });
     }).then(
       () => undefined,
       (err: Error) => this.darklyError.set(err.message === 'cancelled' ? 'Render cancelled.' : err.message),
@@ -228,6 +262,7 @@ export class PagePreviewComponent implements OnDestroy {
   }
 
   ngOnDestroy() {
+    if (this.settling) clearTimeout(this.settling);
     this.observer.disconnect();
   }
 }

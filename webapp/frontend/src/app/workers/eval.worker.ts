@@ -35,7 +35,7 @@ addEventListener('message', ({ data }: MessageEvent<EvalRequest>) => {
       break;
     case 'evaluate':
       generation = data.generation;
-      void run(data.generation, data.source, data.first);
+      void run(data.generation, data.source, data.edits, data.first);
       break;
     case 'focus':
       if (data.generation === generation && queue.includes(data.index)) {
@@ -55,12 +55,12 @@ function crashed(err: unknown) {
 /** Let messages in: a newer script, or a page to send first. */
 const pause = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-async function run(gen: number, source: string, first: number) {
+async function run(gen: number, source: string, edits: string | null, first: number) {
   await ready;
   if (gen !== generation) return;
   let evaluation: Evaluation;
   try {
-    evaluation = evaluate(source) as Evaluation;
+    evaluation = evaluate(source, edits ?? undefined) as Evaluation;
   } catch (err) {
     crashed(err);
     return;

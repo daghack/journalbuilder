@@ -256,6 +256,30 @@ for i in 0..4 {
 
 An independent copy of the canvas.
 
+### `canvas.commit_to_editor(name)`
+
+Hands the canvas to the web editor's visual editor (the Ctrl/⌘+P preview), to place by hand there: moved, turned, scaled, stretched, flipped, skewed, its corners pinned, hidden, locked, aligned and re-inked. The edit is kept in the journal's edits/ENTRY.json (see Journals and Their Files) and applied to the canvas here, in place, as the call runs, before anything later in the script, so what the script does with the canvas afterward (translate_by, add, page.add) goes on top of it. Strokes added to the canvas after the call aren't edited. An edit draws nothing from the random generator, so the rest of the entry draws as it would without it; without an edit, the call changes nothing. Returns the canvas.
+
+Gradients laid across the page (from and to, center and radius) and image paint turn, scale and move with an edit's strokes, as the brush's texture does; the corners' pinning leaves them where they are. A hidden canvas's strokes still count toward its bounds() and anything laid out round it, but aren't drawn. In the editor, a canvas the script stops committing loses its edit: the next run without it takes it out of the file.
+
+| argument | what it does | takes |
+|---|---|---|
+| `name` | Which canvas it is to the editor, and to the edits file. | a string of letters, digits, underscores, hyphens and dots, not starting with a dot, committed once a run. |
+
+```rhai render=canvas_commit_to_editor
+fn sign(pen) {
+	new_canvas()
+		.add(new_rectangle(vec2(70, 50), 100, 60), pen)
+		.add(new_line(vec2(70, 80), vec2(70, 130)), pen)
+}
+// Red: as drawn. Placed by hand in the editor, the edit applies here;
+// translate_by goes on top of it.
+page.add(sign(RED_PEN));
+page.add(sign(PEN).commit_to_editor("sign").translate_by(vec2(140, 0)));
+```
+
+![canvas_commit_to_editor](images/canvas_commit_to_editor.svg)
+
 ## Vectors and Angles
 
 Vecs are points and directions: vec2s on the page, and vec3s and vec4s for points of more coordinates, such as distribute_points gives for 3 or 4 bounds. They're values: methods give new vecs and leave the one they're called on as it was. Where an entry says a vec, it means a vec2.
@@ -2897,7 +2921,7 @@ A value kind's default drawing as a parts map for canvas.add(parts, styles): eac
 
 ## Journals and Their Files
 
-A journal is a directory: its manifest, journal.json; its entries, entries/NAME.rhai, each a script building a journal_entry of pages; and files of its own, each kind in a directory of its own: locks/, helpers/, layouts/, illustrations/, chains/ and lib/ (rhai files), styles/ and glyphsets/ (NAME.json), content/ (NAME.txt, a String; NAME.md, Markdown; NAME.json, Symbols: { base, text }, with strict: true or not, or { base, symbols }; or NAME.graph, a Graph), and images/ (NAME.png or NAME.jpg, pictures for image(name)). They stand in front of the built-in library's, webapp/library/, which has the same directories: a journal's file stands in for the library's of the same name. Each entry runs on its own, sharing the journal's files but not code with the other entries.
+A journal is a directory: its manifest, journal.json; its entries, entries/NAME.rhai, each a script building a journal_entry of pages; and files of its own, each kind in a directory of its own: locks/, helpers/, layouts/, illustrations/, chains/ and lib/ (rhai files), styles/ and glyphsets/ (NAME.json), content/ (NAME.txt, a String; NAME.md, Markdown; NAME.json, Symbols: { base, text }, with strict: true or not, or { base, symbols }; or NAME.graph, a Graph), and images/ (NAME.png or NAME.jpg, pictures for image(name)). They stand in front of the built-in library's, webapp/library/, which has the same directories: a journal's file stands in for the library's of the same name. Beside them, edits/ENTRY.json holds the visual editor's edits to the canvases entry ENTRY commits to it (canvas.commit_to_editor); the library has none. Each entry runs on its own, sharing the journal's files but not code with the other entries.
 
 journal.json: the journal's manifest, a JSON object.
 
@@ -2908,6 +2932,21 @@ journal.json: the journal's manifest, a JSON object.
 | `description` | none | What it is. | a string. |
 | `entries` | required | Its entries, in order: entries/NAME.rhai each. | a non-empty array of names: letters, digits and underscores. |
 | `bundled` | none | Library files an export copied in beside the journal's own, as paths from the journal (locks/huffman.rhai), so an import can drop them. | an array of strings. |
+
+edits/ENTRY.json: the visual editor's edits to entry ENTRY's committed canvases, a JSON object, written by the web editor. An edit is applied when its canvas is committed: its corners pinned, then moved, turned, scaled and skewed about the centre C of the box its strokes cover, to C + move + R(turn)·K(skew)·S(scale)·(p − C), then re-inked. An edit for a name the entry doesn't commit is warned of; the web editor drops it.
+
+| key | default | what it does | takes |
+|---|---|---|---|
+| `version` | required | Which edits format. | 1. |
+| `canvases` | none | Each committed canvas's edit, by its name. | an object of edits, each an object of the keys below. |
+| `canvases.NAME.move` | [0, 0] | How far it's moved, across and down. | [x, y], finite numbers. |
+| `canvases.NAME.turn` | 0 | How far it's turned, clockwise. | a number of degrees. |
+| `canvases.NAME.scale` | [1, 1] | How many times bigger, across and down; negative flips. Brush sizes stay as they are. | [x, y], numbers not 0. |
+| `canvases.NAME.skew` | 0 | How far it's skewed: further down goes further right. | a number of degrees, between -89 and 89. |
+| `canvases.NAME.warp` | none | Its box's corners pinned: how far each is moved (top left, top right, bottom right, bottom left), the points between moved in between. | four [x, y] pairs. |
+| `canvases.NAME.hidden` | false | Leaves its strokes undrawn, though in its bounds. | true or false. |
+| `canvases.NAME.locked` | false | Keeps the editor from picking it on the page. Changes nothing drawn. | true or false. |
+| `canvases.NAME.ink` | none | Its strokes re-inked: color, one colour for all of them in place of their own; opacity, their alpha times this; weight, their brush sizes times this. | an object of color (a colour), opacity (0 to 1) and weight (a positive number), each optional. |
 
 glyphsets/NAME.json: a glyphset, a JSON object. Glyph units span about -1 to 1, y down; a glyph scale is 2 of them.
 
@@ -3243,7 +3282,7 @@ The built-in library, webapp/library/, holds what any journal can use; a journal
 
 ### `journalbuild NAME [flags]`
 
-Runs a journal's entries, each on its own, and renders their pages, an entry's into a directory named for it. An entry that fails doesn't stop the others rendering: the failures, and why, are listed at the end, and the exit status is 1.
+Runs a journal's entries, each on its own, with the visual editor's edits (edits/ENTRY.json), and renders their pages, an entry's into a directory named for it. An entry that fails doesn't stop the others rendering: the failures, and why, are listed at the end, and the exit status is 1.
 
 | argument | what it does | takes |
 |---|---|---|

@@ -1,3 +1,4 @@
+pub mod affine;
 pub mod art;
 pub mod avoid;
 pub mod canvas;

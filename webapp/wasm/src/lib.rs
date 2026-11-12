@@ -22,7 +22,7 @@ use scribe::journal::darkly;
 use scribe::journal::fonts::FontBook;
 use scribe::journal::pdf::PdfWriter;
 use scribe::journal::publish::{self, Render};
-use scribe::journal::rhaientries::{brush_names, Entry, JournalEngine, LockLibrary, Resources};
+use scribe::journal::rhaientries::{brush_names, commit_report, CommitReport, Edits, Entry, JournalEngine, LockLibrary, Resources};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::cell::RefCell;
@@ -59,6 +59,9 @@ struct PageView {
     /// The box of canvas units its SVG shows, `[x, y, width, height]`;
     /// `None` if nothing's drawn on it.
     view: Option<[f32; 4]>,
+    /// Its set size (`page.size`), if it has one: it's the region from the
+    /// origin to there.
+    size: Option<[f32; 2]>,
 }
 
 thread_local! {
@@ -86,6 +89,9 @@ struct Evaluation {
     millis: f64,
     /// The journal's files that stand in for the library's, as paths.
     overrides: Vec<String>,
+    /// The canvases committed to the visual editor, in order, and where
+    /// they ended up: `[{ name, line, box, local, shown: [{ page, corners }] }]`.
+    committed: Vec<CommitReport>,
 }
 
 /// The journal being edited, from `setJournal`.
@@ -176,17 +182,23 @@ fn glyphsets(resources: &Resources) -> (Rc<FontBook>, Option<String>) {
     }
 }
 
-/// Run a journal entry with `resources`: its entry, if it ran, and what it
-/// said.
-fn run_with(source: &str, resources: Resources) -> (Result<Entry, ScriptError>, Evaluation) {
+/// Run a journal entry with `resources` and the visual editor's `edits`
+/// (an edits file's text): its entry, if it ran, and what it said.
+fn run_with(source: &str, resources: Resources, edits: Option<&str>) -> (Result<Entry, ScriptError>, Evaluation) {
     let (book, glyphsets_error) = glyphsets(&resources);
     let overrides = resources.overrides();
     let mut engine = JournalEngine::with_resources(book.clone(), resources);
+    let mut warnings: Vec<String> = glyphsets_error.into_iter().collect();
+    if let Some(edits) = edits {
+        match Edits::parse(edits) {
+            Ok(edits) => engine.set_edits(edits),
+            Err(e) => warnings.push(format!("the entry's edits file can't be read, so its edits are left out: {}", e)),
+        }
+    }
     let prints: Rc<RefCell<Vec<String>>> = Rc::default();
     let printed = prints.clone();
     engine.on_print(move |text| printed.borrow_mut().push(text.to_string()));
     let entry = engine.build_entry(source).map_err(|err| ScriptError { message: err.message, line: err.line, column: err.column });
-    let mut warnings: Vec<String> = glyphsets_error.into_iter().collect();
     warnings.extend(engine.warnings());
     if let Ok(entry) = &entry {
         if entry.page_count() == 0 {
@@ -197,6 +209,10 @@ fn run_with(source: &str, resources: Resources) -> (Result<Entry, ScriptError>, 
             warnings.push(format!("{} empty canvas(es), with nothing drawn on them: {}", empty.len(), empty.join(", ")));
         }
     }
+    let committed = match &entry {
+        Ok(entry) => commit_report(entry, &engine.committed()),
+        Err(_) => Vec::new(),
+    };
     let evaluation = Evaluation {
         pages: Vec::new(),
         warnings,
@@ -205,26 +221,29 @@ fn run_with(source: &str, resources: Resources) -> (Result<Entry, ScriptError>, 
         error: None,
         millis: 0.0,
         overrides,
+        committed,
     };
     (entry, evaluation)
 }
 
-/// Run a journal entry with the journal's files.
-fn run(source: &str) -> (Result<Entry, ScriptError>, Evaluation) {
-    run_with(source, resources(&[]))
+/// Run a journal entry with the journal's files and `edits`.
+fn run(source: &str, edits: Option<&str>) -> (Result<Entry, ScriptError>, Evaluation) {
+    run_with(source, resources(&[]), edits)
 }
 
-/// Run a journal entry, keeping the entry it makes for `pageSvg`.
-/// Returns `{ pages: [{ index, label, view }], warnings, prints,
-/// missingGlyphs, error: { message, line, column }, millis, overrides }`.
+/// Run a journal entry with the visual editor's `edits` (its edits file's
+/// text, if it has one), keeping the entry it makes for `pageSvg`.
+/// Returns `{ pages: [{ index, label, view, size }], warnings, prints,
+/// missingGlyphs, error: { message, line, column }, millis, overrides,
+/// committed }`.
 #[wasm_bindgen]
-pub fn evaluate(source: &str) -> Result<JsValue, JsError> {
+pub fn evaluate(source: &str, edits: Option<String>) -> Result<JsValue, JsError> {
     let started = js_sys::Date::now();
-    let (entry, mut evaluation) = run(source);
+    let (entry, mut evaluation) = run(source, edits.as_deref());
     let entry = match entry {
         Ok(entry) => {
             evaluation.pages = entry.selected_pages(None)
-                .map(|(index, page)| PageView { index, label: page.label(index), view: publish::page_view(page) })
+                .map(|(index, page)| PageView { index, label: page.label(index), view: publish::page_view(page), size: page.fixed_size() })
                 .collect();
             Some(entry)
         }
@@ -278,7 +297,7 @@ pub fn preview_svg(source: &str, files: Option<String>) -> String {
         Err(e) => return json!({ "svg": null, "view": null, "warnings": [], "missingGlyphs": null, "error": { "message": e } }).to_string(),
     };
     let extra: Vec<(&str, &str)> = files.iter().map(|(path, text)| (path.as_str(), text.as_str())).collect();
-    let (entry, evaluation) = run_with(source, resources(&extra));
+    let (entry, evaluation) = run_with(source, resources(&extra), None);
     let (svg, view, error) = match entry {
         Ok(entry) => match entry.selected_pages(None).next() {
             Some((index, page)) => (publish::page_svg(page, &page.label(index)).map(|(svg, _)| svg), publish::page_view(page), None),
@@ -643,23 +662,23 @@ pub struct Renderer {
 
 struct RendererState {
     engine: darkly::DarklyEngine,
-    /// The last script run, the journal version it ran with, and its entry, so
-    /// rendering its pages one by one runs it once.
-    last: Option<(String, u64, Rc<Entry>)>,
+    /// The last script run, with its edits, the journal version it ran
+    /// with, and its entry, so rendering its pages one by one runs it once.
+    last: Option<(String, Option<String>, u64, Rc<Entry>)>,
 }
 
 impl RendererState {
-    fn entry(&mut self, source: &str) -> Result<Rc<Entry>, JsError> {
+    fn entry(&mut self, source: &str, edits: Option<String>) -> Result<Rc<Entry>, JsError> {
         let version = JOURNAL.with_borrow(|journal| journal.version);
-        if let Some((last_source, last_version, entry)) = &self.last
-            && last_source == source && *last_version == version {
+        if let Some((last_source, last_edits, last_version, entry)) = &self.last
+            && last_source == source && *last_edits == edits && *last_version == version {
             return Ok(entry.clone());
         }
-        let entry = match run(source).0 {
+        let entry = match run(source, edits.as_deref()).0 {
             Ok(entry) => Rc::new(entry),
             Err(err) => return Err(JsError::new(&err.message)),
         };
-        self.last = Some((source.to_string(), version, entry.clone()));
+        self.last = Some((source.to_string(), edits, version, entry.clone()));
         Ok(entry)
     }
 }
@@ -682,18 +701,18 @@ impl Renderer {
         Ok(Renderer { state: Rc::new(RefCell::new(RendererState { engine, last: None })) })
     }
 
-    /// Page `index` of the journal `source` makes, rendered with `options`
-    /// (`{ scale, supersample, parchment }`) as a PNG's bytes, or
-    /// `undefined` if nothing's drawn on it. `progress(fraction)` is called
-    /// as it goes.
+    /// Page `index` of the journal `source` makes with `edits` (see
+    /// `evaluate`), rendered with `options` (`{ scale, supersample,
+    /// parchment }`) as a PNG's bytes, or `undefined` if nothing's drawn on
+    /// it. `progress(fraction)` is called as it goes.
     #[wasm_bindgen(js_name = renderPage)]
-    pub fn render_page(&self, source: String, index: usize, options: JsValue, progress: js_sys::Function) -> js_sys::Promise {
+    pub fn render_page(&self, source: String, edits: Option<String>, index: usize, options: JsValue, progress: js_sys::Function) -> js_sys::Promise {
         let state = self.state.clone();
         let render = RenderOptions::from_js(options);
         wasm_bindgen_futures::future_to_promise(async move {
             let render = render?;
             let mut state = state.try_borrow_mut().map_err(|_| busy())?;
-            let entry = state.entry(&source)?;
+            let entry = state.entry(&source, edits)?;
             let page = entry.selected_pages(None).nth(index).map(|(_, page)| page)
                 .ok_or_else(|| JsError::new(&format!("there's no page {}; the journal has {}", index, entry.page_count())))?;
             let image = publish::page_image_async(page, &page.label(index), &mut state.engine, &render, &mut |done| report(&progress, &[done as f64])).await
@@ -705,18 +724,18 @@ impl Renderer {
         })
     }
 
-    /// Every page of the journal `source` makes, rendered with `options`
+    /// Every page of the journal `source` makes with `edits`, rendered with `options`
     /// (`{ scale, supersample, parchment, stitch }`), in one PDF titled
     /// `title` (as `journalbuild --pdf` makes it, with `--stitch`), as its
     /// bytes. `progress(page, pages, fraction)` is called as it goes.
     #[wasm_bindgen(js_name = exportPdf)]
-    pub fn export_pdf(&self, source: String, title: String, options: JsValue, progress: js_sys::Function) -> js_sys::Promise {
+    pub fn export_pdf(&self, source: String, edits: Option<String>, title: String, options: JsValue, progress: js_sys::Function) -> js_sys::Promise {
         let state = self.state.clone();
         let render = RenderOptions::with_stitch(options);
         wasm_bindgen_futures::future_to_promise(async move {
             let (render, stitch) = render?;
             let mut state = state.try_borrow_mut().map_err(|_| busy())?;
-            let entry = state.entry(&source)?;
+            let entry = state.entry(&source, edits)?;
             let failed = |e: std::io::Error| JsError::new(&format!("couldn't write the PDF: {}", e));
             let mut pdf = PdfWriter::new(std::io::Cursor::new(Vec::new())).map_err(failed)?;
             let mut stitcher = publish::Stitcher::new(stitch);

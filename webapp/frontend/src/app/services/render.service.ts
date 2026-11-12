@@ -40,7 +40,7 @@ export class RenderService {
   private generation = 0;
   /** The script being run, and the newest one waiting for it to finish. */
   private running: { generation: number; timer: ReturnType<typeof setTimeout> } | null = null;
-  private waiting: { generation: number; source: string; first: number } | null = null;
+  private waiting: { generation: number; source: string; edits: string | null; first: number } | null = null;
 
   private darklyWorker: Worker | null = null;
   private nextId = 0;
@@ -76,9 +76,9 @@ export class RenderService {
    * to `svg`, `first` first. Returns the run's generation. While a script
    * runs, only the newest one asked for waits to run next.
    */
-  evaluate(source: string, first: number): number {
+  evaluate(source: string, edits: string | null, first: number): number {
     const generation = ++this.generation;
-    this.waiting = { generation, source, first };
+    this.waiting = { generation, source, edits, first };
     if (!this.running) this.runWaiting();
     return generation;
   }
@@ -198,20 +198,21 @@ export class RenderService {
   }
 
   /**
-   * Render pages `indices` of `source` with Darkly, calling `page` with each
+   * Render pages `indices` of `source` with Darkly, with the visual
+   * editor's `edits` (its edits file's text), calling `page` with each
    * one's PNG (null if nothing's drawn on it) as it's done, with `over`
    * (path -> text) in front of the journal's files.
    */
-  renderPages(source: string, indices: number[], options: RenderOptions,
+  renderPages(source: string, edits: string | null, indices: number[], options: RenderOptions,
               page: (index: number, png: Blob | null) => void, progress: (p: RenderProgress) => void, over?: JournalPayload): Promise<void> {
-    return this.job({ type: 'renderPages', id: 0, source, indices, options }, progress, (reply) => {
+    return this.job({ type: 'renderPages', id: 0, source, edits, indices, options }, progress, (reply) => {
       if (reply.type === 'page') page(reply.index, reply.png ? new Blob([reply.png], { type: 'image/png' }) : null);
     }, over).then(() => undefined);
   }
 
-  /** Every page of `source` rendered with Darkly into one PDF titled `title`. */
-  exportPdf(source: string, title: string, options: RenderOptions, progress: (p: RenderProgress) => void): Promise<Blob> {
-    return this.job({ type: 'exportPdf', id: 0, source, title, options }, progress)
+  /** Every page of `source` with `edits` rendered with Darkly into one PDF titled `title`. */
+  exportPdf(source: string, edits: string | null, title: string, options: RenderOptions, progress: (p: RenderProgress) => void): Promise<Blob> {
+    return this.job({ type: 'exportPdf', id: 0, source, edits, title, options }, progress)
       .then((reply) => new Blob([reply.pdf!], { type: 'application/pdf' }));
   }
 

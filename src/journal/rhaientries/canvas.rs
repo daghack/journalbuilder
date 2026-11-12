@@ -13,7 +13,9 @@ use super::{check_finite, check_name, Canvas, Path, Style, Vec2};
 use std::collections::HashMap;
 
 use crate::journal::canvas::Canvas as JournalCanvas;
-use crate::journal::canvas::InkRun;
+use crate::journal::canvas::{ColoredStroke, InkRun};
+use super::edits::CommitMark;
+use std::sync::Arc;
 use crate::journal::canvas::Frame;
 use crate::journal::paths::StrokePath;
 use crate::journal::symbol::Symbol;
@@ -25,6 +27,9 @@ pub struct CanvasData {
     pub(super) name: Option<String>,
     /// For a tile of a split page, the part of the page it renders.
     pub(super) frame: Option<Frame>,
+    /// Where the canvases committed to the visual editor that it holds
+    /// are (see edits.rs).
+    pub(super) commits: Vec<CommitMark>,
 }
 
 impl CanvasData {
@@ -43,12 +48,19 @@ impl CanvasData {
         // Only a jittered colour draws its seed, so other strokes leave the
         // generator as it was.
         let color_seed = if style.color_jitter() > 0.0 { rng.next_u64() } else { 0 };
-        self.strokes.push(Stroke { path, style: style.clone(), seed: None, color_seed, text });
+        self.strokes.push(Stroke { path, style: style.clone(), seed: None, color_seed, text, hidden: false, commits: None });
     }
     fn transform(&mut self, f: impl Fn(&mut StrokePath)) {
         for stroke in &mut self.strokes {
             f(&mut stroke.path);
         }
+        for mark in &mut self.commits {
+            mark.transform(&f);
+        }
+    }
+    /// Whether the visual editor hid any of its strokes.
+    pub(super) fn has_hidden(&self) -> bool {
+        self.strokes.iter().any(|s| s.hidden)
     }
 }
 
@@ -78,19 +90,26 @@ pub(super) fn register(engine: &mut Engine, rng: SharedRng) {
         })
         .register_fn("add", |c: &mut Canvas, other: Canvas| -> Canvas {
             // Copy first: `c.add(c)` shares one value.
-            let strokes = other.borrow().strokes.clone();
-            c.update(|data| data.strokes.extend(strokes))
+            let (strokes, commits) = { let other = other.borrow(); (other.strokes.clone(), other.commits.clone()) };
+            c.update(|data| {
+                data.strokes.extend(strokes);
+                data.commits.extend(commits);
+            })
         })
         .register_fn("add", |c: &mut Canvas, canvases: rhai::Array| -> RhaiResult<Canvas> {
             // An array of canvases, as fill_with_text gives.
-            let mut strokes = Vec::new();
+            let (mut strokes, mut commits) = (Vec::new(), Vec::new());
             for (i, item) in canvases.into_iter().enumerate() {
                 let type_name = item.type_name();
                 let other = item.try_cast::<Canvas>()
                     .ok_or_else(|| format!("canvas.add: item {} is a {}, not a canvas (glyphs need a style: canvas.add(glyphs, style))", i, type_name))?;
                 strokes.extend(other.borrow().strokes.iter().cloned());
+                commits.extend(other.borrow().commits.iter().cloned());
             }
-            Ok(c.update(|data| data.strokes.extend(strokes)))
+            Ok(c.update(|data| {
+                data.strokes.extend(strokes);
+                data.commits.extend(commits);
+            }))
         })
         .register_fn("add", move |c: &mut Canvas, parts: Map, styles: Map| -> RhaiResult<Canvas> { add_parts(c, parts, styles, &mut *rng.borrow_mut()) })
         .register_fn("translate_by", |c: &mut Canvas, v: Vec2| -> Canvas {
@@ -121,8 +140,8 @@ impl From<CanvasData> for JournalCanvas {
     fn from(val: CanvasData) -> Self {
         let mut canvas = JournalCanvas::new();
         let inks = ink_runs(&val.strokes);
-        for (Stroke { path, style, seed, color_seed, .. }, ink) in val.strokes.into_iter().zip(inks) {
-            canvas.add_seeded_stroke(path, style.stroke_style(color_seed), seed, ink);
+        for (Stroke { path, style, seed, color_seed, commits, .. }, ink) in val.strokes.into_iter().zip(inks) {
+            canvas.add_colored_stroke(ColoredStroke { path, style: style.stroke_style(color_seed), seed, ink, commits });
         }
         canvas.set_frame(val.frame);
         canvas
@@ -132,8 +151,8 @@ impl From<CanvasData> for JournalCanvas {
 impl From<&CanvasData> for JournalCanvas {
     fn from(val: &CanvasData) -> Self {
         let mut canvas = JournalCanvas::new();
-        for (Stroke { path, style, seed, color_seed, .. }, ink) in val.strokes.iter().zip(ink_runs(&val.strokes)) {
-            canvas.add_seeded_stroke(path.clone(), style.stroke_style(*color_seed), *seed, ink);
+        for (Stroke { path, style, seed, color_seed, commits, .. }, ink) in val.strokes.iter().zip(ink_runs(&val.strokes)) {
+            canvas.add_colored_stroke(ColoredStroke { path: path.clone(), style: style.stroke_style(*color_seed), seed: *seed, ink, commits: commits.clone() });
         }
         canvas.set_frame(val.frame);
         canvas
@@ -159,6 +178,12 @@ pub struct Stroke {
     pub(super) color_seed: u64,
     /// What text it writes, for its pen to run dry by.
     pub(super) text: TextRun,
+    /// Whether the visual editor hid it: it's still there, in its canvas's
+    /// bounds, but not drawn.
+    pub(super) hidden: bool,
+    /// The canvases committed to the visual editor it was drawn on (see
+    /// `ColoredStroke::commits`).
+    pub(super) commits: Option<Arc<str>>,
 }
 
 /// What a stroke writes: how many glyphs (none, for a path that isn't

@@ -9,6 +9,7 @@ const journal: JournalData = {
     'entries/reply.rhai': 'journal_entry.add(new_page());\n',
     'locks/swap.rhai': '// swap\n',
     'content/note.md': 'a *note*',
+    'edits/reply.json': '{\n  "version": 1,\n  "canvases": {\n    "seal": {\n      "turn": 15\n    }\n  }\n}\n',
   },
 };
 
@@ -16,6 +17,8 @@ describe('a journal', () => {
   it('knows its files by path', () => {
     expect(splitPath('content/note.md')).toEqual({ kind: 'content', name: 'note', ext: 'md' });
     expect(splitPath('locks/swap.json')).toBeNull();
+    expect(splitPath('edits/reply.json')).toEqual({ kind: 'edits', name: 'reply', ext: 'json' });
+    expect(splitPath('edits/reply.rhai')).toBeNull();
     expect(splitPath('journal.json')).toBeNull();
     expect(splitPath('content/routes.graph')).toEqual({ kind: 'content', name: 'routes', ext: 'graph' });
     expect(contentType('graph')).toBe('Graph');

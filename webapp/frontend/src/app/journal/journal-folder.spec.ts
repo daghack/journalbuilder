@@ -20,6 +20,7 @@ const letters: Tree = {
   'README.md': 'not the journal\'s',
   entries: { 'letter_1.rhai': 'journal_entry.add(new_page());\n', '.DS_Store': '' },
   locks: { 'swap.rhai': '// swap\n', 'huffman.rhai': '// the library\'s, bundled' },
+  edits: { 'letter_1.json': '{ "version": 1, "canvases": { "seal": { "turn": 15 } } }\n' },
   lib: { deep: { 'helpers.rhai': 'fn f() {}' } },
   letters_output: { 'page_0.png': '' },
 };
@@ -32,6 +33,7 @@ describe('a journal read from its directory', () => {
       files: {
         'entries/letter_1.rhai': 'journal_entry.add(new_page());\n',
         'locks/swap.rhai': '// swap\n',
+        'edits/letter_1.json': '{ "version": 1, "canvases": { "seal": { "turn": 15 } } }\n',
         'lib/deep/helpers.rhai': 'fn f() {}',
       },
     });

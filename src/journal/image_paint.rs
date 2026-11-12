@@ -7,6 +7,7 @@ use image::RgbaImage;
 use parry2d::math::Vec2;
 use std::sync::{Arc, OnceLock};
 
+use crate::journal::affine::Affine;
 use crate::journal::avoid::AvoidanceTree;
 use crate::journal::canvas::color_jitter::oklab;
 
@@ -29,6 +30,12 @@ pub struct ImagePaint {
     /// and how far off them (in OKLab) a colour still counts.
     pub avoid: Vec<[f32; 3]>,
     pub avoid_tolerance: f32,
+    /// How it's been moved since it was laid (from where `at` and `size`
+    /// place it to where it is), as the visual editor moves it with the
+    /// strokes it colours.
+    pub transform: Affine,
+    /// How opaque its colours are, as the visual editor fades them.
+    pub opacity: f32,
     /// Those parts, worked out when first asked for: rectangles of the
     /// picture, as their top-left and bottom-right corners on the canvas.
     avoided: Arc<OnceLock<Vec<(Vec2, Vec2)>>>,
@@ -38,6 +45,7 @@ impl PartialEq for ImagePaint {
     fn eq(&self, other: &Self) -> bool {
         (Arc::ptr_eq(&self.pixels, &other.pixels) || self.name == other.name) && self.at == other.at && self.size == other.size
             && self.avoid == other.avoid && self.avoid_tolerance == other.avoid_tolerance
+            && self.transform == other.transform && self.opacity == other.opacity
     }
 }
 
@@ -55,13 +63,25 @@ impl ImagePaint {
             }
         }
         let average = sum.map(|s| (s / n / 255.0) as f32);
-        ImagePaint { name, pixels, at, size, average, avoid: Vec::new(), avoid_tolerance: DEFAULT_AVOID_TOLERANCE, avoided: Arc::default() }
+        ImagePaint { name, pixels, at, size, average, avoid: Vec::new(), avoid_tolerance: DEFAULT_AVOID_TOLERANCE, transform: Affine::IDENTITY, opacity: 1.0, avoided: Arc::default() }
     }
 
     /// The same paint, keeping clear of its picture's parts in `colours`
     /// (sRGB, 0-1), or within `tolerance` of them in OKLab.
     pub fn avoiding(self, colours: Vec<[f32; 3]>, tolerance: f32) -> Self {
         ImagePaint { avoid: colours, avoid_tolerance: tolerance, avoided: Arc::default(), ..self }
+    }
+
+    /// The same paint moved by `m` as well, as the strokes it colours are.
+    pub fn moved(&self, m: &Affine) -> Self {
+        ImagePaint { transform: self.transform.then(m), avoided: Arc::default(), ..self.clone() }
+    }
+
+    /// The same paint, `opacity` as opaque again.
+    pub fn faded(&self, opacity: f32) -> Self {
+        let mut average = self.average;
+        average[3] *= opacity;
+        ImagePaint { opacity: self.opacity * opacity, average, ..self.clone() }
     }
 
     /// The parts of the picture in the colours it avoids, as rectangles on
@@ -133,7 +153,17 @@ impl ImagePaint {
             }
             let cell = Vec2::new(self.size.x * block as f32 / w as f32, self.size.y * block as f32 / h as f32);
             let corner = |gx: u32, gy: u32| (self.at + Vec2::new(gx as f32 * cell.x, gy as f32 * cell.y)).min(self.at + self.size);
-            done.into_iter().map(|(x0, x1, y0, y1)| (corner(x0, y0), corner(x1, y1))).collect()
+            done.into_iter().map(|(x0, x1, y0, y1)| {
+                let (min, max) = (corner(x0, y0), corner(x1, y1));
+                if self.transform.is_identity() {
+                    return (min, max);
+                }
+                // Moved, each rectangle's box.
+                let corners = [min, Vec2::new(max.x, min.y), max, Vec2::new(min.x, max.y)].map(|p| self.transform.apply(p));
+                let lo = corners.iter().copied().reduce(Vec2::min).expect("four corners");
+                let hi = corners.iter().copied().reduce(Vec2::max).expect("four corners");
+                (lo, hi)
+            }).collect()
         })
     }
 
@@ -152,6 +182,10 @@ impl ImagePaint {
         if w == 0 || h == 0 {
             return self.average;
         }
+        let p = match self.transform.is_identity() {
+            true => p,
+            false => self.transform.inverse().map_or(p, |back| back.apply(p)),
+        };
         let u = (p.x - self.at.x) / self.size.x.max(1e-6) * w as f32 - 0.5;
         let v = (p.y - self.at.y) / self.size.y.max(1e-6) * h as f32 - 0.5;
         let (u, v) = (u.clamp(0.0, (w - 1) as f32), v.clamp(0.0, (h - 1) as f32));
@@ -160,11 +194,13 @@ impl ImagePaint {
         let (fx, fy) = (u - x0 as f32, v - y0 as f32);
         let px = |x, y| self.pixels.get_pixel(x, y).0.map(|c| c as f32 / 255.0);
         let (a, b, c, d) = (px(x0, y0), px(x1, y0), px(x0, y1), px(x1, y1));
-        std::array::from_fn(|i| {
+        let mut colour: [f32; 4] = std::array::from_fn(|i| {
             let top = a[i] + (b[i] - a[i]) * fx;
             let bottom = c[i] + (d[i] - c[i]) * fx;
             top + (bottom - top) * fy
-        })
+        });
+        colour[3] *= self.opacity;
+        colour
     }
 
     /// The colour of a stroke through `points`: the picture's where it's

@@ -1,6 +1,6 @@
 import { Injectable, computed, effect, signal, untracked } from '@angular/core';
 import {
-  BLANK_ENTRY, MANIFEST_VERSION, VALID_NAME, blankJournal, checkEntries, checkManifest, entryPath, journalHash, kindOf, snakeCase, splitPath,
+  BLANK_ENTRY, MANIFEST_VERSION, VALID_NAME, blankJournal, checkEntries, checkManifest, editsPath, entryPath, journalHash, kindOf, snakeCase, splitPath,
   type JournalData, type Manifest,
 } from '../journal/journal-files';
 import { idbGet, idbSet } from './idb';
@@ -41,10 +41,10 @@ export class JournalStore {
   readonly files = computed(() => this.journal().files);
   /** Whether it's changed since it was last saved (exported, or loaded). */
   readonly dirty = computed(() => journalHash(this.journal()) !== this.saved());
-  /** Its files besides the entries, which every script runs with: changes only when they do. */
+  /** Its files besides the entries (and their edits, which go with each run), which every script runs with: changes only when they do. */
   readonly resources = computed(() => {
     const files = this.files();
-    return Object.fromEntries(Object.entries(files).filter(([path]) => kindOf(path) !== 'entries'));
+    return Object.fromEntries(Object.entries(files).filter(([path]) => kindOf(path) !== 'entries' && kindOf(path) !== 'edits'));
   }, { equal: sameFiles });
   /** Entry files the manifest doesn't list. */
   readonly unlisted = computed(() => Object.keys(this.files())
@@ -116,12 +116,13 @@ export class JournalStore {
     this.update((j) => ({ ...j, files: { ...j.files, [path]: text } }));
   }
 
-  /** Remove file `path` (an entry's too, from the manifest). */
+  /** Remove file `path` (an entry's too, from the manifest, with its edits). */
   removeFile(path: string) {
     if (!(path in this.files())) return;
     const split = splitPath(path);
     this.update((j) => {
       const { [path]: _, ...files } = j.files;
+      if (split?.kind === 'entries') delete files[editsPath(split.name)];
       const entries = split?.kind === 'entries' ? j.manifest.entries.filter((e) => e !== split.name) : j.manifest.entries;
       return { ...j, files, manifest: { ...j.manifest, entries } };
     });
@@ -137,8 +138,11 @@ export class JournalStore {
     const b = splitPath(to);
     if (!a || !b || a.kind !== b.kind) return `${to} isn't a ${a?.kind ?? ''} file's path`;
     if (!VALID_NAME.test(b.name)) return 'a name is letters, digits and _ only';
+    // An entry's edits go with it.
+    const moves = new Map([[from, to]]);
+    if (a.kind === 'entries' && editsPath(a.name) in files) moves.set(editsPath(a.name), editsPath(b.name));
     this.update((j) => {
-      const renamed = Object.fromEntries(Object.entries(j.files).map(([path, text]) => [path === from ? to : path, text]));
+      const renamed = Object.fromEntries(Object.entries(j.files).map(([path, text]) => [moves.get(path) ?? path, text]));
       const entries = a.kind === 'entries' ? j.manifest.entries.map((e) => (e === a.name ? b.name : e)) : j.manifest.entries;
       return { ...j, files: renamed, manifest: { ...j.manifest, entries } };
     });

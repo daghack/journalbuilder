@@ -45,7 +45,8 @@
 //             ragged lines aligned too; the symbols_to_string helper,
 //             symbols written out as a string; the hidden_message
 //             illustration, a secret picked out of a plain text in a
-//             style of its own
+//             style of its own; canvases committed to the visual editor,
+//             commit_to_editor, placed by hand (edits/showcase.json)
 //
 // Pages are bound with new_book: numbered, named and listed in the
 // contents.
@@ -2671,6 +2672,66 @@ let hiding = new_lock("hiding")
 	.connect("w.text", "hid.secret");
 hidden.add(hiding.run(#{ "w.symbols": symbols(27, "SECRET MESSAGE") }).canvases("hid")[0].translate_by(vec2(LEFT, TOP + 1110)));
 book.bind("appendix", hidden);
+
+// The visual editor: canvas.commit_to_editor(name) hands a canvas to the
+// web editor's visual editor (Ctrl/⌘+P), where it's placed by hand. Its
+// edits are kept in edits/showcase.json and applied here, as journalbuild
+// applies them: each motif in red as the script drew it, in ink as edited.
+let edited = sheet("canvases");
+edited.add(subhead("visual editor", TOP));
+edited.add(caption("canvas.commit_to_editor(name): the canvas handed to the web editor's visual editor (Ctrl or Cmd+P), to place by", TOP + 50));
+edited.add(caption("hand; its edit, kept in edits/ENTRY.json, applied at the call. Red: as the script drew it; ink: as edited", TOP + 84));
+// A house, its sun to the upper right, to see which way it's turned.
+fn house(c, style) {
+	new_canvas()
+		.add(new_polyline([c + vec2(-50, 60), c + vec2(-50, -10), c + vec2(0, -55), c + vec2(50, -10), c + vec2(50, 60)], #{ closed: true }), style)
+		.add(new_rectangle(c + vec2(-18, 35), 22, 50), style)
+		.add(new_circle(c + vec2(62, -58), 14), style)
+}
+let cells = [
+	["move", "move: [70, -30]"],
+	["turn", "turn: 30 (degrees, clockwise)"],
+	["scale", "scale: [1.3, 1.3]"],
+	["stretch", "scale: [1.5, 0.7]"],
+	["flip", "scale: [-1, 1]: flipped"],
+	["skew", "skew: 25"],
+	["warp", "warp: corners pinned"],
+	["ink", "ink: #{ color, weight: 2.5 }"],
+	["hidden", "hidden: true (its bounds stay)"],
+];
+for (cell, i) in cells {
+	let x = LEFT + (i % 3) * 340;
+	let y = TOP + 140 + (i / 3) * 255;
+	edited.add(write(cell[1], x, y, 18));
+	let c = vec2(x + 150, y + 125);
+	if cell[0] != "ink" { edited.add(house(c, CAPTION)); }
+	let committed = house(c, LINE).commit_to_editor(cell[0]);
+	if cell[0] == "hidden" {
+		let b = committed.bounds();
+		edited.add(new_rectangle(b.center, b.width, b.height), CAPTION);
+	}
+	edited.add(committed);
+}
+// Paints laid over the canvas (gradients, pictures) move with the edit.
+let y = TOP + 870;
+edited.add(caption("Gradients and pictures go with the ink: new_gradient(..., #{ from, to }), new_image_paint; turned and moved", y));
+let across = new_style(new_brush_style(new_gradient([RED, INK], #{ from: vec2(LEFT + 30, 0), to: vec2(LEFT + 190, 0) }), "Ink Pen", 4), new_handwriting_style());
+let sky = new_image_paint(image("sunset"), #{ at: vec2(LEFT + 500, y + 50), width: 240 });
+let skied = new_style(new_brush_style(sky, "Ink Pen", 4), new_handwriting_style());
+for (paint, i) in [[across, "gradient"], [skied, "picture"]] {
+	let x = LEFT + i * 520;
+	edited.add(house(vec2(x + 100, y + 150), paint[0]));
+	edited.add(house(vec2(x + 100, y + 150), paint[0]).commit_to_editor(paint[1]));
+}
+// Committed inside a canvas committed in turn; and moved after: its edit
+// is where it was committed, what the script does after goes on top.
+let y = TOP + 1110;
+edited.add(write("committed in one committed in turn,", LEFT, y + 50, 18));
+edited.add(write("then moved by the script's translate_by", LEFT, y + 80, 18));
+let inner = house(vec2(LEFT + 560, y + 75), LINE).commit_to_editor("inner");
+let outer = new_canvas().add(new_rectangle(vec2(LEFT + 560, y + 75), 220, 130), LINE).add(inner).commit_to_editor("outer");
+edited.add(outer.translate_by(vec2(200, 0)));
+book.bind("appendix", edited);
 
 // ---- the title page and the contents, which go first ----
 

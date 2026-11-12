@@ -195,7 +195,7 @@ export class FileSidebarComponent {
       const split = splitPath(path)!;
       return split.kind === 'content' ? contentType(split.ext) : undefined;
     };
-    return KINDS.map((info) => {
+    return KINDS.filter((info) => !info.hidden).map((info) => {
       const paths = Object.keys(files).filter((path) => splitPath(path)?.kind === info.kind).sort();
       let own: Item[];
       if (info.kind === 'entries') {
