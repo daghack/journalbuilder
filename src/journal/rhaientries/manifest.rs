@@ -18,7 +18,7 @@
 
 use super::resources::Resources;
 use super::sources::Sources;
-use super::{Entry, JournalEngine};
+use super::{Edits, Entry, JournalEngine};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -138,10 +138,34 @@ impl Journal {
         Ok(JournalEngine::with_resources(Rc::new(glyphsets), resources))
     }
 
-    /// Run entry `name` in `engine`; errors name its file.
+    /// Entry `name`'s edits file, `edits/NAME.json`.
+    pub fn edits_path(&self, name: &str) -> PathBuf {
+        self.dir.join("edits").join(format!("{}.json", name))
+    }
+
+    /// The visual editor's edits to entry `name`'s canvases; none without
+    /// an edits file.
+    pub fn edits(&self, name: &str) -> Result<Option<Edits>, String> {
+        let path = self.edits_path(name);
+        match std::fs::read_to_string(&path) {
+            Ok(text) => Edits::parse(&text).map(Some).map_err(|e| format!("{}: {}", path.display(), e)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(format!("couldn't read {}: {}", path.display(), e)),
+        }
+    }
+
+    /// Run entry `name` in `engine`, with its edits; errors name its file.
+    /// Edits for canvases it doesn't commit are warned of.
     pub fn build_entry(&self, engine: &mut JournalEngine, name: &str) -> Result<Entry, String> {
         let source = self.entry_source(name)?;
-        engine.build_entry_str(&source).map_err(|err| format!("{}: {}", self.entry_path(name).display(), err))
+        if let Some(edits) = self.edits(name)? {
+            engine.set_edits(edits);
+        }
+        let entry = engine.build_entry_str(&source).map_err(|err| format!("{}: {}", self.entry_path(name).display(), err))?;
+        for unused in engine.unused_edits() {
+            engine.warn(format!("{} has an edit for '{}', which the entry doesn't commit to the editor", self.edits_path(name).display(), unused));
+        }
+        Ok(entry)
     }
 }
 

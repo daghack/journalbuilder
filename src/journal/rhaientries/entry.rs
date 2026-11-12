@@ -156,6 +156,10 @@ impl Page {
     /// `None` if there's nothing to render.
     pub fn render_canvas(&self, canvas: &CanvasData) -> Option<JournalCanvas> {
         let mut rendered: JournalCanvas = canvas.into();
+        // Strokes the visual editor hid aren't drawn.
+        if canvas.has_hidden() {
+            rendered.keep_strokes(&canvas.strokes.iter().map(|s| !s.hidden).collect::<Vec<_>>());
+        }
         if rendered.frame().is_none() {
             if !rendered.has_strokes() {
                 return None;
@@ -166,6 +170,10 @@ impl Page {
             }
         }
         Some(rendered)
+    }
+    /// Its set size (`page.size`), if it has one.
+    pub fn fixed_size(&self) -> Option<[f32; 2]> {
+        self.size.map(|s| [s.x, s.y])
     }
     fn get_size(&mut self) -> Dynamic {
         self.size.map_or(Dynamic::UNIT, |s| Dynamic::from(Vec2::new(s.x as f64, s.y as f64)))

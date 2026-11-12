@@ -7,6 +7,27 @@ export interface PageView {
   label: string;
   /** The box of canvas units its SVG shows, `[x, y, width, height]`; null if nothing's drawn on it. */
   view: [number, number, number, number] | null;
+  /** Its set size (`page.size`), if it has one: the region from the origin to there. */
+  size?: [number, number] | null;
+}
+
+/** A point, `[x, y]`, in canvas units. */
+export type Point = [number, number];
+
+/** A box's corners: top left, top right, bottom right, bottom left. */
+export type Corners = [Point, Point, Point, Point];
+
+/** A canvas a script committed to the visual editor (`canvas.commit_to_editor(name)`), and where it ended up. */
+export interface Committed {
+  name: string;
+  /** The script line of the commit. */
+  line: number | null;
+  /** Its box when committed, `[x, y, width, height]`; null if it was empty. */
+  box: [number, number, number, number] | null;
+  /** The box's corners once its edit moved, turned, scaled and skewed them (not warped). */
+  local: Corners | null;
+  /** Each place it's drawn: its page, and those corners there. */
+  shown: { page: number; corners: Corners }[];
 }
 
 export interface ScriptError {
@@ -25,6 +46,8 @@ export interface Evaluation {
   millis: number;
   /** The journal's files that stand in for the library's, as paths. */
   overrides?: string[];
+  /** The canvases committed to the visual editor, in order. */
+  committed?: Committed[];
 }
 
 /** What the workers are sent of the journal: its files besides the entries, by path (see JournalStore). */
@@ -44,7 +67,7 @@ export interface RenderOptions {
 export type EvalRequest =
   | { type: 'init'; wasmUrl: string }
   | { type: 'journal'; files: JournalPayload }
-  | { type: 'evaluate'; generation: number; source: string; first: number }
+  | { type: 'evaluate'; generation: number; source: string; edits: string | null; first: number }
   | { type: 'focus'; generation: number; index: number };
 
 export type EvalReply =
@@ -60,8 +83,8 @@ export type EvalReply =
 export type DarklyRequest =
   | { type: 'init'; wasmUrl: string }
   | { type: 'journal'; files: JournalPayload }
-  | { type: 'renderPages'; id: number; source: string; indices: number[]; options: RenderOptions }
-  | { type: 'exportPdf'; id: number; source: string; title: string; options: RenderOptions };
+  | { type: 'renderPages'; id: number; source: string; edits: string | null; indices: number[]; options: RenderOptions }
+  | { type: 'exportPdf'; id: number; source: string; edits: string | null; title: string; options: RenderOptions };
 
 export type DarklyReply =
   | { type: 'progress'; id: number; page: number; pages: number; fraction: number }

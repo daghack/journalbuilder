@@ -57,7 +57,9 @@ use rhai::{Dynamic, Engine, Map};
 use super::gradient;
 use super::options::{above_zero, at_least_zero, one_of, register_settings, setting_number, Settings};
 use super::RhaiResult;
-use crate::journal::canvas::{Brush, ColorJitter, InkRun, PressureProfile, StrokeColor};
+use crate::journal::affine::Affine;
+use crate::journal::canvas::{css, parse_color, Brush, ColorJitter, InkRun, PressureProfile, StrokeColor};
+use crate::journal::gradient::Gradient;
 use crate::journal::canvas::StrokeStyle as JournalStrokeStyle;
 use crate::journal::paths::StrokePath;
 
@@ -358,6 +360,37 @@ impl Style {
     }
     pub(super) fn color(&self) -> &StrokeColor {
         &self.brush.color
+    }
+    /// Its paint moved by `m` as well, if it's laid across the canvas (a
+    /// gradient from a point, or a picture), as the strokes it colours are.
+    pub(super) fn move_paint(&mut self, m: &Affine) {
+        self.brush.color = match &self.brush.color {
+            StrokeColor::Gradient(g) => StrokeColor::Gradient(g.moved(m)),
+            StrokeColor::Image(p) => StrokeColor::Image(p.moved(m)),
+            solid => solid.clone(),
+        };
+    }
+    /// Drawn in `color` (CSS) instead.
+    pub(super) fn recolor(&mut self, color: &str) {
+        self.brush.color = StrokeColor::Solid(color.to_string());
+    }
+    /// Its colours `opacity` as opaque again.
+    pub(super) fn fade(&mut self, opacity: f32) {
+        self.brush.color = match &self.brush.color {
+            StrokeColor::Solid(c) => match parse_color(c) {
+                Ok([r, g, b, a]) => StrokeColor::Solid(css([r, g, b, a * opacity])),
+                Err(_) => StrokeColor::Solid(c.clone()),
+            },
+            StrokeColor::Gradient(g) => {
+                let stops = g.stops.iter().map(|&(at, [r, gr, b, a])| (at, [r, gr, b, a * opacity])).collect();
+                StrokeColor::Gradient(Gradient { stops, ..g.clone() })
+            }
+            StrokeColor::Image(p) => StrokeColor::Image(p.faded(opacity)),
+        };
+    }
+    /// Its brush `weight` times as wide.
+    pub(super) fn weigh(&mut self, weight: f64) {
+        self.brush.brush_size *= weight;
     }
     /// A path as this style draws it: each subpath gone over `passes`
     /// times, each pass astray by up to `pass_end_jitter` (see

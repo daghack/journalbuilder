@@ -112,7 +112,7 @@ pub fn new_gradient(colours: Array, options: Map) -> RhaiResult<Gradient> {
         if options.len() > 1 {
             return Err(format!("{}: 'vertical' runs down each path, so it takes no 'from', 'to', 'center' or 'radius'", CALLER).into());
         }
-        return Ok(Gradient { stops, kind: GradientKind::Vertical });
+        return Ok(Gradient { stops, kind: GradientKind::Vertical, transform: Default::default() });
     }
     let (from, to, center) = (vec_option(&options, "from")?, vec_option(&options, "to")?, vec_option(&options, "center")?);
     let radius = number(CALLER, &options, "radius")?;
@@ -132,7 +132,7 @@ pub fn new_gradient(colours: Array, options: Map) -> RhaiResult<Gradient> {
         }
         _ => return Err(format!("{}: give 'from' and 'to' (across the page), 'center' and 'radius' (out from a point), 'vertical: true' (down each path), or none (along each stroke)", CALLER).into()),
     };
-    Ok(Gradient { stops, kind })
+    Ok(Gradient { stops, kind, transform: Default::default() })
 }
 
 fn describe(g: &mut Gradient) -> String {

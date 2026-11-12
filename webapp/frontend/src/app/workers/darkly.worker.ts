@@ -80,14 +80,14 @@ async function handle(request: Exclude<DarklyRequest, { type: 'init' | 'journal'
       const pages = request.indices.length;
       for (const [n, index] of request.indices.entries()) {
         const progress = (fraction: number) => post({ type: 'progress', id, page: n, pages, fraction });
-        const png: Uint8Array | undefined = await r.renderPage(request.source, index, request.options, progress);
+        const png: Uint8Array | undefined = await r.renderPage(request.source, request.edits ?? undefined, index, request.options, progress);
         const copy = png ? buffer(png) : null;
         post({ type: 'page', id, index, png: copy }, copy ? [copy] : []);
       }
       post({ type: 'done', id });
     } else {
       const progress = (page: number, pages: number, fraction: number) => post({ type: 'progress', id, page, pages, fraction });
-      const pdf: Uint8Array = await r.exportPdf(request.source, request.title, request.options, progress);
+      const pdf: Uint8Array = await r.exportPdf(request.source, request.edits ?? undefined, request.title, request.options, progress);
       const copy = buffer(pdf);
       post({ type: 'done', id, pdf: copy }, [copy]);
     }

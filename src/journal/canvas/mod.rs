@@ -2,6 +2,7 @@ use rayon::prelude::*;
 use crate::journal::{avoid::AvoidanceTree, StrokePath};
 use crate::journal::paths::{push_cut_number, push_number, trim_decimals};
 use std::borrow::Cow;
+use std::sync::Arc;
 use crate::journal::gradient::{Gradient, GradientKind};
 use crate::journal::image_paint::ImagePaint;
 use parry2d::math::{Vec2};
@@ -50,7 +51,7 @@ impl StrokeColor {
             },
             StrokeColor::Gradient(g) => {
                 let stops = g.stops.iter().map(|(at, c)| (*at, dark_ink(*c))).collect();
-                StrokeColor::Gradient(Gradient { stops, kind: g.kind })
+                StrokeColor::Gradient(Gradient { stops, kind: g.kind, transform: g.transform })
             }
             StrokeColor::Image(_) => self.clone(),
         }
@@ -83,13 +84,18 @@ fn svg_gradient(gradient: &Gradient, id: &str) -> String {
     let stops: String = gradient.stops.iter().map(|(at, c)| {
         format!("<stop offset=\"{}\" stop-color=\"{}\" />", at, css(*c))
     }).collect();
+    // Moved with its strokes (see `Gradient::transform`).
+    let moved = match gradient.transform.is_identity() {
+        true => String::new(),
+        false => format!(" gradientTransform=\"{}\"", gradient.transform.svg()),
+    };
     match gradient.kind {
         GradientKind::Linear { from, to } => format!(
-            "<linearGradient id=\"{}\" gradientUnits=\"userSpaceOnUse\" x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\">{}</linearGradient>",
-            id, from.x, from.y, to.x, to.y, stops),
+            "<linearGradient id=\"{}\" gradientUnits=\"userSpaceOnUse\"{} x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\">{}</linearGradient>",
+            id, moved, from.x, from.y, to.x, to.y, stops),
         GradientKind::Radial { center, radius } => format!(
-            "<radialGradient id=\"{}\" gradientUnits=\"userSpaceOnUse\" cx=\"{}\" cy=\"{}\" r=\"{}\">{}</radialGradient>",
-            id, center.x, center.y, radius, stops),
+            "<radialGradient id=\"{}\" gradientUnits=\"userSpaceOnUse\"{} cx=\"{}\" cy=\"{}\" r=\"{}\">{}</radialGradient>",
+            id, moved, center.x, center.y, radius, stops),
         GradientKind::Along | GradientKind::Vertical => String::new(),
     }
 }
@@ -316,7 +322,7 @@ impl StrokeStyle {
             },
             StrokeColor::Gradient(g) => {
                 let stops = g.stops.iter().map(|(at, c)| (*at, self.inked(*c, index, ink))).collect();
-                (svg_gradient(&Gradient { stops, kind: g.kind }, id), format!("url(#{})", id))
+                (svg_gradient(&Gradient { stops, kind: g.kind, transform: g.transform }, id), format!("url(#{})", id))
             }
             // Strokes in a picture are drawn subpath by subpath, each in
             // its own colour: this is only its average.
@@ -458,6 +464,10 @@ pub struct ColoredStroke {
     pub seed: Option<u32>,
     /// How dry its pen is over it, if its pen runs dry.
     pub ink: Option<InkRun>,
+    /// The names of the canvases committed to the visual editor it was
+    /// drawn on, innermost first, space-separated, as its SVG group's
+    /// `data-commit` gives them.
+    pub commits: Option<Arc<str>>,
 }
 
 /// How the SVG output draws strokes: roughened, sampled every
@@ -646,6 +656,37 @@ fn marks_svg(marks: &[Mark], cut: bool) -> String {
     String::from_utf8(svg).expect("marks are written in UTF-8")
 }
 
+/// `paths` in a group, each run of them drawn on the same canvases
+/// committed to the visual editor (`commits`, one for each) in a group of
+/// its own, `data-commit` naming them, for the editor to move as one.
+fn committed_groups(paths: &[String], commits: &[Option<&str>]) -> String {
+    if commits.iter().all(Option::is_none) {
+        return svg_group(paths);
+    }
+    let mut svg = String::with_capacity(paths.iter().map(String::len).sum::<usize>() + 64);
+    svg.push_str("<g>");
+    let mut open: Option<&str> = None;
+    for (path, &names) in paths.iter().zip(commits) {
+        if names != open {
+            if open.is_some() {
+                svg.push_str("</g>");
+            }
+            if let Some(names) = names {
+                svg.push_str("<g data-commit=\"");
+                svg.push_str(names);
+                svg.push_str("\">");
+            }
+            open = names;
+        }
+        svg.push_str(path);
+    }
+    if open.is_some() {
+        svg.push_str("</g>");
+    }
+    svg.push_str("</g>");
+    svg
+}
+
 fn svg_group(paths: &[String]) -> String {
     let mut svg = String::with_capacity(paths.iter().map(String::len).sum::<usize>() + 7);
     svg.push_str("<g>");
@@ -792,21 +833,34 @@ impl Canvas {
     /// Add a stroke, with its texture's seed (see `ColoredStroke::seed`)
     /// and how dry its pen is over it.
     pub fn add_seeded_stroke(&mut self, path: StrokePath, style: StrokeStyle, seed: Option<u32>, ink: Option<InkRun>) {
-        let width_vec = Vec2::splat(style.width);
-        path.for_each_point(|pos| {
+        self.add_colored_stroke(ColoredStroke { path, style, seed, ink, commits: None });
+    }
+    /// Add a stroke as it is.
+    pub fn add_colored_stroke(&mut self, stroke: ColoredStroke) {
+        let width_vec = Vec2::splat(stroke.style.width);
+        stroke.path.for_each_point(|pos| {
             self.update_bounds(pos);
             self.update_bounds(pos + width_vec);
             self.update_bounds(pos - width_vec);
         });
-        self.strokes.push(ColoredStroke {
-            path,
-            style,
-            seed,
-            ink,
-        });
+        self.strokes.push(stroke);
     }
     pub fn strokes(&self) -> &Vec<ColoredStroke> {
         &self.strokes
+    }
+    /// Only the strokes `keep` says to, each with the texture's seed it
+    /// had, so dropping some changes nothing about the rest, and bounds
+    /// round those.
+    pub fn keep_strokes(&mut self, keep: &[bool]) {
+        let seeds = self.stroke_seeds();
+        let strokes = std::mem::take(&mut self.strokes);
+        self.bounds = bounding_volume::Aabb::new_invalid();
+        for ((mut stroke, seed), keep) in strokes.into_iter().zip(seeds).zip(keep) {
+            if *keep {
+                stroke.seed = Some(seed);
+                self.add_colored_stroke(stroke);
+            }
+        }
     }
     /// Change every stroke's colour with `f`.
     pub fn recolor(&mut self, f: impl Fn(&StrokeColor) -> StrokeColor) {
@@ -855,7 +909,9 @@ impl Canvas {
     /// only on their seeds, so they're worked out on several threads at once.
     /// Numbers are cut to two decimal places if `cut`.
     fn to_svg_group(&self, style: Option<&SvgStyle>, seed: u64, min: Vec2, max: Vec2, cut: bool) -> String {
-        let paths: Vec<String> = self.strokes_reaching(style, min, max).into_par_iter().map(|(stroke, stroke_seed)| {
+        let strokes = self.strokes_reaching(style, min, max);
+        let commits: Vec<Option<&str>> = strokes.iter().map(|(stroke, _)| stroke.commits.as_deref()).collect();
+        let paths: Vec<String> = strokes.into_par_iter().map(|(stroke, stroke_seed)| {
             // Ids for gradients, unique in the file.
             let id = format!("gradient_{}", stroke_seed);
             match style {
@@ -864,7 +920,7 @@ impl Canvas {
                 None => plain_path(stroke, &id),
             }
         }).collect();
-        svg_group(&paths)
+        committed_groups(&paths, &commits)
     }
     /// The canvas as SVG. With a style, strokes are roughened and tapered
     /// using generators seeded with `seed`, so the result is reproducible.
@@ -967,12 +1023,14 @@ impl Canvas {
         let svg_data = match stylized {
             Some(opts) => {
                 let (min, max) = (Vec2::new(view[0], view[1]), Vec2::new(view[0] + view[2], view[1] + view[3]));
-                let marks: Vec<Vec<Mark>> = self.strokes_reaching(stylized, min, max).into_par_iter().map(|(stroke, stroke_seed)| {
+                let strokes = self.strokes_reaching(stylized, min, max);
+                let commits: Vec<Option<&str>> = strokes.iter().map(|(stroke, _)| stroke.commits.as_deref()).collect();
+                let marks: Vec<Vec<Mark>> = strokes.into_par_iter().map(|(stroke, stroke_seed)| {
                     Self::stylized_marks(stroke, opts, &mut stroke_rng(seed, stroke_seed), &format!("gradient_{}", stroke_seed))
                 }).collect();
                 let paths: Vec<String> = marks.par_iter().map(|marks| marks_svg(marks, false)).collect();
                 draw_marks(marks.iter().flatten(), view, transform, &mut pixmap);
-                svg_document(view, &svg_group(&paths))
+                svg_document(view, &committed_groups(&paths, &commits))
             }
             None => {
                 let svg_data = svg_document(view, &self.svg_group_in(None, seed, view, false));
@@ -1170,7 +1228,7 @@ mod svg_output_tests {
     }
 
     fn gradient(kind: GradientKind) -> StrokeColor {
-        StrokeColor::Gradient(Gradient { stops: vec![(0.0, [1.0, 0.0, 0.0, 1.0]), (1.0, [0.0, 0.0, 1.0, 1.0])], kind })
+        StrokeColor::Gradient(Gradient { stops: vec![(0.0, [1.0, 0.0, 0.0, 1.0]), (1.0, [0.0, 0.0, 1.0, 1.0])], kind, transform: Default::default() })
     }
 
     #[test]

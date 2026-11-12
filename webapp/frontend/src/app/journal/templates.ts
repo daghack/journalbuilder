@@ -151,6 +151,8 @@ fn example() {
       return '{\n\t"space_width": 0.5,\n\t"glyphs": {}\n}\n';
     case 'images':
       return '';
+    case 'edits':
+      return '{ "version": 1, "canvases": {} }\n';
     case 'lib':
       return `// ${name}: shared functions, for import "lib/${name}" as ${name};
 

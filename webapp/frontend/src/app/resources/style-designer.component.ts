@@ -279,7 +279,7 @@ export class StyleDesignerComponent implements OnDestroy {
     this.darklyError.set(null);
     this.progress.set({ page: 0, pages: 1, fraction: 0 });
     let png: Blob | null = null;
-    this.render.renderPages(script, [0], { scale: 0.5, parchment: false },
+    this.render.renderPages(script, null, [0], { scale: 0.5, parchment: false },
       (_, image) => (png = image),
       (p) => this.progress.set(p),
       files,

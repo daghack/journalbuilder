@@ -12,7 +12,10 @@ and files of its own in `locks/`, `helpers/`, `layouts/`,
 and the compiled-in library hold as data URLs). These stand in
 front of the built-in library, `webapp/library/`, which has the same
 directories; a journal's file stands in for the library's of the same
-name. Anything any journal might use goes in the library; what only one
+name. `edits/ENTRY.json` holds the visual editor's edits to the
+canvases an entry commits to it (`canvas.commit_to_editor(name)`),
+applied at the call; the web editor writes it and drops edits for
+names no longer committed. Anything any journal might use goes in the library; what only one
 journal uses goes in that journal. `journalbuild NAME [--entry E]`
 renders into `NAME_output/ENTRY/`.
 

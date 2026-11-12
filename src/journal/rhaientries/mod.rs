@@ -3,6 +3,7 @@ mod avoid;
 mod book;
 mod canvas;
 mod content;
+mod edits;
 mod entry;
 mod generate;
 mod glyphs;
@@ -41,6 +42,7 @@ pub mod lock_inspection {
     pub use super::locks::{from_json, to_json, value_from_test, value_view, OptionInfo, Ports, RunResult, TypeInfo, ValueView};
 }
 pub use canvas::{CanvasData, Stroke};
+pub use edits::{report as commit_report, CanvasEdit, CommitReport, Committed, Edits, EDITS_VERSION};
 pub use entry::{Entry, Page};
 pub use style::{BrushStyle, HandwritingStyle, Style};
 pub use vec::Vec2;
@@ -157,6 +159,8 @@ pub fn rhai_engine() -> Engine {
 pub struct JournalEngine {
     engine: Engine,
     warnings: Rc<RefCell<Vec<String>>>,
+    /// The visual editor's edits, and the canvases committed to it.
+    editor: edits::SharedEditor,
     symdict: Rc<FontBook>,
     resources: Resources,
     illustrations: Rc<IllustrationLibrary>,
@@ -227,6 +231,7 @@ impl JournalEngine {
         let text: TextSource = (symdict.clone(), rng.clone());
 
         canvas::register(&mut engine, rng.clone());
+        let editor = edits::register(&mut engine);
         path::register(&mut engine, text);
         style::register(&mut engine);
         vec::register(&mut engine);
@@ -292,6 +297,7 @@ impl JournalEngine {
         JournalEngine {
             engine,
             warnings,
+            editor,
             symdict,
             resources,
             illustrations,
@@ -322,6 +328,24 @@ impl JournalEngine {
     pub fn warnings(&self) -> Vec<String> {
         self.warnings.borrow().clone()
     }
+    /// Report a problem as `warn` does, without a script line.
+    pub fn warn(&self, warning: String) {
+        eprintln!("warning: {}", warning);
+        self.warnings.borrow_mut().push(warning);
+    }
+    /// Apply `edits` to the canvases scripts commit to the visual editor.
+    pub fn set_edits(&mut self, edits: Edits) {
+        self.editor.borrow_mut().saved = edits;
+    }
+    /// The canvases the last run committed to the visual editor, in order.
+    pub fn committed(&self) -> Vec<Committed> {
+        self.editor.borrow().committed.clone()
+    }
+    /// The canvases there are edits for that the last run didn't commit.
+    pub fn unused_edits(&self) -> Vec<String> {
+        let editor = self.editor.borrow();
+        editor.saved.canvases.keys().filter(|name| !editor.committed.iter().any(|c| &c.name == *name)).cloned().collect()
+    }
     /// Run a journal script, returning the `journal_entry` it built. Errors
     /// are rhai's message, with the script line.
     pub fn build_entry_str(&mut self, script_str: &str) -> Result<Entry, String> {
@@ -329,6 +353,7 @@ impl JournalEngine {
     }
     /// `build_entry_str`, with where in the script an error happened.
     pub fn build_entry(&mut self, script_str: &str) -> Result<Entry, ScriptError> {
+        self.editor.borrow_mut().committed.clear();
         let mut scope = Scope::new();
         scope.push("journal_entry", Entry::default());
         self.engine.run_with_scope(&mut scope, script_str).map_err(|err| ScriptError::new(&err))?;

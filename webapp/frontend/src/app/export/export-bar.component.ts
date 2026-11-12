@@ -135,19 +135,20 @@ export class ExportBarComponent {
   protected async start() {
     this.running.set(true);
     const source = this.journal.shownSource();
+    const edits = this.journal.shownEdits();
     const name = this.journal.baseName();
     const options = { scale: this.scale(), supersample: this.supersample(), parchment: this.parchment() };
     const progress = (p: RenderProgress) => this.progress.set(p);
     try {
       if (this.format() === 'pdf') {
-        const pdf = await this.render.exportPdf(source, name, { ...options, stitch: this.stitch() ?? undefined }, progress);
+        const pdf = await this.render.exportPdf(source, edits, name, { ...options, stitch: this.stitch() ?? undefined }, progress);
         this.files.download(pdf, `${name}.pdf`);
       } else {
         const pages = this.journal.pages().filter((p) => p.view);
         const files: Record<string, Uint8Array> = {};
         const pngs: Promise<void>[] = [];
         const rendered = new Map<number, Blob>();
-        await this.render.renderPages(source, pages.map((p) => p.index), options, (index, png) => {
+        await this.render.renderPages(source, edits, pages.map((p) => p.index), options, (index, png) => {
           const page = pages.find((p) => p.index === index)!;
           if (png) {
             rendered.set(index, png);

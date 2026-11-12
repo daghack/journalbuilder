@@ -302,6 +302,12 @@ impl StrokePath {
             *cmd = f(cmd);
         }
     }
+    /// Move every point, control points too, by `f`.
+    pub fn map_points(&mut self, mut f: impl FnMut(Vec2) -> Vec2) {
+        for cmd in &mut self.commands {
+            *cmd = cmd.map_points(|_, p| f(p));
+        }
+    }
     pub fn rotated_by(self, angle: f32) -> Self {
         self.rotated_around(Vec2::new(0.0, 0.0), angle)
     }
