@@ -139,6 +139,8 @@ fn journal_files<'a>(files: impl IntoIterator<Item = (&'a str, &'a str)>) -> Res
             ("styles", "json") => &mut journal.styles,
             ("lib", "rhai") => &mut journal.lib,
             ("glyphsets", "json") => &mut journal.glyphsets,
+            ("symbolsets", "json") => &mut journal.symbol_set_data,
+            ("symbolsets", "rhai") => &mut journal.symbol_set_scripts,
             ("content", "txt") => &mut journal.text,
             ("content", "md") => &mut journal.markdown,
             ("content", "json") => &mut journal.symbols,
@@ -568,6 +570,41 @@ pub fn style_types() -> String {
         }
     }).collect();
     Value::Array(types).to_string()
+}
+
+/// Every symbol set, as JSON: `[{ name, description, scripted, base, size,
+/// options, own, builtin }]`, or `{ name, error, own, builtin }` for one
+/// that doesn't load.
+#[wasm_bindgen(js_name = symbolSetTypes)]
+pub fn symbol_set_types() -> String {
+    let engine = engine(&[]);
+    let types: Vec<Value> = engine.symbol_set_names().into_iter().map(|name| {
+        let (data, script) = (format!("symbolsets/{}.json", name), format!("symbolsets/{}.rhai", name));
+        let path = if JOURNAL.with_borrow(|j| j.files.contains_key(&script)) { script } else { data };
+        match engine.describe_symbol_set(&name) {
+            Ok(info) => marked(serde_json::to_value(info).unwrap_or(Value::Null), &path),
+            Err(error) => marked(json!({ "name": name, "error": error }), &path),
+        }
+    }).collect();
+    Value::Array(types).to_string()
+}
+
+/// Symbol set `name`, every symbol drawn and numbered, as SVG: `{ pages:
+/// [{ svg, view }] }`, or `{ error }`. `options` (JSON) are over its
+/// defaults, and `file` stands in for its file, given with its path
+/// (`symbolsets/NAME.json` or `.rhai`) as it's edited.
+#[wasm_bindgen(js_name = symbolSetPreview)]
+pub fn symbol_set_preview(name: &str, file: Option<String>, path: Option<String>, options: &str) -> String {
+    answer((|| {
+        let options = parse_json(options, "options")?;
+        let extra: Vec<(&str, &str)> = match (&path, &file) {
+            (Some(path), Some(file)) => vec![(path.as_str(), file.as_str())],
+            _ => Vec::new(),
+        };
+        let mut engine = engine(&extra);
+        let entry = engine.preview_symbol_set(name, &options)?;
+        Ok(pages_json(&entry))
+    })())
 }
 
 /// A style script, from when styles were scripts, as a style file `name`:

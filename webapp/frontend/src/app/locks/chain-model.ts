@@ -36,8 +36,8 @@ export interface RendererNode {
   y: number;
 }
 
-/** What a source draws on: content (data), or a style, glyphset or layout (for illustrations). */
-export type SourceKind = 'content' | 'style' | 'glyphset' | 'layout';
+/** What a source draws on: content (data), or a style, glyphset, layout or symbol set (for illustrations). */
+export type SourceKind = 'content' | 'style' | 'glyphset' | 'layout' | 'symbolset';
 
 /**
  * A source: one of the journal's files the chain draws on, with one
@@ -61,8 +61,8 @@ export interface SourceNode {
 export const SOURCE_PORT = 'value';
 
 /** The directory a source's file is in. */
-export function sourceDir(kind: SourceKind): 'content' | 'styles' | 'glyphsets' | 'layouts' {
-  return kind === 'content' ? 'content' : kind === 'style' ? 'styles' : kind === 'glyphset' ? 'glyphsets' : 'layouts';
+export function sourceDir(kind: SourceKind): 'content' | 'styles' | 'glyphsets' | 'layouts' | 'symbolsets' {
+  return kind === 'content' ? 'content' : kind === 'style' ? 'styles' : kind === 'glyphset' ? 'glyphsets' : kind === 'symbolset' ? 'symbolsets' : 'layouts';
 }
 
 /** A wire: an output ("lock.port") feeding an input. */
@@ -222,7 +222,7 @@ export function wireProblem(model: ChainModel, ports: PortsByNode, from: string,
   if (isRenderer(model, splitPort(from)[0])) return 'an illustration has no outputs to wire';
   if (isSource(model, splitPort(to)[0])) return 'a source has no inputs';
   if (isSource(model, splitPort(from)[0]) && !isRenderer(model, splitPort(to)[0]) && model.sources.find((s) => s.id === splitPort(from)[0])?.kind !== 'content') {
-    return 'a style, glyphset or layout is something to draw with: only an illustration takes one';
+    return 'a style, glyphset, layout or symbol set is something to draw with: only an illustration takes one';
   }
   if (a === null) return `${from} isn't an output`;
   if (b === null) return `${to} isn't an input`;

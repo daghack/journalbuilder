@@ -8,13 +8,19 @@
 // any other glyphset, its letter (0 a space, 1 to 26 A to Z). Unwired,
 // they're ink pens in the corridors and glyphs colours, the glyphs
 // balanced ternary, as big as the cells hold.
+//
+// symbol_set, a SymbolSet, draws the cells' symbols instead of glyph_style
+// when it's wired: each symbol is the set's own (the cell's symbol 0 to 26
+// of the set's), at its size or smaller if a cell hasn't room, upright.
+// With editor, each cell's symbol is committed to the visual editor as
+// EDITOR_N, N the cell's place in walking order, so any can be changed.
 
 fn options() {
-	#{ cell: 70.0, corridors: "#9b2318", glyphs: "#2b1d12" }
+	#{ cell: 70.0, corridors: "#9b2318", glyphs: "#2b1d12", editor: "" }
 }
 
 fn inputs(o) {
-	#{ maze: "Maze", corridor_style: "TextStyle", glyph_style: "TextStyle" }
+	#{ maze: "Maze", corridor_style: "TextStyle", glyph_style: "TextStyle", symbol_set: "SymbolSet" }
 }
 
 fn fallbacks(o) {
@@ -25,12 +31,25 @@ fn fallbacks(o) {
 			style: new_style(new_brush_style(o.glyphs, "Ink Pen", 2.2, #{ min_pressure: 0.4, max_pressure: 0.8 }), hand),
 			type: new_type_style(glyphset("balanced_ternary"), o.cell * 0.8),
 		},
+		// Unwired, the glyph style draws.
+		symbol_set: (),
 	}
 }
 
 fn render(o, i) {
 	let c = new_canvas();
 	c.add(i.maze.path().scale_by(o.cell), i.corridor_style.style);
+	if i.symbol_set != () {
+		let set = i.symbol_set;
+		let size = min(set.size, o.cell * 0.8);
+		for (cell, k) in i.maze.cells() {
+			if cell.symbol >= set.base { throw `maze_glyphs: symbol ${cell.symbol} is outside the symbol set '${set.name}' (0 to ${set.base - 1})`; }
+			let mark = write_at(set.text([cell.symbol]), vec2(cell.x * o.cell, cell.y * o.cell), #{ type: #{ glyph_scale: size } });
+			if o.editor != "" { mark = mark.commit_to_editor(`${o.editor}_${k}`); }
+			c.add(mark);
+		}
+		return c;
+	}
 	let t = i.glyph_style.type;
 	let scale = min(t.glyph_scale * t.glyph_scale_factor, o.cell * 0.8);
 	let digits = "-13" in t.glyphset.characters();

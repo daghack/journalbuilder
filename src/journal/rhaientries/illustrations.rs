@@ -184,14 +184,14 @@ impl IllustrationType {
     /// The canvases it draws `inputs` (name -> value) as, with `o`.
     pub fn render(&self, engine: &Engine, o: &Map, inputs: Map) -> Result<Vec<Canvas>, String> {
         let value = self.call(engine, "render", "render(o, i)", (Dynamic::from_map(o.clone()), Dynamic::from_map(inputs)))?;
-        if value.is::<Canvas>() {
-            return Ok(vec![value.cast::<Canvas>()]);
+        if let Some(canvas) = super::symbolic::canvas_of(&value) {
+            return Ok(vec![canvas]);
         }
         let type_name = value.type_name();
         let items = value.try_cast::<Array>().ok_or_else(|| format!("illustration '{}': render(o, i) should return a canvas or an array of canvases, got {}", self.name, type_name))?;
         items.into_iter().enumerate().map(|(i, item)| {
             let type_name = item.type_name();
-            item.try_cast::<Canvas>().ok_or_else(|| format!("illustration '{}': render(o, i) returned an array whose item {} is a {}, not a canvas", self.name, i, type_name))
+            super::symbolic::canvas_of(&item).ok_or_else(|| format!("illustration '{}': render(o, i) returned an array whose item {} is a {}, not a canvas", self.name, i, type_name))
         }).collect()
     }
 
@@ -402,13 +402,13 @@ mod tests {
     fn running_mistakes_are_named() {
         for (script, want) in [
             (r#"illustration("nope");"#, "illustration: no illustration named 'nope'; illustrations: "),
-            (r#"illustration("maze_glyphs", #{ size: 3 });"#, "illustration: illustration 'maze_glyphs' has no option 'size'; its options: cell, corridors, glyphs"),
+            (r#"illustration("maze_glyphs", #{ size: 3 });"#, "illustration: illustration 'maze_glyphs' has no option 'size'; its options: cell, corridors, editor, glyphs"),
             (r#"illustration("maze_glyphs").run();"#, "run: illustration 'maze_glyphs' has no value for its input 'maze'"),
-            (r#"illustration("maze_glyphs").run(#{ grid: 1 });"#, "run: illustration 'maze_glyphs' has no input 'grid'; inputs: corridor_style, glyph_style, maze"),
+            (r#"illustration("maze_glyphs").run(#{ grid: 1 });"#, "run: illustration 'maze_glyphs' has no input 'grid'; inputs: corridor_style, glyph_style, maze, symbol_set"),
             (r#"illustration("maze_glyphs").run(#{ maze: symbols(27, "HI") });"#, "run: illustration 'maze_glyphs' input 'maze': expects Maze, got Base27Symbol"),
             (r#"illustration("maze_glyphs").run(#{ maze: 3 });"#, "run: illustration 'maze_glyphs' input 'maze': expected a Maze, got an integer"),
             (r#"illustration("trit_message").run(#{ message: [5] });"#, "run: illustration 'trit_message' input 'message': symbol 5 (item 0) is outside Base3's 0-2"),
-            (r#"illustration("maze_glyphs").run(#{}, #{ size: 3 });"#, "run: illustration 'maze_glyphs' has no option 'size'; its options: cell, corridors, glyphs"),
+            (r#"illustration("maze_glyphs").run(#{}, #{ size: 3 });"#, "run: illustration 'maze_glyphs' has no option 'size'; its options: cell, corridors, editor, glyphs"),
             (r#"illustration("maze_glyphs").run(#{}, #{ cell: "big" });"#, "run: illustration 'maze_glyphs': option 'cell' should be like its default, 70.0, got big"),
         ] {
             let err = engine().build_entry_str(script).expect_err(script);
@@ -421,10 +421,10 @@ mod tests {
         let chain = r#"let lock = new_lock("m").add("maze", "maze_lock", #{ input_base: 27 });"#;
         for (line, want) in [
             (r#"lock.attach("d", "nope");"#, "attach: no illustration named 'nope'; illustrations: "),
-            (r#"lock.attach("d", "maze_glyphs", #{ size: 3 });"#, "attach: illustration 'maze_glyphs' has no option 'size'; its options: cell, corridors, glyphs"),
+            (r#"lock.attach("d", "maze_glyphs", #{ size: 3 });"#, "attach: illustration 'maze_glyphs' has no option 'size'; its options: cell, corridors, editor, glyphs"),
             (r#"lock.attach("d", "maze_glyphs", #{ cell: "big" });"#, "attach: illustration 'maze_glyphs': option 'cell' should be like its default, 70.0, got big"),
             (r#"lock.attach("maze", "maze_glyphs");"#, "attach: there's a lock, illustration or source named 'maze' already"),
-            (r#"lock.attach("d", "maze_glyphs").connect("maze.generated_maze", "d.grid");"#, "connect: illustration 'd' (maze_glyphs) has no input 'grid'; inputs: corridor_style, glyph_style, maze"),
+            (r#"lock.attach("d", "maze_glyphs").connect("maze.generated_maze", "d.grid");"#, "connect: illustration 'd' (maze_glyphs) has no input 'grid'; inputs: corridor_style, glyph_style, maze, symbol_set"),
             (r#"lock.attach("d", "maze_glyphs").connect("maze.text_length", "d.maze");"#, "connect: can't connect maze.text_length (LockProcessInfo) to d.maze (Maze)"),
             (r#"lock.attach("d", "maze_glyphs").connect("maze.nope", "d.maze");"#, "connect: 'maze.nope' isn't a port of the chain"),
             (r#"lock.attach("d", "maze_glyphs").run(#{ "maze.maze_text": symbols(27, "HI"), "maze.random_seed": symbols(10, "1") }).canvases("d");"#, "canvases: illustration 'd' has nothing connected to its input 'maze'"),
@@ -533,7 +533,7 @@ mod tests {
         assert_eq!(library.check_chain("sourced"), Ok(0));
         for (chain, want) in [
             (SOURCED.replace("\"lorem\", base: 27", "\"nope\""), "there's no content named 'nope'"),
-            (SOURCED.replace("type: \"style\"", "type: \"font\""), "has type 'font'; a source is content, style, glyphset or layout"),
+            (SOURCED.replace("type: \"style\"", "type: \"font\""), "has type 'font'; a source is content, style, glyphset, layout or symbolset"),
             (SOURCED.replace("[[\"secret.value\", \"shift.plain_text\"]]", "[[\"hand.value\", \"shift.plain_text\"]]"), "can't connect hand.value (TextStyle) to shift.plain_text (Base27Symbol)"),
             (SOURCED.replace("base: 27 }", "base: 40 }"), "has base 40"),
         ] {

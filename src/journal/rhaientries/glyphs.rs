@@ -209,7 +209,7 @@ fn glyph(f: &Font, key: &Dynamic) -> RhaiResult<Glyph> {
 /// What `glyphset` and `ternary_glyphset` take, as a glyphset's properties.
 const GLYPHSET_PROPS: [&str; 5] = ["glyph_outline_gap", "space_width", "skew", "joined", "fallback"];
 /// What `glyphset.glyph` takes, as a glyph's properties.
-const GLYPH_PROPS: [&str; 4] = ["position", "scale", "rotation", "skew"];
+pub(super) const GLYPH_PROPS: [&str; 4] = ["position", "scale", "rotation", "skew"];
 
 pub fn register(engine: &mut Engine, symdict: Rc<FontBook>, rng: SharedRng) {
     engine.register_type_with_name::<Font>("Glyphset");

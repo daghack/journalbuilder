@@ -108,6 +108,23 @@ fn example() {
 The file's opening comment is its description, shown in the web editor's
 palette.
 
+## Symbol sets and design slots
+
+A mark an illustration draws for a symbol is a symbol of a symbol set
+(`symbolsets/`, see its README), so which mark stands for which symbol is the
+journal's choice. An input typed `SymbolSet` takes a set: wired from a
+`symbolset` chain source, or given to `run`; `fallbacks(o)` gives it
+`symbol_set("name", options)`. A family of marks (the stars of a sky, a
+labyrinth's cells) is two inputs, a `SymbolSet` and the symbols that go in its
+places (typed `Any`, an empty array for none), checked against the set, so the
+choice of mark can itself carry a second message.
+
+Each mark is drawn with `write_at(set.text([symbol]), at, #{ type: #{
+glyph_scale: size }, turn })`, which gives a symbolic. With the illustration's
+`editor` option set, each is committed to the visual editor
+(`mark.commit_to_editor(name)`), so the editor can change its symbol or set;
+names are the entry's own, so two uses in one entry need two editors.
+
 ## In the web editor
 
 The lock editor's palette lists every illustration. Wire a chain's value to

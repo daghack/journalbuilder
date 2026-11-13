@@ -31,6 +31,7 @@ pub enum SourceKind {
     Style,
     Glyphset,
     Layout,
+    SymbolSet,
 }
 
 impl SourceKind {
@@ -40,11 +41,12 @@ impl SourceKind {
             SourceKind::Style => "style",
             SourceKind::Glyphset => "glyphset",
             SourceKind::Layout => "layout",
+            SourceKind::SymbolSet => "symbolset",
         }
     }
 
     fn parse(name: &str) -> Option<SourceKind> {
-        [SourceKind::Content, SourceKind::Style, SourceKind::Glyphset, SourceKind::Layout].into_iter().find(|kind| kind.name() == name)
+        [SourceKind::Content, SourceKind::Style, SourceKind::Glyphset, SourceKind::Layout, SourceKind::SymbolSet].into_iter().find(|kind| kind.name() == name)
     }
 }
 
@@ -75,11 +77,11 @@ pub fn parse_sources(spec: &Map) -> Result<Vec<SourceSpec>, String> {
         }
         let entry = entry.try_cast::<Map>().ok_or_else(|| bad("should be a map, #{ type, name }"))?;
         let kind_name = entry.get("type").and_then(|t| t.clone().into_string().ok())
-            .ok_or_else(|| bad("needs its type: content, style, glyphset or layout"))?;
-        let kind = SourceKind::parse(&kind_name).ok_or_else(|| bad(&format!("has type '{}'; a source is content, style, glyphset or layout", kind_name)))?;
+            .ok_or_else(|| bad("needs its type: content, style, glyphset, layout or symbolset"))?;
+        let kind = SourceKind::parse(&kind_name).ok_or_else(|| bad(&format!("has type '{}'; a source is content, style, glyphset, layout or symbolset", kind_name)))?;
         let allowed: &[&str] = match kind {
             SourceKind::Content => &["type", "name", "base"],
-            SourceKind::Style | SourceKind::Layout => &["type", "name", "options"],
+            SourceKind::Style | SourceKind::Layout | SourceKind::SymbolSet => &["type", "name", "options"],
             SourceKind::Glyphset => &["type", "name"],
         };
         if let Some(unknown) = entry.keys().find(|key| !allowed.contains(&key.as_str())) {
@@ -112,7 +114,7 @@ fn text(mut text: String) -> String {
 
 impl LockLibrary {
     /// The type of `source`'s value: symbols, String or Graph for content,
-    /// TextStyle, Glyphset or Layout for the rest. Fails if its file isn't
+    /// TextStyle, Glyphset, Layout or SymbolSet for the rest. Fails if its file isn't
     /// there.
     pub fn source_type(&self, source: &SourceSpec) -> Result<InfoVarType, String> {
         let at = |e: String| format!("sources: '{}': {}", source.id, e);
@@ -129,6 +131,13 @@ impl LockLibrary {
             SourceKind::Glyphset => Err(missing("glyphset", resources.glyphsets.names().unwrap_or_default())),
             SourceKind::Layout if resources.layouts.has(&source.name) => Ok(InfoVarType::Named("Layout".to_string())),
             SourceKind::Layout => Err(missing("layout", resources.layouts.names().unwrap_or_default())),
+            SourceKind::SymbolSet if resources.symbol_set_data.has(&source.name) || resources.symbol_set_scripts.has(&source.name) => Ok(InfoVarType::Named("SymbolSet".to_string())),
+            SourceKind::SymbolSet => {
+                let mut names = resources.symbol_set_data.names().unwrap_or_default();
+                names.extend(resources.symbol_set_scripts.names().unwrap_or_default());
+                names.sort();
+                Err(missing("symbol set", names))
+            }
         }
     }
 

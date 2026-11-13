@@ -611,6 +611,7 @@ export class LockEditorService {
     const files = this.store.files();
     const library = this.library.files();
     const candidates = source.kind === 'content' ? ['txt', 'md', 'json', 'graph'].map((ext) => pathOf('content', source.name, ext))
+      : source.kind === 'symbolset' ? ['json', 'rhai'].map((ext) => pathOf('symbolsets', source.name, ext))
       : [pathOf(chain.sourceDir(source.kind), source.name)];
     return candidates.find((path) => path in files || path in library) ?? null;
   }
@@ -636,7 +637,7 @@ export class LockEditorService {
         type = source.base !== undefined ? `Base${source.base}Symbol` : 'String';
       }
     } else {
-      type = source.kind === 'style' ? 'TextStyle' : source.kind === 'glyphset' ? 'Glyphset' : 'Layout';
+      type = source.kind === 'style' ? 'TextStyle' : source.kind === 'glyphset' ? 'Glyphset' : source.kind === 'symbolset' ? 'SymbolSet' : 'Layout';
     }
     return { inputs: [], outputs: [[chain.SOURCE_PORT, type]], options: {} };
   }

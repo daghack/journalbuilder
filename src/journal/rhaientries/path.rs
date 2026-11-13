@@ -69,7 +69,7 @@
 //! fill rules. Lines and curves are cut where they cross its outline and
 //! stay lines and curves.
 
-use rhai::{Dynamic, Engine, EvalAltResult, Map};
+use rhai::{Dynamic, Engine, EvalAltResult, Map, NativeCallContext};
 use super::RhaiResult;
 use std::rc::Rc;
 
@@ -86,6 +86,8 @@ use crate::journal::fonts::FontBook;
 use crate::journal::ternary::{ternary_along, TernaryOptions};
 use super::generate::BalancedTernary;
 use super::markdown::{FlowText, Markdown, Styled};
+use super::symbol_sets::SymbolText;
+use super::symbolic::{make, Symbolic};
 use super::text_settings::{Jitter, TextSettings, Wander};
 use parry2d::math::Vec2 as PVec;
 use rhai::{Array, INT};
@@ -134,7 +136,7 @@ impl PathText {
     }
     /// As `parse`, taking `keys` besides a style, a type and a paragraph.
     fn parse_with(caller: &'static str, msg: &FlowText, settings: Map, (symdict, rng): &TextSource, keys: &[&str]) -> RhaiResult<PathText> {
-        let text = TextSettings::read(caller, settings, keys)?;
+        let text = TextSettings::read_for(caller, msg, settings, keys)?;
         let styled = Styled::of_text(caller, msg, &text.type_, text.spans.as_ref(), symdict, &mut *rng.borrow_mut())?;
         Ok(PathText {
             caller,
@@ -158,17 +160,21 @@ impl PathText {
     }
     /// The glyphs placed, which are the text's from glyph `first` on, drawn
     /// as the text styles them.
-    fn draw(&self, mut placed: Vec<Symbol>, first: usize, rng: &SharedRng) -> RhaiResult<Canvas> {
-        let mut rng = rng.borrow_mut();
-        self.jitter.apply(&mut placed, &mut *rng);
+    fn draw(&self, engine: &Engine, mut placed: Vec<Symbol>, first: usize, rng: &SharedRng) -> RhaiResult<Canvas> {
         let mut canvas = CanvasData::default();
-        let tree = if self.styled.has_rules() { self.avoid.now() } else { None };
-        self.styled.draw_row(self.caller, &mut canvas, &placed, first, &self.style, tree.as_deref(), self.clearance, &mut *rng)?;
+        {
+            let mut rng = rng.borrow_mut();
+            self.jitter.apply(&mut placed, &mut *rng);
+            let tree = if self.styled.has_rules() { self.avoid.now() } else { None };
+            self.styled.draw_row(self.caller, &mut canvas, &placed, first, &self.style, tree.as_deref(), self.clearance, &mut *rng)?;
+        }
+        // A scripted symbol set's script runs with the generator free.
+        self.styled.finish(engine, &mut canvas)?;
         Ok(Canvas::new(canvas))
     }
 }
 
-fn fill_with_text(path: &mut Path, msg: &FlowText, settings: Map, text: &TextSource) -> RhaiResult<Vec<Dynamic>> {
+fn fill_with_text(path: &mut Path, msg: &FlowText, settings: Map, text: &TextSource, engine: &Engine) -> RhaiResult<Vec<Dynamic>> {
     const CALLER: &str = "fill_with_text";
     let mut set = PathText::parse(CALLER, msg, settings, text)?;
     let fontsize = set.size(CALLER)?;
@@ -196,14 +202,14 @@ fn fill_with_text(path: &mut Path, msg: &FlowText, settings: Map, text: &TextSou
             ).into());
         }
         let count = placed.len();
-        all_canvases.push(Dynamic::from(set.draw(placed, first, &text.1)?));
+        all_canvases.push(Dynamic::from(set.draw(engine, placed, first, &text.1)?));
         first += count;
         symbols = unplaced;
     }
     Ok(all_canvases)
 }
 
-fn fit_text(path: &mut Path, msg: &FlowText, settings: Map, text: &TextSource) -> RhaiResult<Canvas> {
+fn fit_text(path: &mut Path, msg: &FlowText, settings: Map, text: &TextSource, engine: &Engine) -> RhaiResult<Canvas> {
     const CALLER: &str = "fit_text";
     let set = PathText::parse(CALLER, msg, settings, text)?;
     let path = &path.get();
@@ -235,7 +241,7 @@ fn fit_text(path: &mut Path, msg: &FlowText, settings: Map, text: &TextSource) -
             CALLER, window_min, unplaced.len(), placed.len() + unplaced.len(),
         ).into());
     }
-    set.draw(placed, 0, &text.1)
+    set.draw(engine, placed, 0, &text.1)
 }
 
 /// What `art::spiral_text` takes, besides a style, a type and a paragraph.
@@ -322,7 +328,7 @@ fn spiral(center: PVec, inner: f32, reach: f32, wide: f32, gap: f32, room: f32, 
 /// are the paragraph's line height apart, in the glyphs' own height (the
 /// tallest's) rather than glyph scales; the spiral starts `inner` from the
 /// centre (default 0.85 of the glyph scale).
-pub(super) fn spiral_text(msg: &FlowText, center: Vec2, radius: &Dynamic, settings: Map, text: &TextSource) -> RhaiResult<Canvas> {
+pub(super) fn spiral_text(msg: &FlowText, center: Vec2, radius: &Dynamic, settings: Map, text: &TextSource, engine: &Engine) -> RhaiResult<Canvas> {
     const CALLER: &str = "art::spiral_text";
     let radius = as_number(CALLER, "radius", radius)?;
     if !(radius > 0.0) {
@@ -376,7 +382,7 @@ pub(super) fn spiral_text(msg: &FlowText, center: Vec2, radius: &Dynamic, settin
     let largest = set.size.map_or(radius, |size| size.min(radius));
     let (placed, unplaced) = place(largest);
     if unplaced.is_empty() {
-        return set.draw(placed, 0, &text.1);
+        return set.draw(engine, placed, 0, &text.1);
     }
     let (mut window_min, mut window_max) = (0.0, largest);
     while window_max - window_min > radius * 0.0005 {
@@ -388,7 +394,7 @@ pub(super) fn spiral_text(msg: &FlowText, center: Vec2, radius: &Dynamic, settin
         return Err(format!("{}: the text doesn't fit in the circle at any glyph scale{}", CALLER,
             if inner.is_some() { "; make 'inner' smaller" } else { "" }).into());
     }
-    set.draw(placed, 0, &text.1)
+    set.draw(engine, placed, 0, &text.1)
 }
 
 /// How much a path's subpaths (each closed back to its start) enclose:
@@ -405,12 +411,44 @@ fn enclosed_area(path: &StrokePath) -> f32 {
     }).sum()
 }
 
-fn write_line(msg: &FlowText, at: Vec2, settings: Map, text: &TextSource) -> RhaiResult<Canvas> {
+fn write_line(msg: &FlowText, at: Vec2, settings: Map, text: &TextSource, engine: &Engine) -> RhaiResult<Canvas> {
     const CALLER: &str = "write_line";
     let set = PathText::parse(CALLER, msg, settings, text)?;
-    let size = set.size(CALLER)?;
+    let placed = lay_line(&set, at.into(), CALLER, text)?;
+    set.draw(engine, placed, 0, &text.1)
+}
+
+/// What `write_at` takes, besides a style, a type and a paragraph.
+const WRITE_AT_KEYS: [&str; 2] = ["avoid", "turn"];
+
+/// `write_at(text, at, settings)`: one line of text as `write_line` sets
+/// it, but the middle of the run (from its first glyph's centre to its
+/// last's) put at `at`, and the line turned about `at` by `settings.turn`
+/// (radians, default 0): a single symbol's glyph sits exactly on `at`.
+fn write_at(msg: &FlowText, at: Vec2, settings: Map, text: &TextSource, engine: &Engine) -> RhaiResult<Canvas> {
+    const CALLER: &str = "write_at";
+    let set = PathText::parse_with(CALLER, msg, settings, text, &WRITE_AT_KEYS)?;
+    let turn = number(CALLER, &set.options, "turn")?.unwrap_or(0.0);
+    let at: PVec = at.into();
+    let mut placed = lay_line(&set, at, CALLER, text)?;
+    let live: Vec<usize> = placed.iter().enumerate().filter(|(_, g)| !g.is_blank()).map(|(i, _)| i).collect();
+    if let (Some(&first), Some(&last)) = (live.first(), live.last()) {
+        let middle = (placed[first].position() + placed[last].position()) / 2.0;
+        let (sin, cos) = turn.sin_cos();
+        for glyph in &mut placed {
+            let p = glyph.position() - middle;
+            glyph.set_position(at + PVec::new(p.x * cos - p.y * sin, p.x * sin + p.y * cos));
+            glyph.rotate_rad_by(turn);
+        }
+    }
+    set.draw(engine, placed, 0, &text.1)
+}
+
+/// The glyphs of `set` placed along a line from `start` to the right, as
+/// `write_line` sets them, `caller`'s errors.
+fn lay_line(set: &PathText, start: PVec, caller: &str, text: &TextSource) -> RhaiResult<Vec<Symbol>> {
+    let size = set.size(caller)?;
     let wander = set.style.handwriting().baseline_wander();
-    let start: PVec = at.into();
     let length = (set.symbols.len() as f32 + 1.0) * size * 4.0;
     let line = if wander > 0.0 {
         Wander::new(wander, size, length, &mut *text.1.borrow_mut()).path(start)
@@ -427,10 +465,10 @@ fn write_line(msg: &FlowText, at: Vec2, settings: Map, text: &TextSource) -> Rha
     };
     let (placed, unplaced) = place_text(set.symbols.clone(), &line, &args, &set.mode);
     if !unplaced.is_empty() {
-        return Err(format!("{}: {} of {} glyphs didn't fit on the line{}", CALLER, unplaced.len(), placed.len() + unplaced.len(),
+        return Err(format!("{}: {} of {} glyphs didn't fit on the line{}", caller, unplaced.len(), placed.len() + unplaced.len(),
             if set.avoid.is_some() { "; avoid less" } else { "" }).into());
     }
-    set.draw(placed, 0, &text.1)
+    Ok(placed)
 }
 
 /// What balanced-ternary text takes, besides a style and a type.
@@ -750,7 +788,8 @@ pub(super) fn register(engine: &mut Engine, text: TextSource) {
 
     let (r1, r2) = (text.1.clone(), text.1.clone());
     let (t1, t2, t3) = (text.clone(), text.clone(), text.clone());
-    let (t1m, t2m) = (text.clone(), text);
+    let (t1m, t2m) = (text.clone(), text.clone());
+    let (t1s, t2s) = (text.clone(), text);
     engine.register_type_with_name::<Path>("Path")
         // Every path function changes the path and returns that same
         // (shared) path, so statements, assignments and chains all work:
@@ -764,10 +803,15 @@ pub(super) fn register(engine: &mut Engine, text: TextSource) {
         .register_fn("line_to", |path: &mut Path, pos: Vec2| -> Path {
             update_path(path, |p| p.line_to(pos.x as f32, pos.y as f32))
         })
-        .register_fn("fill_with_text", move |path: &mut Path, text: &str, settings: Map| fill_with_text(path, &plain(text), settings, &t1))
-        .register_fn("fill_with_text", move |path: &mut Path, text: Markdown, settings: Map| fill_with_text(path, &FlowText::Marked(text), settings, &t1m))
-        .register_fn("fit_text", move |path: &mut Path, text: &str, settings: Map| fit_text(path, &plain(text), settings, &t2))
-        .register_fn("fit_text", move |path: &mut Path, text: Markdown, settings: Map| fit_text(path, &FlowText::Marked(text), settings, &t2m))
+        .register_fn("fill_with_text", move |ctx: NativeCallContext, path: &mut Path, text: &str, settings: Map| fill_with_text(path, &plain(text), settings, &t1, ctx.engine()))
+        .register_fn("fill_with_text", move |ctx: NativeCallContext, path: &mut Path, text: Markdown, settings: Map| fill_with_text(path, &FlowText::Marked(text), settings, &t1m, ctx.engine()))
+        .register_fn("fill_with_text", move |ctx: NativeCallContext, path: &mut Path, text: SymbolText, settings: Map| fill_with_text(path, &FlowText::Symbols(text), settings, &t1s, ctx.engine()))
+        .register_fn("fit_text", move |ctx: NativeCallContext, path: &mut Path, text: &str, settings: Map| fit_text(path, &plain(text), settings, &t2, ctx.engine()))
+        .register_fn("fit_text", move |ctx: NativeCallContext, path: &mut Path, text: Markdown, settings: Map| fit_text(path, &FlowText::Marked(text), settings, &t2m, ctx.engine()))
+        .register_fn("fit_text", move |ctx: NativeCallContext, path: &mut Path, text: SymbolText, settings: Map| -> RhaiResult<Symbolic> {
+            let (path, t) = (path.clone(), t2s.clone());
+            make(ctx.engine(), &t2s.1, text, move |engine, msg| fit_text(&mut path.clone(), msg, settings.clone(), &t, engine))
+        })
         .register_fn("fill_with_text", move |path: &mut Path, bt: BalancedTernary, settings: Map| fill_with_ternary(path, &bt, settings, &r1))
         .register_fn("fit_text", move |path: &mut Path, bt: BalancedTernary, settings: Map| fit_ternary(path, &bt, settings, &r2))
         .register_fn("points_along", |path: &mut Path, count: INT| points_along(path, count, &Map::new()))
@@ -854,9 +898,23 @@ pub(super) fn register(engine: &mut Engine, text: TextSource) {
         .register_fn("new_wave", |start: Vec2, end: Vec2| new_wave(start, end, &Map::new()))
         .register_fn("new_wave", |start: Vec2, end: Vec2, options: Map| new_wave(start, end, &options));
     let t = t3.clone();
-    engine.register_fn("write_line", move |text: &str, at: Vec2, settings: Map| write_line(&plain(text), at, settings, &t));
+    engine.register_fn("write_line", move |ctx: NativeCallContext, text: &str, at: Vec2, settings: Map| write_line(&plain(text), at, settings, &t, ctx.engine()));
+    let t = t3.clone();
+    engine.register_fn("write_line", move |ctx: NativeCallContext, text: Markdown, at: Vec2, settings: Map| write_line(&FlowText::Marked(text), at, settings, &t, ctx.engine()));
+    let t = t3.clone();
+    engine.register_fn("write_line", move |ctx: NativeCallContext, text: SymbolText, at: Vec2, settings: Map| -> RhaiResult<Symbolic> {
+        let source = t.clone();
+        make(ctx.engine(), &t.1, text, move |engine, msg| write_line(msg, at.clone(), settings.clone(), &source, engine))
+    });
+    let t = t3.clone();
+    engine.register_fn("write_at", move |ctx: NativeCallContext, text: &str, at: Vec2, settings: Map| write_at(&plain(text), at, settings, &t, ctx.engine()));
+    let t = t3.clone();
+    engine.register_fn("write_at", move |ctx: NativeCallContext, text: Markdown, at: Vec2, settings: Map| write_at(&FlowText::Marked(text), at, settings, &t, ctx.engine()));
     let t = t3;
-    engine.register_fn("write_line", move |text: Markdown, at: Vec2, settings: Map| write_line(&FlowText::Marked(text), at, settings, &t));
+    engine.register_fn("write_at", move |ctx: NativeCallContext, text: SymbolText, at: Vec2, settings: Map| -> RhaiResult<Symbolic> {
+        let source = t.clone();
+        make(ctx.engine(), &t.1, text, move |engine, msg| write_at(msg, at.clone(), settings.clone(), &source, engine))
+    });
 }
 
 /// A string a text call writes, as text with no markup.

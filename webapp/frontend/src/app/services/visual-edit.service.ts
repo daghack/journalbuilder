@@ -3,7 +3,7 @@ import {
   about, align, boundsOf, distribute, editForGesture, editsReadable, parseEdits, placements, scale, serializeEdits, then, translate, unionBounds,
   type Affine, type Alignment, type Bounds, type CanvasEdit, type Placement,
 } from '../journal/canvas-edits';
-import type { Corners } from '../scribe';
+import type { Corners, SymbolicInfo } from '../scribe';
 import { editsPath } from '../journal/journal-files';
 import { JournalStore } from './journal-store.service';
 import { JournalService } from './journal.service';
@@ -269,6 +269,16 @@ export class VisualEditService {
   /** Undo canvas `name`'s placing, warp and ink (not its being hidden or locked). */
   reset(name: string) {
     this.updateOne(name, (edit) => ({ hidden: edit.hidden, locked: edit.locked }));
+  }
+
+  /**
+   * Draw the symbolic `name` as `symbols` of symbol set `set`, as an
+   * undoable edit; what the script made it as is no edit at all.
+   */
+  setSymbolic(name: string, symbolic: SymbolicInfo, set: string, symbols: number[]) {
+    const sameSet = set === symbolic.script_symbol_set;
+    const sameSymbols = symbols.length === symbolic.script_symbols.length && symbols.every((s, i) => s === symbolic.script_symbols[i]);
+    this.updateOne(name, (edit) => ({ ...edit, symbol_set: sameSet ? undefined : set, symbols: sameSymbols ? undefined : symbols }));
   }
 
   // ---- history ----

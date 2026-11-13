@@ -1,6 +1,6 @@
 import { Injectable, inject, signal, untracked } from '@angular/core';
 import type {
-  ChainFile, ChainRun, ChainType, IllustrationType, JournalPayload, LayoutType, LockPorts, LockType, Preview, RenderPreview, ScriptError, ToolError, ToolFunction, ToolsReply, ToolsRequest, ValueKind,
+  ChainFile, ChainRun, ChainType, IllustrationType, JournalPayload, LayoutType, LockPorts, LockType, Preview, RenderPreview, ScriptError, ToolError, ToolFunction, ToolsReply, ToolsRequest, ValueKind, SymbolSetType,
 } from '../scribe';
 import { JournalStore } from './journal-store.service';
 
@@ -98,6 +98,16 @@ export class ToolsService {
   /** Layout `name` typesetting its example(), `source` standing in for its file if given. */
   async layoutPreview(name: string, source: string | null, options: Record<string, unknown>): Promise<Answer<RenderPreview>> {
     return JSON.parse(await this.call<string>('layoutPreview', name, source, JSON.stringify(options)));
+  }
+
+  /** Every symbol set: the journal's symbolsets/ over the library's. */
+  async symbolSetTypes(): Promise<SymbolSetType[]> {
+    return JSON.parse(await this.call<string>('symbolSetTypes'));
+  }
+
+  /** Symbol set `name`, every symbol drawn and numbered; `source` stands in for its file, at `path`, if given. */
+  async symbolSetPreview(name: string, source: string | null, path: string | null, options: Record<string, unknown>): Promise<Answer<RenderPreview>> {
+    return JSON.parse(await this.call<string>('symbolSetPreview', name, source, path, JSON.stringify(options)));
   }
 
   /** Every text style: the journal's styles/*.json over the library's. */

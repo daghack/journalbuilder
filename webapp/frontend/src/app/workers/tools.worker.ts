@@ -5,7 +5,7 @@
 
 import init, {
   chainTypes, convertStyle, illustrationPorts, illustrationPreview, illustrationTypes, lastPanic, layoutPreview, layoutTypes, libraryFiles, lockExamples, lockPorts, lockTypes,
-  previewSvg, readChain, runChain, setJournal, styleChoices, styleTypes, usedLibrary, valueKinds,
+  previewSvg, readChain, runChain, setJournal, styleChoices, styleTypes, symbolSetPreview, symbolSetTypes, usedLibrary, valueKinds,
 } from '../../../wasm-pkg/scribe_wasm.js';
 import type { ToolFunction, ToolsReply, ToolsRequest } from '../scribe';
 
@@ -13,7 +13,7 @@ const post = (reply: ToolsReply) => postMessage(reply);
 
 const tools: Record<ToolFunction, (...args: never[]) => unknown> = {
   previewSvg, libraryFiles, usedLibrary, lockTypes, lockPorts, lockExamples, chainTypes, runChain, readChain, valueKinds,
-  illustrationTypes, illustrationPorts, illustrationPreview, layoutTypes, layoutPreview, styleTypes, convertStyle, styleChoices,
+  illustrationTypes, illustrationPorts, illustrationPreview, layoutTypes, layoutPreview, styleTypes, convertStyle, styleChoices, symbolSetTypes, symbolSetPreview,
 };
 
 let ready: Promise<void> = Promise.reject(new Error('not started'));

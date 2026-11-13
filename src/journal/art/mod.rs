@@ -15,6 +15,7 @@ mod moon;
 mod scene;
 mod snake;
 mod solid;
+mod star;
 mod starchart;
 mod trail;
 
@@ -25,6 +26,7 @@ pub use graph_layout::{lay_out_graph, EdgeLayout, GraphLayout, GraphLayoutSettin
 pub use hydra::snake_along;
 pub use moon::{moon, Moon};
 pub use snake::{snake_path, snake_spine};
+pub use star::{eerie_star, EerieStar, StarKind, StarSettings};
 pub use starchart::{huffman_stars, huffman_tree, lay_out_tree, Star, StarChart, StarChartSettings};
 
 /// A smooth closed curve through `points` and back to the first.

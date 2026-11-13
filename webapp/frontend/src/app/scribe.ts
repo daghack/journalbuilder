@@ -28,6 +28,17 @@ export interface Committed {
   local: Corners | null;
   /** Each place it's drawn: its page, and those corners there. */
   shown: { page: number; corners: Corners }[];
+  /** What it's drawn from, if it's a symbolic: symbols of a symbol set. */
+  symbolic?: SymbolicInfo | null;
+}
+
+/** A committed symbolic: its symbols and symbol set as drawn (the edit applied), their base, and as the script made it. */
+export interface SymbolicInfo {
+  symbols: number[];
+  symbol_set: string;
+  base: number;
+  script_symbols: number[];
+  script_symbol_set: string;
 }
 
 export interface ScriptError {
@@ -97,7 +108,7 @@ export type DarklyReply =
 
 /** The engine functions the tools worker calls (see webapp/wasm). */
 export type ToolFunction = 'previewSvg' | 'libraryFiles' | 'usedLibrary' | 'lockTypes' | 'lockPorts' | 'lockExamples' | 'chainTypes' | 'runChain' | 'readChain'
-  | 'valueKinds' | 'illustrationTypes' | 'illustrationPorts' | 'illustrationPreview' | 'layoutTypes' | 'layoutPreview' | 'styleTypes' | 'convertStyle' | 'styleChoices';
+  | 'valueKinds' | 'illustrationTypes' | 'illustrationPorts' | 'illustrationPreview' | 'layoutTypes' | 'layoutPreview' | 'styleTypes' | 'convertStyle' | 'styleChoices' | 'symbolSetTypes' | 'symbolSetPreview';
 
 /** Whose a file is: the journal's own, the library's, or both (the journal's standing in for the library's). */
 export interface Whose {
@@ -136,6 +147,21 @@ export interface LayoutType extends Whose {
   options?: Record<string, unknown>;
   /** A layout: whether it has an example() to preview with. A style: the text it previews with, if its file gives one. */
   example?: boolean | string | null;
+  error?: string;
+}
+
+/** A symbol set, as the editor lists it. */
+export interface SymbolSetType extends Whose {
+  name: string;
+  description?: string;
+  /** Whether a script (symbolsets/NAME.rhai) draws it. */
+  scripted?: boolean;
+  /** How many symbols it has, at its options' defaults. */
+  base?: number;
+  /** The glyph scale it draws at. */
+  size?: number;
+  /** Its options' defaults. */
+  options?: Record<string, unknown>;
   error?: string;
 }
 
@@ -234,7 +260,7 @@ export interface ChainFile {
     connect?: [string, string][];
     fixed?: Record<string, unknown>;
     /** The journal's files it draws on, each a node with one output, "id.value". */
-    sources?: Record<string, { type: 'content' | 'style' | 'glyphset' | 'layout'; name: string; options?: Record<string, unknown>; base?: number }>;
+    sources?: Record<string, { type: 'content' | 'style' | 'glyphset' | 'layout' | 'symbolset'; name: string; options?: Record<string, unknown>; base?: number }>;
     /** Illustrations attached, each input drawing a port, "lock.port". */
     illustrations?: Record<string, { type: string; options?: Record<string, unknown>; inputs?: Record<string, string> }>;
   };

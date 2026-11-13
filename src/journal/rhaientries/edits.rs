@@ -65,11 +65,15 @@ pub struct CanvasEdit {
     pub hidden: bool,
     pub locked: bool,
     pub ink: Option<InkEdit>,
+    /// For a symbolic (see symbolic.rs): the symbols it's drawn as, and the
+    /// symbol set they're of, in place of the script's.
+    pub symbols: Option<Vec<u32>>,
+    pub symbol_set: Option<String>,
 }
 
 impl Default for CanvasEdit {
     fn default() -> Self {
-        CanvasEdit { offset: [0.0; 2], turn: 0.0, scale: [1.0; 2], skew: 0.0, warp: None, hidden: false, locked: false, ink: None }
+        CanvasEdit { offset: [0.0; 2], turn: 0.0, scale: [1.0; 2], skew: 0.0, warp: None, hidden: false, locked: false, ink: None, symbols: None, symbol_set: None }
     }
 }
 
@@ -185,6 +189,8 @@ pub struct Committed {
     #[serde(rename = "box")]
     pub bounds: Option<[f32; 4]>,
     pub local: Option<[[f32; 2]; 4]>,
+    /// What it's drawn from, if it's a symbolic.
+    pub symbolic: Option<super::symbolic::SymbolicReport>,
 }
 
 /// A committed canvas, as `Committed` has it, and where it ended up: each
@@ -198,6 +204,7 @@ pub struct CommitReport {
     #[serde(rename = "box")]
     pub bounds: Option<[f32; 4]>,
     pub local: Option<[[f32; 2]; 4]>,
+    pub symbolic: Option<super::symbolic::SymbolicReport>,
     pub shown: Vec<Shown>,
 }
 
@@ -222,20 +229,26 @@ pub(super) fn register(engine: &mut Engine) -> SharedEditor {
     let editor: SharedEditor = Rc::default();
     let state = editor.clone();
     engine.register_fn("commit_to_editor", move |ctx: NativeCallContext, canvas: &mut Canvas, name: Dynamic| -> RhaiResult<Canvas> {
-        const CALLER: &str = "commit_to_editor";
-        let name = check_name(CALLER, name)?;
-        let mut state = state.borrow_mut();
-        if state.committed.iter().any(|c| c.name == name) {
-            return Err(format!("{}: '{}' is committed already; give each canvas a name of its own", CALLER, name).into());
-        }
-        let edit = state.saved.canvases.get(&name).cloned().unwrap_or_default();
-        let mut committed = None;
-        let canvas = canvas.update(|data| committed = Some(commit(data, &name, &edit)));
-        let (bounds, local) = committed.expect("the canvas was committed");
-        state.committed.push(Committed { name, line: ctx.call_position().line(), bounds, local });
-        Ok(canvas)
+        let name = check_name("commit_to_editor", name)?;
+        commit_as(&ctx, &state, canvas, name, None)
     });
     editor
+}
+
+/// Commit `canvas` as `name`: the saved edit applied, and noted for the
+/// editor, with what it's drawn from if it's a symbolic's.
+pub(super) fn commit_as(ctx: &NativeCallContext, editor: &SharedEditor, canvas: &mut Canvas, name: String, symbolic: Option<super::symbolic::SymbolicReport>) -> RhaiResult<Canvas> {
+    const CALLER: &str = "commit_to_editor";
+    let mut state = editor.borrow_mut();
+    if state.committed.iter().any(|c| c.name == name) {
+        return Err(format!("{}: '{}' is committed already; give each canvas a name of its own", CALLER, name).into());
+    }
+    let edit = state.saved.canvases.get(&name).cloned().unwrap_or_default();
+    let mut committed = None;
+    let canvas = canvas.update(|data| committed = Some(commit(data, &name, &edit)));
+    let (bounds, local) = committed.expect("the canvas was committed");
+    state.committed.push(Committed { name, line: ctx.call_position().line(), bounds, local, symbolic });
+    Ok(canvas)
 }
 
 fn pair(p: PVec) -> [f32; 2] {
@@ -307,7 +320,7 @@ pub fn report(entry: &Entry, committed: &[Committed]) -> Vec<CommitReport> {
                 .filter(|mark| mark.name == c.name)
                 .map(move |mark| Shown { page, corners: mark.corners.map(pair) })
         }).collect();
-        CommitReport { name: c.name.clone(), line: c.line, bounds: c.bounds, local: c.local, shown }
+        CommitReport { name: c.name.clone(), line: c.line, bounds: c.bounds, local: c.local, symbolic: c.symbolic.clone(), shown }
     }).collect()
 }
 

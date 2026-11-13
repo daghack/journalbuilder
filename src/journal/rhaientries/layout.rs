@@ -122,7 +122,7 @@ use super::markdown::{FlowText, Spans, Styled};
 use super::options::{at_least_zero, check_keys, number, setting_number, Settings};
 use super::random::SharedRng;
 use super::text_settings::{Jitter, ParagraphStyle, TypeStyle};
-use super::{check_finite, CanvasData, Canvas, Page, Path, Stroke, Style};
+use super::{check_finite, CanvasData, Page, Path, Stroke, Style};
 use crate::journal::avoid::AvoidanceTree;
 use crate::journal::canvas::Frame;
 use crate::journal::paths::StrokePath;
@@ -703,6 +703,9 @@ fn parse_content(caller: &str, content: &Map, layout: &Layout, ctx: &NativeCallC
     names.sort_by(|a, b| a.0.cmp(&b.0));
     for (name, text) in names {
         let text = FlowText::from_dynamic(&format!("{}: flow '{}'", caller, name), text)?;
+        if matches!(text, FlowText::Symbols(_)) {
+            return Err(format!("{}: flow '{}' is symbols of a symbol set, which a layout can't set yet: write them with write_block or write_at", caller, name).into());
+        }
         flows.push((name, FlowState { chars: text.text().chars().collect(), text, cursor: 0, paragraph_start: true, styled: HashMap::new() }));
     }
     let mut roles = HashMap::new();
@@ -863,7 +866,7 @@ fn art_strokes(caller: &str, art: &Dynamic, style: &Style, rng: &SharedRng) -> R
         canvas.add_path(path, style, &mut *rng.borrow_mut());
         Ok(canvas.strokes)
     };
-    if let Some(canvas) = art.clone().try_cast::<Canvas>() {
+    if let Some(canvas) = super::symbolic::canvas_of(art) {
         Ok(canvas.borrow().strokes.clone())
     } else if let Some(path) = art.clone().try_cast::<Path>() {
         styled(path.get())

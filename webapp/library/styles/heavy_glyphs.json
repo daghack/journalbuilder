@@ -1,0 +1,16 @@
+{
+  "description": "Glyphs in a heavy rough-ink pen, swelling and thinning, each a touch off true: the plates' symbols.",
+  "color": "#2b1d12",
+  "brush": "Rough Ink",
+  "brush_size": 2.4,
+  "min_pressure": 0.4,
+  "max_pressure": 0.66,
+  "pressure_profile": "taper",
+  "pool": 0.5,
+  "pool_depth": 0.4,
+  "color_jitter": 0.04,
+  "glyph_rotation_jitter": 0.05,
+  "glyph_scale_jitter": 0.06,
+  "glyphset": "loche_upper",
+  "size": 48
+}

@@ -38,7 +38,7 @@
 use rhai::{Array, Dynamic, Engine, Map};
 
 use super::glyphs::Glyph;
-use super::{Canvas, Path, Shared, Style, Vec2};
+use super::{Path, Shared, Style, Vec2};
 use crate::journal::avoid::AvoidanceTree;
 use crate::journal::canvas::{Canvas as JournalCanvas, StrokeColor};
 use crate::journal::image_paint::ImagePaint;
@@ -68,7 +68,7 @@ fn add_to(caller: &str, tree: &mut AvoidanceTree, item: Dynamic, clearance: f32)
         }
     } else if let Some(path) = item.clone().try_cast::<Path>() {
         tree.add_path(&path.borrow(), clearance);
-    } else if let Some(canvas) = item.clone().try_cast::<Canvas>() {
+    } else if let Some(canvas) = super::symbolic::canvas_of(&item) {
         let canvas: JournalCanvas = (&canvas).into();
         tree.add_canvas(&canvas, clearance);
     } else if let Some(glyph) = item.clone().try_cast::<Glyph>() {
@@ -98,7 +98,7 @@ fn hull_points(caller: &str, item: Dynamic, points: &mut Vec<PVec>, reach: &mut 
         }
     } else if let Some(path) = item.clone().try_cast::<Path>() {
         add_path(&path.borrow(), points);
-    } else if let Some(canvas) = item.clone().try_cast::<Canvas>() {
+    } else if let Some(canvas) = super::symbolic::canvas_of(&item) {
         let canvas: JournalCanvas = (&canvas).into();
         for stroke in canvas.strokes() {
             add_path(&stroke.path, points);

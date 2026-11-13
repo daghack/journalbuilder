@@ -1,7 +1,10 @@
-import { Component, computed, inject } from '@angular/core';
+import { Component, computed, effect, inject, signal } from '@angular/core';
 import type { Alignment, Bounds, CanvasEdit } from '../journal/canvas-edits';
 import { editsPath } from '../journal/journal-files';
+import type { SymbolicInfo } from '../scribe';
 import { JournalService } from '../services/journal.service';
+import { JournalStore } from '../services/journal-store.service';
+import { ToolsService, failed } from '../services/tools.service';
 import { VisualEditService } from '../services/visual-edit.service';
 
 /**
@@ -52,6 +55,30 @@ import { VisualEditService } from '../services/visual-edit.service';
     </section>
 
     @if (one(); as name) {
+      @if (symbolic(name); as s) {
+        <section class="panel-section">
+          <h3>Symbols of {{ name }}</h3>
+          <label class="field">
+            <span>Symbol set</span>
+            <select [disabled]="!edit.readable()" (change)="pickSet(name, s, $any($event.target).value)">
+              @for (n of setNames(); track n) { <option [value]="n" [selected]="n === s.symbol_set">{{ n }}</option> }
+              @if (!setNames().includes(s.symbol_set)) { <option [value]="s.symbol_set" selected>{{ s.symbol_set }}</option> }
+            </select>
+          </label>
+          <div class="grid">
+            @for (symbol of s.symbols; track $index) {
+              <label>#{{ $index + 1 }} <input type="number" step="1" min="0" [max]="s.base - 1" [value]="symbol" [disabled]="!edit.readable()" (change)="pickSymbol(name, s, $index, $event)" /></label>
+            }
+          </div>
+          <div class="row">
+            <button type="button" (click)="addSymbol(name, s)" [disabled]="!edit.readable()" title="One more symbol, after the last">Add</button>
+            <button type="button" (click)="removeSymbol(name, s)" [disabled]="!edit.readable() || s.symbols.length < 2" title="Take the last symbol away">Remove</button>
+            <span class="spacer"></span>
+            <button type="button" (click)="edit.setSymbolic(name, s, s.script_symbol_set, s.script_symbols)" title="Back to the symbols and set the script gave">Script's</button>
+          </div>
+          <p class="hint">{{ s.symbol_set }} has {{ s.base }} symbols, 0 to {{ s.base - 1 }}.</p>
+        </section>
+      }
       <section class="panel-section">
         <h3>Placing {{ name }}</h3>
         @let e = edit.edit(name);
@@ -170,6 +197,49 @@ export class CanvasToolbarComponent {
   /** Whether a selected canvas is drawn on the page shown, to arrange there. */
   protected readonly onPageSelection = computed(() => this.edit.placedOf(this.sel()).length > 0);
   protected readonly firstInk = computed(() => (this.sel().length ? this.edit.edit(this.sel()[0]).ink ?? {} : {}));
+
+  private readonly store = inject(JournalStore);
+  private readonly tools = inject(ToolsService);
+  /** The symbol sets there are, with how many symbols each has. */
+  private readonly bases = signal<Record<string, number>>({});
+  protected readonly setNames = computed(() => Object.keys(this.bases()).sort());
+
+  constructor() {
+    // The sets there are, again whenever the journal's files change.
+    effect(() => {
+      this.store.resources();
+      void this.tools.symbolSetTypes().then((types) => {
+        if (failed(types as never)) return;
+        this.bases.set(Object.fromEntries(types.filter((t) => !t.error && t.base !== undefined).map((t) => [t.name, t.base!])));
+      }).catch(() => undefined);
+    });
+  }
+
+  /** What the committed canvas `name` is drawn from, if it's a symbolic. */
+  protected symbolic(name: string): SymbolicInfo | null {
+    return this.edit.committed().find((c) => c.name === name)?.symbolic ?? null;
+  }
+
+  protected pickSet(name: string, s: SymbolicInfo, set: string) {
+    const base = this.bases()[set] ?? s.base;
+    this.edit.setSymbolic(name, s, set, s.symbols.map((n) => Math.min(n, base - 1)));
+  }
+
+  protected pickSymbol(name: string, s: SymbolicInfo, index: number, event: Event) {
+    const value = this.number(event);
+    if (value === null) return;
+    const symbols = [...s.symbols];
+    symbols[index] = Math.max(0, Math.min(s.base - 1, Math.round(value)));
+    this.edit.setSymbolic(name, s, s.symbol_set, symbols);
+  }
+
+  protected addSymbol(name: string, s: SymbolicInfo) {
+    this.edit.setSymbolic(name, s, s.symbol_set, [...s.symbols, s.symbols[s.symbols.length - 1] ?? 0]);
+  }
+
+  protected removeSymbol(name: string, s: SymbolicInfo) {
+    if (s.symbols.length > 1) this.edit.setSymbolic(name, s, s.symbol_set, s.symbols.slice(0, -1));
+  }
 
   protected readonly alignments: { how: Alignment; label: string; title: string }[] = [
     { how: 'left', label: '⇤', title: 'Line up the left edges' },

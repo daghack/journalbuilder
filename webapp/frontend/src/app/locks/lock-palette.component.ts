@@ -154,6 +154,7 @@ export class LockPaletteComponent {
       { kind: 'style' as SourceKind, title: 'Styles', names: names('styles') },
       { kind: 'glyphset' as SourceKind, title: 'Glyphsets', names: names('glyphsets') },
       { kind: 'layout' as SourceKind, title: 'Layouts', names: names('layouts') },
+      { kind: 'symbolset' as SourceKind, title: 'Symbol sets', names: names('symbolsets') },
     ];
   });
 
