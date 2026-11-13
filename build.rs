@@ -7,7 +7,7 @@ use std::path::Path;
 
 /// Every kind of resource: its directory, and its files' extension, as
 /// `resources::KINDS` lists them.
-const KINDS: [(&str, &str); 14] = [
+const KINDS: [(&str, &str); 16] = [
     ("locks", "rhai"),
     ("helpers", "rhai"),
     ("layouts", "rhai"),
@@ -16,6 +16,8 @@ const KINDS: [(&str, &str); 14] = [
     ("styles", "json"),
     ("lib", "rhai"),
     ("glyphsets", "json"),
+    ("symbolsets", "json"),
+    ("symbolsets", "rhai"),
     ("content", "txt"),
     ("content", "md"),
     ("content", "json"),

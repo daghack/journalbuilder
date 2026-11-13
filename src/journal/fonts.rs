@@ -223,7 +223,7 @@ impl Font {
         self.chain().find_map(|font| font.glyphs.glyphs.get(key).map(|bases| (font, bases.as_slice())))
     }
     /// A blank `spaces` spaces wide.
-    fn blank(&self, spaces: f32) -> Symbol {
+    pub fn blank(&self, spaces: f32) -> Symbol {
         // A font size is 2 glyph units.
         let width = 2.0 * self.space_width * spaces;
         Symbol::new_default_from_base_rc(Rc::new(SymbolBase::new(SymbolType::Blank(width, 1.0))))

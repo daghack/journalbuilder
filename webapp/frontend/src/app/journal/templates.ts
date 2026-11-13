@@ -149,6 +149,31 @@ fn example() {
       return ext === 'graph' ? GRAPH_TEMPLATE : '';
     case 'glyphsets':
       return '{\n\t"space_width": 0.5,\n\t"glyphs": {}\n}\n';
+    case 'symbolsets':
+      if (ext === 'json') {
+        return '{\n\t"description": "Space then A to Z, a symbol each.",\n\t"glyphset": "plain",\n\t"glyphs": [null, "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"],\n\t"style": "plain_hand"\n}\n';
+      }
+      return `// ${name}: three marks, a circle, a cross and a square, a symbol each.
+
+fn options() {
+\t#{ ink: "#2b1d12" }
+}
+
+fn symbols(o) {
+\t#{ glyphset: "plain", glyph: "O", count: 3, size: 40.0 }
+}
+
+// symbol is the whole number, glyph the glyph it stands for, placed.
+fn draw(o, symbol, glyph) {
+\tlet r = glyph.scale / 2.0;
+\tlet pen = new_style(new_brush_style(o.ink, "Ink Pen", 1.6), new_handwriting_style());
+\tlet c = new_canvas();
+\tif symbol == 0 { c.add(new_circle(glyph.position, r), pen); }
+\telse if symbol == 1 { c.add(new_line(glyph.position - vec2(r, r), glyph.position + vec2(r, r)), pen).add(new_line(glyph.position - vec2(r, -r), glyph.position + vec2(r, -r)), pen); }
+\telse { c.add(new_rectangle(glyph.position, r * 2.0, r * 2.0), pen); }
+\tc
+}
+`;
     case 'images':
       return '';
     case 'edits':

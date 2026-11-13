@@ -46,7 +46,12 @@
 //             symbols written out as a string; the hidden_message
 //             illustration, a secret picked out of a plain text in a
 //             style of its own; canvases committed to the visual editor,
-//             commit_to_editor, placed by hand (edits/showcase.json)
+//             commit_to_editor, placed by hand (edits/showcase.json);
+//             the puzzle locks (rail_fence, columnar_transposition,
+//             book_cipher, steiner_triples, steiner_cipher, star_alignment,
+//             symbols_to_digits), star_sightings plates, labyrinths, webs
+//             and snakes, the Steiner wheels, symbol sets, symbols as text
+//             (write_at) and symbolics, art::star
 //
 // Pages are bound with new_book: numbered, named and listed in the
 // contents.
@@ -2732,6 +2737,235 @@ let inner = house(vec2(LEFT + 560, y + 75), LINE).commit_to_editor("inner");
 let outer = new_canvas().add(new_rectangle(vec2(LEFT + 560, y + 75), 220, 130), LINE).add(inner).commit_to_editor("outer");
 edited.add(outer.translate_by(vec2(200, 0)));
 book.bind("appendix", edited);
+
+// The puzzle locks: transpositions, a book, a Steiner triple system and a
+// star alignment, each locked and unlocked, and the symbols_to_digits
+// helper that writes symbols as digits in another base.
+let puzzles = sheet("locks");
+puzzles.add(subhead("puzzle locks", TOP));
+puzzles.add(caption("new_lock(name).add(part, lock type, options), run and unlocked: what each hides a text in", TOP + 50));
+let sample_book = "Along the shore the cloud waves break, the twin suns sink behind the lake, the shadows lengthen and the towers stand twice, once upright and once drowned.";
+let rows = [
+	["rail_fence", "3 rails, WEAREDISCOVERED: a zigzag read off rail by rail", new_lock("rail").add("r", "rail_fence", #{ base: 26, rails: 3 }), #{ "r.plain_text": symbols(26, "WEAREDISCOVERED") }, "r.cipher_text", "r.plain_text"],
+	["columnar_transposition", "key WEB, SPIDERS: written under the key, read by columns", new_lock("col").add("c", "columnar_transposition", #{ base: 27 }), #{ "c.plain_text": symbols(27, "SPIDERS"), "c.key": symbols(27, "WEB") }, "c.cipher_text", "c.plain_text"],
+	["steiner_triples", "points 2, a letter two of its triple's three points (base 13)", new_lock("tri").add("t", "steiner_triples", #{ base: 26, points: 2, seed: 3 }), #{ "t.plain_text": symbols(26, "ALMANAC") }, "t.points", "t.plain_text"],
+	["steiner_cipher", "key EGG: each symbol and the key's make up a third (base 13)", new_lock("cip").add("s", "steiner_cipher"), #{ "s.plain_text": symbols(13, "ABCDEFGHIJKLM"), "s.key": symbols(13, "EGG") }, "s.cipher_text", "s.plain_text"],
+	["symbols_to_digits", "a helper: each symbol of base 27 as 3 digits of base 3", new_lock("dig").add("d", "symbols_to_digits", #{ input_base: 27, output_base: 3 }), #{ "d.symbols": symbols(27, "HI") }, "d.digits", "d.symbols"],
+];
+let y = TOP + 120;
+for row in rows {
+	let result = row[2].run(row[3]);
+	assert(row[2].unlock(result).text(row[5]) == row[3][row[5]].text(), `${row[0]} should unlock`);
+	puzzles.add(write_in(row[0], LEFT, y, 26, HEADING, PLAIN));
+	puzzles.add(caption(row[1], y + 40));
+	puzzles.add(write(result.text(row[4]), LEFT + 40, y + 80, 22));
+	y += 150;
+}
+// A book cipher: WORD.LETTER into a text the reader holds elsewhere, with
+// a seed picking among a letter's places; unlocked from the book.
+let bookish = new_lock("book").add("b", "book_cipher", #{ seed: 4 });
+let found = bookish.run(#{ "b.plain_text": symbols(27, "THE KING WAKES"), "b.book": sample_book });
+assert(bookish.unlock(found).text("b.plain_text") == "THE KING WAKES", "book_cipher should unlock");
+puzzles.add(write_in("book_cipher", LEFT, y, 26, HEADING, PLAIN));
+puzzles.add(caption("THE KING WAKES as WORD.LETTER (mode \"initial\": a word's number alone, its first letter), a / a space", y + 40));
+puzzles.add(write_block(found.text("b.references"), vec2(LEFT + 40, y + 80), 900, #{ style: TEXT, type: new_type_style(PLAIN, 22) }).canvas);
+puzzles.add(write_block(sample_book, vec2(LEFT + 40, y + 150), 900, #{ style: CAPTION, type: new_type_style(PLAIN, 20) }).canvas);
+let initials = new_lock("initials").add("b", "book_cipher", #{ mode: "initial", seed: 1 });
+assert(initials.unlock(initials.run(#{ "b.plain_text": symbols(27, "CLOUD"), "b.book": sample_book })).text("b.plain_text") == "CLOUD", "initial mode should unlock");
+// star_alignment: the month some wandering stars next stand in one line,
+// hidden in where each stood on earlier nights, a year apart in a 13-month calendar.
+let watch = new_lock("watch").add("stars", "star_alignment", #{ sightings: 2 });
+let seen = watch.run(#{ "stars.alignment": symbols(13, "JE") });
+assert(watch.unlock(seen).get("stars.alignment").symbols() == [9, 4], "star_alignment should unlock the date");
+y += 270;
+puzzles.add(write_in("star_alignment", LEFT, y, 26, HEADING, PLAIN));
+puzzles.add(caption("periods 5, 7, 8 (a house a month round each orbit), alignment 9 4 (year 9, month 4, digits of base 13):", y + 34));
+puzzles.add(caption("the sightings, as unlocking reads them", y + 62));
+puzzles.add(write_block(seen.get("stars.sightings").value().to_string(), vec2(LEFT + 40, y + 100), 900, #{ style: TEXT, type: new_type_style(PLAIN, 20) }).canvas);
+book.bind("appendix", puzzles);
+
+// The star_sightings illustration: sightings drawn as plates of the sky, a
+// plate to each, every family of marks a symbol set and the symbols that go
+// in its places (the design slots). Unwired, the five dread_stars; wired, a
+// set of the lock's choosing, and which mark goes where can carry a second
+// message.
+let skies = sheet("locks");
+skies.add(subhead("star sightings", TOP));
+skies.add(caption("attach(\"plates\", \"star_sightings\", #{ size, editor, splatter }): a plate to each sighting, a year apart", TOP + 50));
+let sky = new_lock("sky").add("stars", "star_alignment", #{ sightings: 2 })
+	.attach("plates", "star_sightings", #{ size: 490.0, splatter: 4, seed: 1 })
+	.connect("stars.sightings", "plates.sightings");
+let observed = sky.run(#{ "stars.alignment": symbols(13, "JE") });
+let plates = observed.canvases("plates");
+skies.add(plates[0].translate_by(vec2(LEFT, TOP + 90)));
+skies.add(plates[1].translate_by(vec2(LEFT + 510, TOP + 90)));
+skies.add(caption("illustration(\"star_sightings\").run(#{ sightings, markers_set, wanderers, centre, corners_set, corners }): the moons for the stars,", TOP + 620));
+skies.add(caption("which phase each star wears (wanderers: [1, 3, 6]), the centre's (centre: [4]) and the corners' (corners: [0, 2, 4, 6])", TOP + 654));
+let moons = symbol_set("moons");
+let moonlit = illustration("star_sightings", #{ size: 490.0, splatter: 0, seed: 2 }).run(#{
+	sightings: observed.get("stars.sightings"), markers_set: moons, corners_set: moons,
+	wanderers: [1, 3, 6], centre: [4], corners: [0, 2, 4, 6],
+});
+skies.add(moonlit[0].translate_by(vec2(LEFT, TOP + 690)));
+skies.add(moonlit[1].translate_by(vec2(LEFT + 510, TOP + 690)));
+book.bind("appendix", skies);
+
+// The labyrinth, the web, the serpent, the sigil and the orrery: illustrations
+// of a text's symbols, each mark a symbol of a set (the letters unless one's
+// wired), and a chain file that locks a secret under a key and hides the
+// cipher text in a labyrinth.
+let mazes = sheet("locks");
+mazes.add(subhead("labyrinths, webs and snakes", TOP));
+mazes.add(caption("labyrinth_lock hides a text along the one way in: new_lock(name).add(part, \"labyrinth_lock\", #{ base, rings, seed }).attach(\"d\", \"labyrinth\")", TOP + 50));
+let in_the_maze = new_lock("lab").add("l", "labyrinth_lock", #{ base: 27, seed: 3, rings: 5 })
+	.attach("d", "labyrinth", #{ size: 520.0 }).connect("l.labyrinth", "d.labyrinth");
+let wound = in_the_maze.run(#{ "l.text": symbols(27, "WHAT WAITS AT THE HEART OF IT") });
+assert(in_the_maze.unlock(wound).text("l.text") == "WHAT WAITS AT THE HEART OF IT", "the labyrinth should unlock");
+mazes.add(wound.canvases("d")[0].translate_by(vec2(LEFT - 20, TOP + 90)));
+mazes.add(caption("illustration(\"spider_web\", #{ size, ragged, seed }): symbols in the gaps of an old web, read along its thread", TOP + 90));
+mazes.add(illustration("spider_web", #{ size: 470.0, seed: 1 }).run(#{ message: symbols(27, "NOTHING WAITS AT THE HUB") })[0].translate_by(vec2(LEFT + 540, TOP + 130)));
+mazes.add(caption("illustration(\"serpent\", #{ width, per_snake, winding, seed }): symbols along a snake's back", TOP + 660));
+mazes.add(illustration("serpent", #{ width: 1000.0, glyph_size: 26.0 }).run(#{ message: symbols(27, "IT SWALLOWS ITS OWN TAIL") })[0].translate_by(vec2(LEFT, TOP + 690)));
+mazes.add(caption("illustration(\"sigil\"): a word as one line through a ring; \"orrery\": worlds on orbits, round twin suns", TOP + 910));
+mazes.add(illustration("sigil", #{ size: 380.0 }).run(#{ word: symbols(27, "ARCANA") })[0].translate_by(vec2(LEFT, TOP + 940)));
+mazes.add(illustration("orrery", #{ size: 380.0 }).run(#{ worlds: symbols(27, "ALMANAC") })[0].translate_by(vec2(LEFT + 520, TOP + 940)));
+book.bind("appendix", mazes);
+
+// chain("moonlit_labyrinth"): a secret locked under a key, the cipher text
+// hidden in a labyrinth and the key drawn as the moons' phases.
+let moonlit_chain = sheet("locks");
+moonlit_chain.add(subhead("moonlit labyrinth", TOP));
+moonlit_chain.add(caption("chain(\"moonlit_labyrinth\", #{ seed: 5 }).run(#{ \"vig.plain_text\": symbols(27, \"IT SLEEPS\"), \"vig.key\": symbols(27, \"HALI\") })", TOP + 50));
+let hidden_in = chain("moonlit_labyrinth", #{ seed: 5 }).run(#{ "vig.plain_text": symbols(27, "IT SLEEPS BENEATH"), "vig.key": symbols(27, "HALI") });
+moonlit_chain.add(hidden_in.canvases("maze")[0].scale_by(0.9).translate_by(vec2(LEFT, TOP + 90)));
+moonlit_chain.add(hidden_in.canvases("moons")[0].translate_by(vec2(LEFT + 40, TOP + 1000)));
+book.bind("appendix", moonlit_chain);
+
+// The Steiner triple system S(2, 3, 13): thirteen points, 26 triples, a
+// letter each. steiner_wheels draws a group of points as a line or a
+// triangle on a wheel, and symbol_rows writes the same points as marks of a
+// symbol set (the thirteen priests, unwired).
+let steiner = sheet("locks");
+steiner.add(subhead("the thirteen", TOP));
+steiner.add(caption("illustration(\"steiner_wheels\", #{ points, per_row, size, labels }): the 26 triples, a letter each: the key", TOP + 50));
+let alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+let every = new_lock("every").add("t", "steiner_triples", #{ base: 26, points: 3 }).run(#{ "t.plain_text": symbols(26, alphabet) }).get("t.points");
+steiner.add(illustration("steiner_wheels", #{ per_row: 13, size: 74.0, gap: 6.0, label_size: 22.0 }).run(#{ points: every, labels: alphabet })[0].translate_by(vec2(LEFT, TOP + 90)));
+steiner.add(caption("with points 2 a letter is two corners of its triangle (a dot alone is a space), here BLACK STARS RISE:", TOP + 400));
+let spoken = new_lock("spoken").add("s", "steiner_triples", #{ points: 2, seed: 5 })
+	.attach("w", "steiner_wheels", #{ points: 2, per_row: 13, size: 74.0, gap: 6.0 })
+	.attach("g", "symbol_rows", #{ group: 2, per_row: 20, size: 30.0, gap: 4.0, group_gap: 20.0 })
+	.connect("s.points", "w.points").connect("s.points", "g.symbols");
+let said = spoken.run(#{ "s.plain_text": symbols(27, "BLACK STARS RISE") });
+assert(spoken.unlock(said).text("s.plain_text") == "BLACK STARS RISE", "steiner_triples should unlock");
+steiner.add(said.canvases("w")[0].translate_by(vec2(LEFT, TOP + 430)));
+steiner.add(caption("illustration(\"symbol_rows\", #{ group, per_row, size, editor }): the same points as the priests' glyphs, two to a letter", TOP + 640));
+steiner.add(said.canvases("g")[0].translate_by(vec2(LEFT, TOP + 670)));
+book.bind("appendix", steiner);
+
+// Symbol sets: a glyphset's glyphs as the symbols of a lock, each drawn in a
+// style (a simple set, symbolsets/NAME.json) or by a script (symbolsets/NAME.rhai).
+// symbol_set(name[, options]), set.glyphs(symbols), canvas.add(glyphs, set).
+let symbol_sets = sheet("symbol sets");
+symbol_sets.add(subhead("symbol sets", TOP));
+symbol_sets.add(caption("symbol_set(name), symbol_set_names(); set.name, set.base, set.size;", TOP + 50));
+symbol_sets.add(caption("set.glyphs(symbols), glyph.symbol; canvas.add(glyphs, set)", TOP + 78));
+let y = TOP + 110;
+for name in ["letters", "plain_letters", "old_letters", "fine_letters", "ternary", "priests", "four_divine", "dread_stars", "moons", "gazes", "small_marks"] {
+	assert(name in symbol_set_names(), `${name} is a symbol set`);
+	let set = symbol_set(name);
+	symbol_sets.add(write_in(`${name}: ${set.base} symbols`, LEFT, y, 20, CAPTION, PLAIN));
+	let all = [];
+	for k in 0..set.base { all.push(k); }
+	let glyphs = set.glyphs(all);
+	assert(glyphs[set.base - 1].symbol == set.base - 1, "a set's glyphs remember their symbols");
+	for (g, k) in glyphs {
+		g.scale = 30.0;
+		g.position = vec2(LEFT + 18 + k * 35.5, y + 52);
+	}
+	symbol_sets.add(glyphs, set);
+	y += 90;
+}
+// Set options, and the text styles the simple sets are drawn in.
+let calm = symbol_set("dread_stars", #{ ink: BARK, blood: GOLD, seed: 3 });
+assert(calm.base == 5, "a set with options");
+symbol_sets.add(write_in("symbol_set(\"dread_stars\", #{ ink, blood, seed })", LEFT, y + 10, 20, CAPTION, PLAIN));
+symbol_sets.add(write_line("THE STARS ARE RIGHT", vec2(LEFT, y + 60), text_style("heavy_glyphs", #{ size: 30 })));
+symbol_sets.add(write_line("the fine pen for small marks", vec2(LEFT, y + 110), text_style("fine_glyphs", #{ size: 26 })));
+symbol_sets.add(write_line("the old hand dries and is dipped", vec2(LEFT + 540, y + 60), text_style("old_hand", #{ size: 20 })));
+book.bind("appendix", symbol_sets);
+
+// Symbols as text: every text call takes set.text(symbols) where it takes a
+// string, so symbols are placed, jittered and wrapped as text is. write_at
+// puts the middle of a line on a point. What a text call gives for symbols
+// is a symbolic: a canvas that remembers its symbols and set, which can be
+// changed (and which the visual editor changes, through commit_to_editor).
+let written = sheet("symbol sets");
+written.add(subhead("symbols as text", TOP));
+written.add(caption("write_line, write_at, write_block, write_inside_path, fit_text, fill_with_text", TOP + 50));
+written.add(caption("and art::spiral_text take set.text(symbols), where they take a string", TOP + 76));
+let priests = symbol_set("priests");
+let stars = symbol_set("dread_stars");
+let rows = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 0, 6, 12, 3];
+written.add(caption("write_line(priests.text(symbols), at, #{}): the set's size and style, settings over them", TOP + 110));
+written.add(write_line(priests.text(rows), vec2(LEFT, TOP + 150), #{}));
+written.add(caption("write_line(stars.text([0, 1, 2, 3, 4]), at, #{ type: #{ glyph_scale: 70 } }): a scripted set, drawn by its script", TOP + 230));
+written.add(write_line(stars.text([0, 1, 2, 3, 4]), vec2(LEFT + 40, TOP + 300), #{ type: #{ glyph_scale: 70.0 } }));
+written.add(caption("write_at(text, at, #{ turn }): the middle of a line on a point, turned about it", TOP + 400));
+for k in 0..8 {
+	written.add(write_at(priests.text([k, 12 - k]), vec2(LEFT + 120 + (k % 4) * 240, TOP + 480 + (k / 4) * 120), #{ turn: k * 0.4 - 1.2 }));
+}
+written.add(caption("write_block(text, at, width, #{}).canvas, and write_inside_path(text, shape, #{ paragraph: #{ fit: true } })", TOP + 740));
+let block = write_block(priests.text(rows + rows + rows), vec2(LEFT, TOP + 790), 460, #{});
+written.add(block.canvas);
+let ring = new_circle(vec2(LEFT + 760, TOP + 900), 140);
+written.add(ring, CAPTION);
+written.add(write_inside_path(priests.text(rows + rows), ring, #{ type: #{ glyph_scale: 36.0 }, paragraph: #{ fit: true, align: "center", valign: "center" } }).canvas);
+written.add(caption("fit_text along a wave, and art::spiral_text out from the middle", TOP + 1060));
+let wave = new_wave(vec2(LEFT, TOP + 1130), vec2(LEFT + 440, TOP + 1130), #{ amplitude: 22.0, waves: 2 });
+written.add(wave, CAPTION);
+written.add(wave.fit_text(priests.text(rows), #{}));
+written.add(art::spiral_text(priests.text(rows + rows + rows), vec2(LEFT + 760, TOP + 1180), 100, #{ type: #{ glyph_scale: 24.0 } }));
+book.bind("appendix", written);
+
+// Symbolics: write_line, write_at, fit_text and art::spiral_text give one for
+// symbols, and write_block and write_inside_path their canvas. Its symbols
+// and symbol_set are properties: setting one draws it again (the same call
+// from the same generator state, moves made again, strokes added kept).
+let symbolics = sheet("symbol sets");
+symbolics.add(subhead("symbolics", TOP));
+symbolics.add(caption("let s = write_at(set.text([2]), at, #{}); s.symbols; s.symbols = [4];", TOP + 50));
+symbolics.add(caption("s.symbol_set = symbol_set(\"moons\") (or the set's name)", TOP + 78));
+let mark = write_at(stars.text([0]), vec2(LEFT + 100, TOP + 200), #{ type: #{ glyph_scale: 120.0 } });
+assert(type_of(mark) == "Symbolic" && mark.symbols == [0], "a symbolic remembers its symbols");
+mark.translate_by(vec2(80, 0));
+symbolics.add(write_in("symbol 0", LEFT + 100, TOP + 310, 22, CAPTION, PLAIN));
+symbolics.add(mark);
+for (symbol, k) in [1, 2, 3, 4] {
+	let again = write_at(stars.text([0]), vec2(LEFT + 100, TOP + 200), #{ type: #{ glyph_scale: 120.0 } });
+	again.translate_by(vec2((k + 1) * 190 + 80, 0));
+	again.symbols = [symbol];
+	assert(again.symbols == [symbol], "set the symbols, and it's drawn again");
+	symbolics.add(write_in(`symbols = [${symbol}]`, LEFT + 40 + (k + 1) * 190, TOP + 310, 20, CAPTION, PLAIN));
+	symbolics.add(again);
+}
+let other = write_at(stars.text([2]), vec2(LEFT + 100, TOP + 520), #{ type: #{ glyph_scale: 120.0 } });
+other.symbol_set = "moons";
+assert(other.symbol_set.name == "moons", "set the symbol set by name");
+symbolics.add(write_in("symbol_set = \"moons\": symbol 2 of the moons", LEFT + 100, TOP + 630, 22, CAPTION, PLAIN));
+symbolics.add(other);
+symbolics.add(caption("a symbolic works as a canvas everywhere (add, move, bounds, page.add, avoid trees);", TOP + 700));
+symbolics.add(caption("commit_to_editor(name) lets the visual editor change its symbols and set", TOP + 728));
+symbolics.add(caption("(the symbols and symbol_set keys of edits/ENTRY.json), as star_sightings' editor option names each mark", TOP + 756));
+// art::star: five stars that aren't right, as parts to ink apart.
+symbolics.add(caption("art::star(center, radius, #{ kind, rays, reach, tears, unevenness, angle, seed }):", TOP + 830));
+symbolics.add(caption("kinds lashed, spiral, banded, needle and weeping, as parts to ink apart", TOP + 858));
+for (kind, k) in ["lashed", "spiral", "banded", "needle", "weeping"] {
+	let star = art::star(vec2(LEFT + 100 + k * 200, TOP + 1010), 55.0, #{ kind: kind, seed: 4 + k });
+	symbolics.add(star, #{ rays: LINE, body: LINE, dark: LINE, wash: CAPTION, tears: CAPTION, dots: CAPTION });
+	symbolics.add(write_in(kind, LEFT + 60 + k * 200, TOP + 1150, 22, CAPTION, PLAIN));
+}
+book.bind("appendix", symbolics);
 
 // ---- the title page and the contents, which go first ----
 

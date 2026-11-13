@@ -75,6 +75,7 @@ sources: #{
 	hand: #{ type: "style", name: "plain_hand", options: #{ size: 22.0 } },
 	copper: #{ type: "glyphset", name: "copper" },
 	page: #{ type: "layout", name: "two_column_article", options: #{} },
+	marks: #{ type: "symbolset", name: "moons" },   // a SymbolSet, for an illustration input of that type
 },
 connect: [["secret.value", "shift.plain_text"]],
 illustrations: #{ note: #{ type: "styled_text", inputs: #{ text: "words.value", style: "hand.value" } } },

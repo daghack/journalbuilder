@@ -257,6 +257,8 @@ fn turn(from: f32, to: f32) -> f32 {
 pub(super) enum FlowText {
     Plain(String),
     Marked(Markdown),
+    /// Symbols of a symbol set (`set.text(symbols)`), each its glyph.
+    Symbols(super::symbol_sets::SymbolText),
 }
 
 impl FlowText {
@@ -264,6 +266,9 @@ impl FlowText {
     pub(super) fn from_dynamic(caller: &str, value: Dynamic) -> RhaiResult<FlowText> {
         if let Some(markdown) = value.clone().try_cast::<Markdown>() {
             return Ok(FlowText::Marked(markdown));
+        }
+        if let Some(symbols) = value.clone().try_cast::<super::symbol_sets::SymbolText>() {
+            return Ok(FlowText::Symbols(symbols));
         }
         let type_name = value.type_name();
         value.into_immutable_string().map(|s| FlowText::Plain(s.to_string()))
@@ -274,6 +279,7 @@ impl FlowText {
         match self {
             FlowText::Plain(text) => text,
             FlowText::Marked(markdown) => markdown.text(),
+            FlowText::Symbols(_) => "",
         }
     }
 }
@@ -322,6 +328,11 @@ pub(super) struct Styled {
     look_of: Vec<usize>,
     looks: Vec<Look>,
     rules: Vec<RuleLook>,
+    /// The set whose script draws these glyphs, if they're symbols of a
+    /// scripted one: drawn rows are kept in `pending` until `finish` runs
+    /// its script, which can't be while a call holds the generator.
+    scripted: Option<super::symbol_sets::SymbolSet>,
+    pending: std::cell::RefCell<Vec<Symbol>>,
 }
 
 /// How text is set and drawn at some point in it: the settings of the
@@ -395,7 +406,15 @@ impl Styled {
                 let mut rules = Vec::new();
                 let base = State::base(type_, &mut rules);
                 let glyphs = base.type_.glyphset(caller)?.build(text, symdict, rng);
-                return Ok(Styled { look_of: vec![0; glyphs.len()], glyphs, looks: vec![base.look], rules });
+                return Ok(Styled { look_of: vec![0; glyphs.len()], glyphs, looks: vec![base.look], rules, scripted: None, pending: Default::default() });
+            }
+            FlowText::Symbols(symbols) => {
+                let mut rules = Vec::new();
+                let base = State::base(type_, &mut rules);
+                let font = base.type_.glyphset(caller)?;
+                let glyphs = symbols.set.text_glyphs(&font, &symbols.symbols, rng);
+                let scripted = symbols.set.is_scripted().then(|| symbols.set.clone());
+                return Ok(Styled { look_of: vec![0; glyphs.len()], glyphs, looks: vec![base.look], rules, scripted, pending: Default::default() });
             }
         };
         let spans = spans.then(&markdown.spans);
@@ -450,7 +469,7 @@ impl Styled {
             k = end;
         }
         let looks = std::iter::once(base.look).chain(states.into_iter().map(|s| s.look)).collect();
-        Ok(Styled { glyphs, look_of, looks, rules })
+        Ok(Styled { glyphs, look_of, looks, rules, scripted: None, pending: Default::default() })
     }
 
     /// What a text call writes, a string or `markdown(...)`, set in
@@ -463,6 +482,20 @@ impl Styled {
             _ => Spans::default(),
         };
         Styled::new(caller, text, type_, &spans, symdict, rng)
+    }
+
+    /// Draw what a scripted symbol set's script gives for the glyphs
+    /// `draw_row` and `draw` kept, onto `canvas`, in order: after the
+    /// call's own work, with the generator free for the script. Does
+    /// nothing for text that isn't such symbols.
+    pub(super) fn finish(&self, engine: &Engine, canvas: &mut CanvasData) -> RhaiResult<()> {
+        let Some(set) = &self.scripted else { return Ok(()) };
+        let glyphs: Vec<Symbol> = std::mem::take(&mut *self.pending.borrow_mut());
+        for drawing in set.drawn(engine, &glyphs)? {
+            canvas.strokes.extend(drawing.strokes);
+            canvas.commits.extend(drawing.commits);
+        }
+        Ok(())
     }
 
     /// Glyph `k`'s look.
@@ -488,10 +521,14 @@ impl Styled {
             return Err(format!("{}: {} glyphs from glyph {} run past the text's {}", caller, row.len(), first, self.glyphs.len()).into());
         }
         let look_at = |k: usize| self.look_of[first + k];
-        for (glyphs, path) in joined_paths(row, |k| look_at(k) != look_at(k - 1)) {
-            check_finite(caller, &path)?;
-            let ink = self.look(first + glyphs.start).ink.on(caller, style)?;
-            canvas.add_text_path(path, TextRun::of(row, glyphs), &ink, rng);
+        if self.scripted.is_some() {
+            self.pending.borrow_mut().extend(row.iter().filter(|g| !g.is_blank()).cloned());
+        } else {
+            for (glyphs, path) in joined_paths(row, |k| look_at(k) != look_at(k - 1)) {
+                check_finite(caller, &path)?;
+                let ink = self.look(first + glyphs.start).ink.on(caller, style)?;
+                canvas.add_text_path(path, TextRun::of(row, glyphs), &ink, rng);
+            }
         }
         if !self.has_rules() {
             return Ok(());
@@ -511,10 +548,14 @@ impl Styled {
         // Joined up, but not where the look changes.
         let look_at = |k: usize| self.look_of[start + setting.places[k].index];
         let placed = &setting.placed[..setting.places.len().min(setting.placed.len())];
-        for (glyphs, path) in joined_paths(placed, |k| look_at(k) != look_at(k - 1)) {
-            check_finite(CALLER, &path)?;
-            let ink = self.look(start + setting.places[glyphs.start].index).ink.on(CALLER, style)?;
-            canvas.add_text_path(path, TextRun::of(placed, glyphs), &ink, rng);
+        if self.scripted.is_some() {
+            self.pending.borrow_mut().extend(placed.iter().filter(|g| !g.is_blank()).cloned());
+        } else {
+            for (glyphs, path) in joined_paths(placed, |k| look_at(k) != look_at(k - 1)) {
+                check_finite(CALLER, &path)?;
+                let ink = self.look(start + setting.places[glyphs.start].index).ink.on(CALLER, style)?;
+                canvas.add_text_path(path, TextRun::of(placed, glyphs), &ink, rng);
+            }
         }
         self.draw_rules(CALLER, canvas, setting, start, style, Some(avoid), clearance, rng)
     }

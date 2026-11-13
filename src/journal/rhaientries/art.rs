@@ -293,6 +293,45 @@ fn eye(ctx: &NativeCallContext, rng: &SharedRng, center: Vec2, length: &Dynamic,
     Ok(parts)
 }
 
+const STAR_KEYS: [&str; 7] = ["kind", "rays", "reach", "tears", "unevenness", "angle", "seed"];
+
+/// `art::star(center, radius[, #{ kind, rays, reach, tears, unevenness, angle, seed }])`:
+/// #{ rays, body, dark, wash, tears, dots }.
+fn star(ctx: &NativeCallContext, rng: &SharedRng, center: Vec2, radius: &Dynamic, options: &Map) -> RhaiResult<Map> {
+    const CALLER: &str = "art::star";
+    let fail = |err: Box<EvalAltResult>| error(ctx, err.to_string());
+    check_keys(CALLER, options, &STAR_KEYS).map_err(fail)?;
+    let defaults = art::StarSettings::default();
+    let kind = match options.get("kind") {
+        None => defaults.kind,
+        Some(kind) => kind.clone().into_immutable_string().ok().and_then(|name| art::StarKind::named(&name))
+            .ok_or_else(|| error(ctx, format!("{}: 'kind' should be one of {}, got {}", CALLER, art::StarKind::NAMES.join(", "), kind)))?,
+    };
+    let count = |key: &str| -> RhaiResult<Option<u32>> {
+        match options.get(key) {
+            None => Ok(None),
+            Some(v) => v.as_int().ok().and_then(|n| u32::try_from(n).ok()).map(Some)
+                .ok_or_else(|| error(ctx, format!("{}: '{}' should be a whole number of at least 0, got {}", CALLER, key, v))),
+        }
+    };
+    let settings = art::StarSettings {
+        kind,
+        rays: count("rays")?,
+        tears: count("tears")?,
+        reach: number(CALLER, options, "reach").map_err(fail)?,
+        unevenness: number_option(ctx, CALLER, options, "unevenness", defaults.unevenness)?,
+        angle: number_option(ctx, CALLER, options, "angle", defaults.angle)?,
+    };
+    let seed = seed(ctx, rng, CALLER, options)?;
+    let star = art::eerie_star(center.into(), number_arg(ctx, CALLER, "radius", radius)?, settings, seed)
+        .map_err(|err| error(ctx, format!("{}: {}", CALLER, err)))?;
+    let mut parts = Map::new();
+    for (name, path) in [("rays", star.rays), ("body", star.body), ("dark", star.dark), ("wash", star.wash), ("tears", star.tears), ("dots", star.dots)] {
+        parts.insert(name.into(), Dynamic::from(Path::new(path)));
+    }
+    Ok(parts)
+}
+
 /// `art::moon(center, radius, phase)`: #{ outline, terminator, lit, dark }.
 fn moon(ctx: &NativeCallContext, center: Vec2, radius: &Dynamic, phase: &Dynamic) -> RhaiResult<Map> {
     const CALLER: &str = "art::moon";
@@ -449,14 +488,28 @@ pub fn register(engine: &mut Engine, text: super::path::TextSource) {
     let rng = text.1.clone();
     let mut module = Module::new();
     let marked = text.clone();
+    let symbolic = text.clone();
     module.set_native_fn("spiral_text", move |ctx: NativeCallContext, msg: &str, center: Vec2, radius: Dynamic, settings: Map| -> RhaiResult<Canvas> {
-        super::path::spiral_text(&super::path::plain(msg), center, &radius, settings, &text).map_err(|err| error(&ctx, err.to_string()))
+        super::path::spiral_text(&super::path::plain(msg), center, &radius, settings, &text, ctx.engine()).map_err(|err| error(&ctx, err.to_string()))
     });
     module.set_native_fn("spiral_text", move |ctx: NativeCallContext, msg: super::markdown::Markdown, center: Vec2, radius: Dynamic, settings: Map| -> RhaiResult<Canvas> {
-        super::path::spiral_text(&super::markdown::FlowText::Marked(msg), center, &radius, settings, &marked).map_err(|err| error(&ctx, err.to_string()))
+        super::path::spiral_text(&super::markdown::FlowText::Marked(msg), center, &radius, settings, &marked, ctx.engine()).map_err(|err| error(&ctx, err.to_string()))
+    });
+    module.set_native_fn("spiral_text", move |ctx: NativeCallContext, msg: super::symbol_sets::SymbolText, center: Vec2, radius: Dynamic, settings: Map| -> RhaiResult<super::symbolic::Symbolic> {
+        let source = symbolic.clone();
+        super::symbolic::make(ctx.engine(), &symbolic.1, msg, move |engine, text| super::path::spiral_text(text, center.clone(), &radius, settings.clone(), &source, engine))
+            .map_err(|err| error(&ctx, err.to_string()))
     });
     module.set_native_fn("moon", |ctx: NativeCallContext, center: Vec2, radius: Dynamic, phase: Dynamic| -> RhaiResult<Map> {
         moon(&ctx, center, &radius, &phase)
+    });
+    let r = rng.clone();
+    module.set_native_fn("star", move |ctx: NativeCallContext, center: Vec2, radius: Dynamic| -> RhaiResult<Map> {
+        star(&ctx, &r, center, &radius, &Map::new())
+    });
+    let r = rng.clone();
+    module.set_native_fn("star", move |ctx: NativeCallContext, center: Vec2, radius: Dynamic, options: Map| -> RhaiResult<Map> {
+        star(&ctx, &r, center, &radius, &options)
     });
     let r = rng.clone();
     module.set_native_fn("snake", move |ctx: NativeCallContext, head_center: Vec2, tail_end: Vec2, length: Dynamic| -> RhaiResult<Map> {

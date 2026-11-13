@@ -8,7 +8,7 @@ one built into the web editor (`showcase`; nothing else goes there):
 description, its entries in order), its entries in `entries/NAME.rhai`,
 and files of its own in `locks/`, `helpers/`, `layouts/`,
 `illustrations/`, `chains/`, `styles/`, `lib/`, `glyphsets/`,
-`content/` and `images/` (PNG and JPEG pictures, which the web editor
+`symbolsets/`, `content/` and `images/` (PNG and JPEG pictures, which the web editor
 and the compiled-in library hold as data URLs). These stand in
 front of the built-in library, `webapp/library/`, which has the same
 directories; a journal's file stands in for the library's of the same
@@ -43,9 +43,10 @@ the same change:
   an existing function, an `art::` tool, anything registered with the rhai
   engine): a labelled example. New options deserve an example too, even
   though the test below can't see them.
-- **A glyphset or symbol set** (added to `webapp/library/glyphsets/`): its
-  alphabet and a line. The glyphs pages draw every glyph of every
-  glyphset by themselves.
+- **A glyphset or symbol set** (added to `webapp/library/glyphsets/` or
+  `symbolsets/`): its alphabet and a line. The glyphs pages draw every
+  glyph of every glyphset by themselves; the symbol sets page draws each
+  symbol set (add a name to its list).
 - **A brush**: the pens page draws every `brush_names()` entry by itself;
   add examples only for new brush settings.
 - **A lock or helper type** (`webapp/library/locks/`, `helpers/`): a row

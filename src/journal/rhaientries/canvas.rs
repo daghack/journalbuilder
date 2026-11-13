@@ -50,6 +50,10 @@ impl CanvasData {
         let color_seed = if style.color_jitter() > 0.0 { rng.next_u64() } else { 0 };
         self.strokes.push(Stroke { path, style: style.clone(), seed: None, color_seed, text, hidden: false, commits: None });
     }
+    /// `f` applied to every stroke's path (and the committed canvases' marks).
+    pub(super) fn transform_with(&mut self, f: impl Fn(&mut StrokePath)) {
+        self.transform(f)
+    }
     fn transform(&mut self, f: impl Fn(&mut StrokePath)) {
         for stroke in &mut self.strokes {
             f(&mut stroke.path);
@@ -101,7 +105,7 @@ pub(super) fn register(engine: &mut Engine, rng: SharedRng) {
             let (mut strokes, mut commits) = (Vec::new(), Vec::new());
             for (i, item) in canvases.into_iter().enumerate() {
                 let type_name = item.type_name();
-                let other = item.try_cast::<Canvas>()
+                let other = super::symbolic::canvas_of(&item)
                     .ok_or_else(|| format!("canvas.add: item {} is a {}, not a canvas (glyphs need a style: canvas.add(glyphs, style))", i, type_name))?;
                 strokes.extend(other.borrow().strokes.iter().cloned());
                 commits.extend(other.borrow().commits.iter().cloned());

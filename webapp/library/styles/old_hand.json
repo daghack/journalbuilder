@@ -1,0 +1,26 @@
+{
+  "description": "A watcher's old hand: rough ink in the eldritch glyphs, the pen running dry and dipped again, so a wall of it is lighter and darker by turns.",
+  "color": "#2b1d12",
+  "brush": "Rough Ink",
+  "brush_size": 0.9,
+  "min_pressure": 0.35,
+  "max_pressure": 0.66,
+  "pressure_profile": "taper",
+  "pressure_wander": 0.15,
+  "pool": 0.25,
+  "pool_depth": 0.4,
+  "color_jitter": 0.05,
+  "ink_load": 0.36,
+  "redip_every": 70,
+  "glyph_rotation_jitter": 0.04,
+  "glyph_position_jitter": [
+    0.03,
+    0.05
+  ],
+  "glyph_scale_jitter": 0.05,
+  "baseline_wander": 0.08,
+  "glyphset": "eldritch",
+  "size": 25,
+  "glyph_tracking": 0.02,
+  "line_height": 1.18
+}

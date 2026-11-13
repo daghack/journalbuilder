@@ -1,0 +1,10 @@
+{
+  "description": "Glyphs in a fine ink pen, for small marks: loche capitals, light to heavy along each stroke.",
+  "color": "#2b1d12",
+  "brush": "Ink Pen",
+  "brush_size": 1.8,
+  "min_pressure": 0.4,
+  "max_pressure": 0.8,
+  "glyphset": "loche_upper",
+  "size": 30
+}

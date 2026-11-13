@@ -32,6 +32,12 @@ describe('canvas edits', () => {
     expect(cleanEdit({ scale: [0, 2], skew: 120 })).toEqual({ scale: [0.0001, 2], skew: 85 });
   });
 
+  it('keeps a symbolic canvas\'s symbols and symbol set, and drops them when there are none', () => {
+    expect(cleanEdit({ symbols: [3, 1.6], symbol_set: 'moons' })).toEqual({ symbols: [3, 2], symbol_set: 'moons' });
+    expect(cleanEdit({ symbols: [], symbol_set: '' })).toBeNull();
+    expect(cleanEdit({ symbols: [-2] })).toEqual({ symbols: [0] });
+  });
+
   it('are pruned to the canvases a run committed', () => {
     const text = serializeEdits({ version: 1, canvases: { a: { turn: 5 }, b: { turn: 6 } } });
     expect(pruneEdits(text, ['a', 'b'])).toBe(text);

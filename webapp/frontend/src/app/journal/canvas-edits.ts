@@ -33,6 +33,9 @@ export interface CanvasEdit {
   hidden?: boolean;
   locked?: boolean;
   ink?: InkEdit;
+  /** For a symbolic canvas: the symbols it's drawn as, and the symbol set they're of, in place of the script's. */
+  symbols?: number[];
+  symbol_set?: string;
 }
 
 export interface EditsFile {
@@ -88,6 +91,8 @@ export function cleanEdit(edit: CanvasEdit): CanvasEdit | null {
   }
   if (edit.hidden) out.hidden = true;
   if (edit.locked) out.locked = true;
+  if (edit.symbols?.length) out.symbols = edit.symbols.map((s) => Math.max(0, Math.round(s)));
+  if (edit.symbol_set) out.symbol_set = edit.symbol_set;
   if (edit.ink) {
     const ink: InkEdit = {};
     if (edit.ink.color) ink.color = edit.ink.color;

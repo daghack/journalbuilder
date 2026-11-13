@@ -498,6 +498,16 @@ impl TextSettings {
         };
         Ok(TextSettings { style, type_, paragraph, spans, options: settings })
     }
+    /// As `read`, for a call writing `msg`: where that's symbols of a symbol
+    /// set, the set's own style, type and paragraph are what the settings
+    /// are laid over (see `symbol_settings`).
+    pub(super) fn read_for(caller: &str, msg: &super::markdown::FlowText, settings: Map, own: &[&str]) -> RhaiResult<TextSettings> {
+        let settings = match msg {
+            super::markdown::FlowText::Symbols(symbols) => super::symbol_sets::symbol_settings(caller, &symbols.set, settings)?,
+            _ => settings,
+        };
+        TextSettings::read(caller, settings, own)
+    }
     /// How far placed glyphs stray, as the style's hand sets them.
     pub(super) fn jitter(&self) -> Jitter {
         Jitter::of(&self.style)

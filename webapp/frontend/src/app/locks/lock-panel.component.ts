@@ -3,7 +3,7 @@ import type { LockOption } from '../scribe';
 import { JournalStore } from '../services/journal-store.service';
 import { LibraryService } from '../services/library.service';
 import { failed } from '../services/tools.service';
-import { symbolBase, testText, textSymbols, type TestValue } from './chain-model';
+import { sourceDir, symbolBase, testText, textSymbols, type TestValue } from './chain-model';
 import { optionDeclaration } from './chain-source';
 import { LockEditorService } from './lock-editor.service';
 import { OptionsFormComponent, fieldsOf } from '../resources/options-form.component';
@@ -204,7 +204,7 @@ function parseValue(text: string, type: string): { value: TestValue; problem: st
         }
         <p class="hint">
           @if (source.kind === 'content') { Content is data: wire it to a lock's input, or an illustration's. }
-          @else { A {{ source.kind }} is something to draw with: wire it to an illustration's input typed {{ source.kind === 'style' ? 'TextStyle' : source.kind === 'glyphset' ? 'Glyphset' : 'Layout' }}. }
+          @else { A {{ source.kind }} is something to draw with: wire it to an illustration's input typed {{ source.kind === 'style' ? 'TextStyle' : source.kind === 'glyphset' ? 'Glyphset' : source.kind === 'symbolset' ? 'SymbolSet' : 'Layout' }}. }
         </p>
         @if (editor.sourcePath(source); as path) {
           <div class="row"><button type="button" (click)="editor.openFile(path)">Open {{ path }}</button></div>
@@ -392,7 +392,7 @@ export class LockPanelComponent {
   protected readonly sourceNames = computed(() => {
     const source = this.editor.source();
     if (!source) return [];
-    const dir = source.kind === 'content' ? 'content' : source.kind === 'style' ? 'styles' : source.kind === 'glyphset' ? 'glyphsets' : 'layouts';
+    const dir = sourceDir(source.kind);
     const paths = [...Object.keys(this.store.files()), ...Object.keys(this.library.files())].filter((path) => path.startsWith(`${dir}/`));
     const names = [...new Set(paths.map((path) => path.slice(dir.length + 1).replace(/\.[a-z]+$/, '')))].sort();
     return names.includes(source.name) ? names : [source.name, ...names];

@@ -18,7 +18,7 @@ export interface LockCheck {
 }
 
 /** The kinds this editor edits. */
-export type ResourceKind = Extract<Kind, 'locks' | 'helpers' | 'illustrations' | 'layouts' | 'lib'>;
+export type ResourceKind = Extract<Kind, 'locks' | 'helpers' | 'illustrations' | 'layouts' | 'symbolsets' | 'lib'>;
 
 /**
  * A lock, illustration, layout or helper file being edited: its
@@ -164,9 +164,10 @@ export class ResourceEditorService {
         this.preview.set(null);
         return;
       }
-      const list = kind === 'illustrations' ? await this.tools.illustrationTypes() : await this.tools.layoutTypes();
+      const list = kind === 'illustrations' ? await this.tools.illustrationTypes() : kind === 'symbolsets' ? await this.tools.symbolSetTypes() : await this.tools.layoutTypes();
       const type = list.find((t) => t.name === name);
       const preview = kind === 'illustrations' ? await this.tools.illustrationPreview(name, text, values, null)
+        : kind === 'symbolsets' ? await this.tools.symbolSetPreview(name, text, path, values)
         : await this.tools.layoutPreview(name, text, values);
       if (asked !== this.asked) return;
       this.info.set({ description: type?.description, fields: fieldsOf(type?.options), error: type?.error });

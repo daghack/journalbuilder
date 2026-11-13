@@ -13,6 +13,8 @@
 //! styles/NAME.json         text styles, for text_style(name)
 //! lib/NAME.rhai            helpers any script imports: import "lib/NAME"
 //! glyphsets/NAME.json      glyphsets, for glyphset(name)
+//! symbolsets/NAME.json     simple symbol sets, for symbol_set(name)
+//! symbolsets/NAME.rhai     scripted symbol sets, for symbol_set(name)
 //! content/NAME.txt         plain text, for content(name)
 //! content/NAME.md          marked-up text, for content(name)
 //! content/NAME.json        symbols, #{ base, symbols }, for content(name)
@@ -46,7 +48,7 @@ pub const BUILT_IN_JOURNALS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/we
 pub const DEFAULT_JOURNALS_DIRS: [&str; 2] = [DEFAULT_JOURNALS_DIR, BUILT_IN_JOURNALS_DIR];
 
 /// Every kind of resource: its directory, and its files' extension.
-pub const KINDS: [(&str, &str); 14] = [
+pub const KINDS: [(&str, &str); 16] = [
     ("locks", "rhai"),
     ("helpers", "rhai"),
     ("layouts", "rhai"),
@@ -55,6 +57,8 @@ pub const KINDS: [(&str, &str); 14] = [
     ("styles", "json"),
     ("lib", "rhai"),
     ("glyphsets", "json"),
+    ("symbolsets", "json"),
+    ("symbolsets", "rhai"),
     ("content", "txt"),
     ("content", "md"),
     ("content", "json"),
@@ -75,6 +79,11 @@ pub struct Resources {
     pub styles: Sources,
     pub lib: Sources,
     pub glyphsets: Sources,
+    /// Symbol sets: a glyphset's glyphs as the symbols of a lock, each
+    /// drawn in a style (`symbolsets/NAME.json`) or by a script
+    /// (`symbolsets/NAME.rhai`).
+    pub symbol_set_data: Sources,
+    pub symbol_set_scripts: Sources,
     /// Content: plain text, marked-up text, symbols and graphs.
     pub text: Sources,
     pub markdown: Sources,
@@ -119,6 +128,8 @@ impl Resources {
             styles: sources("styles", "json"),
             lib: sources("lib", "rhai"),
             glyphsets: sources("glyphsets", "json"),
+            symbol_set_data: sources("symbolsets", "json"),
+            symbol_set_scripts: sources("symbolsets", "rhai"),
             text: sources("content", "txt"),
             markdown: sources("content", "md"),
             symbols: sources("content", "json"),
@@ -139,6 +150,8 @@ impl Resources {
             styles: self.styles.over(under.styles),
             lib: self.lib.over(under.lib),
             glyphsets: self.glyphsets.over(under.glyphsets),
+            symbol_set_data: self.symbol_set_data.over(under.symbol_set_data),
+            symbol_set_scripts: self.symbol_set_scripts.over(under.symbol_set_scripts),
             text: self.text.over(under.text),
             markdown: self.markdown.over(under.markdown),
             symbols: self.symbols.over(under.symbols),
@@ -167,6 +180,8 @@ impl Resources {
             styles: record(self.styles),
             lib: record(self.lib),
             glyphsets: record(self.glyphsets),
+            symbol_set_data: record(self.symbol_set_data),
+            symbol_set_scripts: record(self.symbol_set_scripts),
             text: record(self.text),
             markdown: record(self.markdown),
             symbols: record(self.symbols),
@@ -178,7 +193,7 @@ impl Resources {
     }
 
     /// Every kind's files, in `KINDS`' order, with their directory's name.
-    pub fn kinds(&self) -> [(&'static str, &Sources); 14] {
+    pub fn kinds(&self) -> [(&'static str, &Sources); 16] {
         [
             ("locks", &self.locks),
             ("helpers", &self.helpers),
@@ -188,6 +203,8 @@ impl Resources {
             ("styles", &self.styles),
             ("lib", &self.lib),
             ("glyphsets", &self.glyphsets),
+            ("symbolsets", &self.symbol_set_data),
+            ("symbolsets", &self.symbol_set_scripts),
             ("content", &self.text),
             ("content", &self.markdown),
             ("content", &self.symbols),

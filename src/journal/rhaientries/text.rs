@@ -54,11 +54,13 @@
 use parry2d::bounding_volume::Aabb;
 use parry2d::math::Vec2 as PVec;
 use rand::Rng;
-use rhai::{Array, Dynamic, Engine, Map};
+use rhai::{Array, Dynamic, Engine, Map, NativeCallContext};
 use std::rc::Rc;
 
 use super::glyphs::{glyph_array, Glyph};
 use super::markdown::{FlowText, Markdown, Styled};
+use super::symbol_sets::SymbolText;
+use super::symbolic::make_with;
 use super::path::plain;
 use super::random::SharedRng;
 use super::{Canvas, CanvasData, Path, Vec2};
@@ -319,9 +321,9 @@ const BLOCK_KEYS: [&str; 1] = ["avoid"];
 /// up and down from straight by up to the hand's `baseline_wander`, words
 /// kept whole unless the paragraph's `layout` is "flat". Gives
 /// `#{ canvas, bottom }`, `bottom` being where a line after them would go.
-fn write_block(msg: &FlowText, at: Vec2, width: Dynamic, settings: Map, symdict: &FontBook, rng: &SharedRng) -> RhaiResult<Map> {
+fn write_block(msg: &FlowText, at: Vec2, width: Dynamic, settings: Map, symdict: &FontBook, rng: &SharedRng, engine: &Engine) -> RhaiResult<Map> {
     const CALLER: &str = "write_block";
-    let text = TextSettings::read(CALLER, settings, &BLOCK_KEYS)?;
+    let text = TextSettings::read_for(CALLER, msg, settings, &BLOCK_KEYS)?;
     text.type_.glyphset(CALLER)?;
     let size = text.type_.size(CALLER)?;
     let width = super::options::float(CALLER, "the width", &width)? as f32;
@@ -382,6 +384,9 @@ fn write_block(msg: &FlowText, at: Vec2, width: Dynamic, settings: Map, symdict:
         first += row.len();
     }
     let rows = lines;
+    // A scripted symbol set's script runs with the generator free.
+    drop(r);
+    styled.finish(engine, &mut canvas)?;
     let mut out = Map::new();
     out.insert("canvas".into(), Dynamic::from(Canvas::new(canvas)));
     out.insert("bottom".into(), Dynamic::from((at.y + rows as f32 * pitch + drift) as f64));
@@ -405,9 +410,9 @@ const FIT_STEPS: usize = 20;
 /// starts with trimmed). With the paragraph's `fit`, the glyphs are as big
 /// as they can be (to within 1%), up to the type's glyph_scale, and still
 /// all fit, so `rest` is empty.
-fn write_inside_path(msg: &FlowText, path: &Path, settings: Map, symdict: &FontBook, rng: &SharedRng) -> RhaiResult<Map> {
+fn write_inside_path(msg: &FlowText, path: &Path, settings: Map, symdict: &FontBook, rng: &SharedRng, engine: &Engine) -> RhaiResult<Map> {
     const CALLER: &str = "write_inside_path";
-    let text = TextSettings::read(CALLER, settings, &INSIDE_KEYS)?;
+    let text = TextSettings::read_for(CALLER, msg, settings, &INSIDE_KEYS)?;
     let fit = text.paragraph.fit();
     text.type_.glyphset(CALLER)?;
     let size = text.type_.size(CALLER)?;
@@ -441,17 +446,28 @@ fn write_inside_path(msg: &FlowText, path: &Path, settings: Map, symdict: &FontB
         tb = scaled;
         placed = at;
     }
-    let rest: String = if fit { String::new() } else {
-        let chars: Vec<char> = msg.text().chars().collect();
-        chars[chars.len() - unplaced.len().min(chars.len())..].iter().collect::<String>().trim_start().to_string()
+    let rest: Dynamic = match msg {
+        // What didn't fit is its symbols still to place.
+        FlowText::Symbols(symbols) if !fit => {
+            let left = symbols.symbols.len() - unplaced.len().min(symbols.symbols.len());
+            Dynamic::from(SymbolText { set: symbols.set.clone(), symbols: symbols.symbols[left..].to_vec() })
+        }
+        FlowText::Symbols(symbols) => Dynamic::from(SymbolText { set: symbols.set.clone(), symbols: Vec::new() }),
+        _ if fit => Dynamic::from(String::new()),
+        _ => {
+            let chars: Vec<char> = msg.text().chars().collect();
+            Dynamic::from(chars[chars.len() - unplaced.len().min(chars.len())..].iter().collect::<String>().trim_start().to_string())
+        }
     };
     tb.jitter.apply(&mut placed, &mut *r);
     let mut canvas = CanvasData::default();
     let tree = if styled.has_rules() { tb.avoid.now() } else { None };
     styled.draw_row(CALLER, &mut canvas, &placed, 0, &text.style, tree.as_deref(), tb.padding, &mut *r)?;
+    drop(r);
+    styled.finish(engine, &mut canvas)?;
     let mut out = Map::new();
     out.insert("canvas".into(), Dynamic::from(Canvas::new(canvas)));
-    out.insert("rest".into(), rest.into());
+    out.insert("rest".into(), rest);
     Ok(out)
 }
 
@@ -482,20 +498,42 @@ pub fn register(engine: &mut Engine, symdict: Rc<FontBook>, rng: SharedRng) {
     });
     // Each text call takes a string or markdown(...).
     let (r, book) = (rng.clone(), symdict.clone());
-    engine.register_fn("write_block", move |text: &str, at: Vec2, width: Dynamic, settings: Map| -> RhaiResult<Map> {
-        write_block(&plain(text), at, width, settings, &book, &r)
+    engine.register_fn("write_block", move |ctx: NativeCallContext, text: &str, at: Vec2, width: Dynamic, settings: Map| -> RhaiResult<Map> {
+        write_block(&plain(text), at, width, settings, &book, &r, ctx.engine())
     });
     let (r, book) = (rng.clone(), symdict.clone());
-    engine.register_fn("write_block", move |text: Markdown, at: Vec2, width: Dynamic, settings: Map| -> RhaiResult<Map> {
-        write_block(&FlowText::Marked(text), at, width, settings, &book, &r)
+    engine.register_fn("write_block", move |ctx: NativeCallContext, text: Markdown, at: Vec2, width: Dynamic, settings: Map| -> RhaiResult<Map> {
+        write_block(&FlowText::Marked(text), at, width, settings, &book, &r, ctx.engine())
     });
     let (r, book) = (rng.clone(), symdict.clone());
-    engine.register_fn("write_inside_path", move |text: &str, path: Path, settings: Map| -> RhaiResult<Map> {
-        write_inside_path(&plain(text), &path, settings, &book, &r)
+    engine.register_fn("write_block", move |ctx: NativeCallContext, text: SymbolText, at: Vec2, width: Dynamic, settings: Map| -> RhaiResult<Map> {
+        let (book, rng) = (book.clone(), r.clone());
+        let (symbolic, mut out) = make_with(ctx.engine(), &r, text, move |engine, msg| {
+            let mut out = write_block(msg, at.clone(), width.clone(), settings.clone(), &book, &rng, engine)?;
+            let canvas = out.remove("canvas").and_then(|c| c.try_cast::<Canvas>()).expect("write_block gives its canvas");
+            Ok((canvas, out))
+        })?;
+        out.insert("canvas".into(), Dynamic::from(symbolic));
+        Ok(out)
+    });
+    let (r, book) = (rng.clone(), symdict.clone());
+    engine.register_fn("write_inside_path", move |ctx: NativeCallContext, text: &str, path: Path, settings: Map| -> RhaiResult<Map> {
+        write_inside_path(&plain(text), &path, settings, &book, &r, ctx.engine())
+    });
+    let (r, book) = (rng.clone(), symdict.clone());
+    engine.register_fn("write_inside_path", move |ctx: NativeCallContext, text: Markdown, path: Path, settings: Map| -> RhaiResult<Map> {
+        write_inside_path(&FlowText::Marked(text), &path, settings, &book, &r, ctx.engine())
     });
     let r = rng.clone();
-    engine.register_fn("write_inside_path", move |text: Markdown, path: Path, settings: Map| -> RhaiResult<Map> {
-        write_inside_path(&FlowText::Marked(text), &path, settings, &symdict, &r)
+    engine.register_fn("write_inside_path", move |ctx: NativeCallContext, text: SymbolText, path: Path, settings: Map| -> RhaiResult<Map> {
+        let (book, rng) = (symdict.clone(), r.clone());
+        let (symbolic, mut out) = make_with(ctx.engine(), &r, text, move |engine, msg| {
+            let mut out = write_inside_path(msg, &path, settings.clone(), &book, &rng, engine)?;
+            let canvas = out.remove("canvas").and_then(|c| c.try_cast::<Canvas>()).expect("write_inside_path gives its canvas");
+            Ok((canvas, out))
+        })?;
+        out.insert("canvas".into(), Dynamic::from(symbolic));
+        Ok(out)
     });
 }
 

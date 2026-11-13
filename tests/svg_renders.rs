@@ -160,6 +160,7 @@ first_pages!(
     lang_font,
     loche_rules,
     matter_of_pyrius,
+    night_almanac,
     nivelia_letters,
     raven_constellations,
     welcome_home,

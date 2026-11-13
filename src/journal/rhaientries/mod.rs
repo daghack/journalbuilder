@@ -12,6 +12,8 @@ mod images;
 mod layout;
 mod locks;
 mod illustrations;
+mod symbol_sets;
+mod symbolic;
 mod manifest;
 mod markdown;
 mod options;
@@ -93,6 +95,10 @@ impl<T: Clone> Shared<T> {
     pub fn borrow_mut(&self) -> std::cell::RefMut<'_, T> {
         self.0.borrow_mut()
     }
+    /// Whether `other` is this same value (a handle to it), not a copy.
+    pub fn same(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
     /// The value as it is now.
     pub fn get(&self) -> T {
         self.0.borrow().clone()
@@ -165,6 +171,7 @@ pub struct JournalEngine {
     resources: Resources,
     illustrations: Rc<IllustrationLibrary>,
     text_styles: Rc<TextStyleLibrary>,
+    symbol_sets: Rc<symbol_sets::SymbolSetLibrary>,
 }
 
 /// A JSON object (or null) as a rhai map.
@@ -291,6 +298,9 @@ impl JournalEngine {
         illustrations::register(&mut engine, illustrations.clone());
         let text_styles = Rc::new(TextStyleLibrary::new(resources.styles.clone(), symdict.clone()));
         text_styles::register(&mut engine, text_styles.clone());
+        let symbol_sets = Rc::new(symbol_sets::SymbolSetLibrary::new(resources.symbol_set_data.clone(), resources.symbol_set_scripts.clone(), text_styles.clone(), symdict.clone()));
+        symbol_sets::register(&mut engine, symbol_sets.clone(), rng.clone());
+        symbolic::register(&mut engine, editor.clone(), symbol_sets.clone(), rng.clone());
         content::register(&mut engine, resources.clone());
         images::register(&mut engine, resources.clone());
 
@@ -302,6 +312,7 @@ impl JournalEngine {
             resources,
             illustrations,
             text_styles,
+            symbol_sets,
         }
     }
     /// The resources scripts use.
@@ -409,6 +420,38 @@ impl JournalEngine {
             entry.add_page(page).map_err(|e| e.to_string())?;
         }
         Ok(entry)
+    }
+    /// The symbol sets' names.
+    pub fn symbol_set_names(&self) -> Vec<String> {
+        self.symbol_sets.names()
+    }
+    /// What symbol set `name` is and takes.
+    pub fn describe_symbol_set(&self, name: &str) -> Result<symbol_sets::SymbolSetInfo, String> {
+        self.symbol_sets.info(&self.engine, name)
+    }
+    /// Symbol set `name` with `options` (a JSON object): a page of every
+    /// symbol drawn, numbered under it.
+    pub fn preview_symbol_set(&mut self, name: &str, options: &serde_json::Value) -> Result<Entry, String> {
+        let mut scope = Scope::new();
+        scope.push("journal_entry", Entry::default());
+        scope.push_constant("NAME", name.to_string());
+        scope.push_constant("OPTIONS", json_map(options, "options")?);
+        self.run_preview(scope, r#"
+            let set = symbol_set(NAME, OPTIONS);
+            let cell = min(max(set.size, 40.0), 160.0) * 1.5;
+            let per_row = min(set.base, 8);
+            let rows = (set.base + per_row - 1) / per_row;
+            let page = new_canvas();
+            let label = #{ style: default_style(), type: new_type_style(glyphset("plain"), 14.0) };
+            for k in 0..set.base {
+                let at = vec2(cell * (k % per_row + 0.5), cell * (k / per_row + 0.5));
+                page.add(write_at(set.text([k]), at, #{}));
+                page.add(write_at(`${k}`, at + vec2(0, cell * 0.42), label));
+            }
+            let p = new_page(#{ size: vec2(cell * per_row, cell * rows) });
+            p.add(page);
+            journal_entry.add(p);
+        "#)
     }
     /// The text styles' names.
     pub fn text_style_names(&self) -> Vec<String> {

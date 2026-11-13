@@ -258,7 +258,7 @@ An independent copy of the canvas.
 
 ### `canvas.commit_to_editor(name)`
 
-Hands the canvas to the web editor's visual editor (the Ctrl/⌘+P preview), to place by hand there: moved, turned, scaled, stretched, flipped, skewed, its corners pinned, hidden, locked, aligned and re-inked. The edit is kept in the journal's edits/ENTRY.json (see Journals and Their Files) and applied to the canvas here, in place, as the call runs, before anything later in the script, so what the script does with the canvas afterward (translate_by, add, page.add) goes on top of it. Strokes added to the canvas after the call aren't edited. An edit draws nothing from the random generator, so the rest of the entry draws as it would without it; without an edit, the call changes nothing. Returns the canvas.
+Hands the canvas to the web editor's visual editor (the Ctrl/⌘+P preview), to place by hand there: moved, turned, scaled, stretched, flipped, skewed, its corners pinned, hidden, locked, aligned and re-inked. The edit is kept in the journal's edits/ENTRY.json (see Journals and Their Files) and applied to the canvas here, in place, as the call runs, before anything later in the script, so what the script does with the canvas afterward (translate_by, add, page.add) goes on top of it. Strokes added to the canvas after the call aren't edited. An edit draws nothing from the random generator, so the rest of the entry draws as it would without it; without an edit, the call changes nothing. Returns the canvas. A symbolic (see Symbol Sets) is committed the same way, and the edit's symbols and symbol_set keys draw it again before anything else is applied; the editor lists it as one, and offers its symbols and set.
 
 Gradients laid across the page (from and to, center and radius) and image paint turn, scale and move with an edit's strokes, as the brush's texture does; the corners' pinning leaves them where they are. A hidden canvas's strokes still count toward its bounds() and anything laid out round it, but aren't drawn. In the editor, a canvas the script stops committing loses its edit: the next run without it takes it out of the file.
 
@@ -1326,6 +1326,8 @@ An independent copy of the glyph.
 
 Text layouts place glyphs, scaling each by the glyph scale and turning it to its line on top of any scale and rotation it has. Every text call takes one settings map: a style (what the glyphs are drawn in, and the hand that sets them), a type (which glyphs, how big, shaped how) and a paragraph (how lines are built and set), each whole or a map of some of its settings, and the call's own options. A map of style settings is over default_style(); of type settings, over no glyphset and no glyph scale; of paragraph settings, over the defaults. A call uses the settings it needs and ignores the rest, spans among them, so a role or a text_style(name) can be passed straight in; unknown keys are errors.
 
+Text is a string, markdown(text) or symbols of a symbol set, set.text(symbols) (see Symbol Sets): where a call says it takes text, it takes any of these.
+
 Settings every text call takes:
 
 | key | default | what it does | takes |
@@ -1623,6 +1625,28 @@ page.add(write_line("Lorem ipsum dolor sit amet", vec2(0, 0), TEXT));
 ```
 
 ![write_line](images/write_line.svg)
+
+### `write_at(text, at, settings)`
+
+One line of text as write_line sets it, but with the middle of the run (from its first glyph's centre to its last's) put at `at`, and the line turned about `at` by `settings.turn`: a single symbol's glyph sits exactly on `at`. The text is a string, markdown(text) or symbols of a symbol set (see Symbol Sets), which give a symbolic. Otherwise as write_line.
+
+| argument | what it does | takes |
+|---|---|---|
+| `text` | The text to write; marked up, its spans are set as it's written (see Marked-Up Text); symbol text is set.text(symbols). | a string, markdown(text) or set.text(symbols). |
+| `at` | Where the middle of the line goes. | a vec. |
+
+| option | default | what it does | takes |
+|---|---|---|---|
+| `settings.turn` | 0 | How far the line is turned about `at`. | a number, in radians. |
+| `settings.avoid` | nothing | What glyphs keep clear of (see Keeping Text Clear). | an avoidance tree, a path, a canvas, a glyph or image paint, or an array of any of these. |
+
+```rhai render=write_at
+page.add(write_at("MIDDLE", vec2(150, 50), TEXT));
+page.add(write_at("TURNED", vec2(150, 50), TEXT + #{ turn: 0.5 }));
+page.add(new_circle(vec2(150, 50), 3), RED_PEN);
+```
+
+![write_at](images/write_at.svg)
 
 ### `write_block(text, at, width, settings)`
 
@@ -2129,6 +2153,25 @@ page.add(art::spiral_text("Lorem ipsum dolor sit amet, consectetur adipiscing el
 
 ![spiral_text](images/spiral_text.svg)
 
+### `art::star(center, radius), art::star(center, radius, options)`
+
+A star that isn't right, as parts to ink apart. Gives #{ rays, body, dark, wash, tears, dots }: its rays, spikes, lashes or needles; its body's lines (lids and iris, a spiral, rings, a lumpy core); closed shapes to fill dark (a pupil, a core, every other band; hatch them, or draw them as outlines); strokes to wash in colour; tears running down from it, each ending in a drop; and small rings dotted round it. Nothing about one is even: rays differ in length and lean, rings wobble, by its seed.
+
+| argument | what it does | takes |
+|---|---|---|
+| `center` | Its centre. | a vec. |
+| `radius` | Its body's radius: rays reach beyond. | a positive number. |
+
+| option | default | what it does | takes |
+|---|---|---|---|
+| `options.kind` | needle | Which star: lashed, an eye (art::eye) ringed with lashes like spikes; spiral, a spiral out from a pupil to a dotted rim; banded, rings one inside another round a pupil, every other band dark; needle, hair-thin rays of every length from a small dark core, some bent; weeping, a dark lumpen core with stubby rays, weeping. | one of those names. |
+| `options.rays` | the kind's own | How many rays. | a whole number from 0 to 400. |
+| `options.reach` | the kind's own | How far the longest ray reaches, in radii. | a number of at least 1. |
+| `options.tears` | the kind's own (3 for weeping) | How many tears run down from it. | a whole number from 0 to 400. |
+| `options.unevenness` | 0.6 | How much its rays differ in length: 0 all alike, 1 some hardly there. | a number from 0 to 1. |
+| `options.angle` | 0 | How far it's turned. | a number, in radians. |
+| `options.seed` | one from the generator | Which star it draws: the same seed gives the same drawing, without touching the script's generator. | a whole number. |
+
 ### `art::moon(center, radius, phase)`
 
 The moon in a phase, seen from the northern hemisphere. Gives #{ outline, terminator, lit, dark }: the disc's outline; the terminator, the half ellipse from the top of the disc to the bottom between light and dark (an empty path at new and full); and the lit and dark sides as closed shapes, to hatch or fill (the lit side empty at new, the dark side at full). It takes no seed: the same phase draws the same moon.
@@ -2192,6 +2235,111 @@ A chart's tree cut into constellations, a page each: pieces that hold together, 
 | `options.label_gap` | 6 | How far from its star's edge a label sits, at least. | a number of at least 0. |
 | `options.most_stars` | no limit | The most stars a constellation may have: the cut is the one nearest count pieces whose pieces all fit, so there are more pieces than count if that's what it takes (with count 1, as few as fit). | a whole number of at least 2. |
 | `options.split_at` | [] | Stars whose constellation is split in two at them, one more piece each, both keeping the star: its branches from the star (the parts of it that meet only there) are taken round the star by the way they go, from the widest gap between them, and cut into two runs with about as many links each, so the pieces lie either side of it, the leftmost first. | an array of star indices, each with a constellation that has two or more branches from it. |
+
+## Symbol Sets
+
+A symbol set is a glyphset's glyphs as the symbols of a lock, and how each is drawn, so lock values reach the page without being turned into strings and glyphs by hand. A set is a file in symbolsets/ (see Symbol set files): simple, a glyphset's glyphs in a style, or scripted, each drawn by a script. Every text call takes `set.text(symbols)` where it takes a string, applying the same placing, jitter and paragraph options; what write_line, write_at, fit_text and art::spiral_text give for it is a symbolic.
+
+### `symbol_set(name), symbol_set(name, options)`
+
+The symbol set symbolsets/NAME.json or symbolsets/NAME.rhai describes, the journal's or the library's.
+
+| argument | what it does | takes |
+|---|---|---|
+| `name` | Which file. | a symbol set's name (see Symbol Sets in The Library). |
+
+| option | default | what it does | takes |
+|---|---|---|---|
+| `options` | the file's defaults | A simple set's are its style's: size, its glyph scale, and color, its ink. A scripted set's are its options() as declared. | a map of option names to values like their defaults. |
+
+### `symbol_set_names()`
+
+The name of every symbol set, sorted, the journal's and the library's.
+
+### `set.name, set.base, set.size`
+
+Read only: its name; how many symbols it has (symbols are 0 to base - 1); the glyph scale it draws at.
+
+### `set.glyph(symbol), set.glyph(symbol, options)`
+
+The glyph for a symbol, at the origin with scale set.size: the glyphset's first variant, as glyphset.glyph gives, remembering the symbol it stands for (glyph.symbol). A blank symbol is a blank glyph.
+
+| argument | what it does | takes |
+|---|---|---|
+| `symbol` | Which symbol. | a whole number from 0 to base - 1. |
+
+| option | default | what it does | takes |
+|---|---|---|---|
+| `options.position` | the origin | As glyph.position. | as glyph.position. |
+| `options.scale` | the set's size | As glyph.scale. | as glyph.scale. |
+| `options.rotation` | 0 | As glyph.rotation. | as glyph.rotation. |
+| `options.skew` | 0 | As glyph.skew. | as glyph.skew. |
+
+### `set.glyphs(symbols)`
+
+The glyphs for symbols, as set.glyph gives each: for placing by hand, or for canvas.add(glyphs, set).
+
+| argument | what it does | takes |
+|---|---|---|
+| `symbols` | Which symbols. | a lock value of symbols, or an array of whole numbers, each from 0 to base - 1. |
+
+### `glyph.symbol`
+
+Read only: the symbol a glyph stands for, if a symbol set made it; (), for every glyph a glyphset makes.
+
+### `canvas.add(glyph, set), canvas.add(glyphs, set)`
+
+Adds what the set draws for glyphs made by its glyph and glyphs, each where it was placed: a simple set's in its style, a scripted set's as its script draws them. Returns the canvas.
+
+| argument | what it does | takes |
+|---|---|---|
+| `glyph` | What to draw. | a glyph from set.glyph, or an array of them. |
+| `set` | The set that made it. | a symbol set. |
+
+```rhai render=symbol_set
+let moons = symbol_set("moons");
+let glyphs = moons.glyphs([0, 1, 2, 3, 4, 5, 6, 7]);
+for (g, i) in glyphs { g.scale = 40.0; g.position = vec2(30 + i * 48, 30); }
+page.add(glyphs, moons);
+```
+
+![symbol_set](images/symbol_set.svg)
+
+### `set.text(symbols)`
+
+Symbols of the set as text: what every text call (write_line, write_at, write_block, write_inside_path, fit_text, fill_with_text, art::spiral_text) takes where it takes a string. The set's own style, glyph scale and paragraph are what the call's settings are laid over; its glyphset is always the set's (one given is ignored), and spans are left out. A blank symbol breaks words where a space would. A scripted set's script draws each placed glyph after the call has placed them.
+
+| argument | what it does | takes |
+|---|---|---|
+| `symbols` | Which symbols, in order. | a lock value of symbols, or an array of whole numbers, each from 0 to base - 1. |
+
+What the calls give: write_line, write_at, fit_text and art::spiral_text a symbolic; write_block and write_inside_path their map with a symbolic as canvas (write_inside_path's rest is the symbols that didn't fit, as symbol text); fill_with_text an array of canvases. A layout's flows and scatter_notes can't take symbol text.
+
+```rhai render=symbol_text
+let priests = symbol_set("priests");
+page.add(write_line(priests.text([0, 1, 2, 3, 4, 5, 6]), vec2(10, 40), #{}));
+page.add(write_at(priests.text([8, 9]), vec2(150, 110), #{ turn: 0.4 }));
+```
+
+![symbol_text](images/symbol_text.svg)
+
+### `symbolic.symbols, symbolic.symbol_set`
+
+A symbolic is what the text calls give for symbol text: a canvas in every respect (add, move, bounds, page.add, avoidance trees, commit_to_editor), which remembers the symbols and set it was drawn from. Both are properties, which can be read and set: setting one draws it again, the same call from the generator as it stood, the moves made since (translate_by, scale_by, rotate_around) made again; strokes added to it afterwards stay as they are, and the rest of the script draws as it would without. symbol_set can be set to a symbol set or its name; the symbols must be below the set's base. The visual editor changes them through commit_to_editor: edits/ENTRY.json's symbols and symbol_set keys are applied at the call.
+
+| argument | what it does | takes |
+|---|---|---|
+| `symbols` | The symbols it's drawn as. | an array of whole numbers, each from 0 to base - 1. |
+| `symbol_set` | The set they're of. | a symbol set, or its name. |
+
+```rhai render=symbolic
+let marks = symbol_set("dread_stars");
+let mark = write_at(marks.text([0]), vec2(60, 60), #{ type: #{ glyph_scale: 90.0 } });
+mark.symbols = [3];
+page.add(mark);
+```
+
+![symbolic](images/symbolic.svg)
 
 ## Books
 
@@ -2550,17 +2698,17 @@ Attaches an illustration, an illustrations/TYPE.rhai file drawing the values wir
 
 ### `lock.source(id, kind, name), lock.source(id, kind, name, options)`
 
-Adds a source: a journal file the chain draws on, its value at port ID.value, which lock.connect wires as a lock's output is. Content is data, so it can feed a lock's input (its value fixed there) or an illustration's; a style, glyphset or layout only an illustration's, at an input typed TextStyle, Glyphset or Layout, made when the illustration draws (text_style(name, options), glyphset(name), layout(name, options)). Returns the chain.
+Adds a source: a journal file the chain draws on, its value at port ID.value, which lock.connect wires as a lock's output is. Content is data, so it can feed a lock's input (its value fixed there) or an illustration's; a style, glyphset, layout or symbol set only an illustration's, at an input typed TextStyle, Glyphset, Layout or SymbolSet, made when the illustration draws (text_style(name, options), glyphset(name), layout(name, options), symbol_set(name, options)). Returns the chain.
 
 | argument | what it does | takes |
 |---|---|---|
 | `id` | Its name in the chain. | a string, not empty, with no dot, that no lock, illustration or source in the chain has. |
-| `kind` | What it draws on. | content, style, glyphset or layout. |
-| `name` | Which file. | a content, text style, glyphset or layout name. |
+| `kind` | What it draws on. | content, style, glyphset, layout or symbolset. |
+| `name` | Which file. | a content, text style, glyphset, layout or symbol set name. |
 
 | option | default | what it does | takes |
 |---|---|---|---|
-| `options.options` | the file's defaults | A style's or layout's options. | a map. |
+| `options.options` | the file's defaults | A style's, layout's or symbol set's options. | a map. |
 | `options.base` | none | Content only: text content (.txt, .md) as symbols in this base, what doesn't fit dropped; without it, text is a String. A .json content file's symbols are in its own base; a .graph file is a Graph, and takes none. | a whole number from 2 to 27. |
 
 ### `lock.illustrations()`
@@ -2757,6 +2905,13 @@ Lock types: the files in locks/, with the options lock.add gives them and the va
 | `huffman` | A Huffman code built from a corpus: symbols common in it get short codes, rare ones long, rewriting text from input_base to output_base. Ties go to the lower symbol, so a corpus always gives the same code. Takes corpus and plain_text, both in input_base; gives cipher_text, in output_base, and corpus, which unlocking rebuilds the code from. | options: input_base and output_base (required), whole numbers from 2 to 27; smoothing (optional, default 1), a whole number of at least 0, how many times every symbol counts besides its uses in the corpus. With smoothing 0, a symbol the corpus lacks has no code, and locking text with one fails. |
 | `keyed_doublering` | A doublering whose order is an input. Takes plain_text and base_ordering, gives cipher_text and base_ordering, in the base. | options: base (required), an even whole number. |
 | `maze_lock` | The text written into a square maze's cells, one symbol each, in walking order, the maze laid out by the seed. Takes maze_text (in input_base) and random_seed (base 10); gives generated_maze, random_seed and text_length. | options: input_base (required), a whole number from 2 to 27; strategy (optional, default LeftHanded), LeftHanded or RightHanded. |
+| `rail_fence` | The text written in a zigzag, down and up across rails rails, then read off rail by rail; offset starts the zigzag that many places along. Takes plain_text, gives cipher_text, in the base. | options: base (required), a whole number from 2 to 27; rails (default 3), a whole number of at least 2; offset (default 0), a whole number of at least 0. |
+| `columnar_transposition` | The text written in rows under the key, a column to each of the key's symbols, then read off column by column, the columns in the order of their key symbols (alike, leftmost first). Takes plain_text and key, gives cipher_text and key. | options: base (required), a whole number from 2 to 27; key_base (default 27), a whole number from 2 to 27. |
+| `book_cipher` | Each letter written as where to find it in a book the reader holds: WORD.LETTER, the word counted from the book's first and the letter from the word's first, or with mode initial a word's number alone, standing for its first letter; a space is /. A letter the book holds more than once takes any of its places, picked by the seed; one it doesn't hold is an error naming it. Takes plain_text (base 26 or 27) and book, a String; gives references, a String, and book. | options: base (default 27), 26 or 27; mode (default letter), letter or initial; seed (default 0), a whole number. |
+| `labyrinth_lock` | The text hidden along the one way through a round labyrinth, a symbol to a cell from the entrance in to the heart, every other cell given a symbol picked from the text's, to mislead; as many rings as the way needs, at least rings. Takes text; gives labyrinth, a Labyrinth (plain data: base, sectors, entrance, heart, inward, clockwise, symbols; the labyrinth illustration draws it), and text_length. | options: base (required), a whole number from 2 to 27; seed (default 0), a whole number; rings (default 4), a whole number from 2 to 16. |
+| `steiner_triples` | Each letter written as points of the Steiner triple system S(2, 3, 13), whose 26 triples are the 26 letters: with points 2 two of its triple's three points, all three with 3, which two and in what order picked by the seed; a space is one point over again. Takes plain_text (base 26 or 27), gives points, in base 13. | options: base (default 27), 26 or 27; points (default 2), 2 or 3; seed (default 0), a whole number. |
+| `steiner_cipher` | A cipher of thirteen symbols by the Steiner triple system: each symbol and the key's symbol under it, the key repeating, are two points of a triple, and the cipher's symbol is the third; a symbol under itself stays as it is. Locking the cipher text with the same key gives the plain text back. Takes plain_text and key, gives cipher_text and key, all base 13. | none. |
+| `star_alignment` | The month some wandering stars next stand in one line, hidden in sightings of where each stood on earlier nights, in a 13-month calendar: each star circles an orbit of its own, a house a month, and the alignment is where every orbit has its first house (the Chinese remainder theorem). A date is a number in base 13: its year's digits, then its month, 0 to 12. Takes alignment, in base 13; gives sightings, #{ periods, sightings: [#{ date, houses }] }, each sighting a year (apart) after the last, the house each star stood in, 0 its first. Unlocking reckons the alignment from the last sighting and checks the others agree. Periods of 13 or a multiple are refused. | options: periods (default [5, 7, 8]), 3 to 5 whole numbers from 2 to 24; sightings (default 2), a whole number from 1 to 12; apart (default 13), months between sightings; seed (default 0), which night before the alignment the last sighting is. |
 | `shift_cipher` | Every symbol moved shift places along the base, wrapping round (a Caesar cipher). Takes plain_text, gives cipher_text. | options: base (required), a whole number from 2 to 27; shift (required), a whole number, negative moving the other way. |
 | `shift_vigenere` | The key shifted along the alphabet, then used as a Vigenere key; a composite of shift_cipher and vigenere_cipher, base 27. Takes key and plain_text, gives cipher_text and shifted_key. | options: shift (optional, default 3), a whole number. |
 | `star_chart` | An art node: a HuffmanCode drawn as a StarChart, every node a named star, every link carrying its digit, the sky cut into constellations of at most most_stars stars, a page each, every one fitted to its page; neighbouring pages share a star under the same name. The root is Shiathri, a letter's star is named for its letter (the space's, in base 27, Vacii). Unlocking reads only what the pages show: it joins them on their shared names, takes the root as the star no link points to, a leaf's symbol from its name's first letter and each digit from its link. Takes code, gives chart. | options: input_base and output_base (required), the code's (input_base 27 or a base of letters, 2 to 26 but not 10); most_stars (default 9), at least 2; seed (7), the sky's shape; name_seed (11), the names; size_seed (29), the stars' sizes; star_size (22), the biggest star's radius as it's laid out; width and height (1000 and 860), each page's sky; label_size (24), the size each star's number is written at (star_pages' digit_style's), its label given room 1.1 of that across and 1.4 down; label_gap (14), the label's distance from the star, as art::constellations takes it. |
@@ -2771,6 +2926,7 @@ Helper types: the files in helpers/, lock files that transform data between lock
 | `split_symbols` | A text cut into pieces each as long as the first, the last ones shorter or empty. Takes plain_text, gives output_0 to output_N. | options: base_n (required), a whole number from 2 to 27; output_count (required), a whole number of at least 1. |
 | `string_to_symbols` | A string read as symbols in the base, made to fit it first as symbols' lenient option makes it: in capitals, what the base can't write dropped. Takes text, a String; gives symbols, in the base. Unlocking writes the symbols back out as text, the text as it was fitted. | options: base (required), a whole number from 2 to 27; strict (optional, default false), true or false: the text must be written in the base already, as symbols(base, text) reads it, and text the base can't write is an error. |
 | `symbols_to_string` | Symbols written out as a string, a letter each: in bases up to 26 the base's first letters, A for 0 (base 10 too, A to J, not digits as symbol_text writes it); in base 27 a space for 0, then A to Z. Takes symbols, in the base; gives text, a String. Unlocking reads the string back, its letters in either case; a character the base hasn't is an error. | options: base (required), a whole number from 2 to 27. |
+| `symbols_to_digits` | Each symbol written as digits in another base, the biggest first, width digits to a symbol (as few as hold every symbol, with width 0): what the symbol_rows illustration draws a text's letters as, in moons or eyes. Takes symbols, in input_base; gives digits, in output_base. Unlocking reads the digits back, width at a time. | options: input_base and output_base (required), whole numbers from 2 to 27; width (default 0), a whole number: 0, or as many digits as it takes at least. |
 
 ## Value Kinds
 
@@ -2837,7 +2993,15 @@ Illustrations: the files in illustrations/, with the options lock.attach or illu
 | key | what it does | takes |
 |---|---|---|
 | `eye` | An eye stood on end, its corners top and bottom: one text's symbols round its iris as balanced-ternary glyphs, clockwise from the top, and another's filling its pupil, as large as they fit; each symbol shifted to sit round 0. One canvas, width across and length down. Draws outer, symbols in outer_base, round the iris, and inner, symbols in inner_base, in the pupil; Welcome Home's eye holds a substitution cipher's ordering and cipher text. Drawn in lid_style, ring_style, iris_style and pupil_style, TextStyles, each whole: the iris's and pupil's glyphs are their types' glyphsets' (whose A to M and N to Z are 1 to 13 and -13 to -1), the iris's at iris_style's size or smaller if the ring hasn't room, the pupil's as large as all of it fits up to pupil_style's size, each glyph set off true by its hand's glyph jitter. Unwired, rough ink pens inked as its options say and balanced ternary. | options: outer_base and inner_base (27 and 27), whole numbers from 2 to 27; length and width (1640 and 717.2), the eye's size; top_ink and bottom_ink (#09603d and #0b2a1c), its lines' gradient, top to bottom; inner_ink (#000000), the pupil's glyphs; pupil_size (40), the pupil's glyphs' size unwired; pupil (lines), how the pupil's text goes: lines, across it line under line, justified and centred, or spiral, round and round out from its middle as art::spiral_text writes it; pupil_minimum_scale (0.33), with pupil spiral, the smallest its last turn's glyphs shrink to, as a fraction of the rest. |
-| `maze_glyphs` | A Maze on a grid, cell by cell: its corridors in one style and each cell's symbol (0 to 26) in another. One canvas. Draws maze, a Maze, in corridor_style and glyph_style, TextStyles, each whole: the glyphs are glyph_style's glyphset's at its size, or smaller if a cell hasn't room (0.8 of one), leant as it leans them; in balanced-ternary digits, a symbol is its digit shifted to sit round 0, in any other glyphset its letter (0 a space, 1 to 26 A to Z). Unwired, ink pens in the corridors and glyphs inks and balanced ternary as big as the cells hold. | options: cell (70), a cell's size; corridors and glyphs (#9b2318 and #2b1d12), the inks of the styles' fallbacks. |
+| `maze_glyphs` | A Maze on a grid, cell by cell: its corridors in one style and each cell's symbol (0 to 26) in another. One canvas. Draws maze, a Maze, in corridor_style and glyph_style, TextStyles, each whole: the glyphs are glyph_style's glyphset's at its size, or smaller if a cell hasn't room (0.8 of one), leant as it leans them; in balanced-ternary digits, a symbol is its digit shifted to sit round 0, in any other glyphset its letter (0 a space, 1 to 26 A to Z). Unwired, ink pens in the corridors and glyphs inks and balanced ternary as big as the cells hold. The symbol_set input, a SymbolSet, draws the cells' symbols instead when it's wired: each the set's own at its size, or smaller if a cell hasn't room, upright. | options: cell (70), a cell's size; corridors and glyphs (#9b2318 and #2b1d12), the inks of the styles' fallbacks.; editor (empty), which commits each cell's symbol to the visual editor as EDITOR_N (with symbol_set wired). |
+| `symbol_rows` | Symbols written as the marks of a symbol set, row after row, each in a square its size across: a cipher text set out plainly, or a moon, an eye or a star a symbol. One canvas. Draws symbols (a lock value) in symbol_set, a SymbolSet; unwired, the priests'. | options: per_row (12); group (0), the marks of a row in groups of that many; size (0, the set's own); gap (14), group_gap (30) and row_gap (22); editor (empty), which commits each mark to the visual editor as EDITOR_N. |
+| `star_sightings` | Sightings (star_alignment's) drawn as plates of the sky, one to each sighting: the star the others circle in the middle, round it each wandering star's orbit between broad dark bands, a tick at every house, a star in its house that month, one line up through every orbit's first house; round the orbits a band of the year's 364 days with the month filled in, thirteen month glyphs, and the year and month again under the sky; a star at each corner, a glory of rays and a ruled frame. One canvas each, size across and down. Every family of marks is a symbol set and symbols (design slots, each checked against its set): markers_set with wanderers (default 0, 1, 2 of the set) and centre (default 4), corners_set with corners (default 1 4 1 4), months_set (the priests'), month_marks_set with month_marks (13, default 0). Unwired, the dread_stars, the priests and small_marks. | options: size (900); seed (0) and splatter (14), how much ink was spilt on each plate; editor (empty), which commits each mark as EDITOR.PLATE.SLOT_N; ink and blood, the inks. |
+| `labyrinth` | A Labyrinth drawn round: rings of cells about its heart, walls with a gap wherever one opens on the next, the outer wall open at the entrance, and each cell's symbol in its middle: what labyrinth_lock hides a text along the one way through. One canvas, size across and down. Draws labyrinth in wall_style and heart_style (TextStyles), and symbol_set, a SymbolSet, its symbols at glyph_size or smaller. Unwired, near-black pens and the fine letters in red. | options: size (900); heart (basic_eye), a glyph of the symbols glyphset in the heart, or an empty string; turned (false), each symbol turned to its ring; glyph_size (60), 0 for the set's own; editor (empty), EDITOR_RING_CELL; wall_ink and glyph_ink. |
+| `spider_web` | Symbols caught in an old orb web, one in each gap, read along its spiral thread clockwise from the top spoke: the hub off the middle, spokes at odd angles, turns unevenly apart, threads sagging their own way and torn or hanging past the symbols. Nothing waits at the hub. Draws message in thread_style (a TextStyle) and symbol_set, a SymbolSet. One canvas, size across and down. | options: base (27); spokes (9), 5 to 32; size (900); sag (0.25); ragged (1), from 0 (a web spun true) to 1; seed (0); turned (true); glyph_size (40); editor (empty), EDITOR_N along the thread. |
+| `serpent` | Symbols written along a snake's back (art::snake), from behind its head to where its tail thins, each turned to the way its body runs; with per_snake a snake for each run of symbols, one under another. Draws message in snake_style and symbol_set. One canvas, width across at most. | options: base (27); width (1000); per_snake (0); winding (1.3), 1.1 to 2; seed (0); row_gap (30); glyph_size (30); editor (empty), EDITOR_ROW_N. |
+| `sigil` | A word drawn as one line, as sigils are: the base's symbols in a ring, clockwise from the top, and the line traced from the word's first symbol to its next and on to its last, starting in a small circle and ending in a bar across it, each return to a symbol stopping farther in. Draws word and ordering (the ring, default the symbols in order) in line_style and symbol_set. One canvas, size across and down. | options: base (27); size (700); show_ring (true), false for the line alone; bordered (false); editor (empty), EDITOR_N round the ring; line_ink and glyph_ink. |
+| `orrery` | Symbols as worlds circling twin suns, a world to a symbol, each on an orbit of its own, the first symbol's innermost: a moon in its phase, a black star or a ringed world by the seed, on the line from the suns to its symbol round the rim, with dust between. Draws worlds and ordering in orbit_style and world_style (TextStyles) and symbol_set, for the rim. One canvas, size across and down. | options: base (27); size (900); show_ring (true); seed (0); stars (40), specks of dust; editor (empty), EDITOR_N round the rim; orbit_ink, world_ink and glyph_ink. |
+| `steiner_wheels` | Groups of points drawn as little wheels, a wheel to every points of them, row after row: a ring with a tick at each of the base's places, the points dots at their places joined up (two by a line, three by a triangle); what steiner_triples writes a letter as. With labels, a character under each wheel. One canvas. Draws points, labels (a String) in ring_style, line_style and label_style (TextStyles). | options: base (13); points (3); per_row (9); size (100); gap (24) and row_gap (24); label_size (28); ring_ink and line_ink. |
 | `star_pages` | A StarChart page by page, a canvas each, page-sized: its constellation's name over it, each star's mark, each link's digit in balanced-ternary marks, each star numbered on its page at its label, and an index of the numbers to the names in the bottom right corner; leaves in red. Draws chart, a StarChart, in heading_style (the name, the index's heading at 0.64 of its size, the rule), line_style (links and stars, the marks reaching its glyph scale), leaf_style, digit_style (the numbers, in the index at 0.9 of its size: in balanced-ternary digits a glyph to three trits, in any other glyphset decimal), name_style and leaf_name_style, TextStyles, each whole; the index is spaced by the numbers' and names' sizes. Unwired, near-black and red ink pens, the heading in loche_upper, the numbers in balanced_ternary and the names in plain, at the sizes its options say. The star_chart's label_size should be digit_style's size. | options: width and height (1200 and 1600), the canvas; sky_x and sky_y (100 and 180), where the chart's sky starts; large_star (33), the size from which a star takes large_shape rather than small_shape; large_shape and small_shape (corona and rayed), each one of celestial, corona, orrery, rayed, sparkle or star (anything else a disc); heading_size, digit_size and name_size (44, 24 and 22), the unwired heading's, numbers' and names' sizes; index_x and index_y (600 and 1110), where the name index starts. |
 | `symbol_ring` | A base's symbols in a ring, clockwise from the top, each joined by a dashed line to the symbol step on from it, round and round (base 5, step 2 is a five-pointed star; where base and step share a factor, a figure for each cycle), and in the middle the step's symbol. With bordered, each symbol round the ring is ringed and the dashes run from border to border; with center_bordered, the middle's is; the dashes stop short of the middle's symbol. One canvas, size across and down. Draws no lock value, in glyph_style (the symbols and their borders) and line_style (the dashes), TextStyles, each whole: the glyphs are glyph_style's glyphset's own, never its fallback's, at its size, or smaller if the ring hasn't room, leant as it leans them, the middle's center_scale times that; in balanced-ternary digits, a symbol is its digit shifted to sit round 0 (14 to 26 as -13 to -1), in a glyphset with a whole alphabet its letter, in capitals or else lowercase (0 a space, a gap in the ring, 1 to 26 A to Z), and in any other the glyph that far along its characters, of which it needs at least base. Unwired, ink pens in glyph_ink and line_ink and loche_upper as big as the ring holds. | options: base (27), the symbols, a whole number from 2 to 27; step (5), a whole number from 0 (no lines, and in the middle symbol 0, blank in letters) to base - 1; steps (0), 0 for every line, or how many lines of the walk from the top (0, step, 2 step...) to draw, then half the next, ending in an arrow (stopping short of the middle symbol), a walk back at the top before then drawn closed without one; bordered (true), whether the ring's symbols are ringed; center_bordered (true), whether the middle's is; size (900), the canvas's width and height; center_scale (3), the middle symbol's size over the ring's, at most half the ring's radius; dash and gap (14 and 10), a dash's and a gap's length, stretched so each line ends on a dash; glyph_ink and line_ink (#2b1d12 and #9b2318), the inks of the styles' fallbacks. |
 | `rearranged_symbol_ring` | A base's symbols in a ring as taking step's path rearranges them: clockwise from the top, in the order symbol_ring's walk by step reaches them (0, step, 2 step...), so place k holds symbol k times step round the base (base 5, step 2 is 0 2 4 1 3; where base and step share a factor, the walk is back at the top early and the ring repeats; step 0 takes no path, and leaves every place empty), and in the middle the step's symbol. With bordered, each symbol round the ring is ringed; with center_bordered, the middle's is. It is symbol_ring's ring, with the same options laid out alike. One canvas, size across and down. Draws no lock value, in glyph_style (the symbols and their borders), a TextStyle, whole, its glyphs chosen, sized and leant as symbol_ring's. Unwired, an ink pen in glyph_ink and loche_upper as big as the ring holds. | options: base (27), the symbols, a whole number from 2 to 27; step (5), a whole number from 0 (no path: every place empty, and in the middle symbol 0) to base - 1; bordered (true), whether the ring's symbols are ringed; center_bordered (true), whether the middle's is; size (900), the canvas's width and height; center_scale (3), the middle symbol's size over the ring's, at most half the ring's radius; glyph_ink (#2b1d12), the ink of the style's fallback. |
@@ -2921,7 +3085,7 @@ A value kind's default drawing as a parts map for canvas.add(parts, styles): eac
 
 ## Journals and Their Files
 
-A journal is a directory: its manifest, journal.json; its entries, entries/NAME.rhai, each a script building a journal_entry of pages; and files of its own, each kind in a directory of its own: locks/, helpers/, layouts/, illustrations/, chains/ and lib/ (rhai files), styles/ and glyphsets/ (NAME.json), content/ (NAME.txt, a String; NAME.md, Markdown; NAME.json, Symbols: { base, text }, with strict: true or not, or { base, symbols }; or NAME.graph, a Graph), and images/ (NAME.png or NAME.jpg, pictures for image(name)). They stand in front of the built-in library's, webapp/library/, which has the same directories: a journal's file stands in for the library's of the same name. Beside them, edits/ENTRY.json holds the visual editor's edits to the canvases entry ENTRY commits to it (canvas.commit_to_editor); the library has none. Each entry runs on its own, sharing the journal's files but not code with the other entries.
+A journal is a directory: its manifest, journal.json; its entries, entries/NAME.rhai, each a script building a journal_entry of pages; and files of its own, each kind in a directory of its own: locks/, helpers/, layouts/, illustrations/, chains/ and lib/ (rhai files), styles/ and glyphsets/ (NAME.json), symbolsets/ (NAME.json or NAME.rhai: see Symbol set files), content/ (NAME.txt, a String; NAME.md, Markdown; NAME.json, Symbols: { base, text }, with strict: true or not, or { base, symbols }; or NAME.graph, a Graph), and images/ (NAME.png or NAME.jpg, pictures for image(name)). They stand in front of the built-in library's, webapp/library/, which has the same directories: a journal's file stands in for the library's of the same name. Beside them, edits/ENTRY.json holds the visual editor's edits to the canvases entry ENTRY commits to it (canvas.commit_to_editor); the library has none. Each entry runs on its own, sharing the journal's files but not code with the other entries.
 
 journal.json: the journal's manifest, a JSON object.
 
@@ -2946,6 +3110,8 @@ edits/ENTRY.json: the visual editor's edits to entry ENTRY's committed canvases,
 | `canvases.NAME.warp` | none | Its box's corners pinned: how far each is moved (top left, top right, bottom right, bottom left), the points between moved in between. | four [x, y] pairs. |
 | `canvases.NAME.hidden` | false | Leaves its strokes undrawn, though in its bounds. | true or false. |
 | `canvases.NAME.locked` | false | Keeps the editor from picking it on the page. Changes nothing drawn. | true or false. |
+| `canvases.NAME.symbols` | none | For a symbolic canvas: the symbols it's drawn as, in place of the script's. | an array of whole numbers, each below the symbol set's base. |
+| `canvases.NAME.symbol_set` | none | For a symbolic canvas: the symbol set its symbols are of, in place of the script's. | a symbol set's name. |
 | `canvases.NAME.ink` | none | Its strokes re-inked: color, one colour for all of them in place of their own; opacity, their alpha times this; weight, their brush sizes times this. | an object of color (a colour), opacity (0 to 1) and weight (a positive number), each optional. |
 
 glyphsets/NAME.json: a glyphset, a JSON object. Glyph units span about -1 to 1, y down; a glyph scale is 2 of them.
@@ -3223,6 +3389,27 @@ Optional: the page's size, #{ width, height }, positive numbers, given the optio
 
 Optional, in a layout file: what to typeset to preview it, as the web editor does and cargo test checks: typeset's options, #{ flows, roles, art, ... }.
 
+### Symbol set files
+
+symbolsets/NAME.json or symbolsets/NAME.rhai: a symbol set, loaded by symbol_set(name); the library's symbolsets/README.md says the same. A name can't be both. A simple set is a JSON object, a glyphset's glyphs drawn in a style; a scripted set is a script that gives the same and draws each symbol itself. Its description is the file's description key, or its opening comment.
+
+| key | default | what it does | takes |
+|---|---|---|---|
+| `description` | none | What it's for, as the web editor lists it. | a string. |
+| `glyphset` | required | The glyphset its glyphs come from. | a glyphset's name. |
+| `glyphs` | all the glyphset's own, in order | The glyphs' names in symbol order, so the base is how many there are; null is a blank symbol, set as a space. | an array of 1 to 1024 glyph names (the glyphset's own, not its fallbacks') and nulls. |
+| `glyph`, `count` | none | In place of glyphs, one glyph that many times: for a scripted set whose script draws a mark in the glyph's box. | a glyph's name, and a whole number from 1 to 1024. |
+| `style` | required in a simple set | A styles/ file whose pen, hand and size draw the glyphs (its `size` and `color` are the set's options). A scripted set's hand is only this, its inks being its script's. | a text style's name. |
+| `size` | the style's | The glyph scale it draws at. | a positive number. |
+
+A scripted set defines:
+
+| function | gives |
+|---|---|
+| `options()` | Optional: `#{ NAME: default }`, its options, as an illustration's. |
+| `symbols(o)` | The map above, `#{ glyphset, glyphs or glyph and count, style, size }`, with the options `o` given: so its base can follow them. One of style and size must give a size. |
+| `draw(o, symbol, glyph)` | A canvas for each non-blank symbol: `symbol` the whole number, `glyph` its glyph as placed (position, scale, rotation, skew). Text keeps clear of the glyph's outline, not of what's drawn: pick a glyph whose box covers it. |
+
 ### Style files
 
 styles/NAME.json: a text style, a JSON object of every setting a style, type and paragraph have, as the web editor's style form sets them, every key optional; text_style(name) gives what it describes. Styles were once scripts, styles/NAME.rhai: the web editor converts those a file can say all of when it loads a journal, and says what's stopping the others; nothing else reads them.
@@ -3261,21 +3448,35 @@ The built-in library, webapp/library/, holds what any journal can use; a journal
 | `the_four_divine` | Base 4 digits, written a, i, l and v. |
 | `thirteen_black_priests` | Base 13 digits, written 0 to 8, A, E, f and s. |
 
+| symbol set | what it draws |
+|---|---|
+| `letters`, `plain_letters`, `old_letters`, `fine_letters` | Space then A to Z (a to z in `old_letters`'s eldritch glyphs), base 27: in loche capitals and a heavy pen, plain and easy to read, an old drying hand, and a fine pen for small marks. |
+| `ternary` | A balanced-ternary glyph for each base-27 symbol, 0 to 13 as they are, 14 to 26 as -13 to -1. |
+| `priests`, `four_divine` | The thirteen black priests' digits (base 13), the four divine's (base 4), in a heavy pen. |
+| `dread_stars` | Five stars that aren't right (art::star: an eye in lashes, a spiral, a thing that weeps, a burst of needles, a banded disc), inked in blood and ink. Options: ink, blood, seed, reach. |
+| `moons` | The moon in its phases, d / phases of the way through its month, dark side hatched. Options: phases (8), ink. |
+| `gazes` | Eyes (art::eye) each looking a way: 3 ways left, ahead and right; 5, ahead, up, right, down and left; 9, ahead then up and clockwise round the compass. Options: ways (9), ink, iris, seed. |
+| `small_marks` | A lozenge, a dot, a cross and a ring, to set between things. Option: ink. |
+
 | file | what it is |
 |---|---|
-| `locks/doublering`, `keyed_doublering`, `huffman`, `huffman_apply`, `huffman_encode`, `maze_lock`, `shift_cipher`, `shift_vigenere`, `star_chart`, `substitution_cipher`, `vigenere_cipher` | Lock types (see Locks for each's options). |
-| `helpers/merge_alpha`, `split_symbols`, `string_to_symbols`, `symbols_to_string` | Helper types, lock files that join, cut and convert values between locks. |
-| `illustrations/eye`, `graph_map`, `hidden_message`, `joined_symbol_ring`, `maze_glyphs`, `rearranged_symbol_ring`, `star_pages`, `styled_text`, `symbol_ring`, `trit_message` | Illustrations (see Value Kinds for what each draws). |
+| `locks/doublering`, `keyed_doublering`, `huffman`, `huffman_apply`, `huffman_encode`, `maze_lock`, `shift_cipher`, `shift_vigenere`, `star_chart`, `substitution_cipher`, `vigenere_cipher`, `rail_fence`, `columnar_transposition`, `book_cipher`, `labyrinth_lock`, `steiner_triples`, `steiner_cipher`, `star_alignment` | Lock types (see Locks for each's options). |
+| `helpers/merge_alpha`, `split_symbols`, `string_to_symbols`, `symbols_to_string`, `symbols_to_digits` | Helper types, lock files that join, cut and convert values between locks. |
+| `illustrations/eye`, `graph_map`, `hidden_message`, `joined_symbol_ring`, `maze_glyphs`, `rearranged_symbol_ring`, `star_pages`, `styled_text`, `symbol_ring`, `trit_message`, `labyrinth`, `orrery`, `serpent`, `sigil`, `spider_web`, `star_sightings`, `steiner_wheels`, `symbol_rows` | Illustrations (see Value Kinds for what each draws). |
+| `chains/moonlit_labyrinth` | A chain: a secret locked under a key (vigenere_cipher), the cipher text hidden along a labyrinth's one way (labyrinth_lock, drawn by labyrinth), and the key as the moons' phases, two a letter (symbols_to_digits, symbol_rows with the moons set). |
 | `chains/raven_sky` | A chain: a message locked with a text's Huffman code, and the code drawn as a sky of named stars cut into constellations, a page each: the pages are the key. |
 | `layouts/bordered_title` | A title page: the title, a flourish and the credits centred in a ruled frame, inside a border of ornamental bands. |
 | `layouts/captioned_figure` | A figure filling the page, with its caption centred beneath it. |
 | `layouts/two_column_article` | An article in two columns, opening with a heading, a drop cap and a captioned illustration, the body running on over as many pages as it takes. |
 | `styles/plain_hand` | Easy-reading text in plain, written with an ink pen by a hand a little unsteady. |
+| `styles/heavy_glyphs`, `fine_glyphs`, `old_hand` | The pens the symbol sets' glyphs are drawn in: heavy rough ink in loche capitals; a fine ink pen in them, for small marks; a watcher's old drying hand in the eldritch glyphs. |
 | `styles/copper_heading` | Headings in copper, centred, with a broad calligraphy nib at a constant pressure; strong text gone over twice. |
 | `content/lorem` | Lorem ipsum, a paragraph of it. |
 | `lib/huffman` | Reading and writing text with a Huffman code given as its tree. |
 | `lib/names` | Names for stars and constellations, made from syllables. |
 | `lib/permutations` | Permutations of a base's symbols, as tables, for the substitution and doublering locks. |
+| `lib/inks`, `lib/plates`, `lib/chance`, `lib/digit_rows` | What the puzzle illustrations are drawn with: a few shared pens (contour, band, detail, fine, fill, pencil, wash, stain, soot); frames, ticks, rings of glyphs, blots and the design slots' check (plates::slot); numbers picked by a seed without moving the generator; and rows of marks. |
+| `lib/labyrinth`, `lib/steiner`, `lib/crt` | A round labyrinth's rings and its way through; the Steiner triple system S(2, 3, 13) (its 26 triples, and the pairs and third points they make); remainders, gcd, lcm and the Chinese remainder theorem. |
 | `lib/symbol_rings` | Rings of a base's symbols and the walks round them, for the symbol ring illustrations; arrowhead(tip, direction, size) draws an arrowhead. |
 
 ## Building

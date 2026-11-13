@@ -132,6 +132,9 @@ pub struct Symbol {
     padding: f32,
     /// Whether it joins its neighbours, if its glyphset joins up.
     joined: bool,
+    /// The symbol (a whole number of a symbol set) this glyph stands for,
+    /// if it was made by one; every glyph a glyphset makes has none.
+    stands_for: Option<u32>,
 }
 
 impl Symbol {
@@ -147,7 +150,17 @@ impl Symbol {
             skew_rad: 0.0,
             padding: 0.0,
             joined: false,
+            stands_for: None,
         }
+    }
+    /// The same glyph standing for `symbol` of a symbol set.
+    pub fn with_stands_for(mut self, symbol: u32) -> Symbol {
+        self.stands_for = Some(symbol);
+        self
+    }
+    /// The symbol it stands for, if it was made by a symbol set.
+    pub fn stands_for(&self) -> Option<u32> {
+        self.stands_for
     }
     /// The same glyph joining its neighbours or not, if its glyphset
     /// joins up.

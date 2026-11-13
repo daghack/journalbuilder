@@ -618,6 +618,7 @@ pub(super) fn source_value(ctx: &rhai::NativeCallContext, library: &LockLibrary,
         SourceKind::Style => ctx.call_native_fn::<Dynamic>("text_style", (source.name.clone(), source.options.clone())),
         SourceKind::Glyphset => ctx.call_native_fn::<Dynamic>("glyphset", (source.name.clone(),)),
         SourceKind::Layout => ctx.call_native_fn::<Dynamic>("layout", (source.name.clone(), source.options.clone())),
+        SourceKind::SymbolSet => ctx.call_native_fn::<Dynamic>("symbol_set", (source.name.clone(), source.options.clone())),
     };
     made.map_err(|e| format!("source '{}': {}", source.id, super::options::unwrap_runtime(&e)))
 }
