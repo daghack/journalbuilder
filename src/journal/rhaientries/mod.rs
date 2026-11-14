@@ -698,27 +698,27 @@ brush.color = \"darkredd\";", BRUSH)).expect_err("bad color should fail").to_str
             let p = new_path();
             p.move_to(vec2(0.0, 0.0));
             p.line_to(vec2(1.0, 0.0));
-            p.scale_by(2.0);
+            p.scale_by(vec2(2.0, 2.0));
             p.translate_by(vec2(1.0, 1.0));
             p
         "#);
         // ...and chaining (including on temporaries) gives the same result.
         let chained = path_string(r#"
             new_path().move_to(vec2(0.0, 0.0)).line_to(vec2(1.0, 0.0))
-                .scale_by(2.0).translate_by(vec2(1.0, 1.0))
+                .scale_by(vec2(2.0, 2.0)).translate_by(vec2(1.0, 1.0))
         "#);
         let reassigned = path_string(r#"
             let p = new_path();
             p = p.move_to(vec2(0.0, 0.0));
             p = p.line_to(vec2(1.0, 0.0));
-            p = p.scale_by(2.0);
+            p = p.scale_by(vec2(2.0, 2.0));
             p = p.translate_by(vec2(1.0, 1.0));
             p
         "#);
         // Chains on a variable change the variable by every call.
         let chained_variable = path_string(r#"
             let p = new_path();
-            p.move_to(vec2(0.0, 0.0)).line_to(vec2(1.0, 0.0)).scale_by(2.0).translate_by(vec2(1.0, 1.0));
+            p.move_to(vec2(0.0, 0.0)).line_to(vec2(1.0, 0.0)).scale_by(vec2(2.0, 2.0)).translate_by(vec2(1.0, 1.0));
             p
         "#);
         assert_eq!(statements, "M 1 1 L 3 1 ");
@@ -1120,9 +1120,8 @@ brush.color = \"darkredd\";", BRUSH)).expect_err("bad color should fail").to_str
         for (script, want) in [
             ("vec2(1.0 / 0.0, 0.0);", "vec2: x must be finite"),
             ("vec2(0.0, 0.0 / 0.0);", "vec2: y must be finite"),
-            ("new_circle(vec2(0.0, 0.0), 5.0).scale_by(0.0 / 0.0);", "scale_by: the scale must be finite"),
             // Finite, but past what paths hold.
-            ("c.add(new_circle(vec2(0.0, 0.0), 5.0).scale_by(1e300), s);", "canvas.add: the path has a non-finite"),
+            ("c.add(new_circle(vec2(0.0, 0.0), 5.0).scale_by(vec2(1e300, 1e300)), s);", "canvas.add: the path has a non-finite"),
             ("c.add(glyphset(\"symbols\").glyph(\"basic_eye\").scale_by(1e300), s);", "add_glyph: the path has a non-finite"),
         ] {
             let err = engine().build_entry_str(&format!("{}\n{}", setup, script)).expect_err(script).to_string();

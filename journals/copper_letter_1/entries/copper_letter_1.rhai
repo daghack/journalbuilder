@@ -16,6 +16,6 @@ let style = new_style(new_brush_style("darkred", "Rough Ink", 1.0, #{ min_pressu
 let copper = #{ glyphset: glyphset("copper") };
 
 for (paragraph, index) in paragraphs {
-	let maze_path = new_maze(10, 10, #{ seed: index }).path().scale_by(40.0);
+	let maze_path = new_maze(10, 10, #{ seed: index }).path().scale_by(vec2(40.0, 40.0));
 	journal_entry.add(new_page().add(maze_path.fit_text(paragraph, #{ style: style, type: copper })));
 }

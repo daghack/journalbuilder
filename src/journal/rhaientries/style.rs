@@ -346,6 +346,11 @@ impl Style {
     pub(super) fn brush_size(&self) -> f32 {
         self.brush.brush_size as f32
     }
+    /// How far its marks reach past their lines, as a canvas's bounds
+    /// count them: its brush size at its most pressure.
+    pub(super) fn stroke_width(&self) -> f32 {
+        (self.brush.brush_size * self.brush.max_pressure) as f32
+    }
     /// How wide its marks are, about, halfway between its least pressure
     /// and its most.
     pub(super) fn pen_width(&self) -> f32 {
@@ -479,7 +484,7 @@ impl From<&Style> for JournalStrokeStyle {
     fn from(style: &Style) -> Self {
         let b = &style.brush;
         JournalStrokeStyle {
-            width: (b.brush_size * b.max_pressure) as f32,
+            width: style.stroke_width(),
             color: b.color.clone(),
             color_jitter: None,
             brush: Some(Brush {

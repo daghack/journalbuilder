@@ -488,7 +488,7 @@ mod tests {
             let outer = new_canvas().add(c).translate_by(vec2(100, 0));
             outer.commit_to_editor("outer");
             journal_entry.add(new_page());
-            journal_entry.add(new_page().add(outer).add(c.copy().scale_by(2)));"#, BOX);
+            journal_entry.add(new_page().add(outer).add(c.copy().scale_by(vec2(2, 2))));"#, BOX);
         let (entry, engine) = run(NONE, &script);
         let reports = report(&entry, &engine.committed());
         let boxed = reports.iter().find(|r| r.name == "box").unwrap();

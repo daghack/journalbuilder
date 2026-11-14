@@ -27,7 +27,7 @@ use rand::rngs::StdRng;
 use rhai::{Array, Dynamic, Engine, Map, NativeCallContext};
 use serde::Serialize;
 
-use super::canvas::CanvasData;
+use super::canvas::{fit_of, CanvasData, Fit};
 use super::edits::{commit_as, SharedEditor};
 use super::markdown::FlowText;
 use super::random::SharedRng;
@@ -59,8 +59,10 @@ pub struct SymbolicData {
 #[derive(Clone, Copy, Debug)]
 enum Move {
     Translate(PVec),
-    Scale(f32),
+    Scale(PVec),
     Rotate(PVec, f32),
+    /// Sized to a box again: the drawing as it's drawn again fitted to it.
+    SizeTo(Fit),
 }
 
 /// What the visual editor is told of a committed symbolic: its symbols and
@@ -117,12 +119,12 @@ impl SymbolicData {
         *self.rng.borrow_mut() = saved;
         let mut fresh = result?;
         for step in &self.moves {
-            let step = *step;
-            fresh.transform_with(|path| match step {
-                Move::Translate(v) => path.translate_by(v),
-                Move::Scale(s) => path.scale_by(s),
-                Move::Rotate(point, rad) => path.rotate_around(point, rad),
-            });
+            match *step {
+                Move::Translate(v) => fresh.transform_with(|path| path.translate_by(v)),
+                Move::Scale(s) => fresh.transform_with(|path| path.scale_by(s)),
+                Move::Rotate(point, rad) => fresh.transform_with(|path| path.rotate_around(point, rad)),
+                Move::SizeTo(fit) => fresh.fit(fit)?,
+            }
         }
         let kept = self.drawn;
         let count = fresh.strokes.len();
@@ -165,6 +167,12 @@ fn plain_args(args: Vec<Dynamic>) -> Vec<Dynamic> {
 /// symbolic itself if that's the canvas it hands back, so chains go on.
 fn delegate(ctx: &NativeCallContext, name: &str, symbolic: &mut Symbolic, args: Vec<Dynamic>) -> RhaiResult<Dynamic> {
     let canvas = symbolic.borrow().canvas.clone();
+    // Its box, read before the canvas changes, as size_to reads it.
+    let fit = match (name, args.as_slice()) {
+        ("size_to", [target]) => Some(fit_of(target, &Map::new())?),
+        ("size_to", [target, options]) => options.clone().try_cast::<Map>().map(|options| fit_of(target, &options)).transpose()?,
+        _ => None,
+    };
     let mut all = vec![Dynamic::from(canvas.clone())];
     all.extend(plain_args(args.clone()));
     let result = ctx.call_native_fn::<Dynamic>(name, all)?;
@@ -172,7 +180,8 @@ fn delegate(ctx: &NativeCallContext, name: &str, symbolic: &mut Symbolic, args: 
     let number = |v: &Dynamic| v.as_float().or_else(|_| v.as_int().map(|n| n as f64)).ok().map(|n| n as f32);
     match (name, args.as_slice()) {
         ("translate_by", [v]) => if let Some(v) = point(v) { symbolic.borrow_mut().moves.push(Move::Translate(v)) },
-        ("scale_by", [s]) => if let Some(s) = number(s) { symbolic.borrow_mut().moves.push(Move::Scale(s)) },
+        ("scale_by", [s]) => if let Some(s) = point(s) { symbolic.borrow_mut().moves.push(Move::Scale(s)) },
+        ("size_to", _) => if let Some(fit) = fit { symbolic.borrow_mut().moves.push(Move::SizeTo(fit)) },
         ("rotate_around", [p, r]) => if let (Some(p), Some(r)) = (point(p), number(r)) { symbolic.borrow_mut().moves.push(Move::Rotate(p, r)) },
         _ => {}
     }
@@ -235,7 +244,7 @@ pub(super) fn register(engine: &mut Engine, editor: SharedEditor, library: Rc<Sy
         Shared::new(data)
     });
     // Every canvas function, on the symbolic's canvas.
-    for name in ["add", "translate_by", "scale_by", "rotate_around", "scatter_notes", "bounds"] {
+    for name in ["add", "translate_by", "scale_by", "size_to", "rotate_around", "scatter_notes", "bounds"] {
         engine.register_fn(name, move |ctx: NativeCallContext, s: &mut Symbolic| delegate(&ctx, name, s, vec![]));
         engine.register_fn(name, move |ctx: NativeCallContext, s: &mut Symbolic, a: Dynamic| delegate(&ctx, name, s, vec![a]));
         engine.register_fn(name, move |ctx: NativeCallContext, s: &mut Symbolic, a: Dynamic, b: Dynamic| delegate(&ctx, name, s, vec![a, b]));
@@ -357,6 +366,35 @@ mod tests {
         assert!(err.contains("outside the symbol set's 0-3"), "{}", err);
         let err = build(&mut e, r#"let s = write_at(symbol_set("priests").text([3]), vec2(0, 0), #{}); s.symbol_set = symbol_set("letters3");"#).err().unwrap_or_default();
         assert!(err.contains("outside symbol set 'letters3'"), "{}", err);
+    }
+
+    #[test]
+    fn scaling_and_sizing_are_made_again_when_it_draws_again() {
+        let mut e = engine(r#"{ "version": 1 }"#);
+        build(&mut e, r#"
+            fn near(a, b) { (a - b).abs() < 0.01 }
+            let p = symbol_set("priests");
+            // Scaled by a vec: across and down apart, made again.
+            let s = write_at(p.text([0]), vec2(0, 0), #{}).scale_by(vec2(3, 1));
+            assert(type_of(s) == "Symbolic", "scale_by gives the symbolic back");
+            s.symbols = [1];
+            let wide = write_at(p.text([1]), vec2(0, 0), #{}).bounds();
+            assert(s.bounds().width > wide.width * 2.0, "stretched again: " + s.bounds().width + " vs " + wide.width);
+            // Sized to a page, or a canvas: the new drawing fills the same box.
+            let page = new_page(#{ size: vec2(300, 200) });
+            let t = write_at(p.text([0]), vec2(500, 500), #{}).size_to(page, #{ padding: 10 });
+            assert(type_of(t) == "Symbolic", "size_to gives the symbolic back");
+            t.symbols = [1, 2, 3];
+            let b = t.bounds();
+            assert(near(b.min.x, 10) && near(b.min.y, 10) && near(b.max.x, 290) && near(b.max.y, 190), "refitted: " + b.min + " " + b.max);
+            let frame = new_canvas().add(new_rectangle(vec2(50, 50), 80, 40), default_style());
+            let u = write_at(p.text([2]), vec2(0, 0), #{}).size_to(frame, #{ keep_proportions: true });
+            u.symbols = [3, 0];
+            assert(u.bounds().height <= frame.bounds().height + 0.01 && u.bounds().width <= frame.bounds().width + 0.01, "kept within the frame");
+            // A symbolic as the target, as a canvas.
+            let v = new_canvas().add(new_circle(vec2(0, 0), 5), default_style()).size_to(t);
+            assert(near(v.bounds().min.x, t.bounds().min.x) && near(v.bounds().max.y, t.bounds().max.y), "sized to a symbolic");
+        "#).unwrap();
     }
 
     #[test]

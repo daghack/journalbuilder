@@ -38,7 +38,7 @@ fn fallbacks(o) {
 
 fn render(o, i) {
 	let c = new_canvas();
-	c.add(i.maze.path().scale_by(o.cell), i.corridor_style.style);
+	c.add(i.maze.path().scale_by(vec2(o.cell, o.cell)), i.corridor_style.style);
 	if i.symbol_set != () {
 		let set = i.symbol_set;
 		let size = min(set.size, o.cell * 0.8);

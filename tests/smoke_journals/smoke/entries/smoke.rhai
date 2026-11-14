@@ -36,7 +36,7 @@ shapes.add(
 // A symbol, transformed with chained calls, at a seeded random tilt.
 seed(3);
 shapes.add(
-	glyphset("symbols").glyph("basic_eye").scale_by(2).path().scale_by(30.0).rotate_around(vec2(0.0, 0.0), random_range(-0.3, 0.3)).translate_by(vec2(0.0, 0.0)),
+	glyphset("symbols").glyph("basic_eye").scale_by(2).path().scale_by(vec2(30.0, 30.0)).rotate_around(vec2(0.0, 0.0), random_range(-0.3, 0.3)).translate_by(vec2(0.0, 0.0)),
 	outline);
 
 // Text fitted along an arc.
@@ -81,7 +81,7 @@ journal_entry.add(new_page().add(shapes));
 let page_maze = new_maze(3, 3, #{ seed: 7 });
 if page_maze.cells().len() != 9 + 8 { throw "a 3x3 maze should have 9 nodes and 8 passages"; }
 let maze_path = page_maze.path();
-maze_path.scale_by(40.0);
+maze_path.scale_by(vec2(40.0, 40.0));
 let maze_canvas = maze_path.fit_text("Every path leads back here.", #{ style: text, type: #{ glyphset: font } });
 maze_canvas.add(maze_path, faint);
 
@@ -134,10 +134,10 @@ if lock.unlock(result).text("vig.plain_text") != plain.to_upper() {
 let maze = result.get("maze.generated_maze").maze();
 let cell_size = 24.0;
 let maze_canvas = new_canvas();
-maze_canvas.add(maze.path().scale_by(cell_size), faint);
+maze_canvas.add(maze.path().scale_by(vec2(cell_size, cell_size)), faint);
 for cell in maze.cells() {
 	maze_canvas.add(
-		glyphset("balanced_ternary").glyph((cell.symbol - 13)).scale_by(2).path().scale_by(cell_size / 2.0)
+		glyphset("balanced_ternary").glyph((cell.symbol - 13)).scale_by(2).path().scale_by(vec2(cell_size, cell_size) / 2.0)
 			.translate_by(vec2(cell.x * cell_size, cell.y * cell_size)),
 		outline);
 }
@@ -183,7 +183,7 @@ pale_pen.color = "#a8d68a";
 let bramble_inks = #{ vines: vines, leaves: new_style(pale_pen, steady), flowers: pale };
 snakes.add(plant, bramble_inks);
 // A small maze grown with brambles, and made a many-headed serpent.
-let maze_lines = new_maze(3, 2, #{ seed: 5 }).path().scale_by(50.0);
+let maze_lines = new_maze(3, 2, #{ seed: 5 }).path().scale_by(vec2(50.0, 50.0));
 let along = art::bramble_along(maze_lines.copy().translate_by(vec2(0.0, 300.0)), 30.0, #{ seed: 2 });
 snakes.add(along, bramble_inks);
 snakes.add(art::snake_along(maze_lines.copy().translate_by(vec2(300.0, 300.0)), 20.0, #{ seed: 2 }), pale);

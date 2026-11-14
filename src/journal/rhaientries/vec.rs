@@ -110,6 +110,17 @@ impl From<Vec2> for PVec {
     }
 }
 
+/// `scale_by`'s factors: a vec, how many times bigger across and down. A
+/// number, as `scale_by` once took, is refused with the vec to write.
+pub(super) fn scale_factors(caller: &str, v: Dynamic) -> RhaiResult<PVec> {
+    if let Ok(n) = v.as_float().or_else(|_| v.as_int().map(|i| i as f64)) {
+        return Err(format!("{}: the scale should be a vec, vec2(across, down): vec2({}, {}) for {} both ways", caller, n, n, n).into());
+    }
+    let type_name = v.type_name();
+    v.try_cast::<Vec2>().map(PVec::from)
+        .ok_or_else(|| format!("{}: the scale should be a vec, vec2(across, down), got {}", caller, type_name).into())
+}
+
 /// A vec of more than two coordinates (`vec3`, `vec4`): a value type
 /// with the arithmetic and measures `Vec2` has, bar the 2D-only `angle`
 /// and `rotated`.

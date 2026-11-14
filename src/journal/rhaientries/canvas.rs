@@ -7,9 +7,11 @@ use rand::RngCore;
 use rhai::{Dynamic, Engine, EvalAltResult, Map, NativeCallContext};
 use super::RhaiResult;
 
-use super::options::{apply_props, float};
+use super::options::{apply_props, at_least_zero, check_keys, float};
 use super::random::SharedRng;
-use super::{check_finite, check_name, Canvas, Path, Style, Vec2};
+use super::vec::scale_factors;
+use super::symbolic::canvas_of;
+use super::{check_finite, check_name, Canvas, Page, Path, Style, Vec2};
 use std::collections::HashMap;
 
 use crate::journal::canvas::Canvas as JournalCanvas;
@@ -121,9 +123,11 @@ pub(super) fn register(engine: &mut Engine, rng: SharedRng) {
             c.update(|data| data.transform(|p| p.translate_by(v)))
         })
         .register_fn("scale_by", |c: &mut Canvas, scale: Dynamic| -> RhaiResult<Canvas> {
-            let scale = float("scale_by", "the scale", &scale)? as f32;
+            let scale = scale_factors("canvas.scale_by", scale)?;
             Ok(c.update(|data| data.transform(|p| p.scale_by(scale))))
         })
+        .register_fn("size_to", |c: &mut Canvas, target: Dynamic| size_to(c, target, &Map::new()))
+        .register_fn("size_to", |c: &mut Canvas, target: Dynamic, options: Map| size_to(c, target, &options))
         .register_fn("rotate_around", |c: &mut Canvas, point: Vec2, rad: Dynamic| -> RhaiResult<Canvas> {
             let (point, rad) = (point.into(), float("rotate_around", "the angle", &rad)? as f32);
             Ok(c.update(|data| data.transform(|p| p.rotate_around(point, rad))))
@@ -232,14 +236,121 @@ fn add_parts(canvas: &mut Canvas, parts: Map, styles: Map, rng: &mut dyn RngCore
     Ok(canvas.update(|data| for (path, style) in added { data.add_path(path, &style, rng) }))
 }
 
+/// What `canvas.size_to` takes.
+const SIZE_TO_OPTIONS: [&str; 2] = ["padding", "keep_proportions"];
+
+/// What `canvas.size_to` was asked: the box to fill, the room to leave
+/// inside its edges, and whether to keep the canvas's proportions.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Fit {
+    target: Aabb,
+    padding: f32,
+    keep_proportions: bool,
+}
+
+const SIZE_TO: &str = "canvas.size_to";
+
+/// `canvas.size_to(target, options)`'s arguments: the target's box (a
+/// page's size from the origin, or another canvas's bounds, a symbolic's
+/// included) and the options.
+pub(super) fn fit_of(target: &Dynamic, options: &Map) -> RhaiResult<Fit> {
+    check_keys(SIZE_TO, options, &SIZE_TO_OPTIONS)?;
+    let padding = match options.get("padding") {
+        None => 0.0,
+        Some(padding) => at_least_zero(SIZE_TO, "padding", padding)? as f32,
+    };
+    let keep_proportions = match options.get("keep_proportions") {
+        None => false,
+        Some(keep) => keep.as_bool()
+            .map_err(|type_name| format!("{}: 'keep_proportions' should be true or false, got {}", SIZE_TO, type_name))?,
+    };
+    let target = if let Some(page) = target.clone().try_cast::<Page>() {
+        let size = page.size.ok_or_else(|| format!("{}: the page has no size to fill; set page.size", SIZE_TO))?;
+        Aabb::new(PVec::ZERO, size)
+    } else if let Some(other) = canvas_of(target) {
+        stroke_bounds(&other.borrow().strokes).ok_or_else(|| format!("{}: the target canvas is empty", SIZE_TO))?.1
+    } else {
+        return Err(format!("{}: the target should be a page or a canvas, got {}", SIZE_TO, target.type_name()).into());
+    };
+    Ok(Fit { target, padding, keep_proportions })
+}
+
+/// `canvas.size_to(target, options)`, the target read before the canvas is
+/// changed, so a canvas can be sized to itself.
+fn size_to(canvas: &mut Canvas, target: Dynamic, options: &Map) -> RhaiResult<Canvas> {
+    let fit = fit_of(&target, options)?;
+    canvas.borrow_mut().fit(fit)?;
+    Ok(canvas.clone())
+}
+
+impl CanvasData {
+    /// Scaled about the origin and moved so that what its strokes cover,
+    /// their widths included (as `canvas.bounds()` gives), fills the fit's
+    /// box less its padding all round: stretched across and down
+    /// separately, or, keeping its proportions, as big as fits and centred.
+    /// Brush sizes stay as they are, so the lines are scaled to leave room
+    /// for them; lines with no extent one way (a straight line across)
+    /// can't be stretched that way and are centred.
+    pub(super) fn fit(&mut self, fit: Fit) -> RhaiResult<()> {
+        let pad = PVec::splat(fit.padding);
+        let (from, to) = (fit.target.mins + pad, fit.target.maxs - pad);
+        // Which stroke's width reaches furthest past the lines can change
+        // as they're scaled, so it's fitted again from where it lands until
+        // it stays put (at once, when the strokes share a brush size).
+        for _ in 0..4 {
+            let (lines, covered) = stroke_bounds(&self.strokes).ok_or_else(|| format!("{}: the canvas is empty", SIZE_TO))?;
+            // The box the lines go in: the target's, less what the widths take.
+            let (from, to) = (from + (lines.mins - covered.mins), to - (covered.maxs - lines.maxs));
+            let (room, extents) = (to - from, lines.extents());
+            let mut scale = PVec::ONE;
+            for axis in 0..2 {
+                if extents[axis] > 0.0 {
+                    if room[axis] <= 0.0 {
+                        return Err(format!("{}: the target less the padding is too small for the strokes' widths", SIZE_TO).into());
+                    }
+                    scale[axis] = room[axis] / extents[axis];
+                }
+            }
+            if fit.keep_proportions {
+                let fits = (0..2).filter(|&axis| extents[axis] > 0.0).map(|axis| scale[axis]).fold(f32::INFINITY, f32::min);
+                scale = PVec::splat(if fits.is_finite() { fits } else { 1.0 });
+            }
+            let offset = (from + to) / 2.0 - lines.center() * scale;
+            self.transform(|p| {
+                p.scale_by(scale);
+                p.translate_by(offset);
+            });
+            if (scale - PVec::ONE).abs().max_element() < 1e-6 && offset.abs().max_element() < 1e-4 {
+                break;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// What the strokes' lines cover, and what they cover with their widths
+/// (as `canvas.bounds()` gives it), or `None` for no strokes.
+fn stroke_bounds(strokes: &[Stroke]) -> Option<(Aabb, Aabb)> {
+    let (mut lines, mut covered) = (Aabb::new_invalid(), Aabb::new_invalid());
+    for stroke in strokes {
+        let width = PVec::splat(stroke.style.stroke_width());
+        stroke.path.for_each_point(|point| {
+            lines.take_point(point);
+            covered.take_point(point - width);
+            covered.take_point(point + width);
+        });
+    }
+    (lines.mins.x <= lines.maxs.x).then_some((lines, covered))
+}
+
 fn vec(v: PVec) -> Dynamic {
     Dynamic::from(Vec2::new(v.x as f64, v.y as f64))
 }
 
 /// `canvas.bounds()`: what its strokes cover, their widths included.
 fn bounds(canvas: &mut Canvas) -> RhaiResult<Map> {
-    let jc: JournalCanvas = (&*canvas).into();
-    bounds_map(jc.bounds()).ok_or_else(|| "bounds: the canvas is empty".into())
+    stroke_bounds(&canvas.borrow().strokes).and_then(|(_, covered)| bounds_map(covered))
+        .ok_or_else(|| "bounds: the canvas is empty".into())
 }
 
 /// A box as scripts see it: `#{ min, max, center, width, height }`, or
@@ -295,5 +406,107 @@ mod tests {
         "#);
         assert!(ok);
         assert!(fails("new_canvas().bounds()").contains("bounds: the canvas is empty"));
+    }
+
+    /// Whether a canvas's bounds are `min`..`max`, near enough.
+    const NEAR: &str = r#"
+        fn near(b, min, max) { (b.min - min).length() < 0.001 && (b.max - max).length() < 0.001 }
+    "#;
+
+    #[test]
+    fn scale_by_takes_a_vec() {
+        let ok: bool = eval(r#"
+            let p = new_line(vec2(1, 1), vec2(2, 3)).scale_by(vec2(2, -3));
+            let c = new_canvas().add(new_line(vec2(1, 1), vec2(2, 3)), style).scale_by(vec2(3, 2));
+            let b = c.bounds();
+            p.bounds().min == vec2(2, -9) && p.bounds().max == vec2(4, -3)
+                && b.min == vec2(2, 1) && b.max == vec2(7, 7)
+        "#);
+        assert!(ok);
+        let err = fails("new_line(vec2(0, 0), vec2(1, 1)).scale_by(2)");
+        assert!(err.contains("path.scale_by: the scale should be a vec, vec2(across, down): vec2(2, 2) for 2 both ways"), "{}", err);
+        let err = fails("new_canvas().scale_by(0.5)");
+        assert!(err.contains("canvas.scale_by: the scale should be a vec, vec2(across, down): vec2(0.5, 0.5) for 0.5 both ways"), "{}", err);
+        assert!(fails(r#"new_canvas().scale_by("big")"#).contains("canvas.scale_by: the scale should be a vec, vec2(across, down), got string"));
+    }
+
+    #[test]
+    fn size_to_fills_a_page_or_a_canvas() {
+        // Stretched: what the strokes cover, widths and all, fills the
+        // page less the padding.
+        let ok: bool = eval(&format!("{}{}", NEAR, r#"
+            let c = new_canvas().add(new_rectangle(vec2(-40, 7), 10, 20), style);
+            let page = new_page(#{ size: vec2(200, 100) });
+            c.size_to(page, #{ padding: 10 });
+            let filled = near(c.bounds(), vec2(10, 10), vec2(190, 90));
+            c.size_to(page);
+            filled && near(c.bounds(), vec2(0, 0), vec2(200, 100))
+        "#));
+        assert!(ok);
+        // Its proportions kept: as big as fits, centred. The lines go
+        // from 10 by 20 to 39 by 78, a width either side.
+        let ok: bool = eval(&format!("{}{}", NEAR, r#"
+            let c = new_canvas().add(new_rectangle(vec2(0, 0), 10, 20), style)
+                .size_to(new_page(#{ size: vec2(200, 100) }), #{ padding: 10, keep_proportions: true });
+            near(c.bounds(), vec2(79.5, 10), vec2(120.5, 90))
+        "#));
+        assert!(ok);
+        // Another canvas's bounds, its widths included.
+        let ok: bool = eval(&format!("{}{}", NEAR, r#"
+            let frame = new_canvas().add(new_rectangle(vec2(50, 50), 100, 60), style);
+            let c = new_canvas().add(new_circle(vec2(0, 0), 3), style).size_to(frame, #{ padding: 5 });
+            near(c.bounds(), vec2(4, 24), vec2(96, 76))
+        "#));
+        assert!(ok);
+    }
+
+    #[test]
+    fn size_to_fits_strokes_of_different_widths() {
+        // The thick stroke's width reaches past the thin one's, and which
+        // reaches furthest changes as they're scaled.
+        let ok: bool = eval(&format!("{}{}", NEAR, r#"
+            let thick = new_style(new_brush_style("black", "Ink Pen", 8.0, #{ max_pressure: 1.0 }), new_handwriting_style());
+            let c = new_canvas()
+                .add(new_line(vec2(0, 0), vec2(10, 10)), style)
+                .add(new_line(vec2(4, 4), vec2(6, 6)), thick)
+                .size_to(new_page(#{ size: vec2(300, 200) }));
+            near(c.bounds(), vec2(0, 0), vec2(300, 200))
+        "#));
+        assert!(ok);
+    }
+
+    #[test]
+    fn size_to_centres_lines_it_cant_stretch() {
+        // A line straight across has no height to stretch: it's stretched
+        // across and centred down.
+        let ok: bool = eval(&format!("{}{}", NEAR, r#"
+            let c = new_canvas().add(new_line(vec2(0, 5), vec2(10, 5)), style)
+                .size_to(new_page(#{ size: vec2(100, 50) }), #{ padding: 4 });
+            let across = near(c.bounds(), vec2(4, 24), vec2(96, 26));
+            let kept = new_canvas().add(new_line(vec2(0, 5), vec2(10, 5)), style)
+                .size_to(new_page(#{ size: vec2(100, 50) }), #{ padding: 4, keep_proportions: true });
+            across && near(kept.bounds(), vec2(4, 24), vec2(96, 26))
+        "#));
+        assert!(ok);
+    }
+
+    #[test]
+    fn size_to_refuses_what_it_cant_fill() {
+        let setup = r#"let style = new_style(new_brush_style("black", "Ink Pen", 1.0, #{ max_pressure: 1.0 }), new_handwriting_style());
+            let c = new_canvas().add(new_line(vec2(0, 0), vec2(10, 10)), style);
+            let page = new_page(#{ size: vec2(100, 100) });"#;
+        for (script, want) in [
+            ("c.size_to(new_page())", "canvas.size_to: the page has no size to fill; set page.size"),
+            ("new_canvas().size_to(page)", "canvas.size_to: the canvas is empty"),
+            ("c.size_to(new_canvas())", "canvas.size_to: the target canvas is empty"),
+            ("c.size_to(vec2(10, 10))", "canvas.size_to: the target should be a page or a canvas, got"),
+            ("c.size_to(page, #{ padding: 49.5 })", "canvas.size_to: the target less the padding is too small for the strokes' widths"),
+            ("c.size_to(page, #{ padding: -1 })", "canvas.size_to: 'padding' can't be negative, got -1"),
+            ("c.size_to(page, #{ keep_proportions: 1 })", "canvas.size_to: 'keep_proportions' should be true or false"),
+            ("c.size_to(page, #{ margin: 1 })", "canvas.size_to: unknown option 'margin'; options: padding, keep_proportions"),
+        ] {
+            let err = fails(&format!("{}\n{}", setup, script));
+            assert!(err.contains(want), "{}: {}", want, err);
+        }
     }
 }
