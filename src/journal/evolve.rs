@@ -11,16 +11,22 @@
 //! It's the same for a seed every time, and does no arithmetic of its own
 //! beyond comparing costs, so a problem whose methods keep to `+ - * /` and
 //! square roots evolves the same in the browser.
+//!
+//! A generation's candidates are bred one after another, from the one
+//! source of chance, and then their costs, the dear part, are worked out
+//! on every core at once: however many there are, a seed evolves the same.
 
 use rand::rngs::StdRng;
 use rand::Rng;
+use rayon::prelude::*;
 
 /// A problem whose candidates can be evolved.
-pub trait Evolve {
+pub trait Evolve: Sync {
     /// A candidate.
-    type Genome: Clone;
+    type Genome: Clone + Send;
 
-    /// How bad a candidate is: the lower the better. Finite.
+    /// How bad a candidate is: the lower the better. Finite. A
+    /// generation's are worked out at once, on different cores.
     fn cost(&self, genome: &Self::Genome) -> f64;
 
     /// Change a candidate, more the hotter it is: `heat` falls from 1, at
@@ -64,21 +70,18 @@ pub fn evolve<P: Evolve>(problem: &P, seeds: &[P::Genome], settings: &Settings, 
     }
     let size = settings.population.max(seeds.len()).max(1);
     let elite = settings.elite.clamp(1, size);
-    let mut people: Vec<(P::Genome, f64)> = seeds.iter().map(|g| (g.clone(), problem.cost(g))).collect();
-    let mut k = 0;
-    while people.len() < size {
+    let mut first: Vec<P::Genome> = seeds.to_vec();
+    for k in 0..size - seeds.len() {
         let mut g = seeds[k % seeds.len()].clone();
         problem.mutate(&mut g, 1.0, rng);
-        let cost = problem.cost(&g);
-        people.push((g, cost));
-        k += 1;
+        first.push(g);
     }
+    let mut people = costed(problem, first);
     for generation in 0..settings.generations {
         // Best first; among equals, the earlier.
         people.sort_by(|a, b| a.1.total_cmp(&b.1));
         let heat = 1.0 - generation as f64 / settings.generations as f64;
-        let mut next: Vec<(P::Genome, f64)> = people[..elite].to_vec();
-        while next.len() < size {
+        let children: Vec<P::Genome> = (elite..size).map(|_| {
             let a = pick(&people, settings.tournament, rng);
             let mut child = if rng.random_bool(settings.cross.clamp(0.0, 1.0)) {
                 let b = pick(&people, settings.tournament, rng);
@@ -87,12 +90,21 @@ pub fn evolve<P: Evolve>(problem: &P, seeds: &[P::Genome], settings: &Settings, 
                 people[a].0.clone()
             };
             problem.mutate(&mut child, heat, rng);
-            let cost = problem.cost(&child);
-            next.push((child, cost));
-        }
-        people = next;
+            child
+        }).collect();
+        people.truncate(elite);
+        people.extend(costed(problem, children));
     }
     people.into_iter().min_by(|a, b| a.1.total_cmp(&b.1))
+}
+
+/// Each candidate with its cost, in the order given: the costs worked
+/// out on every core at once.
+fn costed<P: Evolve>(problem: &P, genomes: Vec<P::Genome>) -> Vec<(P::Genome, f64)> {
+    genomes.into_par_iter().map(|g| {
+        let cost = problem.cost(&g);
+        (g, cost)
+    }).collect()
 }
 
 /// A parent, by tournament: the best of `size` drawn at random (the
