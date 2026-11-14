@@ -872,7 +872,7 @@ function sourceSpec(source: SourceNode): Record<string, unknown> {
   return {
     type: source.kind,
     name: source.name,
-    ...(Object.keys(source.options).length && (source.kind === 'style' || source.kind === 'layout') ? { options: source.options } : {}),
+    ...(Object.keys(source.options).length && (source.kind === 'style' || source.kind === 'layout' || source.kind === 'symbolset') ? { options: source.options } : {}),
     ...(source.base !== undefined && source.kind === 'content' ? { base: source.base } : {}),
   };
 }

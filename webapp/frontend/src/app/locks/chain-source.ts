@@ -63,10 +63,10 @@ function nodeOptions(node: ChainNode | RendererNode, kinds: Record<string, LockO
   ]));
 }
 
-/** A source's settings besides its type and name: a style's or layout's options, text content's base. */
+/** A source's settings besides its type and name: a style's, layout's or symbol set's options, text content's base. */
 function sourceSettings(source: SourceNode): [string, string][] {
   const entries: [string, string][] = [];
-  if ((source.kind === 'style' || source.kind === 'layout') && Object.keys(source.options).length) {
+  if ((source.kind === 'style' || source.kind === 'layout' || source.kind === 'symbolset') && Object.keys(source.options).length) {
     const options = Object.entries(source.options).sort(([a], [b]) => (a < b ? -1 : 1));
     entries.push(['options', mapLiteral(options.map(([k, v]) => [rhaiKey(k), rhaiValue(v, typeof v === 'number' && !Number.isInteger(v))]))]);
   }

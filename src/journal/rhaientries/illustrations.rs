@@ -319,6 +319,18 @@ mod tests {
     }
 
     #[test]
+    fn a_preview_takes_a_symbol_set_source() {
+        let engine = engine();
+        let wired = |name: &str| serde_json::json!({ "symbol_set": { "$source": { "type": "symbolset", "name": name } } });
+        for set in ["moons", "letters"] {
+            let entry = engine.render("joined_symbol_ring", &serde_json::json!({}), Some(&wired(set))).unwrap_or_else(|e| panic!("{}: {}", set, e));
+            assert!(entry.page_count() == 2 && entry.empty_canvases().is_empty(), "{} should draw both rings", set);
+        }
+        let err = engine.render("joined_symbol_ring", &serde_json::json!({}), Some(&wired("nope"))).unwrap_err();
+        assert!(err.contains("input 'symbol_set'") && !err.contains("layout"), "{}", err);
+    }
+
+    #[test]
     fn a_journal_attaches_illustrations_and_draws_a_run() {
         let script = r#"
             let lock = new_lock("m")
