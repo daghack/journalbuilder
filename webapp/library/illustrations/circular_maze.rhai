@@ -1,7 +1,7 @@
-// labyrinth: a Labyrinth drawn round: rings of cells about its heart,
+// circular_maze: a CircularMaze drawn round: rings of cells about its heart,
 // their walls with a gap wherever one opens on the next, the outer wall
 // open at the entrance and the heart's at the one cell that leads in, and
-// each cell's symbol in its middle. What labyrinth_lock hides a text in:
+// each cell's symbol in its middle. What circular_maze_lock hides a text in:
 // read from the entrance along the one way to the heart, the symbols
 // passed are the text, and every other cell's are there to mislead.
 //
@@ -15,7 +15,7 @@
 // the fine letters set in red. With editor, each cell's symbol is committed to
 // the visual editor as EDITOR_RING_CELL.
 
-import "lib/labyrinth" as lab;
+import "lib/circular_maze" as lab;
 import "lib/symbol_rings" as rings;
 
 fn options() {
@@ -23,7 +23,7 @@ fn options() {
 }
 
 fn inputs(o) {
-	#{ labyrinth: "Labyrinth", wall_style: "TextStyle", symbol_set: "SymbolSet", heart_style: "TextStyle" }
+	#{ maze: "CircularMaze", wall_style: "TextStyle", symbol_set: "SymbolSet", heart_style: "TextStyle" }
 }
 
 fn fallbacks(o) {
@@ -36,7 +36,7 @@ fn fallbacks(o) {
 }
 
 fn render(o, i) {
-	let l = i.labyrinth;
+	let l = i.maze;
 	lab::check(l);
 	let rings = l.sectors.len();
 	let centre = vec2(o.size / 2.0, o.size / 2.0);
@@ -77,12 +77,12 @@ fn render(o, i) {
 	let c = new_canvas().add(walls, i.wall_style.style);
 	if o.heart != "" {
 		let marks = glyphset("symbols");
-		if !(o.heart in marks.characters()) { throw `labyrinth: heart should be a glyph of the symbols glyphset, or "": there's no '${o.heart}'`; }
+		if !(o.heart in marks.characters()) { throw `circular_maze: heart should be a glyph of the symbols glyphset, or "": there's no '${o.heart}'`; }
 		c.add(marks.glyph(o.heart, #{ scale: inner.call(0) * 1.3, position: centre }), i.heart_style.style);
 	}
 	// Each cell's symbol, as big as the narrowest cell holds.
 	let set = i.symbol_set;
-	if set.base < l.base { throw `labyrinth: the symbol set '${set.name}' has ${set.base} symbols, fewer than the labyrinth's base, ${l.base}`; }
+	if set.base < l.base { throw `circular_maze: the symbol set '${set.name}' has ${set.base} symbols, fewer than the circular maze's base, ${l.base}`; }
 	let size = min(if o.glyph_size > 0.0 { o.glyph_size } else { set.size }, wide * 0.64);
 	for k in 0..rings {
 		size = min(size, 2.0 * PI() * (inner.call(k) + wide * 0.5) / l.sectors[k] * 0.62);
@@ -101,10 +101,10 @@ fn render(o, i) {
 }
 
 fn example() {
-	// What labyrinth_lock makes of a text.
-	let made = new_lock("example").add("l", "labyrinth_lock", #{ base: 27, seed: 3 })
+	// What circular_maze_lock makes of a text.
+	let made = new_lock("example").add("l", "circular_maze_lock", #{ base: 27, seed: 3 })
 		.run(#{ "l.text": symbols(27, "WHAT WAITS AT THE HEART") });
-	#{ labyrinth: made.get("l.labyrinth").value() }
+	#{ maze: made.get("l.maze").value() }
 }
 
 // Which way a `turn` of the way round is from the middle, clockwise from

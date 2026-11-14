@@ -300,7 +300,22 @@ impl LockBuilder {
         self.illustrations.iter().map(|r| (r.id.as_str().into(), r.illustration.as_str().into())).collect()
     }
 
+    /// Every step's outputs (`outputs`) or inputs, as "step.port".
+    fn step_ports(&self, outputs: bool) -> Vec<String> {
+        self.locks.iter().flat_map(|(id, lock)| {
+            let ports = if outputs { lock.outputs() } else { lock.inputs() };
+            ports.into_keys().map(move |port| format!("{}.{}", id, port))
+        }).collect()
+    }
+
+    /// The inputs still needing a value, as `inputs` lists them.
+    fn open_inputs(&mut self) -> Vec<String> {
+        self.inputs().keys().map(|k| k.to_string()).collect()
+    }
+
     fn connect(&mut self, from: &str, to: &str) -> RhaiResult<Self> {
+        let from = &port_named("connect", from, self.step_ports(true))?;
+        let to = &port_named("connect", to, self.step_ports(false))?;
         if let Some((id, input)) = to.split_once('.') {
             if self.illustrations.iter().any(|r| r.id == id) {
                 return self.connect_illustration(from, id, input);
@@ -328,6 +343,7 @@ impl LockBuilder {
     }
 
     fn set_input(&mut self, name: &str, value: Dynamic) -> RhaiResult<Self> {
+        let name = &port_named("set_input", name, self.open_inputs())?;
         let var = port_value(value, "set_input", name)?;
         self.update("set_input", |next| {
             next.fixed_inputs.retain(|(existing, _)| existing != name);
@@ -348,7 +364,7 @@ impl LockBuilder {
     }
 
     fn run(&mut self, inputs: Map) -> RhaiResult<LockResult> {
-        let inputs = value_set(inputs, "run")?;
+        let inputs = value_set(ports_named("run", inputs, &self.open_inputs())?, "run")?;
         let open = self.inputs();
         if let Some(unknown) = inputs.keys().find(|name| !open.contains_key(name.as_str())) {
             return Err(format!("run: '{}' isn't an open input; open inputs: {}", unknown, keys(&open)).into());
@@ -365,7 +381,8 @@ impl LockBuilder {
     /// Recover the inputs from hand-supplied outputs (name -> lock value).
     /// Chains with graph outputs, such as mazes, need a `run` result instead.
     fn unlock_map(&mut self, outputs: Map) -> RhaiResult<LockResult> {
-        self.unlock_values(value_set(outputs, "unlock")?)
+        let names: Vec<String> = self.lock.outputs().into_keys().collect();
+        self.unlock_values(value_set(ports_named("unlock", outputs, &names)?, "unlock")?)
     }
 
     fn unlock_values(&mut self, outputs: InfoVarSet) -> RhaiResult<LockResult> {
@@ -547,6 +564,7 @@ pub struct LockResult {
 
 impl LockResult {
     fn get(&mut self, name: &str) -> RhaiResult<LockValue> {
+        let name = &port_named("get", name, self.values.keys().cloned())?;
         self.values.get(name)
             .map(|var| LockValue { var: var.clone() })
             .ok_or_else(|| format!("'{}' isn't in this result; available: {}", name, sorted_names(&self.values)).into())
@@ -729,6 +747,37 @@ fn value_set(map: Map, what: &str) -> RhaiResult<InfoVarSet> {
         .collect()
 }
 
+/// The port `name` is among `ports` ("step.port"): itself, if it names
+/// its step; if not, the one port of that name, whichever step's, so a
+/// chain of one step can call its ports by their own names. Two steps with
+/// a port of that name is an error; none leaves it as it is, for the
+/// caller to say it's no port.
+fn port_named(what: &str, name: &str, ports: impl IntoIterator<Item = String>) -> RhaiResult<String> {
+    if name.contains('.') {
+        return Ok(name.to_string());
+    }
+    let mut found: Vec<String> = ports.into_iter()
+        .filter(|port| port.split_once('.').is_some_and(|(_, own)| own == name))
+        .collect();
+    found.sort();
+    found.dedup();
+    match found.len() {
+        0 => Ok(name.to_string()),
+        1 => Ok(found.remove(0)),
+        _ => Err(format!("{}: '{}' could be {}; name its step", what, name, found.join(" or ")).into()),
+    }
+}
+
+/// `map` with its keys as the ports they name among `ports` (see
+/// `port_named`).
+fn ports_named(what: &str, map: Map, ports: &[String]) -> RhaiResult<Map> {
+    let mut named = Map::new();
+    for (name, value) in map {
+        named.insert(port_named(what, &name, ports.iter().cloned())?.into(), value);
+    }
+    Ok(named)
+}
+
 fn keys(map: &Map) -> String {
     map.keys().map(|k| k.as_str()).collect::<Vec<_>>().join(", ")
 }
@@ -774,6 +823,33 @@ mod tests {
 
     fn error(script: &str) -> String {
         engine().run(script).expect_err("script should fail").to_string()
+    }
+
+    #[test]
+    fn ports_can_go_by_their_own_names_when_only_one_step_has_them() {
+        let script = r#"
+            let lock = new_lock("one").add("v", "vigenere_cipher", #{ key_base: 27, plain_base: 27, cipher_base: 27 });
+            let result = lock.run(#{ plain_text: symbols(27, "attack at dawn"), key: symbols(27, "LAKE") });
+            if result.text("cipher_text") != result.text("v.cipher_text") { throw "the two names should give the same value"; }
+            let back = lock.unlock(#{ cipher_text: result.get("cipher_text"), key: result.get("key") });
+            let pair = new_lock("pair")
+                .add("sub", "substitution_cipher", #{ base_n: 27 })
+                .add("vig", "vigenere_cipher", #{ key_base: 27, plain_base: 27, cipher_base: 27 })
+                .connect("sub.cipher_text", "key")
+                .set_input("ordering", symbols(27, "IKBNAZXYFTQWJ HRGLMOUVCPEDS"));
+            if pair.inputs().len() != 2 { throw "connect and set_input should have found vig.key and sub.ordering"; }
+            back.text("plain_text")
+        "#;
+        assert_eq!(eval::<String>(script), "ATTACK AT DAWN");
+        let err = error(r#"
+            new_lock("pair")
+                .add("sub", "substitution_cipher", #{ base_n: 27 })
+                .add("vig", "vigenere_cipher", #{ key_base: 27, plain_base: 27, cipher_base: 27 })
+                .run(#{ plain_text: symbols(27, "HI") });
+        "#);
+        assert!(err.contains("run: 'plain_text' could be sub.plain_text or vig.plain_text; name its step"), "{}", err);
+        let err = error(r#"new_lock("one").add("v", "vigenere_cipher", #{ key_base: 27, plain_base: 27, cipher_base: 27 }).run(#{ plain: symbols(27, "HI") });"#);
+        assert!(err.contains("'plain' isn't an open input"), "{}", err);
     }
 
     #[test]

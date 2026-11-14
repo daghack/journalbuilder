@@ -1,9 +1,10 @@
-// Labyrinths: rings of cells round a heart, walled off from each other but
-// for one way through. What the labyrinth_lock lock makes and the
-// labyrinth illustration draws.
-// import "lib/labyrinth" as lab;
+// Circular mazes: rings of cells round a heart, walled off from each other but
+// for one way through (with blind ways beside it: a maze, not a labyrinth,
+// which has a single path). What the circular_maze_lock lock makes and the
+// circular_maze illustration draws.
+// import "lib/circular_maze" as lab;
 //
-// A Labyrinth is plain data:
+// A CircularMaze is plain data:
 //   base       its symbols' base
 //   sectors    how many cells each ring has, the innermost ring first
 //   entrance   the cell of the outermost ring the way in opens on
@@ -87,7 +88,7 @@ fn path(l) {
 		}
 	}
 	if from[0][l.heart] == () {
-		throw "the labyrinth has no way from its entrance to its heart";
+		throw "the circular maze has no way from its entrance to its heart";
 	}
 	let way = [];
 	let cell = [0, l.heart];
@@ -99,28 +100,28 @@ fn path(l) {
 	way
 }
 
-// Throws unless `l` has a Labyrinth's parts, each ring's the right size.
+// Throws unless `l` has a CircularMaze's parts, each ring's the right size.
 fn check(l) {
-	if type_of(l) != "map" { throw `expected a Labyrinth, got ${type_of(l)}`; }
+	if type_of(l) != "map" { throw `expected a CircularMaze, got ${type_of(l)}`; }
 	for key in ["base", "sectors", "entrance", "heart", "inward", "clockwise", "symbols"] {
-		if !(key in l) { throw `the labyrinth has no ${key}`; }
+		if !(key in l) { throw `the circular maze has no ${key}`; }
 	}
 	let rings = l.sectors.len();
-	if rings < 1 { throw "the labyrinth has no rings"; }
+	if rings < 1 { throw "the circular maze has no rings"; }
 	for key in ["inward", "clockwise", "symbols"] {
-		if l[key].len() != rings { throw `the labyrinth's ${key} should have ${rings} rings, not ${l[key].len()}`; }
+		if l[key].len() != rings { throw `the circular maze's ${key} should have ${rings} rings, not ${l[key].len()}`; }
 		for k in 0..rings {
 			if l[key][k].len() != l.sectors[k] {
-				throw `ring ${k} of the labyrinth's ${key} should have ${l.sectors[k]} cells, not ${l[key][k].len()}`;
+				throw `ring ${k} of the circular maze's ${key} should have ${l.sectors[k]} cells, not ${l[key][k].len()}`;
 			}
 		}
 	}
 	for k in 1..rings {
 		let each = l.sectors[k] / l.sectors[k - 1];
 		if l.sectors[k] % l.sectors[k - 1] != 0 || each < 1 || each > 2 {
-			throw `ring ${k} of the labyrinth should have as many cells as ring ${k - 1}, or twice as many`;
+			throw `ring ${k} of the circular maze should have as many cells as ring ${k - 1}, or twice as many`;
 		}
 	}
-	if l.entrance < 0 || l.entrance >= l.sectors[rings - 1] { throw `the labyrinth's entrance, ${l.entrance}, isn't a cell of its outermost ring`; }
-	if l.heart < 0 || l.heart >= l.sectors[0] { throw `the labyrinth's heart, ${l.heart}, isn't a cell of its innermost ring`; }
+	if l.entrance < 0 || l.entrance >= l.sectors[rings - 1] { throw `the circular maze's entrance, ${l.entrance}, isn't a cell of its outermost ring`; }
+	if l.heart < 0 || l.heart >= l.sectors[0] { throw `the circular maze's heart, ${l.heart}, isn't a cell of its innermost ring`; }
 }

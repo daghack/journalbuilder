@@ -41,10 +41,5 @@ fn draw(o, symbol, glyph) {
 	}
 	let eye = art::eye(glyph.position, glyph.scale, look);
 	let iris = glyph.scale * 0.42 / 2.0;
-	let c = new_canvas();
-	c.add(eye.wash, inks::wash(o.iris, iris * 0.3));
-	c.add(eye.rim, inks::detail(o.iris, max(iris * 0.03, 0.6)));
-	c.add(eye.accent, inks::detail(o.iris, max(iris * 0.03, 0.6)));
-	c.add(eye.lines, inks::contour(o.ink, max(iris * 0.03, 0.8)));
-	c
+	inks::eye(eye, o.ink, o.iris, iris * 0.03)
 }

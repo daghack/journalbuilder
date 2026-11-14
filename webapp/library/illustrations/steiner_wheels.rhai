@@ -18,25 +18,31 @@
 // lines joining them, and label_style writes the labels, in its glyphs
 // at its size. Unwired, they're near-black and red ink pens, the labels
 // in plain at label_size.
+//
+// The whole symbol set can be passed in too: symbol_set, a SymbolSet
+// whose symbol p (the first base of them) is written inside each wheel at
+// place p, mark_size across (a tenth of the wheel if that's 0), so the
+// points a wheel joins are read off it as symbols. Unwired, the wheels
+// are unmarked.
 
 import "lib/digit_rows" as rows;
 
 fn options() {
 	#{
-		base: 13, points: 3, per_row: 9, size: 100.0, gap: 24.0, row_gap: 24.0, label_size: 28.0,
+		base: 13, points: 3, per_row: 9, size: 100.0, gap: 24.0, row_gap: 24.0, label_size: 28.0, mark_size: 0.0,
 		ring_ink: "#2b1d12", line_ink: "#9b2318",
 	}
 }
 
 fn inputs(o) {
-	#{ points: `Base${o.base}Symbol`, labels: "String", ring_style: "TextStyle", line_style: "TextStyle", label_style: "TextStyle" }
+	#{ points: `Base${o.base}Symbol`, labels: "String", ring_style: "TextStyle", line_style: "TextStyle", label_style: "TextStyle", symbol_set: "SymbolSet" }
 }
 
 fn fallbacks(o) {
 	let hand = new_handwriting_style();
 	let steady = #{ min_pressure: 0.4, max_pressure: 0.7, pressure_profile: "constant" };
 	#{
-		labels: "",
+		labels: "", symbol_set: (),
 		ring_style: #{ style: new_style(new_brush_style(o.ring_ink, "Ink Pen", 1.0, steady), hand) },
 		line_style: #{ style: new_style(new_brush_style(o.line_ink, "Ink Pen", 1.8, steady), hand) },
 		label_style: #{ style: new_style(new_brush_style(o.ring_ink, "Ink Pen", 1.6, steady), hand), type: new_type_style(glyphset("plain"), o.label_size) },
@@ -59,11 +65,19 @@ fn render(o, i) {
 	let rings = new_path();
 	let lines = new_path();
 	let c = new_canvas();
+	let set = i.symbol_set;
+	if set != () && set.base < o.base { throw `steiner_wheels: the symbol set '${set.name}' has ${set.base} symbols, fewer than the base, ${o.base}`; }
+	let mark = if o.mark_size > 0.0 { o.mark_size } else { o.size * 0.1 };
 	for (at, k) in rows::places(i.points.len() / o.points, o.size, o.size, layout) {
 		rings.append(new_circle(at, radius));
 		for p in 0..o.base {
 			let way = toward(p, o.base);
 			rings.append(new_line(at + way * radius * (if p == 0 { 0.8 } else { 1.0 }), at + way * radius * (if p == 0 { 1.19 } else { 1.1 })));
+		}
+		if set != () {
+			for p in 0..o.base {
+				c.add(write_at(set.text([p]), at + toward(p, o.base) * radius * 0.7, #{ type: #{ glyph_scale: mark } }));
+			}
 		}
 		// Its points, each once, in the order given.
 		let corners = [];

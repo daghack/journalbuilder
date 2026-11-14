@@ -25,19 +25,27 @@
 // times the ring's, up to as big as fit in symbol_ring's middle.
 // Unwired, they're ink pens, near-black, red, blue and the purple of the
 // two, the glyphs loche_upper, as big as the ring holds.
+//
+// The whole symbol set can be passed in instead: symbol_set, a SymbolSet,
+// whose marks are the ring's symbols (symbol k of the set at place k),
+// glyph_size across (the set's own size if that's 0) or smaller if the
+// ring hasn't room, and whose base is the ring's (the base option is 0,
+// the set's whole, unless it gives fewer). The set then draws every
+// symbol, borders still in glyph_style's pen; unwired, the glyphs
+// are glyph_style's, as above.
 
 import "lib/symbol_rings" as rings;
 
 fn options() {
 	#{
-		base: 27, first: 2, second: 5, steps: 0, bordered: true, center_bordered: true, size: 900.0, center_scale: 3.0,
+		base: 0, first: 2, second: 5, steps: 0, bordered: true, center_bordered: true, size: 900.0, center_scale: 3.0, glyph_size: 0.0,
 		dash: 14.0, gap: 10.0, glyph_ink: "#2b1d12", first_ink: "#9b2318", second_ink: "#23409b",
 		joined_ink: "#5f2a6e",
 	}
 }
 
 fn inputs(o) {
-	#{ glyph_style: "TextStyle", first_style: "TextStyle", second_style: "TextStyle", joined_style: "TextStyle" }
+	#{ glyph_style: "TextStyle", first_style: "TextStyle", second_style: "TextStyle", joined_style: "TextStyle", symbol_set: "SymbolSet" }
 }
 
 fn fallbacks(o) {
@@ -45,24 +53,26 @@ fn fallbacks(o) {
 	#{
 		glyph_style: #{
 			style: new_style(new_brush_style(o.glyph_ink, "Ink Pen", 2.2, #{ min_pressure: 0.4, max_pressure: 0.8 }), hand),
-			type: new_type_style(glyphset("loche_upper"), rings::room(o.size, o.base)),
+			type: new_type_style(glyphset("loche_upper"), rings::room(o.size, if o.base > 0 { o.base } else { 27 })),
 		},
 		first_style: #{ style: path_pen(o.first_ink, hand) },
 		second_style: #{ style: path_pen(o.second_ink, hand) },
 		joined_style: #{ style: path_pen(o.joined_ink, hand) },
+		symbol_set: (),
 	}
 }
 
 fn render(o, i) {
+	let m = rings::marks(o, i.symbol_set, i.glyph_style);
+	let o = o;
+	o.base = m.base;
 	rings::check_base(o.base);
 	rings::check_step(o.base, o.first, "first");
 	rings::check_step(o.base, o.second, "second");
 	rings::check_steps(o.steps);
-	let t = i.glyph_style.type;
-	let names = rings::symbol_names(t.glyphset, o.base);
 
 	// The two walks, and their symbols next to each other in the middle.
-	let r = rings::ring(o, t, 2);
+	let r = rings::ring(o, m, 2);
 	let first = rings::walk(o.base, o.first, o.steps);
 	let second = rings::walk(o.base, o.second, o.steps);
 	let common = rings::common(first, second);
@@ -70,16 +80,16 @@ fn render(o, i) {
 	let paths = new_canvas();
 	rings::draw_walk(paths, r, first, i.first_style.style, o, nudge, common);
 	rings::draw_walk(paths, r, second, i.second_style.style, o, -nudge, common);
-	rings::draw_symbols(paths, r, t, names, 1, i.glyph_style.style);
-	rings::draw_middle(paths, r, t, [names[o.first], names[o.second]], [i.first_style.style, i.second_style.style], i.glyph_style.style);
+	rings::draw_symbols(paths, r, m, 1, i.glyph_style.style);
+	rings::draw_middle(paths, r, m, [o.first, o.second], [i.first_style.style, i.second_style.style], i.glyph_style.style);
 
 	// What they join to: the ring of their product.
 	let product = (o.first * o.second) % o.base;
-	let r = rings::ring(o, t, 1);
+	let r = rings::ring(o, m, 1);
 	let joined = new_canvas();
 	rings::draw_walk(joined, r, rings::walk(o.base, product, o.steps), i.joined_style.style, o, 0.0, #{});
-	rings::draw_symbols(joined, r, t, names, 1, i.glyph_style.style);
-	rings::draw_middle(joined, r, t, [names[product]], [i.joined_style.style], i.glyph_style.style);
+	rings::draw_symbols(joined, r, m, 1, i.glyph_style.style);
+	rings::draw_middle(joined, r, m, [product], [i.joined_style.style], i.glyph_style.style);
 	[paths, joined]
 }
 

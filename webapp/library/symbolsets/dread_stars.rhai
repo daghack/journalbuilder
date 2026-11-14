@@ -21,15 +21,5 @@ fn draw(o, symbol, glyph) {
 	let kinds = ["lashed", "spiral", "weeping", "needle", "banded"];
 	let r = glyph.scale * 0.5 / o.reach;
 	let star = art::star(glyph.position, r, #{ kind: kinds[symbol], reach: o.reach, angle: glyph.rotation, seed: o.seed + 7 * symbol + 1 });
-	let c = new_canvas();
-	if !star.wash.is_empty { c.add(star.wash, inks::wash(o.blood, max(r * 0.12, 1.0))); }
-	if !star.dark.is_empty {
-		let gap = max(r * 0.08, 2.0);
-		c.add(inks::solid(star.dark, gap), inks::fill(o.ink, gap));
-	}
-	c.add(star.rays, inks::fine(o.ink, max(r * 0.014, 0.5)));
-	c.add(star.body, inks::contour(o.ink, max(r * 0.022, 0.6)));
-	c.add(star.dots, inks::detail(o.blood, max(r * 0.016, 0.5)));
-	c.add(star.tears, inks::contour(o.blood, max(r * 0.024, 0.7)));
-	c
+	inks::star(star, o.ink, o.blood, r)
 }

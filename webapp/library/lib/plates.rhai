@@ -1,8 +1,10 @@
-// What a plate is built from besides its subject: frames, ticks, rings of
-// glyphs, blots. For the puzzle illustrations, with lib/inks' pens.
+// What a plate is built from besides its subject: frames, ticks, rulers,
+// points and rings of glyphs round a ring, rings and lines ruled twice,
+// inscriptions, blots. For the puzzle illustrations, with lib/inks' pens.
 // import "lib/plates" as plates;
 
 import "lib/chance" as chance;
+import "lib/inks" as inks;
 
 // Which way a `turn` of the way round is from a middle, clockwise from
 // the top: 0.25 is to the right.
@@ -126,4 +128,67 @@ fn slot(given, count, set, what, fallback) {
 		out.push(s);
 	}
 	out
+}
+
+// `count` points evenly round a circle of `radius` about `centre`,
+// clockwise from the top: an array of vecs.
+fn around(centre, radius, count) {
+	let points = [];
+	for k in 0..count { points.push(centre + toward(k * 1.0 / count) * radius); }
+	points
+}
+
+// A ruler from a to b, as a path: the line, and count + 1 ticks along it,
+// evenly from a to b, rising `short` to its left as it runs (up, for one
+// running left to right); every `every`-th rises `long` instead (0 for
+// none).
+fn ruler(a, b, count, short, every, long) {
+	let path = new_path().append(new_line(a, b));
+	let way = (b - a).normalized();
+	let up = vec2(way.y, -way.x);
+	for k in 0..=count {
+		let at = a + (b - a) * (k * 1.0 / count);
+		let rise = if every > 0 && k % every == 0 { long } else { short };
+		path.append(new_line(at, at + up * rise));
+	}
+	path
+}
+
+// A ring ruled twice, added to canvas c: a contour `weight` wide at
+// `radius` about `centre`, and a finer line `gap` inside it, in `ink`.
+fn double_ring(c, centre, radius, gap, ink, weight) {
+	c.add(new_circle(centre, radius), inks::contour(ink, weight));
+	c.add(new_circle(centre, radius - gap), inks::fine(ink, weight * 0.45));
+}
+
+// A line ruled twice, added to canvas c: a contour `weight` wide from a to
+// b, and a finer line `gap` to its right as it runs (below, for one
+// running left to right), in `ink`.
+fn double_rule(c, a, b, gap, ink, weight) {
+	let way = (b - a).normalized();
+	let down = vec2(-way.y, way.x) * gap;
+	c.add(new_line(a, b), inks::contour(ink, weight));
+	c.add(new_line(a + down, b + down), inks::fine(ink, weight * 0.45));
+}
+
+// What to write along `path` so path.fit_text sets it at about the glyph
+// scale of `hand` (a text style, #{ style, type, ... }): as many whole
+// words of `text`, over and over, as go along it at that scale, each with
+// the space after it. fit_text sets them a little larger, to run the
+// path's whole length, so a ring's inscription closes between two words
+// and is as big as the hand says, give or take a word's room.
+fn inscription(path, text, hand) {
+	let words = [];
+	for w in text.split(" ") { if w != "" { words.push(w); } }
+	if words.is_empty() { return ""; }
+	let upto = |k| { let said = ""; for n in 0..k { said += words[n % words.len()] + " "; } said };
+	let fits = |k| { let ok = false; try { ok = path.fill_with_text(upto.call(k), hand).len() == 1; } catch { ok = false; } ok };
+	let low = 1;
+	let high = 2;
+	while fits.call(high) { low = high; high *= 2; }
+	while high - low > 1 {
+		let mid = (low + high) / 2;
+		if fits.call(mid) { low = mid; } else { high = mid; }
+	}
+	upto.call(low)
 }

@@ -1,6 +1,7 @@
 import { Component, computed, effect, inject, signal } from '@angular/core';
 import type { Alignment, Bounds, CanvasEdit } from '../journal/canvas-edits';
 import { editsPath } from '../journal/journal-files';
+import { keep, stored } from '../layout/pane-state';
 import type { SymbolicInfo } from '../scribe';
 import { JournalService } from '../services/journal.service';
 import { JournalStore } from '../services/journal-store.service';
@@ -16,7 +17,15 @@ import { VisualEditService } from '../services/visual-edit.service';
   selector: 'app-canvas-toolbar',
   template: `
     <section class="panel-section">
-      <h3>Canvases</h3>
+      <h3>
+        <button type="button" class="fold" (click)="toggleList()" [attr.aria-expanded]="listShown()"
+                [title]="listShown() ? 'Hide the list of canvases' : 'Show the list of canvases'">
+          <span class="caret">{{ listShown() ? '▾' : '▸' }}</span> Canvases <span class="count">{{ edit.committed().length }}</span>
+        </button>
+      </h3>
+      @if (!listShown()) {
+        <!-- collapsed: the list is one click away -->
+      } @else {
       @if (!edit.readable()) {
         <p class="note-warning">{{ editsFile() }} isn't an edits file this editor reads: fix it or delete it to edit here.</p>
       }
@@ -39,6 +48,7 @@ import { VisualEditService } from '../services/visual-edit.service';
         </div>
       } @empty {
         <p class="hint">The entry commits no canvases. Hand one to the editor with <code>canvas.commit_to_editor("name")</code>, then move, turn, scale and re-ink it here.</p>
+      }
       }
     </section>
 
@@ -172,6 +182,10 @@ import { VisualEditService } from '../services/visual-edit.service';
     .canvas.on .name { font-weight: 600; }
     .link { background: transparent; border: 0; padding: 0; color: var(--accent); text-decoration: underline; font-size: 11px; cursor: pointer; }
     .spacer { flex: 1; }
+    h3 { margin: 0; }
+    .fold { background: transparent; border: 0; padding: 0; color: inherit; font: inherit; font-weight: inherit; cursor: pointer; display: flex; align-items: center; gap: 4px; width: 100%; text-align: left; }
+    .fold .caret { width: 1em; color: var(--muted); }
+    .fold .count { margin-left: auto; font: 11px var(--mono); color: var(--muted); }
     .icon { min-width: 26px; padding: 2px 4px; }
     .icon.off { opacity: 0.5; }
     button.on { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
@@ -191,6 +205,8 @@ export class CanvasToolbarComponent {
 
   protected readonly sel = this.edit.selection;
   protected readonly selected = computed(() => new Set(this.sel()));
+  /** Whether the list of canvases is open: it starts shut, and stays as it was left. */
+  protected readonly listShown = signal(stored('preview-canvases', false));
   /** The one canvas selected, if just one is. */
   protected readonly one = computed(() => (this.sel().length === 1 ? this.sel()[0] : null));
   protected readonly editsFile = computed(() => editsPath(this.journal.entry() ?? 'entry'));
@@ -239,6 +255,11 @@ export class CanvasToolbarComponent {
 
   protected removeSymbol(name: string, s: SymbolicInfo) {
     if (s.symbols.length > 1) this.edit.setSymbolic(name, s, s.symbol_set, s.symbols.slice(0, -1));
+  }
+
+  protected toggleList() {
+    this.listShown.update((shown) => !shown);
+    keep('preview-canvases', this.listShown());
   }
 
   protected readonly alignments: { how: Alignment; label: string; title: string }[] = [
