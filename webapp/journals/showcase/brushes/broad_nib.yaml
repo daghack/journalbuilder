@@ -1,0 +1,32 @@
+name: Broad Nib
+description: A flat nib held at a slant, broad going one way and a hairline the other, for the showcase's own brush.
+author: Showcase
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      stabilize: 0.5
+  circle:
+    type: circle
+    inputs:
+      aspect: 0.25
+      rotation: 0.6
+      softness: 0.05
+  paint:
+    type: paint
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- circle.mask -> stamp.tip
+- paint_color.color -> stamp.color
+- pen_input.position -> paint.position
+- pen_input.pressure -> paint.build_flow
+- pen_input.pressure -> paint.size
+- stamp.dab -> paint.rgba
+exposed_ports:
+  brush_settings.size: {}
+  circle.rotation: {}

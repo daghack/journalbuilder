@@ -1,0 +1,33 @@
+name: Clone
+description: Paints with pixels sampled from elsewhere on the canvas rather than with the current color.
+nodes:
+  pen_input:
+    type: pen_input
+  brush_settings:
+    type: brush_settings
+    inputs:
+      spacing: 0.05
+  circle:
+    type: circle
+    inputs:
+      softness: 0.2
+  clone_source:
+    type: clone_source
+  stamp:
+    type: stamp
+  paint:
+    type: paint
+connections:
+- 'pen_input.position -> clone_source.center'
+- 'pen_input.position -> paint.position'
+- 'pen_input.pressure -> paint.size'
+- 'circle.mask -> stamp.tip'
+- 'clone_source.color -> stamp.color'
+- 'stamp.dab -> paint.rgba'
+exposed_ports:
+  'brush_settings.size': {}
+  'paint.opacity': {}
+  'circle.softness': {}
+  'brush_settings.spacing': {}
+  'clone_source.mode': {}
+  'clone_source.merged': {}

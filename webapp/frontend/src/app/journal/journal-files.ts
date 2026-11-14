@@ -7,7 +7,7 @@
 import { strFromU8, strToU8, unzipSync, zipSync, type Zippable } from 'fflate';
 
 /** The kinds of file a journal has, each in a directory of its own. */
-export type Kind = 'entries' | 'chains' | 'locks' | 'helpers' | 'illustrations' | 'layouts' | 'styles' | 'content' | 'glyphsets' | 'symbolsets' | 'lib' | 'images' | 'edits';
+export type Kind = 'entries' | 'chains' | 'locks' | 'helpers' | 'illustrations' | 'layouts' | 'styles' | 'brushes' | 'content' | 'glyphsets' | 'symbolsets' | 'lib' | 'images' | 'edits';
 
 /** The kinds the resource editor edits. */
 export const RESOURCE_KINDS: readonly Kind[] = ['locks', 'helpers', 'illustrations', 'layouts', 'symbolsets', 'lib'];
@@ -33,6 +33,7 @@ export const KINDS: KindInfo[] = [
   { kind: 'illustrations', label: 'Illustrations', exts: ['rhai'], library: true },
   { kind: 'layouts', label: 'Layouts', exts: ['rhai'], library: true },
   { kind: 'styles', label: 'Styles', exts: ['json'], library: true },
+  { kind: 'brushes', label: 'Brushes', exts: ['yaml'], library: true },
   { kind: 'content', label: 'Content', exts: ['txt', 'md', 'json', 'graph'], library: true },
   { kind: 'glyphsets', label: 'Glyphsets', exts: ['json'], library: true },
   { kind: 'symbolsets', label: 'Symbol sets', exts: ['json', 'rhai'], library: true },

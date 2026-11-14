@@ -1311,6 +1311,7 @@ dependencies = [
  "ryu",
  "serde",
  "serde_json",
+ "serde_yaml_ng",
  "smol",
  "stretch",
  "svgtypes",

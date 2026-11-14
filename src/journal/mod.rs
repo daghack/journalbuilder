@@ -1,6 +1,7 @@
 pub mod affine;
 pub mod art;
 pub mod avoid;
+pub mod brushes;
 pub mod canvas;
 pub mod clip;
 pub mod compose;

@@ -13,8 +13,45 @@ Saint's Rest
 Paper Mazes -> Saint's Rest: Follow the red thread
 `;
 
+/** A new brush, called `name`: Darkly's Ink Pen, a crisp round nib whose marks grow with pressure. */
+export function brushTemplate(name: string): string {
+  const quoted = /^[A-Za-z][A-Za-z0-9_]*$/.test(name) && !/^(true|false|yes|no|on|off|null)$/i.test(name) ? name : `'${name}'`;
+  return `name: ${quoted}
+description: A crisp round nib whose marks grow heavier and wider with pressure.
+nodes:
+  brush_settings:
+    type: brush_settings
+  circle:
+    type: circle
+    inputs:
+      softness: 0.1
+  paint:
+    type: paint
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- circle.mask -> stamp.tip
+- paint_color.color -> stamp.color
+- pen_input.position -> paint.position
+- pen_input.pressure -> paint.build_flow
+- pen_input.pressure -> paint.size
+- stamp.dab -> paint.rgba
+exposed_ports:
+  brush_settings.size: {}
+  circle.softness: {}
+  paint.build_flow: {}
+  paint.opacity: {}
+`;
+}
+
 export function template(kind: Kind, name: string, ext: string): string {
   switch (kind) {
+    case 'brushes':
+      return brushTemplate(name);
     case 'entries':
       return BLANK_ENTRY;
     case 'chains':

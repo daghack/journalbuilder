@@ -7,7 +7,7 @@ one built into the web editor (`showcase`; nothing else goes there):
 `journal.json` (title,
 description, its entries in order), its entries in `entries/NAME.rhai`,
 and files of its own in `locks/`, `helpers/`, `layouts/`,
-`illustrations/`, `chains/`, `styles/`, `lib/`, `glyphsets/`,
+`illustrations/`, `chains/`, `styles/`, `brushes/`, `lib/`, `glyphsets/`,
 `symbolsets/`, `content/` and `images/` (PNG and JPEG pictures, which the web editor
 and the compiled-in library hold as data URLs). These stand in
 front of the built-in library, `webapp/library/`, which has the same
@@ -47,8 +47,9 @@ the same change:
   `symbolsets/`): its alphabet and a line. The glyphs pages draw every
   glyph of every glyphset by themselves; the symbol sets page draws each
   symbol set (add a name to its list).
-- **A brush**: the pens page draws every `brush_names()` entry by itself;
-  add examples only for new brush settings.
+- **A brush** (`webapp/library/brushes/NAME.yaml`, Darkly's format): the
+  pens page draws every `brush_names()` entry by itself; add examples only
+  for new brush settings, and name the file in docs/api.md's library.
 - **A lock or helper type** (`webapp/library/locks/`, `helpers/`): a row
   locking and unlocking an example.
 - **An illustration** (`webapp/library/illustrations/*.rhai`): attach it
