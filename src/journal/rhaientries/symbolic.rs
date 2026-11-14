@@ -376,8 +376,9 @@ pub(super) fn register(engine: &mut Engine, library: Rc<SymbolSetLibrary>) {
     engine.register_fn("add", |ctx: NativeCallContext, c: &mut Canvas, s: Symbolic| -> RhaiResult<Dynamic> {
         ctx.call_native_fn::<Dynamic>("add", (c.clone(), s.canvas))
     });
-    engine.register_fn("add", |ctx: NativeCallContext, page: &mut super::Page, s: Symbolic| -> RhaiResult<Dynamic> {
-        ctx.call_native_fn::<Dynamic>("add", (page.clone(), s.canvas))
+    // A page is a value: add to it, not to a copy.
+    engine.register_fn("add", |page: &mut super::Page, s: Symbolic| -> RhaiResult<super::Page> {
+        page.add_canvas(s.canvas)
     });
     engine.register_fn("free_regions_in_canvas", |ctx: NativeCallContext, s: Symbolic| -> RhaiResult<Dynamic> {
         ctx.call_native_fn::<Dynamic>("free_regions_in_canvas", (s.canvas,))

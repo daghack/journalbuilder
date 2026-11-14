@@ -138,7 +138,7 @@ impl PathText {
     /// As `parse`, taking `keys` besides a style, a type and a paragraph.
     fn parse_with(caller: &'static str, msg: &FlowText, settings: Map, (symdict, rng): &TextSource, keys: &[&str]) -> RhaiResult<PathText> {
         let text = TextSettings::read_for(caller, msg, settings, keys)?;
-        let styled = Styled::of_text(caller, msg, &text.type_, text.spans.as_ref(), symdict, &mut *rng.borrow_mut())?;
+        let styled = Styled::of_text(caller, msg, &text, symdict, &mut *rng.borrow_mut())?;
         Ok(PathText {
             caller,
             symbols: styled.glyphs.clone(),
