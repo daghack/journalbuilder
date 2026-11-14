@@ -17,6 +17,11 @@
 //! unfolds rather than crumpling. The moves cool as they go, from the best
 //! of a few seeded starts.
 //!
+//! With generations, the starts are then evolved ([`crate::journal::evolve`]):
+//! nodes moved, swapped and drawn toward their neighbours, the layouts
+//! with the fewest crossings, the shortest lines and the most room
+//! between things kept and bred, and the best tidied again.
+//!
 //! Only `+ - * /` and square roots are used while it's laid out (no
 //! `hypot`, no trigonometry), so it lays out the same in the browser.
 
@@ -28,6 +33,7 @@ use rand::{Rng, SeedableRng};
 
 use super::geom::V;
 use super::starchart::segments_meet;
+use crate::journal::evolve::{evolve, wobble, Evolve, Settings};
 
 /// Where an edge's label goes on its line.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -62,10 +68,19 @@ pub struct GraphLayoutSettings {
     /// How many steps the forces take, from each start.
     pub iterations: usize,
     pub place: LabelPlace,
+    /// How many generations the layouts are evolved for after the forces
+    /// are done: 0 for none.
+    pub generations: usize,
 }
 
 /// The most steps a layout takes.
 pub const MOST_ITERATIONS: usize = 5000;
+
+/// The most generations a layout is evolved for.
+pub const MOST_GENERATIONS: usize = 2000;
+
+/// How many layouts each generation holds.
+const POPULATION: usize = 24;
 
 /// How many seeded starts are tried; the best is kept.
 const STARTS: u64 = 4;
@@ -113,17 +128,33 @@ pub fn lay_out_graph(sizes: &[(f64, f64)], edges: &[(usize, usize)], labels: &[O
         return Ok(GraphLayout { points: Vec::new(), size: (graph.width, graph.height), edges: Vec::new(), names: Vec::new() });
     }
     let mut best: Option<(f64, Vec<V>, Vec<usize>)> = None;
+    let mut starts = Vec::new();
     for start in 0..STARTS {
         let mut rng = StdRng::seed_from_u64(s.seed.wrapping_mul(STARTS).wrapping_add(start));
         let mut pos = graph.start(&mut rng);
         graph.relax(&mut pos, s.iterations, &mut rng);
         let sides = graph.tidy(&mut pos);
         let score = graph.score(&pos, &sides);
+        starts.push(pos.clone());
         if best.as_ref().is_none_or(|(b, _, _)| score < *b) {
             best = Some((score, pos, sides));
         }
     }
-    let (_, mut pos, sides) = best.expect("a start was tried");
+    let (_, mut pos, mut sides) = best.expect("a start was tried");
+    if s.generations > 0 {
+        // The starts evolved, the best tidied, kept if it's better still
+        // than the best start.
+        let mut rng = StdRng::seed_from_u64(s.seed.wrapping_mul(STARTS).wrapping_add(STARTS));
+        let settings = Settings { population: POPULATION, generations: s.generations, ..Settings::default() };
+        if let Some((mut evolved, _)) = evolve(&graph, &starts, &settings, &mut rng) {
+            let evolved_sides = graph.tidy(&mut evolved);
+            if graph.cost(&evolved) <= graph.cost(&pos) {
+                (pos, sides) = (evolved, evolved_sides);
+            }
+        }
+        // Short lines draw a layout in: spread it back out to its box.
+        sides = graph.fill(&mut pos, &sides);
+    }
     let size = graph.fit(&mut pos, &sides);
     let lines = graph.lines(&pos);
     let names = graph.name_boxes(&pos, &sides);
@@ -144,6 +175,9 @@ fn check(sizes: &[(f64, f64)], edges: &[(usize, usize)], labels: &[Option<(f64, 
     }
     if s.iterations > MOST_ITERATIONS {
         return Err(format!("iterations must be at most {}, got {}", MOST_ITERATIONS, s.iterations));
+    }
+    if s.generations > MOST_GENERATIONS {
+        return Err(format!("generations must be at most {}, got {}", MOST_GENERATIONS, s.generations));
     }
     let size_ok = |(w, h): (f64, f64)| w >= 0.0 && h >= 0.0 && w.is_finite() && h.is_finite();
     if let Some(k) = sizes.iter().position(|&wh| !size_ok(wh)) {
@@ -508,9 +542,35 @@ impl Graph {
         lines
     }
 
-    /// Move the layout to the middle of its box, growing the box, in
-    /// proportion, if it's too big for it: its size.
-    fn fit(&self, pos: &mut [V], sides: &[usize]) -> (f64, f64) {
+    /// Spread the nodes out from their middle, all alike, as far as the
+    /// layout still fits its box, the names then set again: the sides
+    /// they're on.
+    fn fill(&self, pos: &mut [V], sides: &[usize]) -> Vec<usize> {
+        let n = pos.len() as f64;
+        let mut middle = V::default();
+        for &p in pos.iter() {
+            middle = middle + p;
+        }
+        let middle = middle * (1.0 / n.max(1.0));
+        let was = pos.to_vec();
+        let spread = |f: f64| -> Vec<V> { was.iter().map(|&p| middle + (p - middle) * f).collect() };
+        let fits = |at: &[V]| {
+            let (lo, hi) = self.extent(at, sides);
+            hi.x - lo.x <= self.width && hi.y - lo.y <= self.height
+        };
+        if fits(&spread(1.0)) {
+            let (mut lo, mut hi) = (1.0, 4.0);
+            for _ in 0..24 {
+                let mid = (lo + hi) / 2.0;
+                if fits(&spread(mid)) { lo = mid } else { hi = mid }
+            }
+            pos.copy_from_slice(&spread(lo));
+        }
+        self.sides(pos, &self.lines(pos), Some(sides))
+    }
+
+    /// The corners of what the layout covers: boxes, names and labels.
+    fn extent(&self, pos: &[V], sides: &[usize]) -> (V, V) {
         let (mut lo, mut hi) = (V::new(f64::MAX, f64::MAX), V::new(f64::MIN, f64::MIN));
         let mut take = |c: V, reach: V| {
             lo = V::new(lo.x.min(c.x - reach.x), lo.y.min(c.y - reach.y));
@@ -527,6 +587,13 @@ impl Graph {
                 take(r.c, V::new(r.reach(V::new(1.0, 0.0)), r.reach(V::new(0.0, 1.0))));
             }
         }
+        (lo, hi)
+    }
+
+    /// Move the layout to the middle of its box, growing the box, in
+    /// proportion, if it's too big for it: its size.
+    fn fit(&self, pos: &mut [V], sides: &[usize]) -> (f64, f64) {
+        let (lo, hi) = self.extent(pos, sides);
         let (w, h) = (hi.x - lo.x, hi.y - lo.y);
         let grow = (w / self.width).max(h / self.height).max(1.0);
         let size = (self.width * grow, self.height * grow);
@@ -886,6 +953,121 @@ impl Graph {
         overlap * 1e6 + crossings * 1e3 + stretch / self.k.max(1.0)
     }
 
+    /// How bad a layout looks, for evolving it: what overlaps, far worst;
+    /// then lines crossing each other, or running under boxes, names and
+    /// labels not theirs; long lines, for the layout's size, by their
+    /// length squared and, the longest far worse, to the fourth; and crowding, how far things come
+    /// within a few gaps of each other (a gap, for a label and what's at
+    /// its line's ends), or of lines not theirs, and nodes bunched far
+    /// nearer each other than spread evenly they'd be; and a layout bigger
+    /// than its box. Names go on the sides
+    /// tidy would set them on.
+    fn shape_cost(&self, pos: &[V]) -> f64 {
+        let n = pos.len();
+        let gap = self.gap.max(1.0);
+        let crowd = 3.0 * gap;
+        let lines = self.lines(pos);
+        let sides = self.sides(pos, &lines, Some(&self.sides(pos, &lines, None)));
+        let names = self.name_boxes(pos, &sides);
+        // Everything that takes room, and whose it is: boxes, names and
+        // labels.
+        let mut things: Vec<(Rect, Owner)> = Vec::new();
+        for i in 0..n {
+            things.push((Rect::upright(pos[i], self.half[i]), Owner::Box(i)));
+            if let Some(name) = names[i] {
+                things.push((name, Owner::Name(i)));
+            }
+        }
+        for line in &lines {
+            if let Some((label, _)) = line.label {
+                things.push((label, Owner::Label(line.edge)));
+            }
+        }
+        let node_of = |o: Owner| match o { Owner::Box(i) | Owner::Name(i) => Some(i), Owner::Label(_) => None };
+        let ends_at = |e: usize, i: usize| self.edges[e].0 == i || self.edges[e].1 == i;
+        let pair_of = |e: usize| { let (a, b) = self.edges[e]; (a.min(b), a.max(b)) };
+        let (mut overlap, mut crowding, mut crossings) = (0.0, 0.0, 0.0);
+        for (x, (rx, ox)) in things.iter().enumerate() {
+            for (ry, oy) in &things[x + 1..] {
+                // How much room a pair of things wants between them: none
+                // for a node's box and name, a gap for a label and what's at
+                // its edge's ends or its fellows', and a few gaps otherwise.
+                let room = match (*ox, *oy) {
+                    (Owner::Box(i) | Owner::Name(i), Owner::Box(j) | Owner::Name(j)) if i == j => continue,
+                    (Owner::Label(e), Owner::Label(f)) if pair_of(e) == pair_of(f) => gap,
+                    (Owner::Label(e), other) | (other, Owner::Label(e)) if node_of(other).is_some_and(|i| ends_at(e, i)) => gap,
+                    _ => crowd,
+                };
+                overlap += depth(rx, ry, 0.0);
+                crowding += depth(rx, ry, room);
+            }
+        }
+        // What it covers: bigger than the box, it'll be scaled down to fit;
+        // smaller, spread out to it (fill), so lines are long or short for
+        // its size, as nodes spread evenly over it would be apart.
+        let (mut lo, mut hi) = (V::new(f64::MAX, f64::MAX), V::new(f64::MIN, f64::MIN));
+        for (r, _) in &things {
+            let reach = V::new(r.reach(V::new(1.0, 0.0)), r.reach(V::new(0.0, 1.0)));
+            lo = V::new(lo.x.min(r.c.x - reach.x), lo.y.min(r.c.y - reach.y));
+            hi = V::new(hi.x.max(r.c.x + reach.x), hi.y.max(r.c.y + reach.y));
+        }
+        let k = ((hi.x - lo.x) * (hi.y - lo.y) / n.max(1) as f64).sqrt().max(1.0);
+        // Nodes much nearer each other than spread evenly they'd be: some
+        // bunched up while others are far off.
+        let mut bunched = 0.0;
+        let want = 0.6 * k;
+        for i in 0..n {
+            for j in i + 1..n {
+                let short = (want - norm(pos[j] - pos[i])) / want;
+                if short > 0.0 {
+                    bunched += short * short;
+                }
+            }
+        }
+        let ends = |l: &Line| (l.start + l.u * l.free.0, l.start + l.u * l.free.1);
+        let mut long = 0.0;
+        for (x, line) in lines.iter().enumerate() {
+            let (a, b) = self.edges[line.edge];
+            let (from, to) = ends(line);
+            // Squared, and the longest far worse, to the fourth.
+            let length = norm(pos[b] - pos[a]) / k;
+            let squared = length * length;
+            long += squared + 0.5 * squared * squared;
+            // Lines under, or near, what isn't theirs: not their own label,
+            // their own ends' boxes, or the labels of the lines beside them
+            // between the same two nodes; under their own ends' names, but
+            // not near them.
+            for (r, owner) in &things {
+                let near = match *owner {
+                    Owner::Label(e) if pair_of(e) == pair_of(line.edge) => continue,
+                    Owner::Box(i) if i == a || i == b => continue,
+                    Owner::Name(i) if i == a || i == b => false,
+                    _ => true,
+                };
+                if under(line, r, 0.0) > 1e-6 {
+                    crossings += 1.0;
+                }
+                if near {
+                    if let Some((_, d, _)) = off_line(from, to, line.u, r, crowd) {
+                        crowding += d;
+                    }
+                }
+            }
+            for other in &lines[x + 1..] {
+                let (c, d) = self.edges[other.edge];
+                if [c, d].contains(&a) || [c, d].contains(&b) {
+                    continue;
+                }
+                let (p, q) = ends(other);
+                if segments_meet(from, to, p, q) {
+                    crossings += 1.0;
+                }
+            }
+        }
+        let grown = ((hi.x - lo.x) / self.width).max((hi.y - lo.y) / self.height) - 1.0;
+        100.0 * overlap / gap + 8.0 * crossings + long + 4.0 * bunched + crowding / gap + 400.0 * grown.max(0.0)
+    }
+
     /// An edge's line as it's drawn, broken wherever a label or a name
     /// lies over it: its own label, unless that's beside it, and any other.
     fn edge_layout(&self, line: &Line, lines: &[Line], names: &[Option<Rect>]) -> EdgeLayout {
@@ -916,6 +1098,68 @@ impl Graph {
     }
 }
 
+/// Whose a box, name or label is: a node's, or an edge's.
+#[derive(Clone, Copy, PartialEq)]
+enum Owner {
+    Box(usize),
+    Name(usize),
+    Label(usize),
+}
+
+/// A layout's nodes, evolved: each candidate is where they are.
+impl Evolve for Graph {
+    type Genome = Vec<V>;
+
+    fn cost(&self, pos: &Vec<V>) -> f64 {
+        self.shape_cost(pos)
+    }
+
+    /// Moved, hotter further: one node nudged, a few nudged, one drawn
+    /// toward the nodes it's joined to, or two swapped.
+    fn mutate(&self, pos: &mut Vec<V>, heat: f64, rng: &mut StdRng) {
+        let n = pos.len();
+        let step = self.k * (0.03 + 0.4 * heat);
+        let nudge = |p: V, rng: &mut StdRng| p + V::new(wobble(rng), wobble(rng)) * step;
+        match rng.random_range(0..10) {
+            0..=3 => {
+                let i = rng.random_range(0..n);
+                pos[i] = nudge(pos[i], rng);
+            }
+            4..=5 => {
+                for _ in 0..rng.random_range(2..=3) {
+                    let i = rng.random_range(0..n);
+                    pos[i] = nudge(pos[i], rng);
+                }
+            }
+            6..=7 => {
+                let i = rng.random_range(0..n);
+                let near: Vec<usize> = self.around[i].iter().map(|&e| { let (a, b) = self.edges[e]; if a == i { b } else { a } }).collect();
+                if !near.is_empty() {
+                    let mut middle = V::default();
+                    for &j in &near {
+                        middle = middle + pos[j];
+                    }
+                    let middle = middle * (1.0 / near.len() as f64);
+                    let t = rng.random_range(0.2..0.8);
+                    pos[i] = nudge(pos[i] + (middle - pos[i]) * t, rng);
+                }
+            }
+            _ => {
+                if n > 1 {
+                    let i = rng.random_range(0..n);
+                    let j = (i + rng.random_range(1..n)) % n;
+                    pos.swap(i, j);
+                }
+            }
+        }
+    }
+
+    /// Each node where one parent or the other has it.
+    fn cross(&self, a: &Vec<V>, b: &Vec<V>, rng: &mut StdRng) -> Vec<V> {
+        a.iter().zip(b).map(|(&x, &y)| if rng.random_bool(0.5) { x } else { y }).collect()
+    }
+}
+
 /// The way text along a line going `u` reads: left to right, or, on an
 /// upright line, bottom to top.
 fn reading(u: V) -> V {
@@ -939,7 +1183,7 @@ mod tests {
     use super::*;
 
     fn settings(seed: u64, place: LabelPlace) -> GraphLayoutSettings {
-        GraphLayoutSettings { width: 1000.0, height: 800.0, gap: 10.0, seed, iterations: 300, place }
+        GraphLayoutSettings { width: 1000.0, height: 800.0, gap: 10.0, seed, iterations: 300, place, generations: 0 }
     }
 
     /// Paper Mazes, Saint's Rest and the Cloister, and two more, with
@@ -952,12 +1196,42 @@ mod tests {
     }
 
     fn lay_out(seed: u64, place: LabelPlace) -> GraphLayout {
+        evolved(seed, place, 0)
+    }
+
+    fn evolved(seed: u64, place: LabelPlace, generations: usize) -> GraphLayout {
         let (sizes, edges, labels) = places();
-        lay_out_graph(&sizes, &edges, &labels, &vec![None; sizes.len()], &settings(seed, place)).unwrap()
+        lay_out_graph(&sizes, &edges, &labels, &vec![None; sizes.len()], &GraphLayoutSettings { generations, ..settings(seed, place) }).unwrap()
     }
 
     fn rect_of(p: Vec2, (w, h): (f64, f64)) -> Rect {
         Rect::upright(V::new(p.x as f64, p.y as f64), V::new(w / 2.0, h / 2.0))
+    }
+
+    #[test]
+    fn evolving_lays_out_the_same_every_time_and_crosses_less() {
+        let (_, edges, _) = places();
+        let crossings = |l: &GraphLayout| {
+            let mut count = 0;
+            for (x, &(a, b)) in edges.iter().enumerate() {
+                for (y, &(c, d)) in edges.iter().enumerate().skip(x + 1) {
+                    let (p, q, r, s) = (&l.edges[x], &l.edges[y], &l.edges[x], &l.edges[y]);
+                    let v = |w: Vec2| V::new(w.x as f64, w.y as f64);
+                    if ![c, d].contains(&a) && ![c, d].contains(&b) && segments_meet(v(p.start), v(r.end), v(q.start), v(s.end)) {
+                        count += 1;
+                    }
+                }
+            }
+            count
+        };
+        let (mut before, mut after) = (0, 0);
+        for seed in 0..6 {
+            let l = evolved(seed, LabelPlace::Along, 60);
+            assert_eq!(format!("{:?}", l), format!("{:?}", evolved(seed, LabelPlace::Along, 60)));
+            before += crossings(&lay_out(seed, LabelPlace::Along));
+            after += crossings(&l);
+        }
+        assert!(after <= before, "{} crossings evolved, {} not", after, before);
     }
 
     #[test]
@@ -970,9 +1244,9 @@ mod tests {
     #[test]
     fn boxes_and_labels_keep_apart_inside_the_box() {
         let (sizes, _, labels) = places();
-        for place in [LabelPlace::Along, LabelPlace::Beside, LabelPlace::Upright] {
+        for (place, generations) in [(LabelPlace::Along, 0), (LabelPlace::Beside, 0), (LabelPlace::Upright, 0), (LabelPlace::Along, 30), (LabelPlace::Upright, 30)] {
             for seed in 0..4 {
-                let l = lay_out(seed, place);
+                let l = evolved(seed, place, generations);
                 let boxes: Vec<Rect> = l.points.iter().zip(&sizes).map(|(&p, &s)| rect_of(p, s)).collect();
                 for i in 0..boxes.len() {
                     for j in i + 1..boxes.len() {
@@ -1087,6 +1361,8 @@ mod tests {
         }
         let many = GraphLayoutSettings { iterations: 6000, ..settings(0, LabelPlace::Along) };
         assert!(lay_out_graph(&sizes, &[], &[], &[None, None], &many).unwrap_err().contains("at most 5000"));
+        let ages = GraphLayoutSettings { generations: 2001, ..settings(0, LabelPlace::Along) };
+        assert!(lay_out_graph(&sizes, &[], &[], &[None, None], &ages).unwrap_err().contains("generations must be at most 2000"));
         assert!(lay_out_graph(&sizes, &[], &[], &[None], &ok).unwrap_err().contains("there are 1 names for 2 nodes"));
         assert!(lay_out_graph(&sizes, &[], &[], &[None, Some((-3.0, 1.0))], &ok).unwrap_err().contains("names[1] should be a width and height of at least 0"));
         assert!(LabelPlace::named("across").unwrap_err().contains("\"along\", \"beside\" or \"upright\""));

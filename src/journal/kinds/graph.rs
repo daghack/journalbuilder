@@ -121,7 +121,7 @@ impl ValueKind for Graph {
             Some((longest as f64 * 0.6 * s, lines.len() as f64 * 1.2 * s))
         }).collect();
         let ends: Vec<(usize, usize)> = edges.iter().map(|e| (index_of(e, "from"), index_of(e, "to"))).collect();
-        let settings = GraphLayoutSettings { width: 1000.0, height: 800.0, gap: 0.5 * s, seed: 0, iterations: 300, place: LabelPlace::Upright };
+        let settings = GraphLayoutSettings { width: 1000.0, height: 800.0, gap: 0.5 * s, seed: 0, iterations: 300, place: LabelPlace::Upright, generations: 0 };
         let laid = lay_out_graph(&sizes, &ends, &labels, &named, &settings).ok()?;
         let (mut boxes, mut rings, mut lines, mut arrows) = (StrokePath::new(), StrokePath::new(), StrokePath::new(), StrokePath::new());
         let mut words = Vec::new();
@@ -329,9 +329,9 @@ fn read_size(value: &Dynamic, what: &str) -> Result<(f64, f64), String> {
     Ok((read_number(&wh[0], what).map_err(|_| wrong())?, read_number(&wh[1], what).map_err(|_| wrong())?))
 }
 
-const LAYOUT_KEYS: [&str; 8] = ["labels", "names", "label_place", "gap", "width", "height", "seed", "iterations"];
+const LAYOUT_KEYS: [&str; 9] = ["labels", "names", "label_place", "gap", "width", "height", "seed", "iterations", "generations"];
 
-/// `graph::layout(graph, sizes[, #{ labels, names, label_place, gap, width, height, seed, iterations }])`:
+/// `graph::layout(graph, sizes[, #{ labels, names, label_place, gap, width, height, seed, iterations, generations }])`:
 /// #{ points, size, edges: [#{ start, end, label, angle, pieces }], names },
 /// the nodes' boxes, of `sizes`, each edge's line and label, and each
 /// node's name beside its box.
@@ -366,6 +366,7 @@ fn layout(ctx: &NativeCallContext, graph: &Map, sizes: &Array, options: &Map) ->
         seed: o.index("seed", 0).map_err(err)? as u64,
         iterations: o.index("iterations", 300).map_err(err)?,
         place,
+        generations: o.index("generations", 0).map_err(err)?,
     };
     let ends: Vec<(usize, usize)> = edges.iter().map(|e| { let e = as_map(e); (index_of(&e, "from"), index_of(&e, "to")) }).collect();
     let laid = lay_out_graph(&sizes, &ends, &labels, &names, &settings).map_err(err)?;

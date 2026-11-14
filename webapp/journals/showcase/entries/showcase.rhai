@@ -53,7 +53,9 @@
 //             and snakes, the Steiner wheels, symbol sets, symbols as text
 //             (write_at) and symbolics, art::star, whole symbol sets in
 //             the rings and the Steiner wheels, banded discs, a lock's
-//             values by their own names, and the plates' inks and helpers
+//             values by their own names, the plates' inks and helpers,
+//             modular mazes (a ring in disguise that divides as it's
+//             walked), and graph::layout's generations, evolving a layout
 //
 // Pages are bound with new_book: numbered, named and listed in the
 // contents.
@@ -3044,6 +3046,46 @@ tools.add(write_in("inks::moon, inks::star,", LEFT + 680, TOP + 1108, 22, CAPTIO
 tools.add(write_in("inks::eye", LEFT + 680, TOP + 1136, 22, CAPTION, PLAIN));
 discs.add(tools);
 book.bind("appendix", discs);
+
+// modular_maze: a ring in disguise, a map of places whose ways each go so
+// many steps round it, red where they pass the start, so that a walk of S
+// steps from the start ends at place S mod base along S div base red ways.
+let modular = sheet("modular mazes");
+modular.add(subhead("a maze that divides", TOP));
+modular.add(caption("illustration(\"modular_maze\", #{ base, edges, seed }).run(#{ places, walks }): a ring of base places in disguise,", TOP + 50));
+modular.add(caption("each way its steps round it, red where it passes the start (boxed twice); a walk of S steps from the start ends", TOP + 78));
+modular.add(caption("at place S mod base along S div base red ways, whichever it takes, and every S can be walked", TOP + 106));
+let ring = illustration("modular_maze", #{ seed: 1, width: 1000.0, height: 600.0 }).run()[0];
+modular.add(ring.translate_by(vec2(LEFT, TOP + 150)));
+// Smaller, to go two abreast.
+let small_maze = #{ width: 480.0, height: 380.0, name_size: 20.0, edge_size: 18.0, glyph_size: 26.0, gap: 14.0, arrow: 12.0, padding: 6.0, dot: 8.0 };
+let y = TOP + 790;
+modular.add(caption("#{ base: 9, edges: 14, seed: 3 }, walks: [16, 23],", y));
+modular.add(caption("each one it must allow; edges 0 is a quarter more", y + 28));
+let nine = illustration("modular_maze", small_maze + #{ base: 9, edges: 14, seed: 3 }).run(#{ walks: [16, 23] })[0];
+modular.add(nine.translate_by(vec2(LEFT, y + 80)));
+modular.add(write_in("places: [\"Lorem: basic_eye\", \"Ipsum\", ...], chosen:", LEFT + 520, y, 22, CAPTION, PLAIN));
+modular.add(write_in("[[0, 1], [0, 2], ...], \"{word} paces\", mark_start: false", LEFT + 520, y + 28, 22, CAPTION, PLAIN));
+let lorem_places = ["Lorem: basic_eye", "Ipsum", "Dolor", "Sit Amet", "Consectetur", "Adipiscing"];
+let chosen = [[0, 1], [0, 2], [1, 2], [2, 1], [3, 1], [3, 2], [4, 2], [5, 2]];
+let lorem_maze = illustration("modular_maze", small_maze + #{ chosen: chosen, step_text: "{word} paces", mark_start: false })
+	.run(#{ places: lorem_places, walks: [16] })[0];
+modular.add(lorem_maze.translate_by(vec2(LEFT + 520, y + 80)));
+book.bind("appendix", modular);
+
+// graph::layout's generations: the forces' best start evolved, for fewer
+// crossings, shorter lines and room between places; graph_map's default
+// is 200 and modular_maze's 400.
+let evolved = sheet("modular mazes");
+evolved.add(caption("graph::layout(graph, sizes, #{ generations }): the forces' best start evolved, a population of layouts bred", TOP));
+evolved.add(caption("for fewer crossings, shorter lines and room between places; 0 is graph::layout's default, 200 graph_map's", TOP + 28));
+for (generations, i) in [0, 200] {
+	let y = TOP + 80 + i * 620;
+	evolved.add(caption(`illustration("graph_map", #{ generations: ${generations}, seed: 1 }).run(#{ graph: content("routes") })`, y));
+	let map = illustration("graph_map", #{ generations: generations, width: 1000.0, height: 540.0, seed: 1 }).run(#{ graph: routes })[0];
+	evolved.add(map.translate_by(vec2(LEFT, y + 40)));
+}
+book.bind("appendix", evolved);
 
 // ---- the title page and the contents, which go first ----
 
