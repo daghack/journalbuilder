@@ -520,7 +520,8 @@ impl JournalEngine {
                     let script = match kind {
                         SourceKind::Style => "text_style(NAME, OPTIONS)",
                         SourceKind::Glyphset => "glyphset(NAME)",
-                        _ => "layout(NAME, OPTIONS)",
+                        SourceKind::SymbolSet => "symbol_set(NAME, OPTIONS)",
+                        SourceKind::Layout | SourceKind::Content => "layout(NAME, OPTIONS)",
                     };
                     self.engine.eval_with_scope::<Dynamic>(&mut scope, script).map_err(|e| format!("input '{}': {}", name, ScriptError::new(&e).message))?
                 }
