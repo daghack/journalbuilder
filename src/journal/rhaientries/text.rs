@@ -508,7 +508,8 @@ pub fn register(engine: &mut Engine, symdict: Rc<FontBook>, rng: SharedRng) {
     let (r, book) = (rng.clone(), symdict.clone());
     engine.register_fn("write_block", move |ctx: NativeCallContext, text: SymbolText, at: Vec2, width: Dynamic, settings: Map| -> RhaiResult<Map> {
         let (book, rng) = (book.clone(), r.clone());
-        let (symbolic, mut out) = make_with(ctx.engine(), &r, text, move |engine, msg| {
+        let site = format!("write_block {:?} {:?} {:?}", at, width, settings);
+        let (symbolic, mut out) = make_with(ctx.engine(), &r, &site, text, move |engine, msg| {
             let mut out = write_block(msg, at.clone(), width.clone(), settings.clone(), &book, &rng, engine)?;
             let canvas = out.remove("canvas").and_then(|c| c.try_cast::<Canvas>()).expect("write_block gives its canvas");
             Ok((canvas, out))
@@ -527,7 +528,8 @@ pub fn register(engine: &mut Engine, symdict: Rc<FontBook>, rng: SharedRng) {
     let r = rng.clone();
     engine.register_fn("write_inside_path", move |ctx: NativeCallContext, text: SymbolText, path: Path, settings: Map| -> RhaiResult<Map> {
         let (book, rng) = (symdict.clone(), r.clone());
-        let (symbolic, mut out) = make_with(ctx.engine(), &r, text, move |engine, msg| {
+        let site = format!("write_inside_path {} {:?}", path.borrow(), settings);
+        let (symbolic, mut out) = make_with(ctx.engine(), &r, &site, text, move |engine, msg| {
             let mut out = write_inside_path(msg, &path, settings.clone(), &book, &rng, engine)?;
             let canvas = out.remove("canvas").and_then(|c| c.try_cast::<Canvas>()).expect("write_inside_path gives its canvas");
             Ok((canvas, out))

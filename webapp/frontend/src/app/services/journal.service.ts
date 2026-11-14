@@ -209,7 +209,7 @@ export class JournalService {
   private prune(source: string, edits: string | null, committed: Committed[]) {
     const entry = this.entry();
     if (entry === null || edits === null || source !== this.source() || edits !== this.edits()) return;
-    const pruned = pruneEdits(edits, committed.map((c) => c.name));
+    const pruned = pruneEdits(edits, committed);
     if (pruned === edits) return;
     if (pruned === null) this.store.removeFile(editsPath(entry));
     else this.store.setFile(editsPath(entry), pruned);

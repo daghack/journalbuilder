@@ -1,6 +1,6 @@
 import { Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
 import {
-  about, align, boundsOf, distribute, editForGesture, editsReadable, parseEdits, placements, scale, serializeEdits, then, translate, unionBounds,
+  about, align, apply, boundsOf, distribute, editForGesture, editsReadable, parseEdits, placements, scale, serializeEdits, then, translate, unionBounds,
   type Affine, type Alignment, type Bounds, type CanvasEdit, type Placement,
 } from '../journal/canvas-edits';
 import type { Corners, SymbolicInfo } from '../scribe';
@@ -33,6 +33,8 @@ export interface Placed {
   edit: CanvasEdit;
   /** Which copy of it this is on the page. */
   copy: number;
+  /** The boxes of the symbolics it holds, as drawn now; null for one that drew nothing. */
+  symbolics: (Corners | null)[];
 }
 
 /**
@@ -51,6 +53,8 @@ export class VisualEditService {
   readonly readable = computed(() => editsReadable(this.journal.edits()));
   readonly selection = signal<string[]>([]);
   readonly tool = signal<EditTool>('select');
+  /** Which of the one selected canvas's symbolics is picked, to change its symbols. */
+  readonly symbolic = signal<number | null>(null);
   /** Gestures drawn ahead of their runs, oldest first. */
   readonly layers = signal<Layer[]>([]);
   /** For each committed canvas, the ones it's inside (from the page's SVG). */
@@ -77,7 +81,8 @@ export class VisualEditService {
       return placements(c, edit, page).map((placement, copy) => {
         const t = this.layerMap(c.name, layers);
         const corners = placement.corners.map((p) => applyMap(t, p)) as Corners;
-        return { placement, corners, bounds: boundsOf(corners), edit, copy };
+        const symbolics = (c.symbolics ?? []).map((s) => (s.corners ? (s.corners.map((p) => applyMap(t, apply(placement.after, p))) as Corners) : null));
+        return { placement, corners, bounds: boundsOf(corners), edit, copy, symbolics };
       });
     });
   });
@@ -96,6 +101,11 @@ export class VisualEditService {
       if (selection.some((n) => !names.has(n)) && untracked(() => !this.journal.evaluating())) {
         this.selection.set(selection.filter((n) => names.has(n)));
       }
+    });
+    // A symbolic is picked of one canvas: another selection picks none.
+    effect(() => {
+      this.selection();
+      untracked(() => this.symbolic.set(null));
     });
     // Gestures are done with once the pages and boxes shown both have their edits.
     effect(() => {
@@ -272,13 +282,17 @@ export class VisualEditService {
   }
 
   /**
-   * Draw the symbolic `name` as `symbols` of symbol set `set`, as an
-   * undoable edit; what the script made it as is no edit at all.
+   * Draw `symbolic`, one of those canvas `name` holds, as `symbols` of
+   * symbol set `set`, as an undoable edit under its id; what the script
+   * made it as is no edit at all.
    */
   setSymbolic(name: string, symbolic: SymbolicInfo, set: string, symbols: number[]) {
     const sameSet = set === symbolic.script_symbol_set;
     const sameSymbols = symbols.length === symbolic.script_symbols.length && symbols.every((s, i) => s === symbolic.script_symbols[i]);
-    this.updateOne(name, (edit) => ({ ...edit, symbol_set: sameSet ? undefined : set, symbols: sameSymbols ? undefined : symbols }));
+    this.updateOne(name, (edit) => ({
+      ...edit,
+      symbolics: { ...edit.symbolics, [symbolic.id]: { symbol_set: sameSet ? undefined : set, symbols: sameSymbols ? undefined : symbols } },
+    }));
   }
 
   // ---- history ----

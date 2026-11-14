@@ -33,9 +33,34 @@ export interface CanvasEdit {
   hidden?: boolean;
   locked?: boolean;
   ink?: InkEdit;
-  /** For a symbolic canvas: the symbols it's drawn as, and the symbol set they're of, in place of the script's. */
+  /**
+   * The symbolics the canvas holds that are drawn as other symbols, or
+   * another set's: each by its id (`SymbolicInfo.id`; older files, by its
+   * place among them, from 0).
+   */
+  symbolics?: Record<string, SymbolicEdit>;
+}
+
+/** What a symbolic is drawn as, in place of the script's: its symbols, and the symbol set they're of. */
+export interface SymbolicEdit {
   symbols?: number[];
   symbol_set?: string;
+}
+
+/** A canvas's edit as files written before a canvas held more than one symbolic have it: symbolic 0's at the top. */
+type OlderEdit = CanvasEdit & SymbolicEdit;
+
+/** Whether `edit` is written the older way. */
+function isOlder(edit: OlderEdit): boolean {
+  return edit.symbols !== undefined || edit.symbol_set !== undefined;
+}
+
+/** `edit` as it's written now: an older one's symbols and set as its symbolic 0's. */
+function convertEdit(edit: OlderEdit): CanvasEdit {
+  if (!edit || typeof edit !== 'object' || !isOlder(edit)) return edit;
+  const { symbols, symbol_set, ...rest } = edit;
+  const first = rest.symbolics?.['0'] ?? {};
+  return { ...rest, symbolics: { ...rest.symbolics, 0: { symbols: first.symbols ?? symbols, symbol_set: first.symbol_set ?? symbol_set } } };
 }
 
 export interface EditsFile {
@@ -43,14 +68,14 @@ export interface EditsFile {
   canvases: Record<string, CanvasEdit>;
 }
 
-/** The edits in an edits file's `text`; none for no file, or one that doesn't parse. */
+/** The edits in an edits file's `text` (older ones as they're written now); none for no file, or one that doesn't parse. */
 export function parseEdits(text: string | null): EditsFile {
   if (text === null) return { version: EDITS_VERSION, canvases: {} };
   try {
     const file = JSON.parse(text) as Partial<EditsFile>;
     if (file && typeof file === 'object' && file.version === EDITS_VERSION) {
       const canvases = file.canvases && typeof file.canvases === 'object' ? file.canvases : {};
-      return { version: EDITS_VERSION, canvases };
+      return { version: EDITS_VERSION, canvases: Object.fromEntries(Object.entries(canvases).map(([name, edit]) => [name, convertEdit(edit)])) };
     }
   } catch {
     // Not JSON: the run says why; the editor starts from none.
@@ -91,8 +116,15 @@ export function cleanEdit(edit: CanvasEdit): CanvasEdit | null {
   }
   if (edit.hidden) out.hidden = true;
   if (edit.locked) out.locked = true;
-  if (edit.symbols?.length) out.symbols = edit.symbols.map((s) => Math.max(0, Math.round(s)));
-  if (edit.symbol_set) out.symbol_set = edit.symbol_set;
+  const symbolics: Record<string, SymbolicEdit> = {};
+  for (const id of Object.keys(edit.symbolics ?? {}).filter((k) => k).sort()) {
+    const { symbols, symbol_set } = edit.symbolics![id] ?? {};
+    const one: SymbolicEdit = {};
+    if (symbols?.length) one.symbols = symbols.map((s) => Math.max(0, Math.round(s)));
+    if (symbol_set) one.symbol_set = symbol_set;
+    if (Object.keys(one).length) symbolics[id] = one;
+  }
+  if (Object.keys(symbolics).length) out.symbolics = symbolics;
   if (edit.ink) {
     const ink: InkEdit = {};
     if (edit.ink.color) ink.color = edit.ink.color;
@@ -119,18 +151,35 @@ export function serializeEdits(file: EditsFile): string | null {
 }
 
 /**
- * The edits file `text` with only the edits for canvases `names` (the ones
- * a run committed); null if none's left. A file the editor can't read is
- * left as it is.
+ * The edits file `text` with only the edits for the canvases a run
+ * `committed`, and for the symbolics each holds, older edits (a canvas's
+ * own symbols, and symbolics by their place) written as they are now, by
+ * id; null if none's left. A file the editor can't read is left
+ * as it is, as is one with nothing to drop or convert.
  */
-export function pruneEdits(text: string | null, names: string[]): string | null {
+export function pruneEdits(text: string | null, committed: { name: string; symbolics?: { id: string }[] }[]): string | null {
   if (text === null || !editsReadable(text)) return text;
+  const raw = (JSON.parse(text) as Partial<EditsFile>).canvases;
+  let changed = !!raw && typeof raw === 'object' && Object.values(raw).some((edit) => edit && typeof edit === 'object' && isOlder(edit));
   const file = parseEdits(text);
-  const kept = new Set(names);
-  const gone = Object.keys(file.canvases).filter((name) => !kept.has(name));
-  if (!gone.length) return text;
-  for (const name of gone) delete file.canvases[name];
-  return serializeEdits(file);
+  const held = new Map(committed.map((c) => [c.name, (c.symbolics ?? []).map((s) => s.id)]));
+  for (const name of Object.keys(file.canvases)) {
+    const ids = held.get(name);
+    if (ids === undefined) {
+      delete file.canvases[name];
+      changed = true;
+      continue;
+    }
+    const symbolics = file.canvases[name]?.symbolics ?? {};
+    for (const key of Object.keys(symbolics).filter((k) => !ids.includes(k))) {
+      // An older edit, by its place: its symbolic's from now on.
+      const id = /^\d+$/.test(key) ? ids[+key] : undefined;
+      if (id !== undefined && !(id in symbolics)) symbolics[id] = symbolics[key];
+      delete symbolics[key];
+      changed = true;
+    }
+  }
+  return changed ? serializeEdits(file) : text;
 }
 
 // ---- affine maps ----

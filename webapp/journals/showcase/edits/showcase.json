@@ -8,6 +8,20 @@
       "move": [250, 0],
       "turn": 90
     },
+    "held": {
+      "turn": 6,
+      "symbolics": {
+        "c69561b1-6008-5c71-b8b9-3ee2749fa7f4": {
+          "symbols": [1, 0],
+          "symbol_set": "moons"
+        },
+        "fdb98152-a14c-e073-8b9f-e08dea75cc1e": {
+          "symbols": [
+            4
+          ]
+        }
+      }
+    },
     "hidden": {
       "hidden": true
     },
