@@ -119,11 +119,11 @@ pub struct StrokeStyle {
     pub brush: Option<Brush>,
 }
 
-/// A Darkly brush preset and the settings it is drawn with.
+/// A Darkly brush and the settings it is drawn with.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Brush {
-    /// Darkly brush preset name, e.g. "Calligraphy" or "Rough Ink".
-    pub name: String,
+    /// The brush: its name ("Calligraphy", "Rough Ink") and its graph.
+    pub graph: std::sync::Arc<crate::journal::brushes::BrushGraph>,
     pub size: f32,
     pub min_pressure: f32,
     pub max_pressure: f32,
@@ -140,6 +140,10 @@ pub struct Brush {
 }
 
 impl Brush {
+    /// The brush's name.
+    pub fn name(&self) -> &str {
+        self.graph.name()
+    }
     /// How much heavier a stroke is at height `y` in a path reaching from
     /// `top` to `bottom` (`y` down): 1 above its lowest `pool_depth`, rising
     /// smoothly to `1 + pool` at the bottom. Paths with no height don't
@@ -1323,7 +1327,7 @@ mod pressure_tests {
     use super::{Brush, PressureProfile, Vec2};
 
     fn brush(pool: f32, pressure_variation: f32) -> Brush {
-        Brush { name: "Ink Pen".into(), size: 1.0, min_pressure: 0.2, max_pressure: 0.8, pressure_profile: PressureProfile::Ramp, pool, pool_depth: 0.25, pressure_variation, variation_length: 10.0 }
+        Brush { graph: crate::journal::brushes::builtin("Ink Pen").unwrap(), size: 1.0, min_pressure: 0.2, max_pressure: 0.8, pressure_profile: PressureProfile::Ramp, pool, pool_depth: 0.25, pressure_variation, variation_length: 10.0 }
     }
 
     #[test]

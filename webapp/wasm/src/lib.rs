@@ -16,13 +16,15 @@
 //! `valueKinds`; and the illustration, layout and style editors have
 //! `illustrationTypes`, `illustrationPorts`, `illustrationPreview`,
 //! `layoutTypes`, `layoutPreview`, `styleTypes`, `convertStyle` and
-//! `styleChoices`.
+//! `styleChoices`; and the brush editor has `brushNodeTypes`, `brushTypes`,
+//! `readBrush` and `writeBrush`.
 
+use scribe::journal::brushes;
 use scribe::journal::darkly;
 use scribe::journal::fonts::FontBook;
 use scribe::journal::pdf::PdfWriter;
 use scribe::journal::publish::{self, Render};
-use scribe::journal::rhaientries::{brush_names, commit_report, CommitReport, Edits, Entry, JournalEngine, LockLibrary, Resources};
+use scribe::journal::rhaientries::{commit_report, CommitReport, Edits, Entry, JournalEngine, LockLibrary, Resources};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::cell::RefCell;
@@ -137,6 +139,7 @@ fn journal_files<'a>(files: impl IntoIterator<Item = (&'a str, &'a str)>) -> Res
             ("illustrations", "rhai") => &mut journal.illustrations,
             ("chains", "rhai") => &mut journal.chains,
             ("styles", "json") => &mut journal.styles,
+            ("brushes", "yaml") => &mut journal.brushes,
             ("lib", "rhai") => &mut journal.lib,
             ("glyphsets", "json") => &mut journal.glyphsets,
             ("symbolsets", "json") => &mut journal.symbol_set_data,
@@ -623,8 +626,55 @@ pub fn convert_style(name: &str, source: &str) -> String {
 /// journal's and the library's), sorted.
 #[wasm_bindgen(js_name = styleChoices)]
 pub fn style_choices() -> String {
-    let (book, _) = glyphsets(&resources(&[]));
-    json!({ "brushes": brush_names(), "glyphsets": book.names() }).to_string()
+    let engine = engine(&[]);
+    json!({ "brushes": engine.brushes().names(), "glyphsets": engine.glyphsets().names() }).to_string()
+}
+
+/// Every type of node brushes are made of, as JSON: Darkly's
+/// registrations, `[{ type_id, category, display_name, description, ports:
+/// [{ name, dir, wire_type, value, min, max, ... }] }]`, each input's
+/// value as brush files write it.
+#[wasm_bindgen(js_name = brushNodeTypes)]
+pub fn brush_node_types() -> String {
+    brushes::node_types_json().to_string()
+}
+
+/// Every brush file, the journal's and the library's, as JSON: `[{ file,
+/// name, own, builtin }]`, name what styles call it (null if the file isn't
+/// YAML), sorted by file.
+#[wasm_bindgen(js_name = brushTypes)]
+pub fn brush_types() -> String {
+    let files = resources(&[]).brushes.unrecorded();
+    let library = Resources::embedded().brushes;
+    let found: Vec<Value> = files.names().unwrap_or_default().into_iter().map(|file| {
+        let name = files.read(&file).ok().and_then(|yaml| brushes::file_name(&yaml)).map(|name| if name.is_empty() { file.clone() } else { name });
+        json!({ "file": file, "name": name, "own": files.has_own(&file), "builtin": library.has(&file) })
+    }).collect();
+    Value::Array(found).to_string()
+}
+
+/// Brush file `yaml`, called `name` (its file's name) if it doesn't say,
+/// for the brush editor: `{ brush, problem }`, brush the file as JSON of the
+/// same shape and problem why it can't be drawn with (or null); or `{ error
+/// }` if it isn't a brush file.
+#[wasm_bindgen(js_name = readBrush)]
+pub fn read_brush(yaml: &str, name: &str) -> String {
+    match brushes::file_to_json(yaml) {
+        // The brush's JSON as it is: a Value would sort its exposed ports.
+        Ok(brush) => format!(r#"{{"brush":{},"problem":{}}}"#, brush, json!(brushes::BrushGraph::parse(yaml, name).err())),
+        Err(error) => json!({ "error": error }).to_string(),
+    }
+}
+
+/// A brush as JSON (as `readBrush` gives it) written as a brush file:
+/// `{ yaml, problem }`, problem why it can't be drawn with (or null), called
+/// `name` if it doesn't say; or `{ error }` if it isn't a brush.
+#[wasm_bindgen(js_name = writeBrush)]
+pub fn write_brush(brush: &str, name: &str) -> String {
+    answer(brushes::json_to_file(brush).map(|yaml| {
+        let problem = brushes::BrushGraph::parse(&yaml, name).err();
+        json!({ "yaml": yaml, "problem": problem })
+    }))
 }
 
 /// Every value kind, as JSON: `[{ name, example }]`, example a rhai

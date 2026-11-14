@@ -108,7 +108,8 @@ export type DarklyReply =
 
 /** The engine functions the tools worker calls (see webapp/wasm). */
 export type ToolFunction = 'previewSvg' | 'libraryFiles' | 'usedLibrary' | 'lockTypes' | 'lockPorts' | 'lockExamples' | 'chainTypes' | 'runChain' | 'readChain'
-  | 'valueKinds' | 'illustrationTypes' | 'illustrationPorts' | 'illustrationPreview' | 'layoutTypes' | 'layoutPreview' | 'styleTypes' | 'convertStyle' | 'styleChoices' | 'symbolSetTypes' | 'symbolSetPreview';
+  | 'valueKinds' | 'illustrationTypes' | 'illustrationPorts' | 'illustrationPreview' | 'layoutTypes' | 'layoutPreview' | 'styleTypes' | 'convertStyle' | 'styleChoices' | 'symbolSetTypes' | 'symbolSetPreview'
+  | 'brushNodeTypes' | 'brushTypes' | 'readBrush' | 'writeBrush';
 
 /** Whose a file is: the journal's own, the library's, or both (the journal's standing in for the library's). */
 export interface Whose {
@@ -273,4 +274,78 @@ export interface ChainFile {
 /** What a tool answers when it can't. */
 export interface ToolError {
   error: string;
+}
+
+// ---- brushes: Darkly brush graphs, in Darkly's own file format ----
+
+/** What a wire carries between brush nodes. */
+export type WireType = 'Scalar' | 'Int' | 'Bool' | 'Enum' | 'String' | 'Curve' | 'Vec2' | 'Vec4';
+
+/** An input's value as a brush file writes it. */
+export type BrushValue = boolean | number | string | number[] | [number, number][];
+
+/** One of a brush node type's ports, as Darkly registers it. */
+export interface BrushPortDef {
+  name: string;
+  dir: 'Input' | 'Output';
+  wire_type: WireType;
+  /** Its default, as a brush file writes it. */
+  value: BrushValue;
+  min: number;
+  max: number;
+  step: number;
+  wirable: boolean;
+  exposable: boolean;
+  /** Whether a new node of the type has it on the brush bar. */
+  exposed: boolean;
+  description: string;
+  unit_type: 'Normalized' | 'Percent' | 'Degrees' | 'Raw' | 'Pixels';
+  label: string;
+  /** Shown only while the input named holds one of these (an enum's index, a toggle's 0 or 1). */
+  visible_when: [string, number[]] | null;
+  natural_range: [number, number] | null;
+  enum_options?: string[];
+}
+
+/** A type of node brushes are made of. */
+export interface BrushNodeType {
+  type_id: string;
+  category: string;
+  display_name: string;
+  description: string;
+  ports: BrushPortDef[];
+  is_terminal: boolean;
+}
+
+/** A node of a brush file. */
+export interface BrushFileNode {
+  type: string;
+  name?: string;
+  comment?: string;
+  /** Inputs set otherwise than their type's defaults. */
+  inputs?: Record<string, BrushValue>;
+  /** Inputs' slider ranges set otherwise than their type's: [min, max]. */
+  ranges?: Record<string, [number, number]>;
+}
+
+/** A brush file (Darkly's portable brush) as JSON. */
+export interface BrushFile {
+  name?: string;
+  description?: string;
+  author?: string;
+  tags?: string[];
+  stabilizer?: unknown;
+  nodes: Record<string, BrushFileNode>;
+  /** Wires, "node.port -> node.port". */
+  connections?: string[];
+  /** The brush bar's ports, "node.port", in order, with how each shows. */
+  exposed_ports?: Record<string, { label?: string; description?: string; icon?: string; invert?: boolean }>;
+}
+
+/** A brush file, as the brush list has it: what styles call it (null if the file isn't YAML). */
+export interface BrushInfo {
+  file: string;
+  name: string | null;
+  own: boolean;
+  builtin: boolean;
 }

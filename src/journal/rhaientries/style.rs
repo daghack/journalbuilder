@@ -54,10 +54,14 @@
 use rand::RngCore;
 use rhai::{Dynamic, Engine, Map};
 
+use std::sync::Arc;
+
+use super::brushes;
 use super::gradient;
 use super::options::{above_zero, at_least_zero, one_of, register_settings, setting_number, Settings};
 use super::RhaiResult;
 use crate::journal::affine::Affine;
+use crate::journal::brushes::BrushGraph;
 use crate::journal::canvas::{css, parse_color, Brush, ColorJitter, InkRun, PressureProfile, StrokeColor};
 use crate::journal::gradient::Gradient;
 use crate::journal::canvas::StrokeStyle as JournalStrokeStyle;
@@ -66,21 +70,13 @@ use crate::journal::paths::StrokePath;
 /// The most passes a style draws its strokes in.
 pub(super) const MAX_PASSES: i64 = 64;
 
-/// Darkly's brushes, by name, sorted. Listed here because Darkly parses
-/// every brush to say, and scripts check brush names however they're
-/// rendered: SVG renders don't touch Darkly. A test holds this to its list.
-pub fn brush_names() -> &'static [&'static str] {
-    &[
-        "Airbrush", "Blur", "Calligraphy", "Charcoal", "Clone", "Hair", "Ink Pen", "Liquify", "Pencil",
-        "Rough Ink", "Rough Watercolor", "Smooth Watercolor", "Smudge", "Sponge",
-    ]
-}
-
 /// The ink: a colour or gradient, a Darkly brush, and how it presses.
 #[derive(Debug, Clone)]
 pub struct BrushStyle {
     color: StrokeColor,
-    brush: String,
+    /// Read and checked when it's named (see `brushes::lookup`), so strokes
+    /// carry it.
+    brush: Arc<BrushGraph>,
     brush_size: f64,
     min_pressure: f64,
     max_pressure: f64,
@@ -113,11 +109,25 @@ impl RedipBy {
     }
 }
 
+/// The brush a style names, as `brushes::lookup` finds it.
+fn brush_named(caller: &str, value: &Dynamic) -> RhaiResult<Arc<BrushGraph>> {
+    let name = value.clone().into_string()
+        .map_err(|t| -> Box<rhai::EvalAltResult> { format!("{}: 'brush' should be a brush's name, a string, got {}", caller, t).into() })?;
+    brushes::lookup(&name).map_err(|e| format!("{}: {}", caller, e).into())
+}
+
 impl BrushStyle {
     fn new(caller: &str, color: &Dynamic, brush: &Dynamic, brush_size: &Dynamic) -> RhaiResult<BrushStyle> {
-        let mut style = BrushStyle {
+        let mut style = BrushStyle::with_brush(brush_named(caller, brush)?);
+        style.set(caller, "color", color)?;
+        style.set(caller, "brush_size", brush_size)?;
+        Ok(style)
+    }
+    /// Black in `brush`, 1.2 wide, pressing from 0.3 to 0.7.
+    fn with_brush(brush: Arc<BrushGraph>) -> BrushStyle {
+        BrushStyle {
             color: StrokeColor::Solid("black".into()),
-            brush: "Ink Pen".into(),
+            brush,
             brush_size: 1.2,
             min_pressure: 0.3,
             max_pressure: 0.7,
@@ -130,11 +140,7 @@ impl BrushStyle {
             ink_load: 0.0,
             redip_every: 40.0,
             redip_by: RedipBy::Glyphs,
-        };
-        style.set(caller, "color", color)?;
-        style.set(caller, "brush", brush)?;
-        style.set(caller, "brush_size", brush_size)?;
-        Ok(style)
+        }
     }
 }
 
@@ -151,7 +157,7 @@ impl Settings for BrushStyle {
                 StrokeColor::Gradient(g) => Dynamic::from(g.clone()),
                 StrokeColor::Image(paint) => Dynamic::from(paint.clone()),
             },
-            "brush" => self.brush.clone().into(),
+            "brush" => self.brush.name().into(),
             "brush_size" => self.brush_size.into(),
             "min_pressure" => self.min_pressure.into(),
             "max_pressure" => self.max_pressure.into(),
@@ -170,7 +176,7 @@ impl Settings for BrushStyle {
     fn set(&mut self, caller: &str, key: &str, value: &Dynamic) -> RhaiResult<()> {
         match key {
             "color" => self.color = gradient::colour_or_gradient(caller, value.clone())?,
-            "brush" => self.brush = one_of(caller, key, value, brush_names())?,
+            "brush" => self.brush = brush_named(caller, value)?,
             "brush_size" => self.brush_size = above_zero(caller, key, value)?,
             "min_pressure" | "max_pressure" => {
                 let pressure = setting_number(caller, key, value)?;
@@ -337,10 +343,12 @@ pub struct Style {
 }
 
 impl Style {
-    /// Black, in an Ink Pen 1.2 wide, by a steady hand.
+    /// Black, in an Ink Pen 1.2 wide, by a steady hand: the journal's Ink
+    /// Pen, if it has one that draws, or else Darkly's.
     pub fn default_style() -> Style {
-        let brush = BrushStyle::new("default_style", &"black".into(), &"Ink Pen".into(), &Dynamic::from(1.2)).expect("the default brush");
-        Style { brush, handwriting: HandwritingStyle::new() }
+        let ink_pen = brushes::lookup("Ink Pen")
+            .unwrap_or_else(|_| crate::journal::brushes::builtin("Ink Pen").expect("Darkly has an Ink Pen"));
+        Style { brush: BrushStyle::with_brush(ink_pen), handwriting: HandwritingStyle::new() }
     }
     /// How wide its brush's marks are.
     pub(super) fn brush_size(&self) -> f32 {
@@ -423,7 +431,7 @@ impl Style {
     /// does: its brush and colour, if it has an ink load.
     pub(super) fn pen(&self) -> Option<String> {
         let b = &self.brush;
-        (b.ink_load > 0.0).then(|| format!("{}|{:?}", b.brush, b.color))
+        (b.ink_load > 0.0).then(|| format!("{}|{:?}", b.brush.name(), b.color))
     }
     /// How far through its dip the pen is over a stroke that writes
     /// `glyphs` glyphs (a path that isn't a glyph counts as one) along
@@ -488,7 +496,7 @@ impl From<&Style> for JournalStrokeStyle {
             color: b.color.clone(),
             color_jitter: None,
             brush: Some(Brush {
-                name: b.brush.clone(),
+                graph: b.brush.clone(),
                 size: b.brush_size as f32,
                 min_pressure: b.min_pressure as f32,
                 max_pressure: b.max_pressure as f32,
@@ -503,8 +511,6 @@ impl From<&Style> for JournalStrokeStyle {
 }
 
 pub(super) fn register(engine: &mut Engine) {
-    engine.register_fn("brush_names", || -> rhai::Array { brush_names().iter().map(|name| Dynamic::from(name.to_string())).collect() });
-
     engine.register_type_with_name::<BrushStyle>("BrushStyle");
     register_settings::<BrushStyle>(engine);
     let new_brush_style = |color: Dynamic, brush: Dynamic, brush_size: Dynamic| BrushStyle::new("new_brush_style", &color, &brush, &brush_size);

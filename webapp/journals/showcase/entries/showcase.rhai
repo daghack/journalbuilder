@@ -57,7 +57,8 @@
 //             modular mazes (a ring in disguise that divides as it's
 //             walked), graph::layout's generations, evolving a layout;
 //             scale_by by a vec, across and down apart, and canvas.size_to,
-//             filling a canvas or a page
+//             filling a canvas or a page; a journal's own brushes,
+//             brushes/NAME.yaml, Darkly brushes drawn with by name
 //
 // Pages are bound with new_book: numbered, named and listed in the
 // contents.
@@ -196,6 +197,9 @@ pens.name = "brushes";
 pens.add(caption("brush_names(), new_brush_style(colour, brush, brush_size), brush_style.brush_size", TOP));
 let y = TOP + 70;
 for name in brush_names() {
+	// The library's: the showcase's own, Broad Nib, has a page of its own in
+	// the appendix.
+	if name == "Broad Nib" { continue; }
 	pens.add(write(name, LEFT, y, 24));
 	pens.add(new_rectangle(vec2(910, y), 380, 54).hatch(7.0, #{ angle: 0.8, roughness: 0.6 }), CAPTION);
 	let brush = new_brush_style(INK, name, 6, #{ max_pressure: 0.9 });
@@ -3136,6 +3140,38 @@ for (options, i) in [#{ padding: 30 }, #{ padding: 30, keep_proportions: true }]
 	fitted.add(write(if i == 0 { "new_page(#{ size: vec2(400, 200) })" } else { "keep_proportions: true" }, at.x, at.y + 232, 18));
 }
 book.bind("appendix", fitted);
+
+// A journal's own brushes: brushes/NAME.yaml, a Darkly brush, nodes wired
+// from the pen to the paint (the web editor's brush editor wires them).
+// Styles draw with it by its name, and brush_names() has it beside the
+// library's. The showcase's is a flat nib held at a slant.
+let nibs = sheet("pens");
+nibs.add(subhead("a journal's brushes", TOP));
+nibs.add(caption("brushes/broad_nib.yaml, a Darkly brush called \"Broad Nib\": a flat nib held at a slant, broad one way, thin the", TOP + 50));
+nibs.add(caption("other; new_brush_style(colour, \"Broad Nib\", brush_size) draws with it, at pressures from 0.1 to 1", TOP + 84));
+let hand = new_handwriting_style();
+let y = TOP + 170;
+for (size, i) in [3.0, 6.0, 10.0] {
+	let nib = new_brush_style(if i == 1 { RED } else { INK }, "Broad Nib", size, #{ min_pressure: 0.1, max_pressure: 1.0, pressure_profile: "taper" });
+	assert(nib.brush == "Broad Nib", "unexpected brush");
+	nibs.add(write(`brush_size ${size.to_int()}`, LEFT, y, 22));
+	nibs.add(wave(320, RIGHT, y, 40), new_style(nib, hand));
+	y += 130;
+}
+nibs.add(caption("a circle, a star and a rectangle, the nib's slant the same whichever way the stroke runs", y));
+y += 150;
+nibs.add(new_circle(vec2(LEFT + 160, y), 100), new_style(new_brush_style(INK, "Broad Nib", 8), hand));
+nibs.add(new_star(vec2(LEFT + 460, y), 100, 40, 5), new_style(new_brush_style(RED, "Broad Nib", 8), hand));
+nibs.add(new_rectangle(vec2(LEFT + 790, y), 240, 160), new_style(new_brush_style(INK, "Broad Nib", 8), hand));
+y += 200;
+nibs.add(caption("writing in it: a style of new_brush_style(INK, \"Broad Nib\", 3)", y));
+let script = new_style(new_brush_style(INK, "Broad Nib", 3), hand);
+nibs.add(write_line("Lorem ipsum dolor sit amet", vec2(LEFT, y + 90), #{ style: script, type: new_type_style(PLAIN, 56) }));
+y += 170;
+let names = brush_names();
+assert("Broad Nib" in names && "Ink Pen" in names, "brush_names() should have the journal's and the library's");
+nibs.add(caption(`brush_names(): the library's ${names.len() - 1} and the journal's own, ${names.len()} in all`, y));
+book.bind("appendix", nibs);
 
 // ---- the title page and the contents, which go first ----
 

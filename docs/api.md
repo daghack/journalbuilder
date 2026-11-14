@@ -814,7 +814,7 @@ The plainest style: black, in an Ink Pen 1.2 wide pressing from 0.3 to 0.7, by a
 
 ### `brush_names()`
 
-The name of every Darkly brush, sorted.
+The name of every brush, sorted: the library's (see The Library) and the journal's own, brushes/NAME.yaml (see Brush files), a journal's standing in for the library's of the same name.
 
 ### `new_brush_style(color, brush, brush_size), new_brush_style(color, brush, brush_size, options)`
 
@@ -823,7 +823,7 @@ A brush style. Pressure runs from min_pressure to max_pressure along each stroke
 | argument | what it does | takes |
 |---|---|---|
 | `color` | The ink. | a CSS colour, a gradient or image paint. |
-| `brush` | Which Darkly brush draws. | one of brush_names(). |
+| `brush` | Which brush draws, by its name: the journal's or the library's. | one of brush_names(). |
 | `brush_size` | How wide its marks are, in canvas units. | a positive number. |
 
 | option | default | what it does | takes |
@@ -850,11 +850,11 @@ The ink.
 
 ### `brush_style.brush = name`
 
-The Darkly brush.
+The brush, by its name: reading it gives the name.
 
 | argument | what it does | takes |
 |---|---|---|
-| `name` | Which brush draws. | one of brush_names(). |
+| `name` | Which brush draws: the journal's or the library's. | one of brush_names(). |
 
 ### `brush_style.brush_size = number`
 
@@ -3128,7 +3128,7 @@ A value kind's default drawing as a parts map for canvas.add(parts, styles): eac
 
 ## Journals and Their Files
 
-A journal is a directory: its manifest, journal.json; its entries, entries/NAME.rhai, each a script building a journal_entry of pages; and files of its own, each kind in a directory of its own: locks/, helpers/, layouts/, illustrations/, chains/ and lib/ (rhai files), styles/ and glyphsets/ (NAME.json), symbolsets/ (NAME.json or NAME.rhai: see Symbol set files), content/ (NAME.txt, a String; NAME.md, Markdown; NAME.json, Symbols: { base, text }, with strict: true or not, or { base, symbols }; or NAME.graph, a Graph), and images/ (NAME.png or NAME.jpg, pictures for image(name)). They stand in front of the built-in library's, webapp/library/, which has the same directories: a journal's file stands in for the library's of the same name. Beside them, edits/ENTRY.json holds the visual editor's edits to the canvases entry ENTRY commits to it (canvas.commit_to_editor); the library has none. Each entry runs on its own, sharing the journal's files but not code with the other entries.
+A journal is a directory: its manifest, journal.json; its entries, entries/NAME.rhai, each a script building a journal_entry of pages; and files of its own, each kind in a directory of its own: locks/, helpers/, layouts/, illustrations/, chains/ and lib/ (rhai files), styles/ and glyphsets/ (NAME.json), brushes/ (NAME.yaml, Darkly brushes: see Brush files), symbolsets/ (NAME.json or NAME.rhai: see Symbol set files), content/ (NAME.txt, a String; NAME.md, Markdown; NAME.json, Symbols: { base, text }, with strict: true or not, or { base, symbols }; or NAME.graph, a Graph), and images/ (NAME.png or NAME.jpg, pictures for image(name)). They stand in front of the built-in library's, webapp/library/, which has the same directories: a journal's file stands in for the library's of the same name. Beside them, edits/ENTRY.json holds the visual editor's edits to the canvases entry ENTRY commits to it (canvas.commit_to_editor); the library has none. Each entry runs on its own, sharing the journal's files but not code with the other entries.
 
 journal.json: the journal's manifest, a JSON object.
 
@@ -3472,6 +3472,20 @@ styles/NAME.json: a text style, a JSON object of every setting a style, type and
 | `line_height`, `paragraph_gap`, `indent`, `align`, `valign`, `fit`, `layout`, `angle`, `split_words`, `split_padding`, `break_words`, `clearance`, `line_start_jitter`, `line_gap_jitter`, `overhang` | those of a paragraph_style | Its paragraph. | as new_paragraph_style takes them. |
 | `spans` | none | Named spans, as a role has them: each one's style and type are maps of settings, colours and gradients as above and glyphsets by name. | an object of span names to their style and type. |
 
+### Brush files
+
+brushes/NAME.yaml: a Darkly brush, in the format Darkly writes and copies brushes in, so a brush can go from one to the other as it is. Its nodes are wired from the pen (pen_input: position, pressure, tilt, speed...) through shapes, textures and maths to the nodes that paint each dab (brush_settings, stamp, paint...). Styles draw with it by its name, its name key or, without one, NAME: new_brush_style(colour, name, size). Two of a journal's brush files of one name are an error; a journal's stands in for a library brush of its name. The web editor's brush editor wires its nodes, previews it in Darkly, and writes it back in this format.
+
+| key | default | what it does | takes |
+|---|---|---|---|
+| `name` | NAME | What styles call it. | a string. |
+| `description`, `author` | none | What it is, and who made it. | strings. |
+| `tags` | none | Darkly's tags for it. | a list of strings. |
+| `stabilizer` | none | Darkly's stroke stabilizer settings. | as Darkly writes them. |
+| `nodes` | required | Its nodes, by id: each one's `type` (a Darkly node type), and optionally its `name`, a `comment`, `inputs` set otherwise than their defaults, and `ranges` for its inputs' sliders. | a map of ids to nodes. It must have a brush_settings node, whose size and stabilize it's drawn at. |
+| `connections` | none | Its wires, each from an output to an input of a type it takes. | a list of "node.output -> node.input". |
+| `exposed_ports` | none | The inputs Darkly's brush bar shows, in order. | a map of "node.input" to {}. |
+
 ## The Library
 
 The built-in library, webapp/library/, holds what any journal can use; a journal's own file of the same name stands in for one (see Journals and Their Files). Its files, by directory:
@@ -3500,6 +3514,23 @@ The built-in library, webapp/library/, holds what any journal can use; a journal
 | `moons` | The moon in its phases, d / phases of the way through its month, dark side hatched. Options: phases (8), ink. |
 | `gazes` | Eyes (art::eye) each looking a way: 3 ways left, ahead and right; 5, ahead, up, right, down and left; 9, ahead then up and clockwise round the compass. Options: ways (9), ink, iris, seed. |
 | `small_marks` | A lozenge, a dot, a cross and a ring, to set between things. Option: ink. |
+
+| brush | what it draws |
+|---|---|
+| `brushes/airbrush` | Airbrush: a fully soft disc that builds colour up gradually. |
+| `brushes/blur` | Blur: softens what's already drawn instead of laying down colour. |
+| `brushes/calligraphy` | Calligraphy: a broad elliptical nib at a fixed angle, thickening and thinning with direction. |
+| `brushes/charcoal` | Charcoal: a soft stick crumbling onto the paper's tooth, for broad, smoky marks. |
+| `brushes/clone` | Clone: paints with what's sampled from elsewhere on the canvas. |
+| `brushes/hair` | Hair: a lock of single strands, twirling or not. |
+| `brushes/ink_pen` | Ink Pen: a crisp-edged nib with a slow pressure ramp, the default. |
+| `brushes/liquify` | Liquify: pushes what's under it along the stroke. |
+| `brushes/pencil` | Pencil: a graphite tip over paper grain, darker only pressing harder. |
+| `brushes/rough_ink` | Rough Ink: an ink nib whose edge is reshaped every dab, bitten rather than printed. |
+| `brushes/rough_watercolor` | Rough Watercolor: bleeding pigment over rough paper, granulated, with a broken edge. |
+| `brushes/smooth_watercolor` | Smooth Watercolor: wet pigment that pools and blends, with a soft, even edge. |
+| `brushes/smudge` | Smudge: a fingertip dragged through what's drawn, leaving nothing of its own. |
+| `brushes/sponge` | Sponge: a textured brush for big, smooth shapes. |
 
 | file | what it is |
 |---|---|

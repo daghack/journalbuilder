@@ -1,0 +1,96 @@
+name: Hair
+description: A lock of individual strands with optional twirling
+nodes:
+  add:
+    type: add
+  brush_settings:
+    type: brush_settings
+    inputs:
+      size: 0.2
+      spacing: 0.01
+      stabilize: 0.5
+  circle:
+    type: circle
+  curve:
+    type: curve
+    comment: pen pressure affects the threshold of hair volume
+    inputs:
+      curve:
+      - - 0.0
+        - 1.0
+      - - 0.48145637
+        - 0.795719
+      - - 1.0
+        - 0.6756355
+  divide:
+    type: divide
+  remap:
+    type: remap
+  multiply:
+    type: multiply
+    inputs:
+      b: 2.56
+  multiply_2:
+    type: multiply
+    inputs:
+      a: 0.5
+    ranges:
+      a:
+      - -1.0
+      - 1.0
+  multiply_3:
+    type: multiply
+    inputs:
+      b: 0.1217829
+    ranges:
+      b:
+      - 0.03296951
+      - 0.21059628
+  noise:
+    type: noise
+    inputs:
+      scale: 12.0
+      space: 1
+  paint:
+    type: paint
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+  subtract:
+    type: subtract
+    inputs:
+      a: 0.11999999731779099
+connections:
+- add.result -> remap.input
+- brush_settings.size -> divide.b
+- brush_settings.size -> multiply_3.a
+- circle.mask -> add.b
+- curve.output -> remap.in_low
+- divide.result -> multiply.a
+- remap.output -> stamp.tip
+- multiply.result -> multiply_2.b
+- multiply_2.result -> noise.rotation
+- multiply_3.result -> noise.scale
+- noise.value -> subtract.b
+- paint_color.color -> stamp.color
+- pen_input.distance -> divide.a
+- pen_input.position -> paint.position
+- pen_input.pressure -> curve.input
+- stamp.dab -> paint.rgba
+- subtract.result -> add.a
+exposed_ports:
+  brush_settings.stabilize: {}
+  brush_settings.size: {}
+  multiply_2.a:
+    label: Twirl
+    description: Twirliness factor
+    icon: tabler:galaxy
+  paint.build_flow: {}
+  paint.opacity: {}
+  multiply_3.b:
+    label: Hair Thickness
+    description: Controls how many and how thick are the individual strands
+    icon: fa6-solid:arrows-left-right

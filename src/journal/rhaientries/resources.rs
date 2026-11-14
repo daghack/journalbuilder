@@ -1,5 +1,5 @@
 //! A journal's resources: its lock, helper, layout, illustration, chain
-//! and lib scripts, text styles, glyphsets and content, each kind in a directory of its
+//! and lib scripts, text styles, brushes, glyphsets and content, each kind in a directory of its
 //! own, in front of the built-in library's (`webapp/library/`), which has
 //! the same directories. A journal's file stands in for a library file of
 //! the same name.
@@ -11,6 +11,7 @@
 //! illustrations/NAME.rhai  what chains draw their values with
 //! chains/NAME.rhai         locks wired together, for chain(name)
 //! styles/NAME.json         text styles, for text_style(name)
+//! brushes/NAME.yaml        Darkly brushes, in Darkly's own format, for brush styles
 //! lib/NAME.rhai            helpers any script imports: import "lib/NAME"
 //! glyphsets/NAME.json      glyphsets, for glyphset(name)
 //! symbolsets/NAME.json     simple symbol sets, for symbol_set(name)
@@ -48,13 +49,14 @@ pub const BUILT_IN_JOURNALS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/we
 pub const DEFAULT_JOURNALS_DIRS: [&str; 2] = [DEFAULT_JOURNALS_DIR, BUILT_IN_JOURNALS_DIR];
 
 /// Every kind of resource: its directory, and its files' extension.
-pub const KINDS: [(&str, &str); 16] = [
+pub const KINDS: [(&str, &str); 17] = [
     ("locks", "rhai"),
     ("helpers", "rhai"),
     ("layouts", "rhai"),
     ("illustrations", "rhai"),
     ("chains", "rhai"),
     ("styles", "json"),
+    ("brushes", "yaml"),
     ("lib", "rhai"),
     ("glyphsets", "json"),
     ("symbolsets", "json"),
@@ -77,6 +79,8 @@ pub struct Resources {
     pub illustrations: Sources,
     pub chains: Sources,
     pub styles: Sources,
+    /// Darkly brushes: their node graphs, as Darkly keeps them.
+    pub brushes: Sources,
     pub lib: Sources,
     pub glyphsets: Sources,
     /// Symbol sets: a glyphset's glyphs as the symbols of a lock, each
@@ -126,6 +130,7 @@ impl Resources {
             illustrations: sources("illustrations", "rhai"),
             chains: sources("chains", "rhai"),
             styles: sources("styles", "json"),
+            brushes: sources("brushes", "yaml"),
             lib: sources("lib", "rhai"),
             glyphsets: sources("glyphsets", "json"),
             symbol_set_data: sources("symbolsets", "json"),
@@ -148,6 +153,7 @@ impl Resources {
             illustrations: self.illustrations.over(under.illustrations),
             chains: self.chains.over(under.chains),
             styles: self.styles.over(under.styles),
+            brushes: self.brushes.over(under.brushes),
             lib: self.lib.over(under.lib),
             glyphsets: self.glyphsets.over(under.glyphsets),
             symbol_set_data: self.symbol_set_data.over(under.symbol_set_data),
@@ -178,6 +184,7 @@ impl Resources {
             illustrations: record(self.illustrations),
             chains: record(self.chains),
             styles: record(self.styles),
+            brushes: record(self.brushes),
             lib: record(self.lib),
             glyphsets: record(self.glyphsets),
             symbol_set_data: record(self.symbol_set_data),
@@ -193,7 +200,7 @@ impl Resources {
     }
 
     /// Every kind's files, in `KINDS`' order, with their directory's name.
-    pub fn kinds(&self) -> [(&'static str, &Sources); 16] {
+    pub fn kinds(&self) -> [(&'static str, &Sources); 17] {
         [
             ("locks", &self.locks),
             ("helpers", &self.helpers),
@@ -201,6 +208,7 @@ impl Resources {
             ("illustrations", &self.illustrations),
             ("chains", &self.chains),
             ("styles", &self.styles),
+            ("brushes", &self.brushes),
             ("lib", &self.lib),
             ("glyphsets", &self.glyphsets),
             ("symbolsets", &self.symbol_set_data),

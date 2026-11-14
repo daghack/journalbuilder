@@ -1,6 +1,6 @@
 import { Injectable, inject, signal, untracked } from '@angular/core';
 import type {
-  ChainFile, ChainRun, ChainType, IllustrationType, JournalPayload, LayoutType, LockPorts, LockType, Preview, RenderPreview, ScriptError, ToolError, ToolFunction, ToolsReply, ToolsRequest, ValueKind, SymbolSetType,
+  BrushFile, BrushInfo, BrushNodeType, ChainFile, ChainRun, ChainType, IllustrationType, JournalPayload, LayoutType, LockPorts, LockType, Preview, RenderPreview, ScriptError, ToolError, ToolFunction, ToolsReply, ToolsRequest, ValueKind, SymbolSetType,
 } from '../scribe';
 import { JournalStore } from './journal-store.service';
 
@@ -123,6 +123,26 @@ export class ToolsService {
   /** What a style can be made of: every Darkly brush's name and every glyphset's, sorted. */
   async styleChoices(): Promise<{ brushes: string[]; glyphsets: string[] }> {
     return JSON.parse(await this.call<string>('styleChoices'));
+  }
+
+  /** Every type of node brushes are made of. */
+  async brushNodeTypes(): Promise<BrushNodeType[]> {
+    return JSON.parse(await this.call<string>('brushNodeTypes'));
+  }
+
+  /** Every brush file, the journal's and the library's, and what styles call each. */
+  async brushTypes(): Promise<BrushInfo[]> {
+    return JSON.parse(await this.call<string>('brushTypes'));
+  }
+
+  /** Brush file `yaml` (called `name` if it doesn't say) as JSON, and why it can't be drawn with, if it can't. */
+  async readBrush(yaml: string, name: string): Promise<Answer<{ brush: BrushFile; problem: string | null }>> {
+    return JSON.parse(await this.call<string>('readBrush', yaml, name));
+  }
+
+  /** `brush` written as a brush file, as Darkly writes them, and why it can't be drawn with, if it can't. */
+  async writeBrush(brush: BrushFile, name: string): Promise<Answer<{ yaml: string; problem: string | null }>> {
+    return JSON.parse(await this.call<string>('writeBrush', JSON.stringify(brush), name));
   }
 
   /** Every value kind, and rhai that makes one. */

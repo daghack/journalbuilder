@@ -13,6 +13,8 @@ use crate::journal::compose::{self, Placed};
 use crate::journal::canvas::color_jitter::{shifted, Shift};
 use crate::journal::gradient::{colorize, Along, GradientKind};
 use std::collections::HashSet;
+use std::sync::Arc;
+use crate::journal::brushes::BrushGraph;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn new_engine(width: u32, height: u32) -> DarklyEngine {
@@ -363,7 +365,7 @@ async fn render_canvas(canvas: &Canvas, engine: &mut DarklyEngine, page_origin: 
     let strokes: Vec<(&ColoredStroke, u32)> = canvas.strokes().iter().zip(canvas.stroke_seeds())
         .filter(|(stroke, _)| Canvas::stroke_reaches(stroke, origin, view_max, 0.0))
         .collect();
-    let mut pen = Pen { engine, page_origin, offset, ratio, brush_scale, loaded_name: None, loaded_size: None, drawn: 0, warned_colors: HashSet::new(), warned_saturation: HashSet::new() };
+    let mut pen = Pen { engine, page_origin, offset, ratio, brush_scale, loaded: None, loaded_size: None, drawn: 0, warned_colors: HashSet::new(), warned_saturation: HashSet::new() };
     let mut rendered: Option<Placed> = None;
     let mut done = 0;
     for pass in strokes.chunk_by(|a, b| a.0.style.color.gradient() == b.0.style.color.gradient()) {
@@ -416,7 +418,7 @@ struct Pen<'a> {
     brush_scale: f32,
     /// Only reload the brush / reset its size when they change between
     /// strokes.
-    loaded_name: Option<String>,
+    loaded: Option<Arc<BrushGraph>>,
     loaded_size: Option<f32>,
     drawn: u32,
     warned_colors: HashSet<String>,
@@ -433,17 +435,17 @@ impl Pen<'_> {
         let ColoredStroke { path, style, .. } = stroke;
         let brush = style.brush.as_ref()
             .expect("Darkly strokes need a brush (rhai stroke styles always have one)");
-        if self.loaded_name.as_deref() != Some(brush.name.as_str()) {
-            self.engine.brush_load(&brush.name)
-                .unwrap_or_else(|e| panic!("Failed to load brush '{}': {}", brush.name, e));
-            self.loaded_name = Some(brush.name.clone());
+        if self.loaded.as_ref().is_none_or(|loaded| !Arc::ptr_eq(loaded, &brush.graph) && **loaded != *brush.graph) {
+            self.engine.set_brush_graph(brush.graph.graph())
+                .unwrap_or_else(|e| panic!("Failed to load brush '{}': {}", brush.name(), e));
+            self.loaded = Some(brush.graph.clone());
             self.loaded_size = None;
             // Stabilization smooths a hand's jitter, and these points are
             // already smooth curves. Darkly also tunes it to screen pixels,
             // which on a headless engine smooths glyph-sized strokes into
             // short straight lines.
             self.engine.brush_set_exposed_port("brush_settings", "stabilize", 0.0)
-                .unwrap_or_else(|e| panic!("Unable to turn off stabilization for brush '{}': {}", brush.name, e));
+                .unwrap_or_else(|e| panic!("Unable to turn off stabilization for brush '{}': {}", brush.name(), e));
         }
         let size = brush.size * self.brush_scale;
         if self.loaded_size != Some(size) {
@@ -455,10 +457,10 @@ impl Pen<'_> {
         // Darkly caps pressure at 1, so pooling and variation past it stop
         // making strokes heavier.
         let peak_pressure = brush.max_pressure * brush.heaviest();
-        if peak_pressure > 1.0 && self.warned_saturation.insert((brush.name.clone(), peak_pressure.to_bits())) {
+        if peak_pressure > 1.0 && self.warned_saturation.insert((brush.name().to_string(), peak_pressure.to_bits())) {
             eprintln!(
                 "warning: strokes with brush '{}' (pressure {}-{}, pooled and varied up to {:.2}x) reach pressure {:.2}; Darkly caps pressure at 1, so their heaviest parts look the same",
-                brush.name, brush.min_pressure, brush.max_pressure, brush.heaviest(), peak_pressure,
+                brush.name(), brush.min_pressure, brush.max_pressure, brush.heaviest(), peak_pressure,
             );
         }
         let colour = if white {

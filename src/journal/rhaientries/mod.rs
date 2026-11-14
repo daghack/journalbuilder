@@ -1,6 +1,7 @@
 mod art;
 mod avoid;
 mod book;
+mod brushes;
 mod canvas;
 mod content;
 mod edits;
@@ -36,7 +37,7 @@ pub use resources::embedded;
 pub use locks::{LockLibrary, SourceKind};
 pub use manifest::{valid_name, Journal, Manifest, MANIFEST, MANIFEST_VERSION};
 pub use illustrations::IllustrationLibrary;
-pub use style::brush_names;
+pub use brushes::BrushLibrary;
 pub use old_text_styles::ConvertedStyle;
 use text_styles::TextStyleLibrary;
 /// What the web editor's lock editor asks of lock types.
@@ -172,6 +173,7 @@ pub struct JournalEngine {
     illustrations: Rc<IllustrationLibrary>,
     text_styles: Rc<TextStyleLibrary>,
     symbol_sets: Rc<symbol_sets::SymbolSetLibrary>,
+    brushes: Rc<BrushLibrary>,
 }
 
 /// A JSON object (or null) as a rhai map.
@@ -237,6 +239,10 @@ impl JournalEngine {
         let rng = random::register(&mut engine);
         let text: TextSource = (symdict.clone(), rng.clone());
 
+        // Styles look their brushes up in these (see `brushes`).
+        let brushes = Rc::new(BrushLibrary::new(resources.brushes.clone()));
+        brushes.use_here();
+        brushes::register(&mut engine, brushes.clone());
         canvas::register(&mut engine, rng.clone());
         let editor = edits::register(&mut engine);
         path::register(&mut engine, text);
@@ -313,7 +319,12 @@ impl JournalEngine {
             illustrations,
             text_styles,
             symbol_sets,
+            brushes,
         }
+    }
+    /// The brushes scripts use: the journal's, in front of the library's.
+    pub fn brushes(&self) -> &Rc<BrushLibrary> {
+        &self.brushes
     }
     /// The resources scripts use.
     pub fn resources(&self) -> &Resources {
@@ -364,6 +375,7 @@ impl JournalEngine {
     }
     /// `build_entry_str`, with where in the script an error happened.
     pub fn build_entry(&mut self, script_str: &str) -> Result<Entry, ScriptError> {
+        self.brushes.use_here();
         self.editor.borrow_mut().committed.clear();
         let mut scope = Scope::new();
         scope.push("journal_entry", Entry::default());
@@ -377,6 +389,7 @@ impl JournalEngine {
     }
     /// What illustration `name` is and takes.
     pub fn describe_illustration(&self, name: &str) -> Result<IllustrationInfo, String> {
+        self.brushes.use_here();
         let illustration = self.illustrations.load(&self.engine, name)?;
         Ok(IllustrationInfo {
             name: illustration.name.clone(),
@@ -390,6 +403,7 @@ impl JournalEngine {
     /// Illustration `name`'s inputs with `options` (a JSON object) over its
     /// defaults.
     pub fn illustration_inputs(&self, name: &str, options: &serde_json::Value) -> Result<Vec<(String, String)>, String> {
+        self.brushes.use_here();
         let illustration = self.illustrations.load(&self.engine, name)?;
         illustration.inputs(&self.engine, &illustration.options(&json_map(options, "options")?)?)
     }
@@ -397,6 +411,7 @@ impl JournalEngine {
     /// object) over its defaults, draw with its fallbacks when nothing's
     /// wired to them.
     pub fn illustration_fallbacks(&self, name: &str, options: &serde_json::Value) -> Result<Vec<String>, String> {
+        self.brushes.use_here();
         let illustration = self.illustrations.load(&self.engine, name)?;
         let fallbacks = illustration.fallbacks(&self.engine, &illustration.options(&json_map(options, "options")?)?)?;
         Ok(fallbacks.keys().map(|k| k.to_string()).collect())
@@ -406,6 +421,7 @@ impl JournalEngine {
     /// of its own `example()` if `None`: an entry with a page for each
     /// canvas.
     pub fn render(&self, name: &str, options: &serde_json::Value, inputs: Option<&serde_json::Value>) -> Result<Entry, String> {
+        self.brushes.use_here();
         let illustration = self.illustrations.load(&self.engine, name)?;
         let options = illustration.options(&json_map(options, "options")?)?;
         let inputs = match inputs {
@@ -427,6 +443,7 @@ impl JournalEngine {
     }
     /// What symbol set `name` is and takes.
     pub fn describe_symbol_set(&self, name: &str) -> Result<symbol_sets::SymbolSetInfo, String> {
+        self.brushes.use_here();
         self.symbol_sets.info(&self.engine, name)
     }
     /// Symbol set `name` with `options` (a JSON object): a page of every
@@ -459,6 +476,7 @@ impl JournalEngine {
     }
     /// What text style `name` takes, and the text it previews with.
     pub fn describe_text_style(&self, name: &str) -> Result<TextStyleInfo, String> {
+        self.brushes.use_here();
         let file = self.text_styles.load(name)?;
         Ok(TextStyleInfo {
             name: name.to_string(),
@@ -470,6 +488,7 @@ impl JournalEngine {
     /// The old style script `source` as a style file called `name` (see
     /// `old_text_styles`), or why it can't be run.
     pub fn convert_old_text_style(&self, name: &str, source: &str) -> Result<ConvertedStyle, String> {
+        self.brushes.use_here();
         old_text_styles::convert(&self.engine, self.text_styles.book(), name, source)
     }
     /// The layouts' names.
@@ -478,12 +497,14 @@ impl JournalEngine {
     }
     /// What layout `name` takes, and whether it previews.
     pub fn describe_layout(&self, name: &str) -> Result<LayoutInfo, String> {
+        self.brushes.use_here();
         let (defaults, description, example) = layout::layout_info(&self.engine, &self.resources.layouts, name)?;
         Ok(LayoutInfo { name: name.to_string(), description, options: locks::to_json(&Dynamic::from_map(defaults)), example })
     }
     /// Layout `name` with `options` (a JSON object) over its defaults,
     /// typesetting what its `example()` gives: its pages.
     pub fn preview_layout(&mut self, name: &str, options: &serde_json::Value) -> Result<Entry, String> {
+        self.brushes.use_here();
         let example = layout::layout_example(&self.engine, &self.resources.layouts, name)?
             .ok_or_else(|| format!("layout '{}' has no example() to preview", name))?;
         let mut scope = Scope::new();
@@ -494,6 +515,7 @@ impl JournalEngine {
         self.run_preview(scope, "journal_entry.add(layout(NAME, OPTIONS).typeset(EXAMPLE));")
     }
     fn run_preview(&mut self, mut scope: Scope, script: &str) -> Result<Entry, String> {
+        self.brushes.use_here();
         self.engine.run_with_scope(&mut scope, script).map_err(|err| ScriptError::new(&err).message)?;
         scope.remove("journal_entry").ok_or_else(|| "the preview lost its entry".to_string())
     }
@@ -501,6 +523,7 @@ impl JournalEngine {
     /// source, as a chain file writes it) made into what it gives an
     /// illustration: as the editor previews an illustration a source feeds.
     fn with_sources(&self, inputs: rhai::Map) -> Result<rhai::Map, String> {
+        self.brushes.use_here();
         let library = LockLibrary::new(&self.resources);
         inputs.into_iter().map(|(name, value)| {
             let Some(spec) = value.clone().try_cast::<rhai::Map>().and_then(|map| map.get("$source").cloned()) else {
@@ -1473,7 +1496,7 @@ brush.color = \"darkredd\";", BRUSH)).expect_err("bad color should fail").to_str
         let jc: JournalCanvas = entry.pages[0].canvases()[0].clone().into();
         let brushes: Vec<_> = jc.strokes().iter()
             .map(|s| s.style.brush.clone().expect("rhai strokes always have a brush"))
-            .map(|b| (b.name, b.size))
+            .map(|b| (b.name().to_string(), b.size))
             .collect();
         assert_eq!(brushes, vec![("Rough Ink".to_string(), 1.0), ("Calligraphy".to_string(), 0.8)]);
     }
