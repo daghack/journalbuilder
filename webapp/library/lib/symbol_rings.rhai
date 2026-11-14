@@ -35,7 +35,8 @@ fn room(size, base) {
 // and middles, #{ at, clear }, the circles lines stop short of: one round
 // the middle's symbols. bordered rings the places' symbols and
 // center_bordered the middle's.
-fn ring(o, t, count) {
+fn ring(o, m, count) {
+	let t = m.type;
 	let centre = vec2(o.size / 2.0, o.size / 2.0);
 	let radius = o.size / 2.0 - room(o.size, o.base);
 	let glyph = min(t.glyph_scale * t.glyph_scale_factor, room(o.size, o.base));
@@ -65,13 +66,13 @@ fn spacing() {
 	0.9
 }
 
-// The symbols in the middle, side by side, names[k] in styles[k], and
-// round them all, if the ring's center_bordered, one circle in
-// border_style.
-fn draw_middle(c, r, t, names, styles, border_style) {
+// The symbols in the middle, side by side, symbol symbols[k] in
+// styles[k], and round them all, if the ring's center_bordered, one
+// circle in border_style.
+fn draw_middle(c, r, m, symbols, styles, border_style) {
 	if r.center_bordered { c.add(new_circle(r.centre, r.middle_border), border_style); }
-	for k in 0..names.len() {
-		draw_symbol(c, t, names[k], r.middle_at[k], r.big, false, styles[k]);
+	for k in 0..symbols.len() {
+		draw_symbol(c, m, symbols[k], r.middle_at[k], r.big, false, styles[k]);
 	}
 }
 
@@ -106,24 +107,48 @@ fn letters_in(own, from, to) {
 // The ring's symbols, drawn on c in style: at place k, symbol k times
 // `times` (1 for the symbols in order). Times 0 takes no path, and leaves
 // every place empty.
-fn draw_symbols(c, r, t, names, times, style) {
+fn draw_symbols(c, r, m, times, style) {
 	let base = r.at.len();
 	for k in 0..base {
-		let name = if times == 0 { () } else { names[(k * times) % base] };
-		draw_symbol(c, t, name, r.at[k], r.glyph, r.bordered, style);
+		draw_symbol(c, m, if times == 0 { () } else { (k * times) % base }, r.at[k], r.glyph, r.bordered, style);
 	}
 }
 
-// The symbol called name drawn at `at`, `size` across, in the type's
-// glyphset (() is a gap), in a circle if bordered.
-fn draw_symbol(c, t, name, at, size, bordered, style) {
+// Symbol `symbol` (() is a gap) drawn at `at`, `size` across, in a circle
+// if bordered: a mark of the symbol set if m has one, else the glyph the
+// type's glyphset has for it (a symbol's glyph is chosen by symbol_names).
+fn draw_symbol(c, m, symbol, at, size, bordered, style) {
 	if bordered { c.add(new_circle(at, size * 0.75), style); }
+	if symbol == () { return; }
+	if m.set != () {
+		c.add(write_at(m.set.text([symbol]), at, #{ type: #{ glyph_scale: size } }));
+		return;
+	}
+	let name = m.names[symbol];
 	if name == () { return; }
+	let t = m.type;
 	let g = t.glyphset.glyph(name);
 	g.scale = size;
 	g.position = at;
 	g.skew = t.skew ?? t.glyphset.skew;
 	c.add(g, style);
+}
+
+// What an illustration draws a ring's symbols with: #{ set, type, names,
+// base }. Given a symbol set (an illustration's `symbol_set` input; () for
+// none), its marks, `glyph_size` across (the set's own if 0) or smaller if
+// the ring hasn't room, and its base the option's, or the set's whole if
+// that's 0. Without one, the glyph_style's glyphset, as symbol_names
+// chooses glyphs from it, base 27 if the option's 0.
+fn marks(o, set, glyph_style) {
+	if set != () {
+		let base = if o.base > 0 { o.base } else { set.base };
+		if set.base < base { throw `the symbol set '${set.name}' has ${set.base} symbols, fewer than the base, ${base}`; }
+		let size = if o.glyph_size > 0.0 { o.glyph_size } else { set.size };
+		return #{ set: set, type: #{ glyph_scale: size, glyph_scale_factor: 1.0 }, names: [], base: base };
+	}
+	let base = if o.base > 0 { o.base } else { 27 };
+	#{ set: (), type: glyph_style.type, names: symbol_names(glyph_style.type.glyphset, base), base: base };
 }
 
 // The walk from the top by step, as the places each line joins, [k, j]:

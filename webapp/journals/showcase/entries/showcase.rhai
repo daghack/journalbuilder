@@ -49,9 +49,11 @@
 //             commit_to_editor, placed by hand (edits/showcase.json);
 //             the puzzle locks (rail_fence, columnar_transposition,
 //             book_cipher, steiner_triples, steiner_cipher, star_alignment,
-//             symbols_to_digits), star_sightings plates, labyrinths, webs
+//             symbols_to_digits), star_sightings plates, circular mazes, webs
 //             and snakes, the Steiner wheels, symbol sets, symbols as text
-//             (write_at) and symbolics, art::star
+//             (write_at) and symbolics, art::star, whole symbol sets in
+//             the rings and the Steiner wheels, banded discs, a lock's
+//             values by their own names, and the plates' inks and helpers
 //
 // Pages are bound with new_book: numbered, named and listed in the
 // contents.
@@ -2810,17 +2812,17 @@ skies.add(moonlit[0].translate_by(vec2(LEFT, TOP + 690)));
 skies.add(moonlit[1].translate_by(vec2(LEFT + 510, TOP + 690)));
 book.bind("appendix", skies);
 
-// The labyrinth, the web, the serpent, the sigil and the orrery: illustrations
+// The circular maze, the web, the serpent, the sigil and the orrery: illustrations
 // of a text's symbols, each mark a symbol of a set (the letters unless one's
 // wired), and a chain file that locks a secret under a key and hides the
-// cipher text in a labyrinth.
+// cipher text in a circular maze.
 let mazes = sheet("locks");
-mazes.add(subhead("labyrinths, webs and snakes", TOP));
-mazes.add(caption("labyrinth_lock hides a text along the one way in: new_lock(name).add(part, \"labyrinth_lock\", #{ base, rings, seed }).attach(\"d\", \"labyrinth\")", TOP + 50));
-let in_the_maze = new_lock("lab").add("l", "labyrinth_lock", #{ base: 27, seed: 3, rings: 5 })
-	.attach("d", "labyrinth", #{ size: 520.0 }).connect("l.labyrinth", "d.labyrinth");
+mazes.add(subhead("circular mazes, webs and snakes", TOP));
+mazes.add(caption("circular_maze_lock hides a text along the one way in: new_lock(name).add(part, \"circular_maze_lock\", #{ base, rings, seed }).attach(\"d\", \"circular_maze\")", TOP + 50));
+let in_the_maze = new_lock("lab").add("l", "circular_maze_lock", #{ base: 27, seed: 3, rings: 5 })
+	.attach("d", "circular_maze", #{ size: 520.0 }).connect("l.maze", "d.maze");
 let wound = in_the_maze.run(#{ "l.text": symbols(27, "WHAT WAITS AT THE HEART OF IT") });
-assert(in_the_maze.unlock(wound).text("l.text") == "WHAT WAITS AT THE HEART OF IT", "the labyrinth should unlock");
+assert(in_the_maze.unlock(wound).text("l.text") == "WHAT WAITS AT THE HEART OF IT", "the circular maze should unlock");
 mazes.add(wound.canvases("d")[0].translate_by(vec2(LEFT - 20, TOP + 90)));
 mazes.add(caption("illustration(\"spider_web\", #{ size, ragged, seed }): symbols in the gaps of an old web, read along its thread", TOP + 90));
 mazes.add(illustration("spider_web", #{ size: 470.0, seed: 1 }).run(#{ message: symbols(27, "NOTHING WAITS AT THE HUB") })[0].translate_by(vec2(LEFT + 540, TOP + 130)));
@@ -2831,12 +2833,12 @@ mazes.add(illustration("sigil", #{ size: 380.0 }).run(#{ word: symbols(27, "ARCA
 mazes.add(illustration("orrery", #{ size: 380.0 }).run(#{ worlds: symbols(27, "ALMANAC") })[0].translate_by(vec2(LEFT + 520, TOP + 940)));
 book.bind("appendix", mazes);
 
-// chain("moonlit_labyrinth"): a secret locked under a key, the cipher text
-// hidden in a labyrinth and the key drawn as the moons' phases.
+// chain("moonlit_maze"): a secret locked under a key, the cipher text
+// hidden in a circular maze and the key drawn as the moons' phases.
 let moonlit_chain = sheet("locks");
-moonlit_chain.add(subhead("moonlit labyrinth", TOP));
-moonlit_chain.add(caption("chain(\"moonlit_labyrinth\", #{ seed: 5 }).run(#{ \"vig.plain_text\": symbols(27, \"IT SLEEPS\"), \"vig.key\": symbols(27, \"HALI\") })", TOP + 50));
-let hidden_in = chain("moonlit_labyrinth", #{ seed: 5 }).run(#{ "vig.plain_text": symbols(27, "IT SLEEPS BENEATH"), "vig.key": symbols(27, "HALI") });
+moonlit_chain.add(subhead("moonlit circular maze", TOP));
+moonlit_chain.add(caption("chain(\"moonlit_maze\", #{ seed: 5 }).run(#{ \"vig.plain_text\": symbols(27, \"IT SLEEPS\"), \"vig.key\": symbols(27, \"HALI\") })", TOP + 50));
+let hidden_in = chain("moonlit_maze", #{ seed: 5 }).run(#{ "vig.plain_text": symbols(27, "IT SLEEPS BENEATH"), "vig.key": symbols(27, "HALI") });
 moonlit_chain.add(hidden_in.canvases("maze")[0].scale_by(0.9).translate_by(vec2(LEFT, TOP + 90)));
 moonlit_chain.add(hidden_in.canvases("moons")[0].translate_by(vec2(LEFT + 40, TOP + 1000)));
 book.bind("appendix", moonlit_chain);
@@ -2966,6 +2968,82 @@ for (kind, k) in ["lashed", "spiral", "banded", "needle", "weeping"] {
 	symbolics.add(write_in(kind, LEFT + 60 + k * 200, TOP + 1150, 22, CAPTION, PLAIN));
 }
 book.bind("appendix", symbolics);
+
+// A whole symbol set in the illustrations that make puzzles from a base:
+// the rings and the Steiner wheels take symbol_set, and with base 0 a ring
+// is the set's own base.
+let set_rings = sheet("symbol sets");
+set_rings.add(subhead("whole sets in the rings", TOP));
+set_rings.add(caption("illustration(\"symbol_ring\", #{ step: 3 }).run(#{ symbol_set: symbol_set(\"moons\") }): base 0 is the set's", TOP + 50));
+set_rings.add(caption("rearranged_symbol_ring, #{ step: 5 }, with the priests: the walk's order round the ring", TOP + 78));
+let moon_ring = illustration("symbol_ring", #{ step: 3, size: 380.0 }).run(#{ symbol_set: symbol_set("moons") })[0];
+set_rings.add(moon_ring.translate_by(vec2(LEFT + 40, TOP + 110)));
+let priest_order = illustration("rearranged_symbol_ring", #{ step: 5, size: 380.0 }).run(#{ symbol_set: symbol_set("priests") })[0];
+set_rings.add(priest_order.translate_by(vec2(LEFT + 580, TOP + 110)));
+set_rings.add(caption("joined_symbol_ring, #{ first: 3, second: 5, glyph_size: 32 }, with the priests: 3 then 5 is 2 round 13", TOP + 520));
+let joined = illustration("joined_symbol_ring", #{ first: 3, second: 5, size: 380.0, glyph_size: 32.0 }).run(#{ symbol_set: symbol_set("priests") });
+set_rings.add(joined[0].translate_by(vec2(LEFT + 40, TOP + 560)));
+set_rings.add(joined[1].translate_by(vec2(LEFT + 580, TOP + 560)));
+set_rings.add(caption("illustration(\"steiner_wheels\", #{ mark_size: 20 }).run(#{ points, symbol_set: symbol_set(\"priests\") }):", TOP + 980));
+set_rings.add(caption("each place of a wheel bears its priest, so a triple is read off as three of them", TOP + 1008));
+let first_triples = every.value().extract(0, 18);
+set_rings.add(illustration("steiner_wheels", #{ per_row: 6, size: 150.0, gap: 20.0, mark_size: 20.0 }).run(#{ points: first_triples, symbol_set: symbol_set("priests") })[0].translate_by(vec2(LEFT + 20, TOP + 1050)));
+book.bind("appendix", set_rings);
+
+// ---- banded discs, a lock's values by their own names, the plates'
+// inks and helpers ----
+import "lib/inks" as inks;
+import "lib/plates" as plates;
+
+let discs = sheet("banded discs");
+discs.add(subhead("a disc of bands", TOP));
+discs.add(caption("illustration(\"banded_disc\").run(#{ inscription }): its bands as they come, from the edge in;", TOP + 50));
+discs.add(caption("its options' bands: [#{ rule: 0.97 }, #{ marks: 0.72, size: 0.34 }, #{ star: 0.45, points: 8, step: 3 }, ...]", TOP + 78));
+let table = illustration("banded_disc", #{ size: 460.0 }).run(#{ inscription: "lorem ipsum dolor sit amet consectetur" })[0];
+discs.add(table.translate_by(vec2(LEFT + 10, TOP + 110)));
+let own = illustration("banded_disc", #{ size: 460.0, bands: [
+	#{ rule: 0.97, double: true, weight: 1.4 },
+	#{ ticks: [0.9, 0.95], count: 96, every: 8, long: 0.97 },
+	#{ marks: 0.72, size: 0.34, turn: 0.0625 },
+	#{ rule: 0.52 },
+	#{ star: 0.45, points: 8, step: 3, red: true },
+	#{ solid: [0.12, 0.2] },
+] }).run(#{ symbols: [0, 1, 2, 3, 4, 5, 6, 7], symbol_set: symbol_set("moons") })[0];
+discs.add(own.translate_by(vec2(LEFT + 530, TOP + 110)));
+
+discs.add(subhead("a lock's values by their own names", TOP + 620));
+discs.add(caption("new_lock(\"v\").add(\"v\", \"vigenere_cipher\", ...).run(#{ plain_text, key }).text(\"cipher_text\"): NAME alone", TOP + 670));
+discs.add(caption("will do for ID.NAME when only one of the chain's locks has a value of that name", TOP + 698));
+let one = new_lock("v").add("v", "vigenere_cipher", #{ key_base: 27, plain_base: 27, cipher_base: 27 })
+	.run(#{ plain_text: symbols(27, "LOREM IPSUM"), key: symbols(27, "DOLOR") });
+discs.add(write(`LOREM IPSUM under DOLOR: ${one.text("cipher_text")}`, LEFT, TOP + 750, 30));
+
+discs.add(subhead("inks and plates", TOP + 820));
+let tools = new_canvas();
+// lib/plates: a ruler, a line ruled twice.
+tools.add(plates::ruler(vec2(LEFT, TOP + 960), vec2(LEFT + 280, TOP + 960), 10, 8.0, 5, 16.0), inks::contour(INK, 1.3));
+plates::double_rule(tools, vec2(LEFT, TOP + 1010), vec2(LEFT + 280, TOP + 1010), 7.0, INK, 1.6);
+tools.add(write_in("plates::ruler,", LEFT, TOP + 1108, 22, CAPTION, PLAIN));
+tools.add(write_in("plates::double_rule", LEFT, TOP + 1136, 22, CAPTION, PLAIN));
+// A ring ruled twice, points round it, and words round inside it at a
+// hand's size.
+let ring_at = vec2(LEFT + 490, TOP + 970);
+plates::double_ring(tools, ring_at, 96.0, 7.0, INK, 1.6);
+for p in plates::around(ring_at, 108.0, 13) { tools.add(new_circle(p, 3.0), inks::detail(RED, 1.0)); }
+let round = new_circle(ring_at, 74.0).rotate_around(ring_at, -PI() / 2.0);
+let hand = #{ style: TEXT, type: new_type_style(PLAIN, 18) };
+tools.add(round.fit_text(plates::inscription(round, "LOREM IPSUM DOLOR", hand), hand));
+tools.add(write_in("plates::double_ring,", LEFT + 360, TOP + 1108, 22, CAPTION, PLAIN));
+tools.add(write_in("plates::around,", LEFT + 360, TOP + 1136, 22, CAPTION, PLAIN));
+tools.add(write_in("plates::inscription", LEFT + 360, TOP + 1164, 22, CAPTION, PLAIN));
+// lib/inks: the art tools' moon, star and eye, inked.
+tools.add(inks::moon(art::moon(vec2(LEFT + 700, TOP + 970), 40.0, 0.3), INK, 1.4));
+tools.add(inks::star(art::star(vec2(LEFT + 810, TOP + 970), 22.0, #{ kind: "lashed", reach: 1.7, seed: 5 }), INK, RED, 22.0));
+tools.add(inks::eye(art::eye(vec2(LEFT + 935, TOP + 970), 100.0, #{ openness: 0.45, seed: 2 }), INK, RED, 1.0));
+tools.add(write_in("inks::moon, inks::star,", LEFT + 680, TOP + 1108, 22, CAPTION, PLAIN));
+tools.add(write_in("inks::eye", LEFT + 680, TOP + 1136, 22, CAPTION, PLAIN));
+discs.add(tools);
+book.bind("appendix", discs);
 
 // ---- the title page and the contents, which go first ----
 

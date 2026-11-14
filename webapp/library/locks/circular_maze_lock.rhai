@@ -1,15 +1,15 @@
-// labyrinth_lock: the text hidden along the one way through a round
-// labyrinth, a symbol to a cell from the entrance in to the heart, and
+// circular_maze_lock: the text hidden along the one way through a
+// circular maze, a symbol to a cell from the entrance in to the heart, and
 // every other cell given a symbol picked from the text's, to mislead.
 // Unlocking walks the way and reads it.
 //
-// The labyrinth is rings of cells round its heart (lib/labyrinth), laid
+// The circular maze is rings of cells round its heart (lib/circular_maze), laid
 // out by the seed: as many rings as it takes for the way to hold the
 // text, and at least rings. Where the way is longer than the text, its
 // last cells, nearest the heart, hold 0, and text_length lets unlocking
 // drop them again.
 
-import "lib/labyrinth" as lab;
+import "lib/circular_maze" as lab;
 
 fn options() {
 	#{ base: integer(), seed: integer(0), rings: integer(4) }
@@ -26,7 +26,7 @@ fn inputs(o) {
 }
 
 fn outputs(o) {
-	#{ labyrinth: "Labyrinth", text_length: "LockProcessInfo" }
+	#{ maze: "CircularMaze", text_length: "LockProcessInfo" }
 }
 
 fn lock(o, i) {
@@ -53,30 +53,30 @@ fn lock(o, i) {
 			for (cell, n) in lab::path(l) {
 				l.symbols[cell[0]][cell[1]] = if n < text.len() { text[n] } else { 0 };
 			}
-			return #{ labyrinth: l, text_length: text.len() };
+			return #{ maze: l, text_length: text.len() };
 		}
 		rings += 1;
 		if rings > 16 {
-			throw `the text, ${text.len()} symbols, is too long for a labyrinth of 16 rings`;
+			throw `the text, ${text.len()} symbols, is too long for a circular maze of 16 rings`;
 		}
 	}
 }
 
 fn unlock(o, out) {
-	let l = out.labyrinth;
+	let l = out.maze;
 	lab::check(l);
 	let text = [];
 	for cell in lab::path(l) {
 		text.push(l.symbols[cell[0]][cell[1]]);
 	}
 	if out.text_length > text.len() {
-		throw `the labyrinth's way is ${text.len()} cells, too short for a text of ${out.text_length}`;
+		throw `the circular maze's way is ${text.len()} cells, too short for a text of ${out.text_length}`;
 	}
 	text.truncate(out.text_length);
 	#{ text: text }
 }
 
-// A labyrinth of `rings` rings with no entrance yet, grown from the cell
+// A circular maze of `rings` rings with no entrance yet, grown from the cell
 // at its heart by a walk that turns at random and backs up from dead
 // ends, opening a wall wherever it goes on: every cell is reached, one
 // way only. Its far is how many cells the way from each cell to the heart

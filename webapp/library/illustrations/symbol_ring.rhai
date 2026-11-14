@@ -25,18 +25,26 @@
 // the glyph that far along its characters, of which it needs at least
 // base. Unwired, they're near-black and red ink pens, the glyphs
 // loche_upper, as big as the ring holds.
+//
+// The whole symbol set can be passed in instead: symbol_set, a SymbolSet,
+// whose marks are the ring's symbols (symbol k of the set at place k),
+// glyph_size across (the set's own size if that's 0) or smaller if the
+// ring hasn't room, and whose base is the ring's (the base option is 0,
+// the set's whole, unless it gives fewer). The set then draws every
+// symbol, borders still in glyph_style's pen; unwired, the glyphs
+// are glyph_style's, as above.
 
 import "lib/symbol_rings" as rings;
 
 fn options() {
 	#{
-		base: 27, step: 5, steps: 0, bordered: true, center_bordered: true, size: 900.0, center_scale: 3.0,
+		base: 0, step: 5, steps: 0, bordered: true, center_bordered: true, size: 900.0, center_scale: 3.0, glyph_size: 0.0,
 		dash: 14.0, gap: 10.0, glyph_ink: "#2b1d12", line_ink: "#9b2318",
 	}
 }
 
 fn inputs(o) {
-	#{ glyph_style: "TextStyle", line_style: "TextStyle" }
+	#{ glyph_style: "TextStyle", line_style: "TextStyle", symbol_set: "SymbolSet" }
 }
 
 fn fallbacks(o) {
@@ -44,24 +52,26 @@ fn fallbacks(o) {
 	#{
 		glyph_style: #{
 			style: new_style(new_brush_style(o.glyph_ink, "Ink Pen", 2.2, #{ min_pressure: 0.4, max_pressure: 0.8 }), hand),
-			type: new_type_style(glyphset("loche_upper"), rings::room(o.size, o.base)),
+			type: new_type_style(glyphset("loche_upper"), rings::room(o.size, if o.base > 0 { o.base } else { 27 })),
 		},
 		line_style: #{ style: new_style(new_brush_style(o.line_ink, "Ink Pen", 1.4), hand) },
+		symbol_set: (),
 	}
 }
 
 fn render(o, i) {
+	let m = rings::marks(o, i.symbol_set, i.glyph_style);
+	let o = o;
+	o.base = m.base;
 	rings::check_base(o.base);
 	rings::check_step(o.base, o.step, "the step");
 	rings::check_steps(o.steps);
-	let t = i.glyph_style.type;
-	let names = rings::symbol_names(t.glyphset, o.base);
-	let r = rings::ring(o, t, 1);
+	let r = rings::ring(o, m, 1);
 	let c = new_canvas();
 	rings::draw_walk(c, r, rings::walk(o.base, o.step, o.steps), i.line_style.style, o, 0.0, #{});
 	let style = i.glyph_style.style;
-	rings::draw_symbols(c, r, t, names, 1, style);
-	rings::draw_middle(c, r, t, [names[o.step]], [style], style);
+	rings::draw_symbols(c, r, m, 1, style);
+	rings::draw_middle(c, r, m, [o.step], [style], style);
 	c
 }
 

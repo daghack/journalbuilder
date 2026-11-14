@@ -115,7 +115,7 @@ A mark an illustration draws for a symbol is a symbol of a symbol set
 journal's choice. An input typed `SymbolSet` takes a set: wired from a
 `symbolset` chain source, or given to `run`; `fallbacks(o)` gives it
 `symbol_set("name", options)`. A family of marks (the stars of a sky, a
-labyrinth's cells) is two inputs, a `SymbolSet` and the symbols that go in its
+circular maze's cells) is two inputs, a `SymbolSet` and the symbols that go in its
 places (typed `Any`, an empty array for none), checked against the set, so the
 choice of mark can itself carry a second message.
 

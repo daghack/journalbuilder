@@ -1,8 +1,12 @@
 {
   "version": 1,
   "title": "The Night Almanac",
-  "description": "A sample of the puzzle kit as finished pages: a watcher's almanac of thirteen months, its secrets locked in sightings, webs, labyrinths and triads. The content is a placeholder for your own.",
+  "description": "A sample of the puzzle kit as finished pages: a watcher's almanac of thirteen months, its secrets locked in sightings, webs, circular mazes and triads. The content is a placeholder for your own.",
   "entries": [
-    "almanac"
+    "almanac",
+    "wheel",
+    "index",
+    "web",
+    "circular_maze"
   ]
 }

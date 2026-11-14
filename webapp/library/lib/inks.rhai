@@ -2,7 +2,8 @@
 // plates look like one hand's work. Each gives a style in the ink it's
 // handed (a colour, a gradient), sized in canvas units as brush styles
 // are: a Rough Ink brush of size 1 draws a line about 3 across at full
-// pressure.
+// pressure. At the end, the art tools' moons, stars and eyes inked with
+// them.
 // import "lib/inks" as inks;
 
 // The plates' two inks: iron-gall near-black, and blood.
@@ -82,4 +83,47 @@ fn soot(ink, size) {
 // holes in them, as path.hatch has it.
 fn solid(shape, gap) {
 	shape.hatch(gap, #{ angle: [0.6, 0.6 + PI() / 2.0], roughness: gap * 0.4 })
+}
+
+// ---- the art tools' drawings, inked ----
+
+// An art::moon, inked, as a canvas: its dark side a solid mass, its
+// outline and terminator in contour `size` wide. o.gap is the dark's
+// hatching gap (size * 3).
+fn moon(m, ink, size) { moon(m, ink, size, #{}) }
+fn moon(m, ink, size, o) {
+	let gap = if "gap" in o { o.gap } else { size * 3.0 };
+	let c = new_canvas();
+	if !m.dark.is_empty { c.add(solid(m.dark, gap), fill(ink, gap)); }
+	c.add(m.outline, contour(ink, size));
+	if !m.terminator.is_empty { c.add(m.terminator, contour(ink, size)); }
+	c
+}
+
+// An art::star of radius `r`, inked, as a canvas: its wash, dots and tears
+// in `blood`, its dark a solid mass, its rays fine, its body in contour,
+// each as wide as the star's size calls for.
+fn star(s, ink, blood, r) {
+	let c = new_canvas();
+	if !s.wash.is_empty { c.add(s.wash, wash(blood, max(r * 0.12, 1.0))); }
+	if !s.dark.is_empty {
+		let gap = max(r * 0.08, 2.0);
+		c.add(solid(s.dark, gap), fill(ink, gap));
+	}
+	c.add(s.rays, fine(ink, max(r * 0.014, 0.5)));
+	c.add(s.body, contour(ink, max(r * 0.022, 0.6)));
+	c.add(s.dots, detail(blood, max(r * 0.016, 0.5)));
+	c.add(s.tears, contour(blood, max(r * 0.024, 0.7)));
+	c
+}
+
+// An art::eye, inked, as a canvas: its iris washed and ringed in `iris`,
+// its lids and lashes in `ink`, the lines about `size` wide.
+fn eye(e, ink, iris, size) {
+	let c = new_canvas();
+	c.add(e.wash, wash(iris, size * 10.0));
+	c.add(e.rim, detail(iris, max(size, 0.6)));
+	c.add(e.accent, detail(iris, max(size, 0.6)));
+	c.add(e.lines, contour(ink, max(size, 0.8)));
+	c
 }

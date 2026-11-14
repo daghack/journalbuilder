@@ -1,9 +1,9 @@
-// moonlit_labyrinth: a secret locked with a key word (vigenere_cipher),
-// the cipher text hidden along the one way through a labyrinth, and the
+// moonlit_maze: a secret locked with a key word (vigenere_cipher),
+// the cipher text hidden along the one way through a circular maze, and the
 // key word written as the moon's phases (the moons symbol set), two moons a letter. Give
 // vig.plain_text, the secret, and vig.key, the key word, in base 27;
-// maze draws the labyrinth and moons the key. rings is how many rings the
-// labyrinth has, at least, and seed lays it out.
+// maze draws the circular maze and moons the key. rings is how many rings the
+// circular maze has, at least, and seed lays it out.
 
 fn options() {
 	#{ rings: integer(4), seed: integer(0) }
@@ -13,7 +13,7 @@ fn chain(o) {
 	#{
 		locks: #{
 			vig: #{ type: "vigenere_cipher", options: #{ plain_base: 27, key_base: 27, cipher_base: 27 } },
-			lab: #{ type: "labyrinth_lock", options: #{ base: 27, rings: o.rings, seed: o.seed } },
+			lab: #{ type: "circular_maze_lock", options: #{ base: 27, rings: o.rings, seed: o.seed } },
 			nights: #{ type: "symbols_to_digits", options: #{ input_base: 27, output_base: 8 } },
 		},
 		connect: [
@@ -25,7 +25,7 @@ fn chain(o) {
 			phases: #{ type: "symbolset", name: "moons" },
 		},
 		illustrations: #{
-			maze: #{ type: "labyrinth", options: #{}, inputs: #{ labyrinth: "lab.labyrinth" } },
+			maze: #{ type: "circular_maze", options: #{}, inputs: #{ maze: "lab.maze" } },
 			moons: #{ type: "symbol_rows", options: #{ group: 2, size: 80.0, per_row: 8 }, inputs: #{ symbols: "nights.digits", symbol_set: "phases.value" } },
 		},
 	}
