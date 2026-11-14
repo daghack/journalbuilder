@@ -19,15 +19,15 @@
 //
 // padding is the room in a name's box round the name, and gap the room
 // kept between glyphs, names, texts and lines (half of it between a
-// place's glyphs and its name). seed and iterations go to the layout,
+// place's glyphs and its name). seed, iterations and generations go to the layout,
 // which takes more room than width by height for a graph too crowded for
 // it; the map is then scaled down to fit.
 
-import "lib/symbol_rings" as rings;
+import "lib/graph_maps" as maps;
 
 fn options() {
 	#{
-		width: 1200.0, height: 900.0, label_place: "along", seed: 0, iterations: 300,
+		width: 1200.0, height: 900.0, label_place: "along", seed: 0, iterations: 300, generations: 200,
 		name_width: 260.0, text_width: 320.0, padding: 10.0, gap: 14.0, arrow: 18.0,
 		name_size: 30.0, edge_size: 20.0, glyph_size: 36.0, dot: 10.0,
 	}
@@ -60,96 +60,17 @@ fn fallbacks(o) {
 }
 
 fn render(o, i) {
-	if !(o.label_place in ["along", "beside", "upright"]) {
-		throw `graph_map: label_place should be "along", "beside" or "upright", got "${o.label_place}"`;
+	maps::check(o, "graph_map");
+	let edges = [];
+	let lines = [];
+	for e in i.graph.edges {
+		edges.push(i.edge_style);
+		lines.push(i.line_style);
 	}
-	let g = i.graph;
-	// Each place's glyphs in a row about (0, 0), or a dot, and their size;
-	// its name about (0, 0) in its box, and the box's size.
-	let glyph_size = size_of(i.glyph_style.type);
-	let sets = glyphset_names();
-	let symbols = [];
-	let sizes = [];
-	let names = [];
-	let name_sizes = [];
-	for node in g.nodes {
-		let glyphs = i.glyph_style.type.glyphset;
-		if node.glyphset != () {
-			if !(node.glyphset in sets) {
-				throw `graph_map: ${node.name}'s glyphset '${node.glyphset}' isn't one there is`;
-			}
-			glyphs = glyphset(node.glyphset);
-		}
-		let known = glyphs.characters();
-		// Side by side, a fifth of a glyph apart.
-		let row = new_canvas();
-		let x = 0.0;
-		for name in node.glyphs {
-			if !(name in known) {
-				throw `graph_map: ${node.name}'s glyph '${name}' isn't one of its glyphset's`;
-			}
-			let glyph = new_canvas().add(glyphs.glyph(name, #{ scale: glyph_size }), i.glyph_style.style);
-			let b = glyph.bounds();
-			row.add(glyph.translate_by(vec2(x - b.min.x, 0)));
-			x += b.max.x - b.min.x + glyph_size * 0.2;
-		}
-		if node.glyphs.len() == 0 {
-			let dot = new_circle(vec2(0, 0), o.dot / 2.0);
-			row.add(dot, i.glyph_style.style).add(dot.hatch(o.dot / 5.0), i.glyph_style.style);
-		}
-		row = centred(row);
-		let b = row.bounds();
-		symbols.push(row);
-		sizes.push([b.max.x - b.min.x, b.max.y - b.min.y]);
-		let name = centred(write_block(markdown(node.name), vec2(0, 0), o.name_width, i.name_style).canvas);
-		let nb = name.bounds();
-		let size = [nb.max.x - nb.min.x + 2.0 * o.padding, nb.max.y - nb.min.y + 2.0 * o.padding];
-		names.push(name.add(new_rectangle(vec2(0, 0), size[0], size[1]), i.box_style.style));
-		name_sizes.push(size);
-	}
-	// Each way's text about (0, 0), and its size.
-	let labels = [];
-	let label_sizes = [];
-	for edge in g.edges {
-		if edge.text == "" {
-			labels.push(());
-			label_sizes.push(());
-			continue;
-		}
-		let c = centred(write_block(markdown(edge.text), vec2(0, 0), o.text_width, i.edge_style).canvas);
-		let b = c.bounds();
-		labels.push(c);
-		label_sizes.push([b.max.x - b.min.x, b.max.y - b.min.y]);
-	}
-	let laid = graph::layout(g, sizes, #{
-		labels: label_sizes, names: name_sizes, label_place: o.label_place, gap: o.gap,
-		width: o.width, height: o.height, seed: o.seed, iterations: o.iterations,
-	});
-	let map = new_canvas();
-	for k in 0..g.nodes.len() {
-		map.add(symbols[k].translate_by(point(laid.points[k])));
-		map.add(names[k].translate_by(point(laid.names[k])));
-	}
-	for (edge, e) in laid.edges {
-		let lines = new_path();
-		for piece in edge.pieces {
-			lines.append(new_line(point(piece[0]), point(piece[1])));
-		}
-		if g.edges[e].directed {
-			let end = point(edge.end);
-			lines.append(rings::arrowhead(end, (end - point(edge.start)).normalized(), o.arrow));
-		}
-		map.add(lines, i.line_style.style);
-		if g.edges[e].text != "" {
-			map.add(labels[e].rotate_around(vec2(0, 0), edge.angle).translate_by(point(edge.label)));
-		}
-	}
-	// A crowded graph took more room: back into width by height.
-	let grown = laid.size[0] / o.width;
-	if grown > 1.0 {
-		map.scale_by(1.0 / grown);
-	}
-	map
+	maps::draw(i.graph, o, #{
+		name_style: i.name_style, glyph_style: i.glyph_style, box_style: i.box_style,
+		edge_styles: edges, line_styles: lines,
+	}, "graph_map")
 }
 
 fn example() {
@@ -158,20 +79,4 @@ fn example() {
 			+ "Paper Mazes -> Saint's Rest: Follow the red thread until you find _To Fall Endlessly_, then use the crawlspace beneath the broken shelf\n"
 			+ "Saint's Rest -- The Cloister: down the bell stair\nThe Cloister -> Paper Mazes: through the reading room"),
 	}
-}
-
-// The size a type sets glyphs at.
-fn size_of(t) {
-	t.glyph_scale * t.glyph_scale_factor
-}
-
-// [x, y] as a vector.
-fn point(xy) {
-	vec2(xy[0], xy[1])
-}
-
-// A canvas moved so what's on it is centred on (0, 0).
-fn centred(c) {
-	let b = c.bounds();
-	c.translate_by(vec2(-b.center.x, -b.center.y))
 }

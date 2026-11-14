@@ -5,6 +5,7 @@ pub mod canvas;
 pub mod clip;
 pub mod compose;
 pub mod distribute;
+pub mod evolve;
 pub mod fonts;
 pub mod free_regions;
 pub mod gradient;
