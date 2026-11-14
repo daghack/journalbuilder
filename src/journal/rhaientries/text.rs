@@ -290,7 +290,7 @@ fn splat(canvas: &Canvas, msgs: Array, width_range: Dynamic, height_range: Dynam
     let mut styled = Vec::with_capacity(msgs.len());
     let mut symbol_msgs: Vec<Vec<Symbol>> = Vec::with_capacity(msgs.len());
     for msg in &msgs {
-        let note = Styled::of_text(CALLER, msg, &text.type_, text.spans.as_ref(), symdict, &mut *rng)?;
+        let note = Styled::of_text(CALLER, msg, &text, symdict, &mut *rng)?;
         let mut symbols = note.glyphs.clone();
         jitter_symbols(&mut symbols, rotation_jitter, scale_jitter, &mut *rng);
         symbol_msgs.push(symbols);
@@ -345,14 +345,14 @@ fn write_block(msg: &FlowText, at: Vec2, width: Dynamic, settings: Map, symdict:
         options.insert("center".into(), Dynamic::from(Vec2::new((at.x + width / 2.0) as f64, y as f64)));
         options.insert("width".into(), Dynamic::from(width as f64));
         options.insert("height".into(), Dynamic::from((size * 0.5) as f64));
-        let line_text = TextSettings { style: text.style.clone(), type_: text.type_.clone(), paragraph: line_paragraph.clone(), spans: None, options };
+        let line_text = TextSettings { style: text.style.clone(), type_: text.type_.clone(), paragraph: line_paragraph.clone(), spans: None, symbol_style: None, options };
         let mut line = TextBox::from_settings(CALLER, &line_text)?;
         line.contain = false;
         (line.wander, line.line_gap_jitter) = (0.0, 0.0);
         Ok(line)
     };
     let mut r = rng.borrow_mut();
-    let styled = Styled::of_text(CALLER, msg, &text.type_, text.spans.as_ref(), symdict, &mut *r)?;
+    let styled = Styled::of_text(CALLER, msg, &text, symdict, &mut *r)?;
     let mut to_place = styled.glyphs.clone();
     // The text's glyph the next line starts at.
     let mut first = 0;
@@ -419,7 +419,7 @@ fn write_inside_path(msg: &FlowText, path: &Path, settings: Map, symdict: &FontB
     let shape = shape_rings(CALLER, "the path", path, size)?;
     let mut tb = TextBox::with_shape(CALLER, &text, shape)?;
     let mut r = rng.borrow_mut();
-    let styled = Styled::of_text(CALLER, msg, &text.type_, text.spans.as_ref(), symdict, &mut *r)?;
+    let styled = Styled::of_text(CALLER, msg, &text, symdict, &mut *r)?;
     let symbols = styled.glyphs.clone();
     let set = |tb: &TextBox, r: &mut dyn rand::RngCore| tb.with_core(|core| core.fill_bounds_with(symbols.clone(), r));
     let (mut placed, unplaced) = set(&tb, &mut *r);
@@ -508,7 +508,8 @@ pub fn register(engine: &mut Engine, symdict: Rc<FontBook>, rng: SharedRng) {
     let (r, book) = (rng.clone(), symdict.clone());
     engine.register_fn("write_block", move |ctx: NativeCallContext, text: SymbolText, at: Vec2, width: Dynamic, settings: Map| -> RhaiResult<Map> {
         let (book, rng) = (book.clone(), r.clone());
-        let (symbolic, mut out) = make_with(ctx.engine(), &r, text, move |engine, msg| {
+        let site = format!("write_block {:?} {:?} {:?}", at, width, settings);
+        let (symbolic, mut out) = make_with(ctx.engine(), &r, &site, text, move |engine, msg| {
             let mut out = write_block(msg, at.clone(), width.clone(), settings.clone(), &book, &rng, engine)?;
             let canvas = out.remove("canvas").and_then(|c| c.try_cast::<Canvas>()).expect("write_block gives its canvas");
             Ok((canvas, out))
@@ -527,7 +528,8 @@ pub fn register(engine: &mut Engine, symdict: Rc<FontBook>, rng: SharedRng) {
     let r = rng.clone();
     engine.register_fn("write_inside_path", move |ctx: NativeCallContext, text: SymbolText, path: Path, settings: Map| -> RhaiResult<Map> {
         let (book, rng) = (symdict.clone(), r.clone());
-        let (symbolic, mut out) = make_with(ctx.engine(), &r, text, move |engine, msg| {
+        let site = format!("write_inside_path {} {:?}", path.borrow(), settings);
+        let (symbolic, mut out) = make_with(ctx.engine(), &r, &site, text, move |engine, msg| {
             let mut out = write_inside_path(msg, &path, settings.clone(), &book, &rng, engine)?;
             let canvas = out.remove("canvas").and_then(|c| c.try_cast::<Canvas>()).expect("write_inside_path gives its canvas");
             Ok((canvas, out))

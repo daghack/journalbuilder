@@ -32,16 +32,32 @@ describe('canvas edits', () => {
     expect(cleanEdit({ scale: [0, 2], skew: 120 })).toEqual({ scale: [0.0001, 2], skew: 85 });
   });
 
-  it('keeps a symbolic canvas\'s symbols and symbol set, and drops them when there are none', () => {
-    expect(cleanEdit({ symbols: [3, 1.6], symbol_set: 'moons' })).toEqual({ symbols: [3, 2], symbol_set: 'moons' });
-    expect(cleanEdit({ symbols: [], symbol_set: '' })).toBeNull();
-    expect(cleanEdit({ symbols: [-2] })).toEqual({ symbols: [0] });
+  it('keeps the symbols and symbol sets of the symbolics a canvas holds, and drops them when there are none', () => {
+    expect(cleanEdit({ symbolics: { b: { symbols: [3, 1.6], symbol_set: 'moons' }, a: { symbols: [-2] } } }))
+      .toEqual({ symbolics: { a: { symbols: [0] }, b: { symbols: [3, 2], symbol_set: 'moons' } } });
+    expect(cleanEdit({ symbolics: { a: { symbols: [], symbol_set: '' } } })).toBeNull();
+  });
+
+  it('reads an older file\'s symbols and symbol set as its first symbolic\'s, by id once a run has shown it', () => {
+    const older = '{ "version": 1, "canvases": { "a": { "turn": 5, "symbols": [3], "symbol_set": "moons" } } }';
+    expect(parseEdits(older).canvases).toEqual({ a: { turn: 5, symbolics: { 0: { symbols: [3], symbol_set: 'moons' } } } });
+    expect(JSON.parse(pruneEdits(older, [{ name: 'a', symbolics: [{ id: 'x' }] }])!).canvases).toEqual({ a: { turn: 5, symbolics: { x: { symbols: [3], symbol_set: 'moons' } } } });
+  });
+
+  it('are pruned to the symbolics a canvas holds, those by place becoming those by id', () => {
+    const text = serializeEdits({ version: 1, canvases: { a: { turn: 5, symbolics: { x: { symbols: [1] }, 'y.2': { symbols: [2] } } } } });
+    const held = (...ids: string[]) => [{ name: 'a', symbolics: ids.map((id) => ({ id })) }];
+    expect(pruneEdits(text, held('w', 'x', 'y', 'y.2'))).toBe(text);
+    expect(JSON.parse(pruneEdits(text, held('x', 'y'))!).canvases).toEqual({ a: { turn: 5, symbolics: { x: { symbols: [1] } } } });
+    expect(JSON.parse(pruneEdits(text, [{ name: 'a' }])!).canvases).toEqual({ a: { turn: 5 } });
+    const placed = serializeEdits({ version: 1, canvases: { a: { symbolics: { 1: { symbols: [4] }, 7: { symbols: [2] } } } } });
+    expect(JSON.parse(pruneEdits(placed, held('x', 'y'))!).canvases).toEqual({ a: { symbolics: { y: { symbols: [4] } } } });
   });
 
   it('are pruned to the canvases a run committed', () => {
     const text = serializeEdits({ version: 1, canvases: { a: { turn: 5 }, b: { turn: 6 } } });
-    expect(pruneEdits(text, ['a', 'b'])).toBe(text);
-    expect(JSON.parse(pruneEdits(text, ['a'])!).canvases).toEqual({ a: { turn: 5 } });
+    expect(pruneEdits(text, [{ name: 'a' }, { name: 'b' }])).toBe(text);
+    expect(JSON.parse(pruneEdits(text, [{ name: 'a' }])!).canvases).toEqual({ a: { turn: 5 } });
     expect(pruneEdits(text, [])).toBeNull();
     expect(pruneEdits(null, [])).toBeNull();
     expect(pruneEdits('{ broken', [])).toBe('{ broken');

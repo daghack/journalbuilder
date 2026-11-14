@@ -20,7 +20,8 @@
 // the orbits, the ticks and the dust, and world_style the worlds and the
 // suns. The rim's symbols are symbol_set's, a SymbolSet, at its size or
 // smaller if the ring hasn't room, upright; a blank symbol a gap in the
-// ring. Unwired, near-black and red ink pens, and the letters set. With
+// ring; in the set's own styles, or with restyle_set in glyph_style's pen.
+// Unwired, near-black and red ink pens, and the letters set. With
 // editor, each rim symbol is committed to the visual editor as EDITOR_0 to
 // EDITOR_N, so any can be changed there.
 
@@ -29,13 +30,13 @@ import "lib/permutations" as perm;
 import "lib/chance" as chance;
 
 fn options() {
-	#{ base: 27, size: 900.0, show_ring: true, seed: 0, stars: 40, editor: "", orbit_ink: "#2b1d12", world_ink: "#9b2318", glyph_ink: "#2b1d12" }
+	#{ base: 27, size: 900.0, show_ring: true, seed: 0, stars: 40, editor: "", restyle_set: false, orbit_ink: "#2b1d12", world_ink: "#9b2318", glyph_ink: "#2b1d12" }
 }
 
 fn inputs(o) {
 	#{
 		worlds: `Base${o.base}Symbol`, ordering: `Base${o.base}Symbol`,
-		orbit_style: "TextStyle", world_style: "TextStyle", symbol_set: "SymbolSet",
+		orbit_style: "TextStyle", world_style: "TextStyle", symbol_set: "SymbolSet", glyph_style: "TextStyle",
 	}
 }
 
@@ -49,6 +50,7 @@ fn fallbacks(o) {
 		orbit_style: #{ style: new_style(new_brush_style(o.orbit_ink, "Ink Pen", 0.9, steady), hand) },
 		world_style: #{ style: new_style(new_brush_style(o.world_ink, "Ink Pen", 1.5, steady), hand) },
 		symbol_set: symbol_set("letters", #{ color: o.glyph_ink }),
+		glyph_style: #{ style: new_style(new_brush_style(o.glyph_ink, "Ink Pen", 2.2, #{ min_pressure: 0.4, max_pressure: 0.8 }), hand) },
 	}
 }
 
@@ -64,8 +66,10 @@ fn render(o, i) {
 	let glyph = min(set.size, room);
 	let c = new_canvas();
 	if o.show_ring {
+		let settings = #{ type: #{ glyph_scale: glyph } };
+		if o.restyle_set { settings.style = i.glyph_style.style; }
 		for k in 0..o.base {
-			let mark = write_at(set.text([i.ordering[k]]), centre + toward(k, o.base) * rim, #{ type: #{ glyph_scale: glyph } });
+			let mark = write_at(set.text([i.ordering[k]]), centre + toward(k, o.base) * rim, settings);
 			if o.editor != "" { mark = mark.commit_to_editor(`${o.editor}_${k}`); }
 			c.add(mark);
 		}

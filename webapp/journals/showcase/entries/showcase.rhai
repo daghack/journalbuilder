@@ -57,8 +57,14 @@
 //             modular mazes (a ring in disguise that divides as it's
 //             walked), graph::layout's generations, evolving a layout;
 //             scale_by by a vec, across and down apart, and canvas.size_to,
-//             filling a canvas or a page; a journal's own brushes,
-//             brushes/NAME.yaml, Darkly brushes drawn with by name
+//             filling a canvas or a page; restyle_set, a whole symbol
+//             set in an illustration's styles, and a text call's style
+//             over a scripted set's strokes; glyph_style and restyle_set
+//             in every illustration that draws a set;
+//             the symbolics a canvas holds, each changed in the visual
+//             editor through the canvas's commit (edits/showcase.json's
+//             symbolics); a journal's own brushes, brushes/NAME.yaml,
+//             Darkly brushes drawn with by name
 //
 // Pages are bound with new_book: numbered, named and listed in the
 // contents.
@@ -3140,6 +3146,101 @@ for (options, i) in [#{ padding: 30 }, #{ padding: 30, keep_proportions: true }]
 	fitted.add(write(if i == 0 { "new_page(#{ size: vec2(400, 200) })" } else { "keep_proportions: true" }, at.x, at.y + 232, 18));
 }
 book.bind("appendix", fitted);
+
+// restyle_set: a whole symbol set's marks drawn in the illustration's own
+// styles, as its glyphs would be, rather than the set's; and a text call's
+// style over a scripted set's strokes, which is how.
+let restyled = sheet("symbol sets");
+restyled.add(subhead("a set in the illustration's styles", TOP));
+restyled.add(caption("illustration(\"joined_symbol_ring\", #{ first: 3, second: 5, restyle_set }).run(#{ symbol_set, glyph_style,", TOP + 50));
+restyled.add(caption("first_style, second_style }): true draws the set's marks as the glyphs would be, each middle one in its walk's pen", TOP + 78));
+let ring_styles = #{ symbol_set: symbol_set("priests"), glyph_style: #{ style: LINE }, first_style: #{ style: pen(RED) }, second_style: #{ style: LINE } };
+for (restyle, i) in [false, true] {
+	let x = LEFT + 40 + i * 540;
+	let paths = illustration("joined_symbol_ring", #{ first: 3, second: 5, size: 360.0, glyph_size: 30.0, restyle_set: restyle }).run(ring_styles)[0];
+	restyled.add(paths.translate_by(vec2(x, TOP + 105)));
+	restyled.add(write(`restyle_set: ${restyle}`, x + 100, TOP + 495, 22));
+}
+restyled.add(caption("symbol_ring, rearranged_symbol_ring and maze_glyphs take restyle_set too, the marks in glyph_style's pen:", TOP + 560));
+restyled.add(caption("a scripted set's every stroke (the moons, a fine red pen), a simple set's glyphs (the letters, red)", TOP + 588));
+let fine_red = new_style(new_brush_style(RED, "Ink Pen", 0.7), new_handwriting_style());
+let moon_ring = illustration("symbol_ring", #{ step: 3, size: 360.0, restyle_set: true }).run(#{ symbol_set: symbol_set("moons"), glyph_style: #{ style: fine_red } })[0];
+restyled.add(moon_ring.translate_by(vec2(LEFT + 40, TOP + 615)));
+let letters_maze = new_maze(3, 3, #{ seed: 4 });
+letters_maze.fill(symbols(27, "HELLO WORLD").symbols());
+let maze = illustration("maze_glyphs", #{ restyle_set: true }).run(#{ maze: letters_maze, symbol_set: symbol_set("letters"), glyph_style: #{ style: pen(RED) } })[0];
+restyled.add(maze.size_to(new_page(#{ size: vec2(300, 300) }), #{ keep_proportions: true }).translate_by(vec2(LEFT + 600, TOP + 650)));
+restyled.add(write("symbol_ring, the moons", LEFT + 110, TOP + 1005, 22));
+restyled.add(write("maze_glyphs, the letters", LEFT + 640, TOP + 1005, 22));
+restyled.add(caption("write_line(moons.text(symbols), at, #{ style }): a whole style is every stroke's, a map is laid over each", TOP + 1070));
+let moons = symbol_set("moons", #{ ink: INK });
+for (style, i) in [[(), "its own"], [pen(RED), "style: pen(RED)"], [#{ color: RED }, "style: #{ color: RED }"]] {
+	let settings = #{ type: #{ glyph_scale: 56.0, glyph_tracking: 0.5 } };
+	if style[0] != () { settings.style = style[0]; }
+	let x = LEFT + 20 + i * 340;
+	restyled.add(write_line(moons.text([1, 2, 3]), vec2(x, TOP + 1150), settings));
+	restyled.add(write(style[1], x, TOP + 1230, 20));
+}
+book.bind("appendix", restyled);
+
+// The illustrations that take a set but drew it only in its own styles
+// take glyph_style and restyle_set too: each here restyled, in the ink its
+// set doesn't use.
+let rest = sheet("symbol sets");
+rest.add(subhead("every set restyled", TOP));
+rest.add(caption("illustration(name, #{ restyle_set: true }).run(#{ ..., glyph_style }): each set's marks in glyph_style's pen,", TOP + 50));
+rest.add(caption("here the ink the set's own style doesn't use (red for the letters and priests, near-black for the red ones)", TOP + 78));
+let circle_maze = new_lock("restyled").add("l", "circular_maze_lock", #{ base: 27, seed: 3 }).run(#{ "l.text": symbols(27, "HEART") }).get("l.maze").value();
+let sky = #{ periods: [5, 7, 8], sightings: [#{ date: [2, 12], houses: [2, 1, 5] }] };
+for (shown, k) in [
+	["orrery", #{ size: 320.0 }, #{ worlds: symbols(27, "ALMANAC").symbols() }, RED],
+	["sigil", #{ size: 320.0 }, #{ word: symbols(27, "ARCANA").symbols() }, RED],
+	["serpent", #{ width: 320.0, glyph_size: 22.0 }, #{ message: symbols(27, "IT SWALLOWS").symbols() }, INK],
+	["spider_web", #{ size: 320.0, glyph_size: 26.0 }, #{ message: symbols(27, "WHAT THE SPIDER SPINS").symbols() }, INK],
+	["circular_maze", #{ size: 320.0, glyph_size: 22.0 }, #{ maze: circle_maze }, INK],
+	["steiner_wheels", #{ per_row: 3, size: 90.0, gap: 14.0 }, #{ points: [12, 0, 3, 0, 1, 4, 5, 7, 12, 10, 11, 1], symbol_set: symbol_set("priests") }, RED],
+	["symbol_rows", #{ per_row: 5, size: 44.0 }, #{ symbols: [2, 6, 1, 0, 11, 4, 3, 2, 8, 1, 12, 5, 4, 0, 9] }, RED],
+	["banded_disc", #{ size: 320.0 }, #{ inscription: "every two of them once never none never twice" }, RED],
+	["star_sightings", #{ size: 320.0, splatter: 0 }, #{ sightings: sky }, INK],
+] {
+	let options = shown[1];
+	options.restyle_set = true;
+	let inputs = shown[2];
+	inputs.glyph_style = #{ style: if shown[3] == RED { pen(RED) } else { LINE } };
+	let drawn = illustration(shown[0], options).run(inputs)[0];
+	let x = LEFT + (k % 3) * 340;
+	let y = TOP + 115 + (k / 3) * 400;
+	rest.add(drawn.size_to(new_page(#{ size: vec2(300, 300) }), #{ keep_proportions: true }).translate_by(vec2(x, y)));
+	rest.add(write(shown[0], x, y + 330, 22));
+}
+book.bind("appendix", rest);
+
+// The symbolics a canvas holds: canvas.add(symbolic) (alone, in an array or
+// on another canvas) hands them on with their strokes, so the visual editor
+// offers each one's symbols and set for a committed canvas. Its edit's
+// symbolics, by their ids (made from the calls that drew them), draw them
+// again where they were.
+fn plate(set, at) {
+	let c = new_canvas().add(new_rectangle(vec2(0, 0), 520, 300), global::LINE);
+	c.add(write_at(set.text([0]), vec2(-170, -60), #{ type: #{ glyph_scale: 100.0 } }));
+	c.add([
+		write_at(set.text([1]), vec2(0, -60), #{ type: #{ glyph_scale: 100.0 } }),
+		write_at(set.text([2]), vec2(170, -60), #{ type: #{ glyph_scale: 100.0 } }),
+	]);
+	let row = new_canvas().add(write_line(set.text([3, 4, 3]), vec2(-150, 100), #{ type: #{ glyph_scale: 70.0 } }));
+	c.add(row);
+	c.rotate_around(vec2(0, 0), -0.08).translate_by(at)
+}
+let held = sheet("symbol sets");
+held.add(subhead("the symbolics a canvas holds", TOP));
+held.add(caption("canvas.add(symbolic), canvas.add([symbolics]), canvas.add(canvas of symbolics): the canvas holds them, each", TOP + 50));
+held.add(caption("with an id of its own, and canvas.commit_to_editor(name) offers its symbols and set to the visual editor", TOP + 84));
+held.add(caption("as the script draws it: four symbolics ([0], [1], [2] and [3, 4, 3])", TOP + 170));
+held.add(plate(stars, vec2(LEFT + 300, TOP + 380)).commit_to_editor("plate"));
+held.add(caption("edits/showcase.json: \"held\": { \"symbolics\": { ID: { \"symbols\": [4] },", TOP + 600));
+held.add(caption("ID: { \"symbols\": [1, 0], \"symbol_set\": \"moons\" } }, \"turn\": 6 }: the second and fourth drawn again where they were", TOP + 634));
+held.add(plate(stars, vec2(LEFT + 300, TOP + 850)).commit_to_editor("held"));
+book.bind("appendix", held);
 
 // A journal's own brushes: brushes/NAME.yaml, a Darkly brush, nodes wired
 // from the pen to the paint (the web editor's brush editor wires them).

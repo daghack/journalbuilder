@@ -115,13 +115,16 @@ fn draw_symbols(c, r, m, times, style) {
 }
 
 // Symbol `symbol` (() is a gap) drawn at `at`, `size` across, in a circle
-// if bordered: a mark of the symbol set if m has one, else the glyph the
-// type's glyphset has for it (a symbol's glyph is chosen by symbol_names).
+// if bordered: a mark of the symbol set if m has one, in its own styles or,
+// if m.restyle, in style, else the glyph the type's glyphset has for it (a
+// symbol's glyph is chosen by symbol_names).
 fn draw_symbol(c, m, symbol, at, size, bordered, style) {
 	if bordered { c.add(new_circle(at, size * 0.75), style); }
 	if symbol == () { return; }
 	if m.set != () {
-		c.add(write_at(m.set.text([symbol]), at, #{ type: #{ glyph_scale: size } }));
+		let settings = #{ type: #{ glyph_scale: size } };
+		if m.restyle { settings.style = style; }
+		c.add(write_at(m.set.text([symbol]), at, settings));
 		return;
 	}
 	let name = m.names[symbol];
@@ -135,20 +138,22 @@ fn draw_symbol(c, m, symbol, at, size, bordered, style) {
 }
 
 // What an illustration draws a ring's symbols with: #{ set, type, names,
-// base }. Given a symbol set (an illustration's `symbol_set` input; () for
-// none), its marks, `glyph_size` across (the set's own if 0) or smaller if
-// the ring hasn't room, and its base the option's, or the set's whole if
-// that's 0. Without one, the glyph_style's glyphset, as symbol_names
-// chooses glyphs from it, base 27 if the option's 0.
+// base, restyle }. Given a symbol set (an illustration's `symbol_set`
+// input; () for none), its marks, `glyph_size` across (the set's own if 0)
+// or smaller if the ring hasn't room, its base the option's, or the set's
+// whole if that's 0, and with the restyle_set option, drawn in the
+// illustration's styles rather than the set's own (restyle). Without one,
+// the glyph_style's glyphset, as symbol_names chooses glyphs from it, base
+// 27 if the option's 0.
 fn marks(o, set, glyph_style) {
 	if set != () {
 		let base = if o.base > 0 { o.base } else { set.base };
 		if set.base < base { throw `the symbol set '${set.name}' has ${set.base} symbols, fewer than the base, ${base}`; }
 		let size = if o.glyph_size > 0.0 { o.glyph_size } else { set.size };
-		return #{ set: set, type: #{ glyph_scale: size, glyph_scale_factor: 1.0 }, names: [], base: base };
+		return #{ set: set, type: #{ glyph_scale: size, glyph_scale_factor: 1.0 }, names: [], base: base, restyle: o.restyle_set };
 	}
 	let base = if o.base > 0 { o.base } else { 27 };
-	#{ set: (), type: glyph_style.type, names: symbol_names(glyph_style.type.glyphset, base), base: base };
+	#{ set: (), type: glyph_style.type, names: symbol_names(glyph_style.type.glyphset, base), base: base, restyle: false };
 }
 
 // The walk from the top by step, as the places each line joins, [k, j]:

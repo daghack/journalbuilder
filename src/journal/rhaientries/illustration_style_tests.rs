@@ -504,3 +504,57 @@ fn symbol_ring_draws_its_glyphsets_own_glyphs() {
     let err = ring_in(r#"glyphset("the_four_divine")"#, "#{ base: 5, step: 1 }").0.unwrap_err();
     assert!(err.contains("glyphset 'the_four_divine' has 4 symbols, too few for base 5"), "{}", err);
 }
+
+/// How many strokes are in `color`, none or more.
+fn count_in(entry: &Entry, color: &str) -> usize {
+    strokes(entry).filter(|s| inked(s, color)).count()
+}
+
+#[test]
+fn restyle_set_draws_a_sets_marks_in_the_illustrations_styles() {
+    // Each illustration with `inputs` (GREEN glyphs, BLUE first walk) and
+    // a symbol set, restyled or not: without borders, only the set's
+    // marks can be in the glyph style's pen.
+    let drawn = |name: &str, options: &str, inputs: &str, restyle: bool| {
+        let script = format!(r#"
+            fn pen(c) {{ new_style(new_brush_style(c, "Ink Pen", 2.0), new_handwriting_style()) }}
+            let maze = new_maze(3, 3, #{{ seed: 4 }});
+            maze.fill(symbols(27, "HELLO WORLD").symbols());
+            let options = {options};
+            options.restyle_set = {restyle};
+            for c in illustration("{name}", options).run({inputs}) {{ journal_entry.add(new_page().add(c)); }}
+        "#).replace("GREEN", GREEN).replace("BLUE", BLUE);
+        engine(&[], &[]).build_entry_str(&script).unwrap_or_else(|e| panic!("{}\n{}", script, e))
+    };
+    let unbordered = "bordered: false, center_bordered: false";
+    for (name, options, inputs) in [
+        ("symbol_ring", format!("#{{ step: 3, {} }}", unbordered), r#"#{ symbol_set: symbol_set("letters"), glyph_style: #{ style: pen("GREEN") } }"#),
+        ("symbol_ring", format!("#{{ step: 3, {} }}", unbordered), r#"#{ symbol_set: symbol_set("moons"), glyph_style: #{ style: pen("GREEN") } }"#),
+        ("rearranged_symbol_ring", format!("#{{ step: 3, {} }}", unbordered), r#"#{ symbol_set: symbol_set("priests"), glyph_style: #{ style: pen("GREEN") } }"#),
+        ("joined_symbol_ring", format!("#{{ base: 13, first: 3, second: 5, {} }}", unbordered), r#"#{ symbol_set: symbol_set("letters"), glyph_style: #{ style: pen("GREEN") }, first_style: #{ style: pen("BLUE") } }"#),
+        ("maze_glyphs", "#{}".to_string(), r#"#{ maze: maze, symbol_set: symbol_set("letters"), glyph_style: #{ style: pen("GREEN") } }"#),
+        // Those whose only style for the marks is glyph_style, for this.
+        ("orrery", "#{}".to_string(), r#"#{ worlds: symbols(27, "ALMANAC").symbols(), glyph_style: #{ style: pen("GREEN") } }"#),
+        ("sigil", "#{}".to_string(), r#"#{ word: symbols(27, "ARCANA").symbols(), glyph_style: #{ style: pen("GREEN") } }"#),
+        ("serpent", "#{}".to_string(), r#"#{ message: symbols(27, "IT SWALLOWS").symbols(), glyph_style: #{ style: pen("GREEN") } }"#),
+        ("spider_web", "#{}".to_string(), r#"#{ message: symbols(27, "WHAT THE SPIDER").symbols(), glyph_style: #{ style: pen("GREEN") } }"#),
+        ("circular_maze", "#{}".to_string(), r#"#{ maze: new_lock("m").add("l", "circular_maze_lock", #{ base: 27, seed: 3 }).run(#{ "l.text": symbols(27, "HEART") }).get("l.maze").value(), glyph_style: #{ style: pen("GREEN") } }"#),
+        ("steiner_wheels", "#{}".to_string(), r#"#{ points: [12, 0, 3, 0, 1, 4], symbol_set: symbol_set("priests"), glyph_style: #{ style: pen("GREEN") } }"#),
+        ("symbol_rows", "#{}".to_string(), r#"#{ symbols: [2, 6, 1, 0, 7], symbol_set: symbol_set("moons"), glyph_style: #{ style: pen("GREEN") } }"#),
+        ("banded_disc", "#{}".to_string(), r#"#{ inscription: "lorem ipsum", glyph_style: #{ style: pen("GREEN") } }"#),
+        ("star_sightings", "#{}".to_string(), r#"#{ sightings: #{ periods: [5, 7, 8], sightings: [#{ date: [2, 12], houses: [2, 1, 5] }] }, glyph_style: #{ style: pen("GREEN") } }"#),
+    ] {
+        let (own, restyled) = (drawn(name, &options, inputs, false), drawn(name, &options, inputs, true));
+        assert_eq!(count_in(&own, GREEN), 0, "{} with {}: the set's marks in their own styles", name, inputs);
+        assert!(count_in(&restyled, GREEN) > 0, "{} with {}: restyled, the set's marks in glyph_style's pen", name, inputs);
+        assert_eq!(strokes(&own).count(), strokes(&restyled).count(), "{} with {}: the same marks", name, inputs);
+        if name == "star_sightings" {
+            // The sighting's month, and the year and month under the sky, in blood still.
+            assert!(count_in(&restyled, RED) > 0, "{}: its highlights in blood", name);
+        }
+        if name == "joined_symbol_ring" {
+            // The first walk's middle symbol in its walk's pen, besides its lines.
+            assert!(count_in(&restyled, BLUE) > count_in(&own, BLUE), "{}: the first walk's middle symbol in its pen", name);
+        }
+    }
+}

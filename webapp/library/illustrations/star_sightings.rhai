@@ -33,7 +33,10 @@
 // Each place's symbol is checked against its set. With editor, each mark is
 // committed to the visual editor as EDITOR.PLATE.SLOT_N (sky.0.corners_2:
 // the third corner of the first plate), so it can be changed there; two
-// uses in one entry need two editors. The rest is drawn in ink and blood,
+// uses in one entry need two editors. The marks are in their sets' own
+// styles, or with restyle_set every set's in glyph_style's pen (the
+// sighting's month and the year and month under the sky in blood; unwired,
+// an ink pen). The rest is drawn in ink and blood,
 // lib/inks' pens; seed picks how each blot is drawn, and splatter how much
 // ink was spilt on each plate.
 
@@ -42,7 +45,7 @@ import "lib/plates" as plates;
 import "lib/chance" as chance;
 
 fn options() {
-	#{ size: 900.0, seed: 0, splatter: 14, editor: "", ink: "#2b1d12", blood: "#9b2318" }
+	#{ size: 900.0, seed: 0, splatter: 14, editor: "", restyle_set: false, ink: "#2b1d12", blood: "#9b2318" }
 }
 
 fn inputs(o) {
@@ -52,6 +55,7 @@ fn inputs(o) {
 		corners_set: "SymbolSet", corners: "Any",
 		months_set: "SymbolSet",
 		month_marks_set: "SymbolSet", month_marks: "Any",
+		glyph_style: "TextStyle",
 	}
 }
 
@@ -62,6 +66,7 @@ fn fallbacks(o) {
 		corners_set: stars, corners: [],
 		months_set: symbol_set("priests"),
 		month_marks_set: symbol_set("small_marks", #{ ink: o.ink }), month_marks: [],
+		glyph_style: #{ style: new_style(new_brush_style(o.ink, "Ink Pen", o.size * 0.002, #{ min_pressure: 0.4, max_pressure: 0.8 }), new_handwriting_style()) },
 	}
 }
 
@@ -87,11 +92,16 @@ fn example() {
 }
 
 // A mark of `set`, symbol `symbol`, `size` across, at `at`, turned, in
-// `style` over the set's unless (); committed to the visual editor as
-// EDITOR.PLATE.NAME if the editor option names one.
-fn mark(c, o, plate, name, set, symbols, at, size, turn, style) {
+// `style` over the set's unless (), or with restyle_set in glyph_style's
+// pen, in style's colour if it gives one; committed to the visual editor
+// as EDITOR.PLATE.NAME if the editor option names one.
+fn mark(c, o, i, plate, name, set, symbols, at, size, turn, style) {
 	let settings = #{ type: #{ glyph_scale: size }, turn: turn };
-	if style != () { settings.style = style; }
+	if o.restyle_set {
+		let pen = i.glyph_style.style;
+		if style != () && "color" in style { pen.color = style.color; }
+		settings.style = pen;
+	} else if style != () { settings.style = style; }
 	let m = write_at(set.text(symbols), at, settings);
 	if o.editor != "" { m = m.commit_to_editor(`${o.editor}.${plate}.${name}`); }
 	c.add(m);
@@ -189,15 +199,15 @@ fn plate(o, i, periods, sighting, n) {
 	let glyph_at = (band_out + rim) / 2.0;
 	for k in 0..13 {
 		let turn = (k + 0.5) / 13.0;
-		mark(c, o, n, `month_${k}`, months, [k], centre + plates::toward(turn) * glyph_at, size, 2.0 * PI() * turn, if k == month { #{ color: o.blood } } else { () });
-		mark(c, o, n, `month_mark_${k}`, i.month_marks_set, [between[k]], centre + plates::toward(k / 13.0) * glyph_at, s * 0.016, 2.0 * PI() * k / 13.0, ());
+		mark(c, o, i, n, `month_${k}`, months, [k], centre + plates::toward(turn) * glyph_at, size, 2.0 * PI() * turn, if k == month { #{ color: o.blood } } else { () });
+		mark(c, o, i, n, `month_mark_${k}`, i.month_marks_set, [between[k]], centre + plates::toward(k / 13.0) * glyph_at, s * 0.016, 2.0 * PI() * k / 13.0, ());
 	}
 
 	// The star they circle, and the wanderers, each in its cleared disc.
-	mark(c, o, n, "centre", i.markers_set, [hub], centre, middle * 1.75, 0.0, ());
+	mark(c, o, i, n, "centre", i.markers_set, [hub], centre, middle * 1.75, 0.0, ());
 	for k in 0..stars {
 		c.add(new_circle(places[k], medal), inks::contour(o.ink, s * 0.0018));
-		mark(c, o, n, `wanderer_${k}`, i.markers_set, [wanderers[k]], places[k], medal * 1.82, 0.0, ());
+		mark(c, o, i, n, `wanderer_${k}`, i.markers_set, [wanderers[k]], places[k], medal * 1.82, 0.0, ());
 	}
 
 	// A glory of fine rays out from the rim, as far as the frame lets
@@ -227,14 +237,14 @@ fn plate(o, i, periods, sighting, n) {
 		let way = (centre - at).normalized();
 		ruled.append(new_line(at + way * s * 0.06, centre - way * (rim + s * 0.02)));
 		c.add(new_circle(at, s * 0.047), inks::contour(o.ink, s * 0.0016));
-		mark(c, o, n, `corner_${q}`, i.corners_set, [corner_symbols[q]], at, s * 0.091, 0.0, ());
+		mark(c, o, i, n, `corner_${q}`, i.corners_set, [corner_symbols[q]], at, s * 0.091, 0.0, ());
 	}
 	c.add(ruled, inks::pencil(o.ink, s * 0.0016));
 
 	// The year, lower left, and the month again, lower right.
 	let year = sighting.date.extract(0, sighting.date.len() - 1);
-	mark(c, o, n, "year", months, year, vec2(centre.x - s * 0.285, centre.y + s * 0.418), size * 0.9, 0.0, #{ color: o.blood });
-	mark(c, o, n, "month", months, [month], vec2(centre.x + s * 0.285, centre.y + s * 0.418), size * 0.9, 0.0, #{ color: o.blood });
+	mark(c, o, i, n, "year", months, year, vec2(centre.x - s * 0.285, centre.y + s * 0.418), size * 0.9, 0.0, #{ color: o.blood });
+	mark(c, o, i, n, "month", months, [month], vec2(centre.x + s * 0.285, centre.y + s * 0.418), size * 0.9, 0.0, #{ color: o.blood });
 
 	// The frame, and what was spilt.
 	let frame = plates::frame(s, s, s * 0.018, s * 0.014, s * 0.03);

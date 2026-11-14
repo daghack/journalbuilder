@@ -244,7 +244,7 @@ impl JournalEngine {
         brushes.use_here();
         brushes::register(&mut engine, brushes.clone());
         canvas::register(&mut engine, rng.clone());
-        let editor = edits::register(&mut engine);
+        let editor = edits::SharedEditor::default();
         path::register(&mut engine, text);
         style::register(&mut engine);
         vec::register(&mut engine);
@@ -306,7 +306,12 @@ impl JournalEngine {
         text_styles::register(&mut engine, text_styles.clone());
         let symbol_sets = Rc::new(symbol_sets::SymbolSetLibrary::new(resources.symbol_set_data.clone(), resources.symbol_set_scripts.clone(), text_styles.clone(), symdict.clone()));
         symbol_sets::register(&mut engine, symbol_sets.clone(), rng.clone());
-        symbolic::register(&mut engine, editor.clone(), symbol_sets.clone(), rng.clone());
+        symbolic::register(&mut engine, symbol_sets.clone());
+        let edit_warnings = warnings.clone();
+        edits::register(&mut engine, editor.clone(), symbol_sets.clone(), move |warning| {
+            eprintln!("warning: {}", warning);
+            edit_warnings.borrow_mut().push(warning);
+        });
         content::register(&mut engine, resources.clone());
         images::register(&mut engine, resources.clone());
 
