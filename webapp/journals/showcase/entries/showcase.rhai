@@ -60,7 +60,10 @@
 //             filling a canvas or a page; restyle_set, a whole symbol
 //             set in an illustration's styles, and a text call's style
 //             over a scripted set's strokes; glyph_style and restyle_set
-//             in every illustration that draws a set
+//             in every illustration that draws a set;
+//             the symbolics a canvas holds, each changed in the visual
+//             editor through the canvas's commit (edits/showcase.json's
+//             symbolics)
 //
 // Pages are bound with new_book: numbered, named and listed in the
 // contents.
@@ -3207,6 +3210,33 @@ for (shown, k) in [
 	rest.add(write(shown[0], x, y + 330, 22));
 }
 book.bind("appendix", rest);
+
+// The symbolics a canvas holds: canvas.add(symbolic) (alone, in an array or
+// on another canvas) hands them on with their strokes, so the visual editor
+// offers each one's symbols and set for a committed canvas. Its edit's
+// symbolics, by their ids (made from the calls that drew them), draw them
+// again where they were.
+fn plate(set, at) {
+	let c = new_canvas().add(new_rectangle(vec2(0, 0), 520, 300), global::LINE);
+	c.add(write_at(set.text([0]), vec2(-170, -60), #{ type: #{ glyph_scale: 100.0 } }));
+	c.add([
+		write_at(set.text([1]), vec2(0, -60), #{ type: #{ glyph_scale: 100.0 } }),
+		write_at(set.text([2]), vec2(170, -60), #{ type: #{ glyph_scale: 100.0 } }),
+	]);
+	let row = new_canvas().add(write_line(set.text([3, 4, 3]), vec2(-150, 100), #{ type: #{ glyph_scale: 70.0 } }));
+	c.add(row);
+	c.rotate_around(vec2(0, 0), -0.08).translate_by(at)
+}
+let held = sheet("symbol sets");
+held.add(subhead("the symbolics a canvas holds", TOP));
+held.add(caption("canvas.add(symbolic), canvas.add([symbolics]), canvas.add(canvas of symbolics): the canvas holds them, each", TOP + 50));
+held.add(caption("with an id of its own, and canvas.commit_to_editor(name) offers its symbols and set to the visual editor", TOP + 84));
+held.add(caption("as the script draws it: four symbolics ([0], [1], [2] and [3, 4, 3])", TOP + 170));
+held.add(plate(stars, vec2(LEFT + 300, TOP + 380)).commit_to_editor("plate"));
+held.add(caption("edits/showcase.json: \"held\": { \"symbolics\": { ID: { \"symbols\": [4] },", TOP + 600));
+held.add(caption("ID: { \"symbols\": [1, 0], \"symbol_set\": \"moons\" } }, \"turn\": 6 }: the second and fourth drawn again where they were", TOP + 634));
+held.add(plate(stars, vec2(LEFT + 300, TOP + 850)).commit_to_editor("held"));
+book.bind("appendix", held);
 
 // ---- the title page and the contents, which go first ----
 

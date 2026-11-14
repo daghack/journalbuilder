@@ -28,17 +28,24 @@ export interface Committed {
   local: Corners | null;
   /** Each place it's drawn: its page, and those corners there. */
   shown: { page: number; corners: Corners }[];
-  /** What it's drawn from, if it's a symbolic: symbols of a symbol set. */
-  symbolic?: SymbolicInfo | null;
+  /** The symbolics it holds (itself, if it's one, and those added to it), in the order they were added. */
+  symbolics?: SymbolicInfo[];
 }
 
-/** A committed symbolic: its symbols and symbol set as drawn (the edit applied), their base, and as the script made it. */
+/**
+ * A symbolic a committed canvas holds: what it is to the canvas's edit
+ * (`id`, the same every run however many others the script draws), its symbols and symbol set as drawn
+ * (the edit applied), their base, and as the script made it; and its box's
+ * corners in the canvas as the canvas's edit left it (null if it drew nothing).
+ */
 export interface SymbolicInfo {
+  id: string;
   symbols: number[];
   symbol_set: string;
   base: number;
   script_symbols: number[];
   script_symbol_set: string;
+  corners?: Corners | null;
 }
 
 export interface ScriptError {

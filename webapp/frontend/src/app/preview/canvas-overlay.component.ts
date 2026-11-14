@@ -50,6 +50,9 @@ let gestures = 0;
             <title>{{ item.name }}{{ item.edit.locked ? ' (locked)' : '' }}{{ item.edit.hidden ? ' (hidden)' : '' }}</title>
           </polygon>
         }
+        @for (s of symbolicBoxes(); track s.key) {
+          <polygon class="symbolic" [attr.points]="points(s.corners)" [class.picked]="s.picked"><title>Symbolic {{ s.index }}</title></polygon>
+        }
         @if (frame(); as f) {
           @if (edit.tool() === 'select') {
             <line class="stem" [attr.x1]="f.topMid[0]" [attr.y1]="f.topMid[1]" [attr.x2]="f.turn[0]" [attr.y2]="f.turn[1]" />
@@ -96,6 +99,8 @@ let gestures = 0;
     .box.copy { stroke-dasharray: 2 4; }
     .box.hidden-ink { stroke: #8a8378; }
     .box.locked { cursor: default; stroke: #8a8378; pointer-events: none; }
+    .symbolic { fill: none; stroke: #b8862a; stroke-width: 1; stroke-dasharray: 2 3; vector-effect: non-scaling-stroke; pointer-events: none; opacity: 0.7; }
+    .symbolic.picked { stroke-dasharray: none; stroke-width: 1.75; opacity: 1; fill: rgb(184 134 42 / 0.1); }
     .handle { fill: #ffffff; stroke: #2a7ab8; stroke-width: 1.25; vector-effect: non-scaling-stroke; }
     .handle.turn { cursor: grab; }
     .handle.warp { fill: #2a7ab8; cursor: crosshair; }
@@ -142,6 +147,22 @@ export class CanvasOverlayComponent {
       const t = live && this.moves(name, live.names) ? live.t : null;
       const corners = t ? (p.corners.map((c) => applyTo(t, c)) as Corners) : p.corners;
       return { key: `${name}#${p.copy}`, name, corners, bounds: boundsOf(corners), edit: p.edit, copy: p.copy, selected: selection.has(name), placed: p };
+    });
+  });
+
+  /** The boxes of the symbolics the one selected canvas holds (when it holds several, or one beside other things), moved by what's held. */
+  protected readonly symbolicBoxes = computed(() => {
+    const selection = this.edit.selection();
+    if (selection.length !== 1) return [];
+    const live = this.live();
+    const picked = this.edit.symbolic();
+    return this.items().filter((i) => i.name === selection[0] && i.placed.symbolics.length > 1).flatMap((item) => {
+      const t = live && this.moves(item.name, live.names) ? live.t : null;
+      return item.placed.symbolics.flatMap((corners, index) => {
+        if (!corners) return [];
+        const moved = t ? (corners.map((c) => applyTo(t, c)) as Corners) : corners;
+        return [{ key: `${item.key}/${index}`, index, corners: moved, picked: index === picked }];
+      });
     });
   });
 
@@ -322,6 +343,11 @@ export class CanvasOverlayComponent {
       this.edit.settle();
     } else if (live && !isIdentity(live.t, 1e-6)) {
       this.edit.transform(live.names, () => live.t, true);
+    } else if (g.kind === 'move') {
+      // A click, not a drag: on a symbolic the selected canvas holds, it picks it.
+      const hits = this.symbolicBoxes().filter((s) => inside(s.corners, g.from));
+      const hit = hits.sort((a, b) => area(a.corners) - area(b.corners))[0];
+      if (hit) this.edit.symbolic.set(hit.index);
     }
     this.end();
   }

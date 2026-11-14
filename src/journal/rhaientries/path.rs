@@ -811,7 +811,8 @@ pub(super) fn register(engine: &mut Engine, text: TextSource) {
         .register_fn("fit_text", move |ctx: NativeCallContext, path: &mut Path, text: Markdown, settings: Map| fit_text(path, &FlowText::Marked(text), settings, &t2m, ctx.engine()))
         .register_fn("fit_text", move |ctx: NativeCallContext, path: &mut Path, text: SymbolText, settings: Map| -> RhaiResult<Symbolic> {
             let (path, t) = (path.clone(), t2s.clone());
-            make(ctx.engine(), &t2s.1, text, move |engine, msg| fit_text(&mut path.clone(), msg, settings.clone(), &t, engine))
+            let site = format!("fit_text {} {:?}", path.borrow(), settings);
+            make(ctx.engine(), &t2s.1, &site, text, move |engine, msg| fit_text(&mut path.clone(), msg, settings.clone(), &t, engine))
         })
         .register_fn("fill_with_text", move |path: &mut Path, bt: BalancedTernary, settings: Map| fill_with_ternary(path, &bt, settings, &r1))
         .register_fn("fit_text", move |path: &mut Path, bt: BalancedTernary, settings: Map| fit_ternary(path, &bt, settings, &r2))
@@ -905,7 +906,8 @@ pub(super) fn register(engine: &mut Engine, text: TextSource) {
     let t = t3.clone();
     engine.register_fn("write_line", move |ctx: NativeCallContext, text: SymbolText, at: Vec2, settings: Map| -> RhaiResult<Symbolic> {
         let source = t.clone();
-        make(ctx.engine(), &t.1, text, move |engine, msg| write_line(msg, at.clone(), settings.clone(), &source, engine))
+        let site = format!("write_line {:?} {:?}", at, settings);
+        make(ctx.engine(), &t.1, &site, text, move |engine, msg| write_line(msg, at.clone(), settings.clone(), &source, engine))
     });
     let t = t3.clone();
     engine.register_fn("write_at", move |ctx: NativeCallContext, text: &str, at: Vec2, settings: Map| write_at(&plain(text), at, settings, &t, ctx.engine()));
@@ -914,7 +916,8 @@ pub(super) fn register(engine: &mut Engine, text: TextSource) {
     let t = t3;
     engine.register_fn("write_at", move |ctx: NativeCallContext, text: SymbolText, at: Vec2, settings: Map| -> RhaiResult<Symbolic> {
         let source = t.clone();
-        make(ctx.engine(), &t.1, text, move |engine, msg| write_at(msg, at.clone(), settings.clone(), &source, engine))
+        let site = format!("write_at {:?} {:?}", at, settings);
+        make(ctx.engine(), &t.1, &site, text, move |engine, msg| write_at(msg, at.clone(), settings.clone(), &source, engine))
     });
 }
 

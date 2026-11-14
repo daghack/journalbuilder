@@ -497,7 +497,8 @@ pub fn register(engine: &mut Engine, text: super::path::TextSource) {
     });
     module.set_native_fn("spiral_text", move |ctx: NativeCallContext, msg: super::symbol_sets::SymbolText, center: Vec2, radius: Dynamic, settings: Map| -> RhaiResult<super::symbolic::Symbolic> {
         let source = symbolic.clone();
-        super::symbolic::make(ctx.engine(), &symbolic.1, msg, move |engine, text| super::path::spiral_text(text, center.clone(), &radius, settings.clone(), &source, engine))
+        let site = format!("spiral_text {:?} {:?} {:?}", center, radius, settings);
+        super::symbolic::make(ctx.engine(), &symbolic.1, &site, msg, move |engine, text| super::path::spiral_text(text, center.clone(), &radius, settings.clone(), &source, engine))
             .map_err(|err| error(&ctx, err.to_string()))
     });
     module.set_native_fn("moon", |ctx: NativeCallContext, center: Vec2, radius: Dynamic, phase: Dynamic| -> RhaiResult<Map> {

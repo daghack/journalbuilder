@@ -10,7 +10,7 @@ use super::RhaiResult;
 use super::options::{apply_props, at_least_zero, check_keys, float};
 use super::random::SharedRng;
 use super::vec::scale_factors;
-use super::symbolic::canvas_of;
+use super::symbolic::{canvas_of, Held, Move};
 use super::{check_finite, check_name, Canvas, Page, Path, Style, Vec2};
 use std::collections::HashMap;
 
@@ -32,6 +32,10 @@ pub struct CanvasData {
     /// Where the canvases committed to the visual editor that it holds
     /// are (see edits.rs).
     pub(super) commits: Vec<CommitMark>,
+    /// The symbolics it holds (see symbolic.rs): those drawn on it or added
+    /// to it, in the order of their strokes, each knowing which strokes are
+    /// its own and how to draw them again as other symbols.
+    pub(super) symbolics: Vec<Held>,
 }
 
 impl CanvasData {
@@ -52,7 +56,9 @@ impl CanvasData {
         let color_seed = if style.color_jitter() > 0.0 { rng.next_u64() } else { 0 };
         self.strokes.push(Stroke { path, style: style.clone(), seed: None, color_seed, text, hidden: false, commits: None });
     }
-    /// `f` applied to every stroke's path (and the committed canvases' marks).
+    /// `f` applied to every stroke's path (and the committed canvases'
+    /// marks), unknown to the symbolics it holds: for a canvas that holds
+    /// none, or with `remember`.
     pub(super) fn transform_with(&mut self, f: impl Fn(&mut StrokePath)) {
         self.transform(f)
     }
@@ -63,6 +69,33 @@ impl CanvasData {
         for mark in &mut self.commits {
             mark.transform(&f);
         }
+    }
+    /// Note something done to every stroke, for the symbolics it holds to
+    /// do again when they're drawn again.
+    pub(super) fn remember(&mut self, step: Move) {
+        for held in &mut self.symbolics {
+            held.remember(step.clone());
+        }
+    }
+    pub(super) fn translate_by(&mut self, v: PVec) {
+        self.transform(|p| p.translate_by(v));
+        self.remember(Move::Translate(v));
+    }
+    pub(super) fn scale_by(&mut self, scale: PVec) {
+        self.transform(|p| p.scale_by(scale));
+        self.remember(Move::Scale(scale));
+    }
+    pub(super) fn rotate_around(&mut self, point: PVec, rad: f32) {
+        self.transform(|p| p.rotate_around(point, rad));
+        self.remember(Move::Rotate(point, rad));
+    }
+    /// Everything `other` has added after its own: strokes, the committed
+    /// canvases' marks, and the symbolics it holds.
+    pub(super) fn append(&mut self, other: &CanvasData) {
+        let base = self.strokes.len();
+        self.strokes.extend(other.strokes.iter().cloned());
+        self.commits.extend(other.commits.iter().cloned());
+        self.symbolics.extend(other.symbolics.iter().map(|held| held.after(base)));
     }
     /// Whether the visual editor hid any of its strokes.
     pub(super) fn has_hidden(&self) -> bool {
@@ -94,43 +127,38 @@ pub(super) fn register(engine: &mut Engine, rng: SharedRng) {
             check_finite("canvas.add", &path)?;
             Ok(c.update(|data| data.add_path(path, &style, &mut *r.borrow_mut())))
         })
+        // A canvas added hands on the symbolics it holds with its strokes
+        // (a symbolic is added as its canvas: see symbolic.rs).
         .register_fn("add", |c: &mut Canvas, other: Canvas| -> Canvas {
             // Copy first: `c.add(c)` shares one value.
-            let (strokes, commits) = { let other = other.borrow(); (other.strokes.clone(), other.commits.clone()) };
-            c.update(|data| {
-                data.strokes.extend(strokes);
-                data.commits.extend(commits);
-            })
+            let other = other.get();
+            c.update(|data| data.append(&other))
         })
         .register_fn("add", |c: &mut Canvas, canvases: rhai::Array| -> RhaiResult<Canvas> {
             // An array of canvases, as fill_with_text gives.
-            let (mut strokes, mut commits) = (Vec::new(), Vec::new());
+            let mut added = CanvasData::default();
             for (i, item) in canvases.into_iter().enumerate() {
                 let type_name = item.type_name();
-                let other = super::symbolic::canvas_of(&item)
+                let other = canvas_of(&item)
                     .ok_or_else(|| format!("canvas.add: item {} is a {}, not a canvas (glyphs need a style: canvas.add(glyphs, style))", i, type_name))?;
-                strokes.extend(other.borrow().strokes.iter().cloned());
-                commits.extend(other.borrow().commits.iter().cloned());
+                added.append(&other.borrow());
             }
-            Ok(c.update(|data| {
-                data.strokes.extend(strokes);
-                data.commits.extend(commits);
-            }))
+            Ok(c.update(|data| data.append(&added)))
         })
         .register_fn("add", move |c: &mut Canvas, parts: Map, styles: Map| -> RhaiResult<Canvas> { add_parts(c, parts, styles, &mut *rng.borrow_mut()) })
         .register_fn("translate_by", |c: &mut Canvas, v: Vec2| -> Canvas {
             let v = v.into();
-            c.update(|data| data.transform(|p| p.translate_by(v)))
+            c.update(|data| data.translate_by(v))
         })
         .register_fn("scale_by", |c: &mut Canvas, scale: Dynamic| -> RhaiResult<Canvas> {
             let scale = scale_factors("canvas.scale_by", scale)?;
-            Ok(c.update(|data| data.transform(|p| p.scale_by(scale))))
+            Ok(c.update(|data| data.scale_by(scale)))
         })
         .register_fn("size_to", |c: &mut Canvas, target: Dynamic| size_to(c, target, &Map::new()))
         .register_fn("size_to", |c: &mut Canvas, target: Dynamic, options: Map| size_to(c, target, &options))
         .register_fn("rotate_around", |c: &mut Canvas, point: Vec2, rad: Dynamic| -> RhaiResult<Canvas> {
             let (point, rad) = (point.into(), float("rotate_around", "the angle", &rad)? as f32);
-            Ok(c.update(|data| data.transform(|p| p.rotate_around(point, rad))))
+            Ok(c.update(|data| data.rotate_around(point, rad)))
         });
 }
 
@@ -291,7 +319,12 @@ impl CanvasData {
     /// Brush sizes stay as they are, so the lines are scaled to leave room
     /// for them; lines with no extent one way (a straight line across)
     /// can't be stretched that way and are centred.
+    ///
+    /// A symbolic it holds that's all there is on it remembers the box, to
+    /// fill it again when it's drawn again; others, how they were scaled
+    /// and moved with the rest.
     pub(super) fn fit(&mut self, fit: Fit) -> RhaiResult<()> {
+        let count = self.strokes.len();
         let pad = PVec::splat(fit.padding);
         let (from, to) = (fit.target.mins + pad, fit.target.maxs - pad);
         // Which stroke's width reaches furthest past the lines can change
@@ -320,9 +353,16 @@ impl CanvasData {
                 p.scale_by(scale);
                 p.translate_by(offset);
             });
+            for held in self.symbolics.iter_mut().filter(|held| !held.is_all(count)) {
+                held.remember(Move::Scale(scale));
+                held.remember(Move::Translate(offset));
+            }
             if (scale - PVec::ONE).abs().max_element() < 1e-6 && offset.abs().max_element() < 1e-4 {
                 break;
             }
+        }
+        for held in self.symbolics.iter_mut().filter(|held| held.is_all(count)) {
+            held.remember(Move::SizeTo(fit));
         }
         Ok(())
     }
@@ -330,7 +370,7 @@ impl CanvasData {
 
 /// What the strokes' lines cover, and what they cover with their widths
 /// (as `canvas.bounds()` gives it), or `None` for no strokes.
-fn stroke_bounds(strokes: &[Stroke]) -> Option<(Aabb, Aabb)> {
+pub(super) fn stroke_bounds(strokes: &[Stroke]) -> Option<(Aabb, Aabb)> {
     let (mut lines, mut covered) = (Aabb::new_invalid(), Aabb::new_invalid());
     for stroke in strokes {
         let width = PVec::splat(stroke.style.stroke_width());

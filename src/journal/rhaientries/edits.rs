@@ -8,10 +8,15 @@
 //!     "move": [12, -4], "turn": 15, "scale": [1.2, -1], "skew": 8,
 //!     "warp": [[0, 0], [6, -3], [0, 0], [0, 0]],
 //!     "hidden": false, "locked": false,
-//!     "ink": { "color": "#7a1f1f", "opacity": 0.8, "weight": 1.5 } } } }
+//!     "ink": { "color": "#7a1f1f", "opacity": 0.8, "weight": 1.5 },
+//!     "symbolics": { "5f1c0a9e-...": { "symbols": [3, 1], "symbol_set": "moons" } } } } }
 //! ```
 //!
-//! Edits are about the canvas's own box (its bounds when it's committed),
+//! First of all the symbolics the canvas holds (see symbolic.rs) are drawn
+//! again as `symbolics` has them, each by its id (which the call that drew
+//! it gives it): other symbols, or another symbol set's.
+//!
+//! The rest is about the canvas's own box (its bounds when it's committed),
 //! so they hold however the script moves it before or after: the corners
 //! are pinned first (`warp`, each corner moved by so much: top left, top
 //! right, bottom right, bottom left), then each point `p` goes to
@@ -25,6 +30,7 @@
 //! Nothing here draws from the random generator, so the rest of the script
 //! draws the same with edits or without.
 
+use parry2d::bounding_volume::Aabb;
 use parry2d::math::Vec2 as PVec;
 use rhai::{Dynamic, Engine, NativeCallContext};
 use serde::{Deserialize, Serialize};
@@ -33,8 +39,10 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use super::canvas::CanvasData;
+use super::canvas::{stroke_bounds, CanvasData, Stroke};
 use super::entry::check_name;
+use super::symbol_sets::SymbolSetLibrary;
+use super::symbolic::{self, Move, SymbolicReport};
 use super::{Canvas, Entry, RhaiResult};
 use crate::journal::affine::Affine;
 use crate::journal::canvas::{parse_color, Canvas as JournalCanvas};
@@ -65,16 +73,33 @@ pub struct CanvasEdit {
     pub hidden: bool,
     pub locked: bool,
     pub ink: Option<InkEdit>,
-    /// For a symbolic (see symbolic.rs): the symbols it's drawn as, and the
-    /// symbol set they're of, in place of the script's.
-    pub symbols: Option<Vec<u32>>,
-    pub symbol_set: Option<String>,
+    /// The symbolics the canvas holds (see symbolic.rs) that are drawn as
+    /// other symbols, or another set's: each by its id (older files, by
+    /// its place among them, from 0).
+    pub symbolics: BTreeMap<String, SymbolicEdit>,
+    /// As files written before a canvas held more than one symbolic have
+    /// symbolic 0's: read into `symbolics` as they're parsed.
+    symbols: Option<Vec<u32>>,
+    symbol_set: Option<String>,
 }
 
 impl Default for CanvasEdit {
     fn default() -> Self {
-        CanvasEdit { offset: [0.0; 2], turn: 0.0, scale: [1.0; 2], skew: 0.0, warp: None, hidden: false, locked: false, ink: None, symbols: None, symbol_set: None }
+        CanvasEdit {
+            offset: [0.0; 2], turn: 0.0, scale: [1.0; 2], skew: 0.0, warp: None, hidden: false, locked: false, ink: None,
+            symbolics: BTreeMap::new(), symbols: None, symbol_set: None,
+        }
     }
+}
+
+/// What a symbolic a committed canvas holds is drawn as, in place of the
+/// script's: its symbols, and the symbol set they're of. Either may be
+/// left out.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SymbolicEdit {
+    pub symbols: Option<Vec<u32>>,
+    pub symbol_set: Option<String>,
 }
 
 /// The ink a committed canvas is re-inked with.
@@ -92,9 +117,12 @@ pub struct InkEdit {
 impl Edits {
     /// The edits in `text`, checked.
     pub fn parse(text: &str) -> Result<Edits, String> {
-        let edits: Edits = serde_json::from_str(text).map_err(|e| e.to_string())?;
+        let mut edits: Edits = serde_json::from_str(text).map_err(|e| e.to_string())?;
         if edits.version != EDITS_VERSION {
             return Err(format!("version {} isn't one this build reads ({})", edits.version, EDITS_VERSION));
+        }
+        for edit in edits.canvases.values_mut() {
+            edit.convert();
         }
         for (name, edit) in &edits.canvases {
             check_name("edits", Dynamic::from(name.clone())).map_err(|e| e.to_string())?;
@@ -105,6 +133,17 @@ impl Edits {
 }
 
 impl CanvasEdit {
+    /// An older file's `symbols` and `symbol_set`, the canvas's own as a
+    /// symbolic, as its symbolic 0's (where `symbolics` doesn't say).
+    fn convert(&mut self) {
+        let (symbols, symbol_set) = (self.symbols.take(), self.symbol_set.take());
+        if symbols.is_some() || symbol_set.is_some() {
+            let first = self.symbolics.entry("0".to_string()).or_default();
+            first.symbols = first.symbols.take().or(symbols);
+            first.symbol_set = first.symbol_set.take().or(symbol_set);
+        }
+    }
+
     fn check(&self) -> Result<(), String> {
         let numbers = self.offset.iter().chain(&self.scale).chain([&self.turn, &self.skew])
             .chain(self.warp.iter().flatten().flatten());
@@ -189,8 +228,9 @@ pub struct Committed {
     #[serde(rename = "box")]
     pub bounds: Option<[f32; 4]>,
     pub local: Option<[[f32; 2]; 4]>,
-    /// What it's drawn from, if it's a symbolic.
-    pub symbolic: Option<super::symbolic::SymbolicReport>,
+    /// The symbolics it holds, in the order they were added: what each is
+    /// drawn from, and where it is.
+    pub symbolics: Vec<SymbolicReport>,
 }
 
 /// A committed canvas, as `Committed` has it, and where it ended up: each
@@ -204,7 +244,7 @@ pub struct CommitReport {
     #[serde(rename = "box")]
     pub bounds: Option<[f32; 4]>,
     pub local: Option<[[f32; 2]; 4]>,
-    pub symbolic: Option<super::symbolic::SymbolicReport>,
+    pub symbolics: Vec<SymbolicReport>,
     pub shown: Vec<Shown>,
 }
 
@@ -224,92 +264,132 @@ pub struct EditorState {
 
 pub(super) type SharedEditor = Rc<RefCell<EditorState>>;
 
-/// `canvas.commit_to_editor(name)`.
-pub(super) fn register(engine: &mut Engine) -> SharedEditor {
-    let editor: SharedEditor = Rc::default();
-    let state = editor.clone();
+/// `canvas.commit_to_editor(name)`, which draws the symbolics the canvas
+/// holds as the edit has them, of `library`'s sets, warning with `warn` of
+/// edits it can't apply.
+pub(super) fn register(engine: &mut Engine, editor: SharedEditor, library: Rc<SymbolSetLibrary>, warn: impl Fn(String) + 'static) {
     engine.register_fn("commit_to_editor", move |ctx: NativeCallContext, canvas: &mut Canvas, name: Dynamic| -> RhaiResult<Canvas> {
-        let name = check_name("commit_to_editor", name)?;
-        commit_as(&ctx, &state, canvas, name, None)
+        const CALLER: &str = "commit_to_editor";
+        let name = check_name(CALLER, name)?;
+        // The editor's let go of while the symbolics are drawn again: a
+        // symbol set's script may run.
+        let edit = {
+            let state = editor.borrow();
+            if state.committed.iter().any(|c| c.name == name) {
+                return Err(format!("{}: '{}' is committed already; give each canvas a name of its own", CALLER, name).into());
+            }
+            state.saved.canvases.get(&name).cloned().unwrap_or_default()
+        };
+        let mut symbolics = symbolic::apply_edits(ctx.engine(), &library, canvas, &name, &edit.symbolics, &warn)?;
+        let mut committed = None;
+        let canvas = canvas.update(|data| committed = Some(commit(data, &name, &edit)));
+        let (bounds, local, corners) = committed.expect("the canvas was committed");
+        for (report, corners) in symbolics.iter_mut().zip(corners) {
+            report.corners = corners;
+        }
+        editor.borrow_mut().committed.push(Committed { name, line: ctx.call_position().line(), bounds, local, symbolics });
+        Ok(canvas)
     });
-    editor
-}
-
-/// Commit `canvas` as `name`: the saved edit applied, and noted for the
-/// editor, with what it's drawn from if it's a symbolic's.
-pub(super) fn commit_as(ctx: &NativeCallContext, editor: &SharedEditor, canvas: &mut Canvas, name: String, symbolic: Option<super::symbolic::SymbolicReport>) -> RhaiResult<Canvas> {
-    const CALLER: &str = "commit_to_editor";
-    let mut state = editor.borrow_mut();
-    if state.committed.iter().any(|c| c.name == name) {
-        return Err(format!("{}: '{}' is committed already; give each canvas a name of its own", CALLER, name).into());
-    }
-    let edit = state.saved.canvases.get(&name).cloned().unwrap_or_default();
-    let mut committed = None;
-    let canvas = canvas.update(|data| committed = Some(commit(data, &name, &edit)));
-    let (bounds, local) = committed.expect("the canvas was committed");
-    state.committed.push(Committed { name, line: ctx.call_position().line(), bounds, local, symbolic });
-    Ok(canvas)
 }
 
 fn pair(p: PVec) -> [f32; 2] {
     [p.x, p.y]
 }
 
-/// Commit `data` as `name`, applying `edit`: its box when committed, and
-/// the corners the edit took it to.
-fn commit(data: &mut CanvasData, name: &str, edit: &CanvasEdit) -> (Option<[f32; 4]>, Option<[[f32; 2]; 4]>) {
+/// An edit as it was applied to a canvas committed as `name`, whose box
+/// was `bounds` then (none if it was empty).
+pub(super) struct Applied {
+    name: String,
+    edit: CanvasEdit,
+    bounds: Option<Aabb>,
+}
+
+impl Applied {
+    /// Where the edit takes a point of the canvas: its corners pinned,
+    /// then moved, turned, scaled and skewed.
+    fn place(&self) -> impl Fn(PVec) -> PVec + '_ {
+        let affine = self.bounds.map(|b| self.edit.affine(b.center())).filter(|affine| !affine.is_identity());
+        let warp = self.bounds.filter(|_| self.edit.warps());
+        move |p| {
+            let p = warp.map_or(p, |b| self.edit.warp_point(b.mins, b.maxs, p));
+            affine.map_or(p, |affine| affine.apply(p))
+        }
+    }
+
+    /// The edit made to `strokes`: placed, re-inked, hidden, and marked
+    /// as the committed canvas's.
+    pub(super) fn apply(&self, strokes: &mut [Stroke]) {
+        let Applied { name, edit, bounds } = self;
+        if let Some(bounds) = bounds {
+            if edit.warps() {
+                for stroke in strokes.iter_mut() {
+                    stroke.path.map_points(|p| edit.warp_point(bounds.mins, bounds.maxs, p));
+                }
+            }
+            let affine = edit.affine(bounds.center());
+            if !affine.is_identity() {
+                for stroke in strokes.iter_mut() {
+                    stroke.path.map_points(|p| affine.apply(p));
+                    stroke.style.move_paint(&affine);
+                }
+            }
+        }
+        if let Some(ink) = &edit.ink {
+            for stroke in strokes.iter_mut() {
+                if let Some(color) = &ink.color {
+                    stroke.style.recolor(color);
+                }
+                if let Some(opacity) = ink.opacity {
+                    stroke.style.fade(opacity);
+                }
+                if let Some(weight) = ink.weight {
+                    stroke.style.weigh(weight as f64);
+                }
+            }
+        }
+        for stroke in strokes.iter_mut() {
+            stroke.hidden |= edit.hidden;
+            stroke.commits = Some(match &stroke.commits {
+                Some(inner) => Arc::from(format!("{} {}", inner, name)),
+                None => Arc::from(name.as_str()),
+            });
+        }
+    }
+}
+
+/// A box's corners: top left, top right, bottom right, bottom left.
+fn corners_of(b: &Aabb) -> [PVec; 4] {
+    [b.mins, PVec::new(b.maxs.x, b.mins.y), b.maxs, PVec::new(b.mins.x, b.maxs.y)]
+}
+
+/// What a commit gives: the canvas's box when committed, the corners the
+/// edit took it to, and, for each symbolic it holds, the corners of its box
+/// (what its strokes cover) as the edit left them.
+type Commit = (Option<[f32; 4]>, Option<[[f32; 2]; 4]>, Vec<Option<[[f32; 2]; 4]>>);
+
+/// Commit `data` as `name`, applying `edit`.
+fn commit(data: &mut CanvasData, name: &str, edit: &CanvasEdit) -> Commit {
     let bounds = JournalCanvas::from(&*data).bounds();
     let has_box = bounds.mins.x <= bounds.maxs.x && bounds.mins.y <= bounds.maxs.y;
-    let (min, max) = (bounds.mins, bounds.maxs);
-    let corners = [min, PVec::new(max.x, min.y), max, PVec::new(min.x, max.y)];
-    let affine = edit.affine(bounds.center());
-    if has_box {
-        if edit.warps() {
-            let warp = |p: PVec| edit.warp_point(min, max, p);
-            for stroke in &mut data.strokes {
-                stroke.path.map_points(warp);
-            }
-            for mark in &mut data.commits {
-                mark.corners = mark.corners.map(warp);
-            }
-        }
-        if !affine.is_identity() {
-            for stroke in &mut data.strokes {
-                stroke.path.map_points(|p| affine.apply(p));
-                stroke.style.move_paint(&affine);
-            }
-            for mark in &mut data.commits {
-                mark.corners = mark.corners.map(|p| affine.apply(p));
-            }
-        }
+    let applied = Rc::new(Applied { name: name.to_string(), edit: edit.clone(), bounds: has_box.then_some(bounds) });
+    let place = applied.place();
+    let symbolics = data.symbolics.iter()
+        .map(|held| stroke_bounds(&data.strokes[held.strokes()]).map(|(_, covered)| corners_of(&covered).map(|p| pair(place(p)))))
+        .collect();
+    for mark in &mut data.commits {
+        mark.corners = mark.corners.map(&place);
     }
-    if let Some(ink) = &edit.ink {
-        for stroke in &mut data.strokes {
-            if let Some(color) = &ink.color {
-                stroke.style.recolor(color);
-            }
-            if let Some(opacity) = ink.opacity {
-                stroke.style.fade(opacity);
-            }
-            if let Some(weight) = ink.weight {
-                stroke.style.weigh(weight as f64);
-            }
-        }
-    }
-    for stroke in &mut data.strokes {
-        stroke.hidden |= edit.hidden;
-        stroke.commits = Some(match &stroke.commits {
-            Some(inner) => Arc::from(format!("{} {}", inner, name)),
-            None => Arc::from(name),
-        });
-    }
+    applied.apply(&mut data.strokes);
+    // The symbolics it holds are edited again when they're drawn again.
+    data.remember(Move::Edit(applied.clone()));
     if !has_box {
-        return (None, None);
+        return (None, None, symbolics);
     }
-    let edited = corners.map(|p| affine.apply(p));
+    let affine = edit.affine(bounds.center());
+    let edited = corners_of(&bounds).map(|p| affine.apply(p));
     data.commits.push(CommitMark { name: name.to_string(), corners: edited });
     let extents = bounds.extents();
-    (Some([min.x, min.y, extents.x, extents.y]), Some(edited.map(pair)))
+    (Some([bounds.mins.x, bounds.mins.y, extents.x, extents.y]), Some(edited.map(pair)), symbolics)
 }
 
 /// Where each canvas committed in a run that made `entry` ended up.
@@ -320,7 +400,7 @@ pub fn report(entry: &Entry, committed: &[Committed]) -> Vec<CommitReport> {
                 .filter(|mark| mark.name == c.name)
                 .map(move |mark| Shown { page, corners: mark.corners.map(pair) })
         }).collect();
-        CommitReport { name: c.name.clone(), line: c.line, bounds: c.bounds, local: c.local, symbolic: c.symbolic.clone(), shown }
+        CommitReport { name: c.name.clone(), line: c.line, bounds: c.bounds, local: c.local, symbolics: c.symbolics.clone(), shown }
     }).collect()
 }
 

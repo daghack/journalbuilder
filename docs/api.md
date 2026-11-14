@@ -191,7 +191,7 @@ Adds a placed glyph's strokes, or each of an array of glyphs', drawn in the styl
 
 ### `canvas.add(other), canvas.add(canvases)`
 
-Adds every stroke on another canvas, or each of an array of canvases (as fill_with_text gives), in its own style.
+Adds every stroke on another canvas, or each of an array of canvases (as fill_with_text gives), in its own style. The symbolics the other canvas holds (see Symbol Sets: a symbolic itself, and those added to a canvas) come with their strokes, so this canvas holds them too, after its own, and commit_to_editor offers each to the visual editor.
 
 | argument | what it does | takes |
 |---|---|---|
@@ -291,7 +291,9 @@ An independent copy of the canvas.
 
 ### `canvas.commit_to_editor(name)`
 
-Hands the canvas to the web editor's visual editor (the Ctrl/⌘+P preview), to place by hand there: moved, turned, scaled, stretched, flipped, skewed, its corners pinned, hidden, locked, aligned and re-inked. The edit is kept in the journal's edits/ENTRY.json (see Journals and Their Files) and applied to the canvas here, in place, as the call runs, before anything later in the script, so what the script does with the canvas afterward (translate_by, add, page.add) goes on top of it. Strokes added to the canvas after the call aren't edited. An edit draws nothing from the random generator, so the rest of the entry draws as it would without it; without an edit, the call changes nothing. Returns the canvas. A symbolic (see Symbol Sets) is committed the same way, and the edit's symbols and symbol_set keys draw it again before anything else is applied; the editor lists it as one, and offers its symbols and set.
+Hands the canvas to the web editor's visual editor (the Ctrl/⌘+P preview), to place by hand there: moved, turned, scaled, stretched, flipped, skewed, its corners pinned, hidden, locked, aligned and re-inked. The edit is kept in the journal's edits/ENTRY.json (see Journals and Their Files) and applied to the canvas here, in place, as the call runs, before anything later in the script, so what the script does with the canvas afterward (translate_by, add, page.add) goes on top of it. Strokes added to the canvas after the call aren't edited. An edit draws nothing from the random generator, so the rest of the entry draws as it would without it; without an edit, the call changes nothing. Returns the canvas.
+
+A canvas keeps track of the symbolics it holds (see Symbol Sets): a symbolic holds itself, and a canvas those added to it, alone, in arrays or on other canvases, in the order they were added. Each has an id, made from the call that drew it (which call, where, and its settings, not its symbols), so it's the same every run and an edit stays its own whatever else the script draws before or after it; those of a canvas drawn by calls alike in all that (the same plate added twice) are numbered among themselves, ID, ID.2 and on. The editor lists them for a committed canvas (click one on the page to pick it) and offers each one's symbols and set; the edit's symbolics key draws those it changes again, before anything else is applied, each where it was: what's been done to it since it was drawn (moves, size_to, earlier edits), on its own or with a canvas it was added to, is done again. An edit for a symbolic the canvas doesn't hold is left out, with a warning; the editor drops it.
 
 Gradients laid across the page (from and to, center and radius) and image paint turn, scale and move with an edit's strokes, as the brush's texture does; the corners' pinning leaves them where they are. A hidden canvas's strokes still count toward its bounds() and anything laid out round it, but aren't drawn. In the editor, a canvas the script stops committing loses its edit: the next run without it takes it out of the file.
 
@@ -2366,7 +2368,7 @@ page.add(write_line(moons.text([1, 2, 3]), vec2(10, 110), #{ type: #{ glyph_scal
 
 ### `symbolic.symbols, symbolic.symbol_set`
 
-A symbolic is what the text calls give for symbol text: a canvas in every respect (add, move, bounds, page.add, avoidance trees, commit_to_editor), which remembers the symbols and set it was drawn from. Both are properties, which can be read and set: setting one draws it again, the same call from the generator as it stood, the moves made since (translate_by, scale_by, rotate_around) made again, and size_to fitting what's drawn again to the box it was sized to; strokes added to it afterwards stay as they are, and the rest of the script draws as it would without. symbol_set can be set to a symbol set or its name; the symbols must be below the set's base. The visual editor changes them through commit_to_editor: edits/ENTRY.json's symbols and symbol_set keys are applied at the call.
+A symbolic is what the text calls give for symbol text: a canvas in every respect (add, move, bounds, page.add, avoidance trees, commit_to_editor), which remembers the symbols and set it was drawn from. Both are properties, which can be read and set: setting one draws it again, the same call from the generator as it stood, the moves made since (translate_by, scale_by, rotate_around) made again, and size_to fitting what's drawn again to the box it was sized to; strokes added to it afterwards stay as they are, and the rest of the script draws as it would without. symbol_set can be set to a symbol set or its name; the symbols must be below the set's base. A canvas a symbolic is added to holds it from then on, as its own copy: the visual editor changes the symbols and set of every symbolic a committed canvas holds, through commit_to_editor, which applies edits/ENTRY.json's symbolics key at the call.
 
 | argument | what it does | takes |
 |---|---|---|
@@ -3161,8 +3163,10 @@ edits/ENTRY.json: the visual editor's edits to entry ENTRY's committed canvases,
 | `canvases.NAME.warp` | none | Its box's corners pinned: how far each is moved (top left, top right, bottom right, bottom left), the points between moved in between. | four [x, y] pairs. |
 | `canvases.NAME.hidden` | false | Leaves its strokes undrawn, though in its bounds. | true or false. |
 | `canvases.NAME.locked` | false | Keeps the editor from picking it on the page. Changes nothing drawn. | true or false. |
-| `canvases.NAME.symbols` | none | For a symbolic canvas: the symbols it's drawn as, in place of the script's. | an array of whole numbers, each below the symbol set's base. |
-| `canvases.NAME.symbol_set` | none | For a symbolic canvas: the symbol set its symbols are of, in place of the script's. | a symbol set's name. |
+| `canvases.NAME.symbolics` | none | The symbolics the canvas holds that are drawn as other than the script made them, each under its id (see canvas.commit_to_editor), as the web editor writes it. Older files have them under their place among them, from "0", which is still read; the web editor writes those by id. | an object of ids to objects of the two keys below. |
+| `canvases.NAME.symbolics.ID.symbols` | none | The symbols symbolic ID is drawn as, in place of the script's. | an array of whole numbers, each below the symbol set's base. |
+| `canvases.NAME.symbolics.ID.symbol_set` | none | The symbol set its symbols are of, in place of the script's. | a symbol set's name. |
+| `canvases.NAME.symbols`, `canvases.NAME.symbol_set` | none | As older files have a symbolic canvas's own: read as its first symbolic's; the web editor writes them under symbolics. | as above. |
 | `canvases.NAME.ink` | none | Its strokes re-inked: color, one colour for all of them in place of their own; opacity, their alpha times this; weight, their brush sizes times this. | an object of color (a colour), opacity (0 to 1) and weight (a positive number), each optional. |
 
 glyphsets/NAME.json: a glyphset, a JSON object. Glyph units span about -1 to 1, y down; a glyph scale is 2 of them.
