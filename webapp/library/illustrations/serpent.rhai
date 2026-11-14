@@ -10,7 +10,8 @@
 // One canvas, width across at most, its corner at the first snake's.
 // snake_style, a TextStyle, a style source's, draws the snakes; the
 // symbols are symbol_set's, a SymbolSet, glyph_size across (the set's own
-// size if that's 0), or smaller if width hasn't room for a snake that long.
+// size if that's 0), or smaller if width hasn't room for a snake that long,
+// in the set's own styles, or with restyle_set in glyph_style's pen.
 // Unwired, a near-black ink pen, and the fine letters set in red. With editor,
 // each symbol is committed to the visual editor as EDITOR_ROW_N.
 
@@ -18,13 +19,13 @@ import "lib/symbol_rings" as rings;
 
 fn options() {
 	#{
-		base: 27, width: 1000.0, per_snake: 0, winding: 1.3, seed: 0, row_gap: 30.0, glyph_size: 30.0, editor: "",
+		base: 27, width: 1000.0, per_snake: 0, winding: 1.3, seed: 0, row_gap: 30.0, glyph_size: 30.0, editor: "", restyle_set: false,
 		snake_ink: "#2b1d12", glyph_ink: "#9b2318",
 	}
 }
 
 fn inputs(o) {
-	#{ message: `Base${o.base}Symbol`, snake_style: "TextStyle", symbol_set: "SymbolSet" }
+	#{ message: `Base${o.base}Symbol`, snake_style: "TextStyle", symbol_set: "SymbolSet", glyph_style: "TextStyle" }
 }
 
 fn fallbacks(o) {
@@ -32,6 +33,7 @@ fn fallbacks(o) {
 	#{
 		snake_style: #{ style: new_style(new_brush_style(o.snake_ink, "Ink Pen", 1.6, #{ min_pressure: 0.4, max_pressure: 0.7, pressure_profile: "constant" }), hand) },
 		symbol_set: symbol_set("fine_letters", #{ color: o.glyph_ink }),
+		glyph_style: #{ style: new_style(new_brush_style(o.glyph_ink, "Ink Pen", 2.2, #{ min_pressure: 0.4, max_pressure: 0.8 }), hand) },
 	}
 }
 
@@ -86,7 +88,9 @@ fn written(o, i, set, text, seed, row) {
 	// A place for each symbol, and for the bare tail's.
 	let places = snake.spine.points_along(((count + 1) / written_part()).ceiling().to_int() + 1);
 	for (s, k) in text {
-		let mark = write_at(set.text([s]), places[k + 1].position, #{ type: #{ glyph_scale: size }, turn: places[k + 1].angle });
+		let settings = #{ type: #{ glyph_scale: size }, turn: places[k + 1].angle };
+		if o.restyle_set { settings.style = i.glyph_style.style; }
+		let mark = write_at(set.text([s]), places[k + 1].position, settings);
 		if o.editor != "" { mark = mark.commit_to_editor(`${o.editor}_${row}_${k}`); }
 		c.add(mark);
 	}

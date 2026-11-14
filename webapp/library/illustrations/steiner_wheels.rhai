@@ -22,20 +22,21 @@
 // The whole symbol set can be passed in too: symbol_set, a SymbolSet
 // whose symbol p (the first base of them) is written inside each wheel at
 // place p, mark_size across (a tenth of the wheel if that's 0), so the
-// points a wheel joins are read off it as symbols. Unwired, the wheels
-// are unmarked.
+// points a wheel joins are read off it as symbols, in the set's own
+// styles, or with restyle_set in glyph_style's pen (unwired, an ink pen in
+// ring_ink). Unwired, the wheels are unmarked.
 
 import "lib/digit_rows" as rows;
 
 fn options() {
 	#{
-		base: 13, points: 3, per_row: 9, size: 100.0, gap: 24.0, row_gap: 24.0, label_size: 28.0, mark_size: 0.0,
+		base: 13, points: 3, per_row: 9, size: 100.0, gap: 24.0, row_gap: 24.0, label_size: 28.0, mark_size: 0.0, restyle_set: false,
 		ring_ink: "#2b1d12", line_ink: "#9b2318",
 	}
 }
 
 fn inputs(o) {
-	#{ points: `Base${o.base}Symbol`, labels: "String", ring_style: "TextStyle", line_style: "TextStyle", label_style: "TextStyle", symbol_set: "SymbolSet" }
+	#{ points: `Base${o.base}Symbol`, labels: "String", ring_style: "TextStyle", line_style: "TextStyle", label_style: "TextStyle", symbol_set: "SymbolSet", glyph_style: "TextStyle" }
 }
 
 fn fallbacks(o) {
@@ -46,6 +47,7 @@ fn fallbacks(o) {
 		ring_style: #{ style: new_style(new_brush_style(o.ring_ink, "Ink Pen", 1.0, steady), hand) },
 		line_style: #{ style: new_style(new_brush_style(o.line_ink, "Ink Pen", 1.8, steady), hand) },
 		label_style: #{ style: new_style(new_brush_style(o.ring_ink, "Ink Pen", 1.6, steady), hand), type: new_type_style(glyphset("plain"), o.label_size) },
+		glyph_style: #{ style: new_style(new_brush_style(o.ring_ink, "Ink Pen", 1.6, steady), hand) },
 	}
 }
 
@@ -68,6 +70,8 @@ fn render(o, i) {
 	let set = i.symbol_set;
 	if set != () && set.base < o.base { throw `steiner_wheels: the symbol set '${set.name}' has ${set.base} symbols, fewer than the base, ${o.base}`; }
 	let mark = if o.mark_size > 0.0 { o.mark_size } else { o.size * 0.1 };
+	let marked = #{ type: #{ glyph_scale: mark } };
+	if o.restyle_set { marked.style = i.glyph_style.style; }
 	for (at, k) in rows::places(i.points.len() / o.points, o.size, o.size, layout) {
 		rings.append(new_circle(at, radius));
 		for p in 0..o.base {
@@ -76,7 +80,7 @@ fn render(o, i) {
 		}
 		if set != () {
 			for p in 0..o.base {
-				c.add(write_at(set.text([p]), at + toward(p, o.base) * radius * 0.7, #{ type: #{ glyph_scale: mark } }));
+				c.add(write_at(set.text([p]), at + toward(p, o.base) * radius * 0.7, marked));
 			}
 		}
 		// Its points, each once, in the order given.
