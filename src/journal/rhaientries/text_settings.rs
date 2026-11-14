@@ -467,6 +467,9 @@ pub(super) struct TextSettings {
     /// The named spans marked-up text's spans name, as given: read when
     /// the text is `markdown(...)`, ignored when it's a string.
     pub(super) spans: Option<Dynamic>,
+    /// The style the call gave, as given, when it writes a scripted symbol
+    /// set's symbols: laid over each stroke the set's script draws.
+    pub(super) symbol_style: Option<Dynamic>,
     pub(super) options: Map,
 }
 
@@ -496,17 +499,21 @@ impl TextSettings {
             None => ParagraphStyle::default(),
             Some(p) => ParagraphStyle::given(&format!("{} 'paragraph'", caller), &p, &ParagraphStyle::default())?,
         };
-        Ok(TextSettings { style, type_, paragraph, spans, options: settings })
+        Ok(TextSettings { style, type_, paragraph, spans, symbol_style: None, options: settings })
     }
     /// As `read`, for a call writing `msg`: where that's symbols of a symbol
     /// set, the set's own style, type and paragraph are what the settings
-    /// are laid over (see `symbol_settings`).
+    /// are laid over (see `symbol_settings`), and where the set is scripted
+    /// the style given is kept to lay over what its script draws.
     pub(super) fn read_for(caller: &str, msg: &super::markdown::FlowText, settings: Map, own: &[&str]) -> RhaiResult<TextSettings> {
-        let settings = match msg {
-            super::markdown::FlowText::Symbols(symbols) => super::symbol_sets::symbol_settings(caller, &symbols.set, settings)?,
-            _ => settings,
+        let (settings, symbol_style) = match msg {
+            super::markdown::FlowText::Symbols(symbols) => {
+                let given = settings.get("style").filter(|_| symbols.set.is_scripted()).cloned();
+                (super::symbol_sets::symbol_settings(caller, &symbols.set, settings)?, given)
+            }
+            _ => (settings, None),
         };
-        TextSettings::read(caller, settings, own)
+        Ok(TextSettings { symbol_style, ..TextSettings::read(caller, settings, own)? })
     }
     /// How far placed glyphs stray, as the style's hand sets them.
     pub(super) fn jitter(&self) -> Jitter {

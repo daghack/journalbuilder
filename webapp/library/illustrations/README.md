@@ -125,6 +125,13 @@ glyph_scale: size }, turn })`, which gives a symbolic. With the illustration's
 (`mark.commit_to_editor(name)`), so the editor can change its symbol or set;
 names are the entry's own, so two uses in one entry need two editors.
 
+A set draws in its own styles. Every illustration that draws a set also
+takes a `glyph_style` input (a TextStyle; where the set stands in for
+glyphs, the style they'd be in) and a `restyle_set` option, false by
+default, that draws the set's marks in its pen instead: `style` in
+write_at's settings, which a simple set's glyphs take and a scripted set's
+every stroke takes too.
+
 ## In the web editor
 
 The lock editor's palette lists every illustration. Wire a chain's value to

@@ -635,6 +635,31 @@ mod tests {
     }
 
     #[test]
+    fn a_style_given_draws_a_scripted_sets_marks() {
+        use crate::journal::canvas::{parse_color, StrokeColor};
+        let mut e = engine(&[], &[("marks", STARS)]);
+        let entry = build(&mut e, r##"
+            let m = symbol_set("marks");
+            let red = new_style(new_brush_style("#ff0000", "Ink Pen", 3.0), new_handwriting_style());
+            let page = new_page();
+            page.add(write_line(m.text([0, 1]), vec2(0, 0), #{}));
+            page.add(write_line(m.text([0, 1]), vec2(0, 100), #{ style: red }));
+            page.add(write_at(m.text([0, 1]), vec2(0, 200), #{ style: #{ color: "#0000ff" } }));
+            journal_entry.add(page);
+        "##).unwrap();
+        let canvases = &entry.pages[0].canvases;
+        assert_eq!(canvases.len(), 3, "each symbolic added to the page itself");
+        // Its own style, a whole one in its place, a map's settings over it.
+        for (canvas, color, width) in [(&canvases[0], "black", 1.2), (&canvases[1], "#ff0000", 3.0), (&canvases[2], "#0000ff", 1.2)] {
+            assert_eq!(canvas.strokes.len(), 2, "a circle and a cross");
+            for stroke in &canvas.strokes {
+                assert!(matches!(stroke.style.color(), StrokeColor::Solid(c) if parse_color(c).unwrap() == parse_color(color).unwrap()), "in {}", color);
+                assert!((stroke.style.brush_size() - width).abs() < 1e-4, "{} wide, got {}", width, stroke.style.brush_size());
+            }
+        }
+    }
+
+    #[test]
     fn the_editor_lists_and_previews_sets() {
         let mut e = engine(&[("priests", PRIESTS)], &[("marks", STARS)]);
         let simple = e.describe_symbol_set("priests").unwrap();

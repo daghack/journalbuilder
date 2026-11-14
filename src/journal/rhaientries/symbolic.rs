@@ -256,9 +256,10 @@ pub(super) fn register(engine: &mut Engine, editor: SharedEditor, library: Rc<Sy
         let other = s.borrow().canvas.clone();
         ctx.call_native_fn::<Dynamic>("add", (c.clone(), other))
     });
-    engine.register_fn("add", |ctx: NativeCallContext, page: &mut super::Page, s: Symbolic| -> RhaiResult<Dynamic> {
+    // A page is a value: add to it, not to a copy.
+    engine.register_fn("add", |page: &mut super::Page, s: Symbolic| -> RhaiResult<super::Page> {
         let other = s.borrow().canvas.clone();
-        ctx.call_native_fn::<Dynamic>("add", (page.clone(), other))
+        page.add_canvas(other)
     });
     engine.register_fn("free_regions_in_canvas", |ctx: NativeCallContext, s: Symbolic| -> RhaiResult<Dynamic> {
         let other = s.borrow().canvas.clone();
