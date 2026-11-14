@@ -30,6 +30,7 @@ use std::f64::consts::{FRAC_PI_2, PI};
 use parry2d::math::Vec2;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
+use rayon::prelude::*;
 
 use super::geom::V;
 use super::starchart::segments_meet;
@@ -127,20 +128,17 @@ pub fn lay_out_graph(sizes: &[(f64, f64)], edges: &[(usize, usize)], labels: &[O
     if sizes.is_empty() {
         return Ok(GraphLayout { points: Vec::new(), size: (graph.width, graph.height), edges: Vec::new(), names: Vec::new() });
     }
-    let mut best: Option<(f64, Vec<V>, Vec<usize>)> = None;
-    let mut starts = Vec::new();
-    for start in 0..STARTS {
-        let mut rng = StdRng::seed_from_u64(s.seed.wrapping_mul(STARTS).wrapping_add(start));
+    // Each start has its own source of chance, so they're tried at once,
+    // on different cores; the best is kept, the earlier of equals.
+    let tried: Vec<(f64, Vec<V>, Vec<usize>)> = (0..STARTS as usize).into_par_iter().map(|start| {
+        let mut rng = StdRng::seed_from_u64(s.seed.wrapping_mul(STARTS).wrapping_add(start as u64));
         let mut pos = graph.start(&mut rng);
         graph.relax(&mut pos, s.iterations, &mut rng);
         let sides = graph.tidy(&mut pos);
-        let score = graph.score(&pos, &sides);
-        starts.push(pos.clone());
-        if best.as_ref().is_none_or(|(b, _, _)| score < *b) {
-            best = Some((score, pos, sides));
-        }
-    }
-    let (_, mut pos, mut sides) = best.expect("a start was tried");
+        (graph.score(&pos, &sides), pos, sides)
+    }).collect();
+    let starts: Vec<Vec<V>> = tried.iter().map(|(_, pos, _)| pos.clone()).collect();
+    let (_, mut pos, mut sides) = tried.into_iter().reduce(|best, next| if next.0 < best.0 { next } else { best }).expect("a start was tried");
     if s.generations > 0 {
         // The starts evolved, the best tidied, kept if it's better still
         // than the best start.
@@ -206,6 +204,11 @@ fn check(sizes: &[(f64, f64)], edges: &[(usize, usize)], labels: &[Option<(f64, 
     Ok(())
 }
 
+/// Further apart than this along x or y, two things are clear of each
+/// other without working out how they overlap: far more than those sums
+/// are ever out by.
+const HAIR: f64 = 1e-6;
+
 /// How much of a line's free part runs over `r`, grown by `grow`.
 fn under(line: &Line, r: &Rect, grow: f64) -> f64 {
     r.across(line.start, line.u, grow).map_or(0.0, |(a, b)| (b.min(line.free.1) - a.max(line.free.0)).max(0.0))
@@ -266,10 +269,32 @@ impl Rect {
         let (d, n) = (p - self.c, self.u.perp());
         slab(V::new(d.dot(self.u), d.dot(n)), V::new(u.dot(self.u), u.dot(n)), self.half + V::new(grow, grow))
     }
+    /// Whether its sides run along x and y.
+    fn is_upright(&self) -> bool {
+        self.u.x == 1.0 && self.u.y == 0.0
+    }
+    /// Half the width and height of the upright box it fits in.
+    fn spans(&self) -> V {
+        if self.is_upright() { self.half } else { V::new(self.reach(V::new(1.0, 0.0)), self.reach(V::new(0.0, 1.0))) }
+    }
     /// How far `b` would move, and which way, to come `margin` clear of
     /// this: `None` if it's that far off already.
     fn overlap(&self, b: &Rect, margin: f64) -> Option<(V, f64)> {
         let d = b.c - self.c;
+        if self.is_upright() && b.is_upright() {
+            // Both upright, as boxes and names are: only x and y to look
+            // along, where the sums below come to just these.
+            let x = self.half.x + b.half.x + margin - d.x.abs();
+            if x <= 0.0 {
+                return None;
+            }
+            let y = self.half.y + b.half.y + margin - d.y.abs();
+            if y <= 0.0 {
+                return None;
+            }
+            let (k, along, depth) = if y < x { (self.u.perp(), d.y, y) } else { (self.u, d.x, x) };
+            return Some((if along < 0.0 { k * -1.0 } else { k }, depth));
+        }
         let mut least: Option<(V, f64)> = None;
         for k in [self.u, self.u.perp(), b.u, b.u.perp()] {
             let along = d.dot(k);
@@ -336,9 +361,36 @@ struct Line {
     start: V,
     u: V,
     free: (f64, f64),
+    /// The ends of its free part, and the corners of the upright box
+    /// they fit in.
+    from: V,
+    to: V,
+    lo: V,
+    hi: V,
     /// Its label's box, if it has one, and how far along the line the
-    /// label's middle is.
+    /// label's middle is; and half the width and height of the upright
+    /// box the label fits in.
     label: Option<(Rect, f64)>,
+    label_spans: V,
+}
+
+impl Line {
+    fn new(edge: usize, start: V, u: V, free: (f64, f64)) -> Line {
+        let (from, to) = (start + u * free.0, start + u * free.1);
+        let (lo, hi) = (V::new(from.x.min(to.x), from.y.min(to.y)), V::new(from.x.max(to.x), from.y.max(to.y)));
+        Line { edge, start, u, free, from, to, lo, hi, label: None, label_spans: V::default() }
+    }
+
+    fn set_label(&mut self, label: Option<(Rect, f64)>) {
+        self.label_spans = label.map_or(V::default(), |(r, _)| r.spans());
+        self.label = label;
+    }
+
+    /// Whether its free part is clear, by a hair or more, of the upright
+    /// box reaching `half` from `c`: if so, it's not over anything in it.
+    fn clear_of(&self, c: V, half: V) -> bool {
+        self.lo.y > c.y + half.y + HAIR || self.hi.y < c.y - half.y - HAIR || self.lo.x > c.x + half.x + HAIR || self.hi.x < c.x - half.x - HAIR
+    }
 }
 
 struct Graph {
@@ -487,8 +539,7 @@ impl Graph {
             // are offset the same way round.
             let pa = pos[pair.a];
             let u = unit(pos[pair.b] - pa);
-            let (offsets, one_after_another) = self.spread(p, u);
-            let mut made: Vec<Line> = pair.edges.iter().zip(&offsets).map(|(&e, &offset)| {
+            let line = |e: usize, offset: f64| {
                 let (a, b) = self.edges[e];
                 let (from, to) = (pos[a] + u.perp() * offset, pos[b] + u.perp() * offset);
                 let eu = unit(to - from);
@@ -497,8 +548,19 @@ impl Graph {
                 let grown = |node: usize| self.half[node] + V::new(self.gap, self.gap);
                 let leave = crossing(from, eu, pos[a], grown(a), false).unwrap_or(0.0).max(0.0);
                 let enter = crossing(from, eu, pos[b], grown(b), true).unwrap_or(length).min(length);
-                Line { edge: e, start: from, u: eu, free: (leave, enter), label: None }
-            }).collect();
+                Line::new(e, from, eu, (leave, enter))
+            };
+            if let [e] = pair.edges[..] {
+                // One edge, as most pairs have: between the middles, its
+                // label halfway.
+                let mut line = line(e, 0.0);
+                let middle = (line.free.0 + line.free.1) / 2.0;
+                line.set_label(self.labels[e].map(|h| (self.label_box(line.start, line.u, middle, h, true), middle)));
+                lines.push(line);
+                continue;
+            }
+            let (offsets, one_after_another) = self.spread(p, u);
+            let mut made: Vec<Line> = pair.edges.iter().zip(&offsets).map(|(&e, &offset)| line(e, offset)).collect();
             // Where each label's middle is, along its line: halfway, or
             // one after another down the middle of the stretch every line
             // of the pair is free on.
@@ -534,11 +596,11 @@ impl Graph {
             for ((line, middle), &offset) in made.iter_mut().zip(middles).zip(&offsets) {
                 let base = if one_after_another && self.place == LabelPlace::Beside { line.start + u.perp() * (outer - offset) } else { line.start };
                 let above = !two || (offset >= 0.0) == up_is_n;
-                line.label = self.labels[line.edge].map(|h| (self.label_box(base, line.u, middle, h, above), middle));
+                line.set_label(self.labels[line.edge].map(|h| (self.label_box(base, line.u, middle, h, above), middle)));
             }
             lines.append(&mut made);
         }
-        lines.sort_by_key(|l| l.edge);
+        lines.sort_unstable_by_key(|l| l.edge);
         lines
     }
 
@@ -607,8 +669,15 @@ impl Graph {
     /// Node `i`'s name's box, if it has one, on `side` of its box about
     /// `c`, half a gap from it.
     fn name_box(&self, i: usize, c: V, side: usize) -> Option<Rect> {
-        let (h, s, (x, y), g) = (self.names[i]?, self.half[i], SIDES[side], self.gap / 2.0);
-        Some(Rect::upright(c + V::new(x * (s.x + g + h.x), y * (s.y + g + h.y)), h))
+        let h = self.names[i]?;
+        Some(Rect::upright(self.name_place(i, c, side, h), h))
+    }
+
+    /// The middle of node `i`'s name, reaching `h` from it, on `side` of
+    /// its box about `c`.
+    fn name_place(&self, i: usize, c: V, side: usize, h: V) -> V {
+        let (s, (x, y), g) = (self.half[i], SIDES[side], self.gap / 2.0);
+        c + V::new(x * (s.x + g + h.x), y * (s.y + g + h.y))
     }
 
     fn name_boxes(&self, pos: &[V], sides: &[usize]) -> Vec<Option<Rect>> {
@@ -623,35 +692,25 @@ impl Graph {
         let n = pos.len();
         let grow = self.gap / 2.0;
         let mut sides = were.map_or_else(|| vec![0; n], <[usize]>::to_vec);
-        let boxes: Vec<Rect> = if were.is_some() { pos.iter().zip(&self.half).map(|(&c, &h)| Rect::upright(c, h)).collect() } else { Vec::new() };
-        for i in (0..n).filter(|&i| self.names[i].is_some()) {
-            let lines: Vec<&Line> = match were {
-                None => self.around[i].iter().map(|&e| &lines[e]).collect(),
-                Some(_) => lines.iter().collect(),
-            };
-            let mut best = (f64::MAX, 0);
-            for side in 0..SIDES.len() {
-                let Some(r) = self.name_box(i, pos[i], side) else { continue };
-                let mut cost = 0.5 * side as f64;
-                for line in &lines {
-                    cost += under(line, &r, grow);
-                    if let Some((label, _)) = &line.label {
-                        cost += 10.0 * depth(label, &r, grow);
-                    }
-                }
-                if were.is_some() {
-                    for j in (0..n).filter(|&j| j != i) {
-                        cost += 10.0 * depth(&boxes[j], &r, grow);
-                        if let Some(other) = self.name_box(j, pos[j], sides[j]) {
-                            cost += 10.0 * depth(&other, &r, grow);
-                        }
-                    }
-                }
-                if cost < best.0 {
-                    best = (cost, side);
-                }
+        // Given the sides the names were on: every name where it is now.
+        let mut names: Vec<Option<Rect>> = if were.is_some() { self.name_boxes(pos, &sides) } else { Vec::new() };
+        for i in 0..n {
+            let Some(h) = self.names[i] else { continue };
+            let mut name = NameSides::new(std::array::from_fn(|side| Rect::upright(self.name_place(i, pos[i], side, h), h)), grow);
+            match were {
+                None => self.around[i].iter().for_each(|&e| name.line(&lines[e])),
+                Some(_) => lines.iter().for_each(|line| name.line(line)),
             }
-            sides[i] = best.1;
+            if were.is_some() {
+                for j in (0..n).filter(|&j| j != i) {
+                    name.upright(pos[j], self.half[j]);
+                    if let Some(other) = &names[j] {
+                        name.upright(other.c, other.half);
+                    }
+                }
+                names[i] = Some(name.at[name.best()]);
+            }
+            sides[i] = name.best();
         }
         sides
     }
@@ -704,7 +763,7 @@ impl Graph {
         let names = self.name_boxes(pos, &self.sides(pos, &lines, None));
         for line in &lines {
             let (a, b) = self.edges[line.edge];
-            let (from, to) = (line.start + line.u * line.free.0, line.start + line.u * line.free.1);
+            let (from, to) = (line.from, line.to);
             for k in 0..n {
                 if k == a || k == b {
                     continue;
@@ -905,7 +964,6 @@ impl Graph {
             }
         }
         let lines = self.lines(pos);
-        let ends = |l: &Line| (l.start + l.u * l.free.0, l.start + l.u * l.free.1);
         let mut crossings = 0.0;
         let names = self.name_boxes(pos, sides);
         for (i, name) in names.iter().enumerate() {
@@ -937,8 +995,7 @@ impl Graph {
                 if [ya, yb].contains(&xa) || [ya, yb].contains(&xb) {
                     continue;
                 }
-                let ((p, q), (r, s)) = (ends(lx), ends(ly));
-                if segments_meet(p, q, r, s) {
+                if segments_meet(lx.from, lx.to, ly.from, ly.to) {
                     crossings += 1.0;
                 }
                 if let (Some((rx, _)), Some((ry, _))) = (&lx.label, &ly.label) {
@@ -968,67 +1025,78 @@ impl Graph {
         let crowd = 3.0 * gap;
         let lines = self.lines(pos);
         let sides = self.sides(pos, &lines, Some(&self.sides(pos, &lines, None)));
-        let names = self.name_boxes(pos, &sides);
-        // Everything that takes room, and whose it is: boxes, names and
-        // labels.
-        let mut things: Vec<(Rect, Owner)> = Vec::new();
+        // Everything that takes room, and whose it is: boxes and names,
+        // node by node, then labels.
+        let mut things: Vec<Thing> = Vec::with_capacity(2 * n + lines.len());
         for i in 0..n {
-            things.push((Rect::upright(pos[i], self.half[i]), Owner::Box(i)));
-            if let Some(name) = names[i] {
-                things.push((name, Owner::Name(i)));
+            things.push(Thing::new(Rect::upright(pos[i], self.half[i]), self.half[i], Owner::Box(i)));
+            if let Some(name) = self.name_box(i, pos[i], sides[i]) {
+                things.push(Thing::new(name, name.half, Owner::Name(i)));
             }
         }
         for line in &lines {
             if let Some((label, _)) = line.label {
-                things.push((label, Owner::Label(line.edge)));
+                things.push(Thing::new(label, line.label_spans, Owner::Label(line.edge)));
             }
         }
         let node_of = |o: Owner| match o { Owner::Box(i) | Owner::Name(i) => Some(i), Owner::Label(_) => None };
         let ends_at = |e: usize, i: usize| self.edges[e].0 == i || self.edges[e].1 == i;
         let pair_of = |e: usize| { let (a, b) = self.edges[e]; (a.min(b), a.max(b)) };
         let (mut overlap, mut crowding, mut crossings) = (0.0, 0.0, 0.0);
-        for (x, (rx, ox)) in things.iter().enumerate() {
-            for (ry, oy) in &things[x + 1..] {
+        for (x, tx) in things.iter().enumerate() {
+            for ty in &things[x + 1..] {
+                // Further apart along x or y than the most room any two
+                // want, they've all the room they want: when either's
+                // upright, that's just how its overlap is found.
+                if (tx.upright || ty.upright) && (tx.spans.x + ty.spans.x + crowd - (ty.r.c.x - tx.r.c.x).abs() <= 0.0 || tx.spans.y + ty.spans.y + crowd - (ty.r.c.y - tx.r.c.y).abs() <= 0.0) {
+                    continue;
+                }
                 // How much room a pair of things wants between them: none
                 // for a node's box and name, a gap for a label and what's at
                 // its edge's ends or its fellows', and a few gaps otherwise.
-                let room = match (*ox, *oy) {
+                let room = match (tx.owner, ty.owner) {
                     (Owner::Box(i) | Owner::Name(i), Owner::Box(j) | Owner::Name(j)) if i == j => continue,
                     (Owner::Label(e), Owner::Label(f)) if pair_of(e) == pair_of(f) => gap,
                     (Owner::Label(e), other) | (other, Owner::Label(e)) if node_of(other).is_some_and(|i| ends_at(e, i)) => gap,
                     _ => crowd,
                 };
-                overlap += depth(rx, ry, 0.0);
-                crowding += depth(rx, ry, room);
+                // Not within their room, they don't overlap.
+                let within = depth(&tx.r, &ty.r, room);
+                if within > 0.0 {
+                    overlap += depth(&tx.r, &ty.r, 0.0);
+                    crowding += within;
+                }
             }
         }
         // What it covers: bigger than the box, it'll be scaled down to fit;
         // smaller, spread out to it (fill), so lines are long or short for
         // its size, as nodes spread evenly over it would be apart.
         let (mut lo, mut hi) = (V::new(f64::MAX, f64::MAX), V::new(f64::MIN, f64::MIN));
-        for (r, _) in &things {
-            let reach = V::new(r.reach(V::new(1.0, 0.0)), r.reach(V::new(0.0, 1.0)));
-            lo = V::new(lo.x.min(r.c.x - reach.x), lo.y.min(r.c.y - reach.y));
-            hi = V::new(hi.x.max(r.c.x + reach.x), hi.y.max(r.c.y + reach.y));
+        for t in &things {
+            lo = V::new(lo.x.min(t.r.c.x - t.spans.x), lo.y.min(t.r.c.y - t.spans.y));
+            hi = V::new(hi.x.max(t.r.c.x + t.spans.x), hi.y.max(t.r.c.y + t.spans.y));
         }
         let k = ((hi.x - lo.x) * (hi.y - lo.y) / n.max(1) as f64).sqrt().max(1.0);
         // Nodes much nearer each other than spread evenly they'd be: some
         // bunched up while others are far off.
         let mut bunched = 0.0;
         let want = 0.6 * k;
+        let surely_apart = want * want * (1.0 + HAIR);
         for i in 0..n {
             for j in i + 1..n {
-                let short = (want - norm(pos[j] - pos[i])) / want;
+                let d = pos[j] - pos[i];
+                if d.dot(d) > surely_apart {
+                    continue;
+                }
+                let short = (want - norm(d)) / want;
                 if short > 0.0 {
                     bunched += short * short;
                 }
             }
         }
-        let ends = |l: &Line| (l.start + l.u * l.free.0, l.start + l.u * l.free.1);
         let mut long = 0.0;
         for (x, line) in lines.iter().enumerate() {
             let (a, b) = self.edges[line.edge];
-            let (from, to) = ends(line);
             // Squared, and the longest far worse, to the fourth.
             let length = norm(pos[b] - pos[a]) / k;
             let squared = length * length;
@@ -1037,18 +1105,23 @@ impl Graph {
             // their own ends' boxes, or the labels of the lines beside them
             // between the same two nodes; under their own ends' names, but
             // not near them.
-            for (r, owner) in &things {
-                let near = match *owner {
+            for t in &things {
+                // Nothing reaches further from its middle than this, so a
+                // line clear of it is neither under the thing nor near it.
+                if line.clear_of(t.r.c, V::new(t.reach + crowd, t.reach + crowd)) {
+                    continue;
+                }
+                let near = match t.owner {
                     Owner::Label(e) if pair_of(e) == pair_of(line.edge) => continue,
                     Owner::Box(i) if i == a || i == b => continue,
                     Owner::Name(i) if i == a || i == b => false,
                     _ => true,
                 };
-                if under(line, r, 0.0) > 1e-6 {
+                if !line.clear_of(t.r.c, t.spans) && under(line, &t.r, 0.0) > 1e-6 {
                     crossings += 1.0;
                 }
                 if near {
-                    if let Some((_, d, _)) = off_line(from, to, line.u, r, crowd) {
+                    if let Some((_, d, _)) = off_line(line.from, line.to, line.u, &t.r, crowd) {
                         crowding += d;
                     }
                 }
@@ -1058,8 +1131,7 @@ impl Graph {
                 if [c, d].contains(&a) || [c, d].contains(&b) {
                     continue;
                 }
-                let (p, q) = ends(other);
-                if segments_meet(from, to, p, q) {
+                if segments_meet(line.from, line.to, other.from, other.to) {
                     crossings += 1.0;
                 }
             }
@@ -1098,12 +1170,129 @@ impl Graph {
     }
 }
 
+/// Which of the three places along x, and along y, a name's middle is at
+/// on each of its `SIDES`: before its node's, level with it, or after.
+const SIDE_AT: [(usize, usize); SIDES.len()] = [(2, 1), (0, 1), (1, 2), (1, 0), (2, 0), (2, 2), (0, 0), (0, 2)];
+
+/// A node's name on each side of its box, and how much each side is over:
+/// a side's sum takes things in the order they're given.
+struct NameSides {
+    at: [Rect; SIDES.len()],
+    /// The three places along x and along y the sides' middles are at,
+    /// and how far the name reaches from its middle, grown.
+    xs: [f64; 3],
+    ys: [f64; 3],
+    reach: V,
+    grow: f64,
+    /// Whichever side it's on, the name, grown, is within this of the
+    /// node's middle, and a hair: what's clear of that is over no side.
+    zone: V,
+    cost: [f64; SIDES.len()],
+}
+
+impl NameSides {
+    fn new(at: [Rect; SIDES.len()], grow: f64) -> NameSides {
+        let reach = at[0].half + V::new(grow, grow);
+        let (xs, ys) = ([at[1].c.x, at[2].c.x, at[0].c.x], [at[3].c.y, at[0].c.y, at[2].c.y]);
+        let zone = V::new((xs[2] - xs[1]).max(xs[1] - xs[0]) + reach.x + HAIR, (ys[2] - ys[1]).max(ys[1] - ys[0]) + reach.y + HAIR);
+        NameSides { at, xs, ys, reach, grow, zone, cost: std::array::from_fn(|side| 0.5 * side as f64) }
+    }
+
+    /// Whether something reaching `spans` along x and y from `c` is clear
+    /// of the name on every side.
+    fn clear_of(&self, c: V, spans: V) -> bool {
+        (c.y - self.ys[1]).abs() >= self.zone.y + spans.y || (c.x - self.xs[1]).abs() >= self.zone.x + spans.x
+    }
+
+    /// How deep something reaching `spans` along x and y from `c` is over
+    /// the name, grown, at each of its places along x, and along y: not
+    /// over it, at 0 or less. Just what `Rect::overlap` finds along x and
+    /// y, the name being upright.
+    fn over(&self, c: V, spans: V) -> ([f64; 3], [f64; 3]) {
+        let (half, grow) = (self.at[0].half, self.grow);
+        (self.xs.map(|x| spans.x + half.x + grow - (x - c.x).abs()), self.ys.map(|y| spans.y + half.y + grow - (y - c.y).abs()))
+    }
+
+    /// Weigh a line: what of it runs under each side, and how deep its
+    /// label's over it.
+    fn line(&mut self, line: &Line) {
+        let middle = V::new(self.xs[1], self.ys[1]);
+        if !line.clear_of(middle, self.zone) {
+            // Clear of the name, by a hair or more, at each place along x,
+            // and y.
+            let clear_x = self.xs.map(|x| line.lo.x > x + self.reach.x + HAIR || line.hi.x < x - self.reach.x - HAIR);
+            let clear_y = self.ys.map(|y| line.lo.y > y + self.reach.y + HAIR || line.hi.y < y - self.reach.y - HAIR);
+            for (side, &(x, y)) in SIDE_AT.iter().enumerate() {
+                if !(clear_x[x] || clear_y[y]) {
+                    self.cost[side] += under(line, &self.at[side], self.grow);
+                }
+            }
+        }
+        let Some((label, _)) = &line.label else { return };
+        if label.is_upright() {
+            return self.upright(label.c, label.half);
+        }
+        if self.clear_of(label.c, line.label_spans) {
+            return;
+        }
+        let (xs, ys) = self.over(label.c, line.label_spans);
+        for (side, &(x, y)) in SIDE_AT.iter().enumerate() {
+            if xs[x] > 0.0 && ys[y] > 0.0 {
+                self.cost[side] += 10.0 * depth(label, &self.at[side], self.grow);
+            }
+        }
+    }
+
+    /// Weigh an upright box reaching `half` from `c`: how deep it's over
+    /// each side, the less of how deep along x and along y.
+    fn upright(&mut self, c: V, half: V) {
+        if self.clear_of(c, half) {
+            return;
+        }
+        let (xs, ys) = self.over(c, half);
+        for (side, &(x, y)) in SIDE_AT.iter().enumerate() {
+            let (x, y) = (xs[x], ys[y]);
+            if x > 0.0 && y > 0.0 {
+                self.cost[side] += 10.0 * if y < x { y } else { x };
+            }
+        }
+    }
+
+    /// The side that's over the least, the earlier of equals.
+    fn best(&self) -> usize {
+        let mut best = (f64::MAX, 0);
+        for (side, &cost) in self.cost.iter().enumerate() {
+            if cost < best.0 {
+                best = (cost, side);
+            }
+        }
+        best.1
+    }
+}
+
 /// Whose a box, name or label is: a node's, or an edge's.
 #[derive(Clone, Copy, PartialEq)]
 enum Owner {
     Box(usize),
     Name(usize),
     Label(usize),
+}
+
+/// Something that takes room, as a layout's cost looks at it.
+struct Thing {
+    r: Rect,
+    owner: Owner,
+    upright: bool,
+    /// Half the width and height of the upright box it fits in, and how
+    /// far its corners are from its middle.
+    spans: V,
+    reach: f64,
+}
+
+impl Thing {
+    fn new(r: Rect, spans: V, owner: Owner) -> Thing {
+        Thing { r, owner, upright: r.is_upright(), spans, reach: norm(r.half) }
+    }
 }
 
 /// A layout's nodes, evolved: each candidate is where they are.
