@@ -1,6 +1,6 @@
 //! A journal's brushes, for scripts: its `brushes/NAME.yaml` in front of
-//! the library's (Darkly's built-ins), each called by the name its file
-//! gives (see `crate::journal::brushes`).
+//! the library's (Darkly's built-ins and the library's own), each called by
+//! the name its file gives (see `crate::journal::brushes`).
 //!
 //! Styles name brushes wherever they're made (constructors, settings maps,
 //! text style files, layouts' roles), so the brushes they're looked up in
@@ -128,11 +128,18 @@ mod tests {
         darkly::brush::builtin_brushes::BUILTIN_BRUSHES_YAML.iter().find(|(f, _)| *f == "ink_pen.yaml").unwrap().1
     }
 
+    /// Darkly's brushes and the library's own, every one of which draws.
     #[test]
-    fn the_library_has_darklys_brushes() {
+    fn the_library_has_darklys_brushes_and_its_own() {
         let library = BrushLibrary::new(Resources::library().brushes);
-        let builtins: Vec<String> = brushes::builtins().keys().cloned().collect();
-        assert_eq!(library.names(), builtins);
+        let names = library.names();
+        for builtin in brushes::builtins().keys() {
+            assert!(names.contains(builtin), "the library should have Darkly's {}: {:?}", builtin, names);
+        }
+        assert!(names.contains(&"Iron Gall Quill".to_string()) && names.contains(&"Guilloche".to_string()), "{:?}", names);
+        for name in &names {
+            library.get(name).unwrap_or_else(|e| panic!("{}", e));
+        }
         assert_eq!(library.get("Ink Pen").unwrap(), brushes::builtin("Ink Pen").unwrap());
     }
 
@@ -155,19 +162,17 @@ mod tests {
         assert!(err.contains("unknown brush 'Crayon'") && err.contains("Quill"), "{}", err);
     }
 
-    /// The library's brushes are Darkly's own files, as its pinned
-    /// revision has them: update them with it.
+    /// The library's files of Darkly's brushes are Darkly's own, as its
+    /// pinned revision has them: update them with it. Its other files are
+    /// its own brushes.
     #[test]
-    fn the_librarys_brush_files_are_darklys() {
+    fn the_librarys_brush_files_of_darklys_are_darklys() {
         let library = Resources::library().brushes;
-        let mut files = library.names().unwrap();
-        files.sort();
-        let mut darklys: Vec<String> = darkly::brush::builtin_brushes::BUILTIN_BRUSHES_YAML.iter()
-            .map(|(file, _)| file.strip_suffix(".yaml").unwrap().to_string()).collect();
-        darklys.sort();
-        assert_eq!(files, darklys, "webapp/library/brushes/ should hold Darkly's brushes");
+        let files = library.names().unwrap();
         for (file, yaml) in darkly::brush::builtin_brushes::BUILTIN_BRUSHES_YAML {
-            assert_eq!(library.read(file.strip_suffix(".yaml").unwrap()).unwrap(), *yaml, "webapp/library/brushes/{} isn't Darkly's", file);
+            let name = file.strip_suffix(".yaml").unwrap();
+            assert!(files.iter().any(|f| f == name), "webapp/library/brushes/ should hold Darkly's {}", file);
+            assert_eq!(library.read(name).unwrap(), *yaml, "webapp/library/brushes/{} isn't Darkly's", file);
         }
     }
 

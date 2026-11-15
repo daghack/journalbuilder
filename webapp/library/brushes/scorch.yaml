@@ -1,0 +1,91 @@
+name: Scorch
+description: A burn creeping into the parchment, brown at its ragged rim and charred black at its heart, building where it dwells, for singed edges, holes burned through and a candle's mark.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      stabilize: 0.5
+  circle:
+    type: circle
+    name: Burn's reach
+    inputs:
+      algorithm: 1
+      amplitude: 0.35
+      frequency: 7.0
+      octaves: 4.0
+      persistence: 0.6
+      softness: 0.7
+  random:
+    type: random
+  char:
+    type: noise
+    name: Uneven burning
+    comment: pinned to the page, so the burn eats further in some places than others
+    inputs:
+      octaves: 4.0
+      roughness: 0.6
+      scale: 60.0
+      space: 0
+      warp: 0.8
+  char_depth:
+    type: remap
+    inputs:
+      clamp: true
+      in_high: 0.7
+      in_low: 0.3
+      out_high: 1.0
+      out_low: 0.6
+  multiply:
+    type: multiply
+    name: Burn on the page
+  charring:
+    type: remap
+    name: Charring
+    comment: how much darker than the ink the burn's middle is
+    inputs:
+      clamp: true
+      in_high: 0.98
+      in_low: 0.6
+      out_high: 0.65
+      out_low: 0.0
+  darken:
+    type: subtract
+    inputs:
+      a: 0.0
+  hsv:
+    type: hsv
+  slow:
+    type: multiply
+    name: A slow burn
+    comment: it builds up where the brush lingers or goes back
+    inputs:
+      b: 0.2
+  paint:
+    type: paint
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- char.value -> char_depth.input
+- char_depth.output -> multiply.b
+- charring.output -> darken.b
+- circle.mask -> charring.input
+- circle.mask -> multiply.a
+- darken.result -> hsv.value
+- hsv.output -> stamp.color
+- multiply.result -> stamp.tip
+- paint_color.color -> hsv.color
+- pen_input.position -> paint.position
+- pen_input.pressure -> paint.size
+- pen_input.pressure -> slow.a
+- random.value -> circle.seed
+- slow.result -> paint.build_flow
+- stamp.dab -> paint.rgba
+exposed_ports:
+  brush_settings.stabilize: {}
+  brush_settings.size: {}
+  slow.b: {}
+  paint.opacity: {}

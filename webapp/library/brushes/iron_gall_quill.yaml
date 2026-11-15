@@ -1,0 +1,78 @@
+name: Iron Gall Quill
+description: A cut quill held at a slant, broad one way and a hairline the other, its edge faintly bitten and its ink thinned a little where the parchment's tooth stands proud, for scribed scroll text.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      spacing: 0.03
+      stabilize: 0.5
+  circle:
+    type: circle
+    name: Cut nib
+    comment: a slanted flat nib whose edge is reshaped a little every dab
+    inputs:
+      algorithm: 1
+      amplitude: 0.03
+      aspect: 0.3
+      frequency: 6.0
+      octaves: 3.0
+      rotation: 0.6
+      softness: 0.06
+  curve:
+    type: curve
+    name: Quick ink
+    comment: the ink comes on fast, so even a light touch writes dark
+    inputs:
+      curve: [[0.0, 0.0], [0.35, 0.75], [1.0, 1.0]]
+  multiply:
+    type: multiply
+    name: Nib on the tooth
+  noise:
+    type: noise
+    name: Parchment tooth
+    comment: pinned to the page, so every stroke skips the same high spots
+    inputs:
+      octaves: 3.0
+      roughness: 0.6
+      scale: 3.0
+      space: 0
+  paint:
+    type: paint
+    inputs:
+      buildup: 0.5
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  random:
+    type: random
+  remap:
+    type: remap
+    name: Tooth depth
+    inputs:
+      clamp: true
+      in_high: 0.7
+      in_low: 0.3
+      out_high: 1.0
+      out_low: 0.82
+  stamp:
+    type: stamp
+connections:
+- circle.mask -> multiply.a
+- curve.output -> paint.build_flow
+- curve.output -> paint.wash_flow
+- multiply.result -> stamp.tip
+- noise.value -> remap.input
+- paint_color.color -> stamp.color
+- pen_input.position -> paint.position
+- pen_input.pressure -> curve.input
+- pen_input.pressure -> paint.size
+- random.value -> circle.seed
+- remap.output -> multiply.b
+- stamp.dab -> paint.rgba
+exposed_ports:
+  brush_settings.stabilize: {}
+  brush_settings.size: {}
+  circle.rotation: {}
+  remap.out_low: {}
+  paint.opacity: {}

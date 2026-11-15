@@ -1,0 +1,99 @@
+name: Flying White
+description: A loaded brush of stiff bristles. Pressed hard it lays a solid black; as it lifts, the ink gives out bristle by bristle and the stroke splits into streaks with the page showing between them, the dry tails calligraphers call flying white.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      spacing: 0.02
+      stabilize: 0.5
+  tuft:
+    type: circle
+    name: Tuft
+    inputs:
+      softness: 0.1
+  bristles:
+    type: noise
+    name: Bristles
+    comment: locked to the dab and turned with the stroke, so each bristle holds its place across the tuft and draws one streak
+    inputs:
+      octaves: 2.0
+      roughness: 0.5
+      space: 1
+  bristle_size:
+    type: multiply
+    name: Bristles to the tuft's size
+    inputs:
+      b: 0.07
+  hairs:
+    type: random
+    name: Each stroke's own bristles
+    inputs:
+      mode: 1
+  heart:
+    type: circle
+    name: The tuft's heart
+    comment: holds its ink longest
+    inputs:
+      softness: 1.0
+  heart_hold:
+    type: multiply
+    inputs:
+      b: 0.25
+  ink:
+    type: add
+  load:
+    type: curve
+    name: How much ink a bristle needs
+    comment: pressed hard, every bristle writes; lifting, only the wettest do
+    inputs:
+      curve: [[0.0, 0.98], [0.3, 0.84], [0.65, 0.66], [0.85, 0.5], [1.0, 0.12]]
+  load_edge:
+    type: add
+    inputs:
+      b: 0.04
+  writes:
+    type: remap
+    name: The bristles that write
+    inputs:
+      clamp: true
+  laid:
+    type: multiply
+  spread:
+    type: curve
+    name: Pressing spreads the tuft
+    inputs:
+      curve: [[0.0, 0.4], [1.0, 1.0]]
+  paint:
+    type: paint
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- bristle_size.result -> bristles.scale
+- bristles.value -> ink.a
+- brush_settings.size -> bristle_size.a
+- hairs.value -> bristles.variation
+- heart.mask -> heart_hold.a
+- heart_hold.result -> ink.b
+- ink.result -> writes.input
+- laid.result -> stamp.tip
+- load.output -> load_edge.a
+- load.output -> writes.in_low
+- load_edge.result -> writes.in_high
+- paint_color.color -> stamp.color
+- pen_input.drawing_angle -> bristles.rotation
+- pen_input.position -> paint.position
+- pen_input.pressure -> load.input
+- pen_input.pressure -> spread.input
+- spread.output -> paint.size
+- stamp.dab -> paint.rgba
+- tuft.mask -> laid.a
+- writes.output -> laid.b
+exposed_ports:
+  brush_settings.size: {}
+  bristle_size.b: {}
+  heart_hold.b: {}
+  paint.opacity: {}

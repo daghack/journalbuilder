@@ -1,0 +1,91 @@
+name: Dry Reed
+description: A reed pen nearly out of ink, dragged over rough parchment. Its ink catches only the tooth's high spots, and pressing harder fills the hollows between them.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      spacing: 0.04
+      stabilize: 0.5
+  circle:
+    type: circle
+    name: Reed tip
+    inputs:
+      algorithm: 1
+      amplitude: 0.12
+      aspect: 0.55
+      frequency: 5.0
+      rotation: 0.4
+      softness: 0.2
+  multiply:
+    type: multiply
+    name: Tip on the tooth
+  subtract:
+    type: subtract
+    name: Dry threshold
+    comment: the grain a light touch needs to reach before it takes ink
+    inputs:
+      a: 0.72
+  add:
+    type: add
+    name: Threshold's soft edge
+    inputs:
+      b: 0.14
+  noise:
+    type: noise
+    name: Parchment tooth
+    comment: pinned to the page, so passes catch the same high spots
+    inputs:
+      octaves: 4.0
+      roughness: 0.65
+      scale: 3.2
+      space: 0
+      warp: 0.4
+  paint:
+    type: paint
+    inputs:
+      buildup: 0.3
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  random:
+    type: random
+  remap:
+    type: remap
+    name: Tooth catches ink
+    inputs:
+      clamp: true
+      out_high: 1.0
+      out_low: 0.0
+  stamp:
+    type: stamp
+  reach:
+    type: remap
+    name: Pressure's reach
+    inputs:
+      clamp: true
+      in_high: 1.0
+      in_low: 0.0
+      out_high: 0.6
+      out_low: 0.0
+connections:
+- add.result -> remap.in_high
+- circle.mask -> multiply.a
+- multiply.result -> stamp.tip
+- reach.output -> subtract.b
+- noise.value -> remap.input
+- paint_color.color -> stamp.color
+- pen_input.position -> paint.position
+- pen_input.pressure -> reach.input
+- pen_input.pressure -> paint.build_flow
+- pen_input.pressure -> paint.size
+- random.value -> circle.seed
+- remap.output -> multiply.b
+- stamp.dab -> paint.rgba
+- subtract.result -> add.a
+- subtract.result -> remap.in_low
+exposed_ports:
+  brush_settings.stabilize: {}
+  brush_settings.size: {}
+  paint.build_flow: {}
+  paint.opacity: {}

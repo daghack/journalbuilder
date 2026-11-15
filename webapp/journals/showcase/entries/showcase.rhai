@@ -58,7 +58,16 @@
 //             walked), graph::layout's generations, evolving a layout;
 //             scale_by by a vec, across and down apart, and canvas.size_to,
 //             filling a canvas or a page; a journal's own brushes,
-//             brushes/NAME.yaml, Darkly brushes drawn with by name
+//             brushes/NAME.yaml, Darkly brushes drawn with by name; the
+//             library's own brushes: pens for scrolls (Iron Gall Quill,
+//             Crowquill, Dry Reed, Feathered Ink, Faded Ink), Sepia Wash,
+//             Gilt and Scorch, and Guilloche, Star Trail, Thornline,
+//             Enchanted Ink and Twisted Cord; and its arcane ones, each
+//             stranger than the last: Driving Rain, Levin, Baleful Star,
+//             Witch Oil, Sanguine, Veinwork, Knell, Keybone, Harrow and
+//             Glossolalia; and its heavy darks: Flying White, Rend,
+//             Strands and Horrid; its gothic ones, Mezzotint, Fraktur,
+//             Shroud, Cinder and Drypoint; and Balefire
 //
 // Pages are bound with new_book: numbered, named and listed in the
 // contents.
@@ -184,6 +193,13 @@ fn bind(section, canvas) {
 }
 
 // ---- pens: every brush ----
+
+// The library's own brushes, which the appendix draws: the pens page has
+// room for Darkly's.
+const LIBRARY_BRUSHES = ["Iron Gall Quill", "Crowquill", "Dry Reed", "Feathered Ink", "Faded Ink", "Sepia Wash", "Gilt", "Scorch", "Guilloche", "Star Trail", "Thornline", "Enchanted Ink", "Twisted Cord",
+	"Driving Rain", "Levin", "Baleful Star", "Witch Oil", "Sanguine", "Veinwork", "Knell", "Keybone", "Harrow", "Glossolalia",
+	"Flying White", "Rend", "Strands", "Horrid",
+	"Mezzotint", "Fraktur", "Shroud", "Cinder", "Drypoint", "Balefire"];
 //
 // A style is what strokes are drawn in: a brush style (the ink: a colour,
 // a Darkly brush, how wide its marks are and how it presses) and a
@@ -197,9 +213,9 @@ pens.name = "brushes";
 pens.add(caption("brush_names(), new_brush_style(colour, brush, brush_size), brush_style.brush_size", TOP));
 let y = TOP + 70;
 for name in brush_names() {
-	// The library's: the showcase's own, Broad Nib, has a page of its own in
-	// the appendix.
-	if name == "Broad Nib" { continue; }
+	// Darkly's: the showcase's own, Broad Nib, and the library's own have
+	// pages in the appendix.
+	if name == "Broad Nib" || name in LIBRARY_BRUSHES { continue; }
 	pens.add(write(name, LEFT, y, 24));
 	pens.add(new_rectangle(vec2(910, y), 380, 54).hatch(7.0, #{ angle: 0.8, roughness: 0.6 }), CAPTION);
 	let brush = new_brush_style(INK, name, 6, #{ max_pressure: 0.9 });
@@ -3172,6 +3188,276 @@ let names = brush_names();
 assert("Broad Nib" in names && "Ink Pen" in names, "brush_names() should have the journal's and the library's");
 nibs.add(caption(`brush_names(): the library's ${names.len() - 1} and the journal's own, ${names.len()} in all`, y));
 book.bind("appendix", nibs);
+
+// The library's own brushes, for scrolls that look real: pens that write
+// as a scribe's would, each with its own way with ink and parchment.
+let scribes = sheet("pens");
+scribes.add(subhead("pens for scrolls", TOP));
+scribes.add(caption("the library's brushes/iron_gall_quill.yaml and the rest: new_brush_style(colour, name, brush_size), here", TOP + 50));
+scribes.add(caption("written at 2.5 with pressures from 0.35 to 0.85, and a wave at 8 tapering from 0.2 to 0.9", TOP + 84));
+let hand = new_handwriting_style();
+let y = TOP + 170;
+for pen_of in [
+	["Iron Gall Quill", "a slanted cut nib, its edge faintly bitten, its ink thin where the tooth stands proud"],
+	["Crowquill", "a fine mapping pen: a hairline under a light hand, swelling only when pressed hard"],
+	["Dry Reed", "a reed nearly dry: only the tooth's high spots take ink, until it's pressed harder"],
+	["Feathered Ink", "ink wicking out along the paper's fibres into a faint, hairy halo round its line"],
+	["Faded Ink", "old ink gone brown and patchy, each stroke faded its own amount, the page in blotches"],
+] {
+	let name = pen_of[0];
+	scribes.add(write(name, LEFT, y, 24));
+	scribes.add(write_in(pen_of[1], LEFT + 260, y, 18, CAPTION, PLAIN));
+	let writing = new_style(new_brush_style(INK, name, 2.5, #{ min_pressure: 0.35, max_pressure: 0.85 }), hand);
+	scribes.add(write_line("Lorem ipsum dolor sit amet", vec2(LEFT, y + 80), #{ style: writing, type: new_type_style(PLAIN, 44) }));
+	let stroke = new_style(new_brush_style(INK, name, 8, #{ min_pressure: 0.2, max_pressure: 0.9, pressure_profile: "taper" }), hand);
+	scribes.add(wave(720, RIGHT, y + 80, 50), stroke);
+	y += 240;
+}
+book.bind("appendix", scribes);
+
+// A wash for shading, gold leaf for capitals, and a burn for edges.
+let finishing = sheet("pens");
+finishing.add(subhead("washes, gilding and burns", TOP));
+finishing.add(caption("Sepia Wash: a thin wash of sepia that pools dark at its rim as it dries, for shading a coast or a hill's", TOP + 50));
+finishing.add(caption("flank: three strokes at 6, 10 and 14 laid side by side, and a coast shaded along its inside", TOP + 84));
+let y = TOP + 190;
+for (size, i) in [6.0, 10.0, 14.0] {
+	let wash = new_style(new_brush_style(BARK, "Sepia Wash", size, #{ min_pressure: 0.3, max_pressure: 0.8, pressure_profile: "taper" }), hand);
+	finishing.add(new_line(vec2(LEFT + 20, y + i * 50), vec2(LEFT + 480, y + i * 50)), wash);
+}
+let coast = new_wave(vec2(LEFT + 560, y + 40), vec2(RIGHT - 20, y + 40), #{ amplitude: 30 });
+finishing.add(coast.translate_by(vec2(0, 30)), new_style(new_brush_style(BARK, "Sepia Wash", 12, #{ min_pressure: 0.3, max_pressure: 0.7, pressure_profile: "taper" }), hand));
+finishing.add(coast, new_style(new_brush_style(INK, "Crowquill", 2.5), hand));
+y += 220;
+finishing.add(caption("Gilt: gold leaf burnished unevenly, bright where it caught the burnisher, dull where it didn't, with a", y));
+finishing.add(caption("glint here and there: a capital in loche at brush_size 7, and a band at 16", y + 34));
+let gilt = new_style(new_brush_style(GOLD, "Gilt", 7, #{ min_pressure: 0.6, max_pressure: 0.9 }), hand);
+finishing.add(write_in("R", LEFT + 60, y + 190, 220, gilt, LOCHE));
+finishing.add(new_line(vec2(LEFT + 300, y + 190), vec2(RIGHT - 20, y + 190)), new_style(new_brush_style(GOLD, "Gilt", 16, #{ min_pressure: 0.7, max_pressure: 0.9, pressure_profile: "constant" }), hand));
+finishing.add(write_line("Lorem ipsum dolor sit amet", vec2(LEFT + 300, y + 280), #{ style: TEXT, type: new_type_style(PLAIN, 40) }));
+y += 420;
+finishing.add(caption("Scorch: a burn creeping in, brown at its ragged rim and charred black at its heart, building where it", y));
+finishing.add(caption("dwells: along a page's edge at 50, and a hole burnt through at 40", y + 34));
+let burn = |size| new_style(new_brush_style(BARK, "Scorch", size, #{ min_pressure: 0.4, max_pressure: 1.0, pressure_profile: "taper" }), new_handwriting_style());
+finishing.add(new_line(vec2(LEFT, y + 130), vec2(LEFT + 620, y + 130)), burn.call(50.0));
+finishing.add(new_circle(vec2(RIGHT - 170, y + 140), 40), burn.call(40.0));
+book.bind("appendix", finishing);
+
+// Brushes that draw more than a line: each dab a shape the stroke strings
+// together, or a colour that changes along it.
+let ornament = sheet("pens");
+ornament.add(subhead("ornamental brushes", TOP));
+ornament.add(caption("Guilloche: an engraver's rosette stamped close along the stroke in outline only, its lobes weaving into", TOP + 50));
+ornament.add(caption("a turned ribbon wherever the stroke bends: a line, a circle and a rectangle at 20, and a circle at 10", TOP + 84));
+let y = TOP + 200;
+let engraved = |size| new_style(new_brush_style(INK, "Guilloche", size, #{ min_pressure: 0.85, max_pressure: 0.85, pressure_profile: "constant" }), new_handwriting_style());
+ornament.add(new_line(vec2(LEFT + 20, y + 40), vec2(LEFT + 180, y + 40)), engraved.call(20.0));
+ornament.add(new_circle(vec2(LEFT + 380, y + 40), 80), engraved.call(20.0));
+ornament.add(new_rectangle(vec2(LEFT + 640, y + 40), 150, 150), engraved.call(20.0));
+ornament.add(new_circle(vec2(RIGHT - 60, y + 40), 45), engraved.call(10.0));
+y += 200;
+ornament.add(caption("Star Trail: a path drawn in four-pointed stars of every size, some bright and some faint, with gaps", y));
+ornament.add(caption("between: a comet's road at 22, and a constellation's ring at 12", y + 34));
+let stars = |size| new_style(new_brush_style(INK, "Star Trail", size, #{ min_pressure: 0.85, max_pressure: 0.85, pressure_profile: "constant" }), new_handwriting_style());
+ornament.add(wave(LEFT + 20, LEFT + 640, y + 140, 120), stars.call(22.0));
+ornament.add(new_circle(vec2(RIGHT - 150, y + 140), 100), stars.call(12.0));
+y += 290;
+ornament.add(caption("Thornline: a briar's stem that sprouts a thorn now and then, raked back on one side or the other: a", y));
+ornament.add(caption("frame at 24, and a vine at 18", y + 34));
+let briar = |size| new_style(new_brush_style(INK, "Thornline", size, #{ min_pressure: 0.85, max_pressure: 0.85, pressure_profile: "constant" }), new_handwriting_style());
+ornament.add(new_rectangle(vec2(LEFT + 200, y + 170), 360, 200), briar.call(24.0));
+ornament.add(wave(LEFT + 480, RIGHT - 20, y + 170, 120), briar.call(18.0));
+y += 330;
+ornament.add(caption("Twisted Cord: strands laid slantwise over each other, lit along their middles: a cord at 18, a ring at 14", y));
+let cord = |size| new_style(new_brush_style(BARK, "Twisted Cord", size, #{ min_pressure: 0.85, max_pressure: 0.85, pressure_profile: "constant" }), new_handwriting_style());
+ornament.add(new_line(vec2(LEFT + 20, y + 110), vec2(LEFT + 640, y + 110)), cord.call(18.0));
+ornament.add(new_circle(vec2(RIGHT - 150, y + 110), 80), cord.call(14.0));
+book.bind("appendix", ornament);
+
+// Ink with a spell on it, and the ornamental brushes framing a map's
+// cartouche together.
+let spells = sheet("pens");
+spells.add(subhead("enchanted ink", TOP));
+spells.add(caption("Enchanted Ink: its colour drifting through the spectrum along each stroke and shimmering where the", TOP + 50));
+spells.add(caption("page catches the light, with a faint glow about it: a ward's circle and line at 6, and writing at 2.5", TOP + 84));
+let y = TOP + 230;
+let warding = |size| new_style(new_brush_style(BLUE, "Enchanted Ink", size, #{ min_pressure: 0.85, max_pressure: 0.85, pressure_profile: "constant" }), new_handwriting_style());
+spells.add(new_circle(vec2(LEFT + 120, y), 100), warding.call(6.0));
+spells.add(new_star(vec2(LEFT + 120, y), 90, 36, 5), warding.call(4.0));
+spells.add(new_line(vec2(LEFT + 300, y - 60), vec2(RIGHT - 20, y - 60)), warding.call(6.0));
+let spell = new_style(new_brush_style(BLUE, "Enchanted Ink", 2.5, #{ min_pressure: 0.35, max_pressure: 0.85 }), new_handwriting_style());
+spells.add(write_line("Lorem ipsum dolor sit amet", vec2(LEFT + 300, y + 20), #{ style: spell, type: new_type_style(PLAIN, 44) }));
+spells.add(write_line("consectetur adipiscing elit", vec2(LEFT + 300, y + 90), #{ style: spell, type: new_type_style(PLAIN, 44) }));
+y += 220;
+spells.add(caption("together: a map's cartouche in a Twisted Cord at 14, inside a Guilloche at 12, a Thornline round it at 16,", y));
+spells.add(caption("Star Trail stars over it at 10, its title in Iron Gall Quill and Gilt, and a Scorch at its corner", y + 34));
+let centre = vec2(W / 2, y + 420);
+spells.add(new_rectangle(centre, 860, 560), briar.call(16.0));
+spells.add(new_rectangle(centre, 760, 460), engraved.call(12.0));
+spells.add(new_rectangle(centre, 640, 340), cord.call(14.0));
+spells.add(wave(centre.x - 260, centre.x + 260, centre.y - 100, 60), stars.call(10.0));
+spells.add(write_in("R", centre.x - 230, centre.y + 20, 130, new_style(new_brush_style(GOLD, "Gilt", 5, #{ min_pressure: 0.6, max_pressure: 0.9 }), new_handwriting_style()), LOCHE));
+let title = new_style(new_brush_style(INK, "Iron Gall Quill", 3, #{ min_pressure: 0.35, max_pressure: 0.85 }), new_handwriting_style());
+spells.add(write_line("Lorem Ipsum", vec2(centre.x - 150, centre.y + 20), #{ style: title, type: new_type_style(PLAIN, 64) }));
+spells.add(write_line("dolor sit amet", vec2(centre.x - 150, centre.y + 90), #{ style: title, type: new_type_style(PLAIN, 36) }));
+spells.add(new_line(vec2(centre.x + 400, centre.y + 250), vec2(centre.x + 460, centre.y + 300)), burn.call(60.0));
+book.bind("appendix", spells);
+
+// The library's arcane brushes, each stranger than the last. A storm first:
+// rain and lightning.
+let storm = sheet("pens");
+storm.add(subhead("a storm", TOP));
+storm.add(caption("Driving Rain: slanting hairlines of every length and weight scattered along the stroke: eleven strokes", TOP + 50));
+storm.add(caption("at brush_size 16, one close under another, make a sky of it", TOP + 84));
+let steady = |name, colour, size| new_style(new_brush_style(colour, name, size, #{ min_pressure: 0.85, max_pressure: 0.85, pressure_profile: "constant" }), new_handwriting_style());
+let y = TOP + 160;
+for row in 0..11 {
+	storm.add(new_line(vec2(LEFT + 20, y + row * 27), vec2(RIGHT - 20, y + row * 27)), steady.call("Driving Rain", INK, 16.0));
+}
+y += 370;
+storm.add(caption("Levin: lightning, crackling along the stroke in short crooked strikes that throw a longer fork now and", y));
+storm.add(caption("then, with a pale glare about it: a bolt at 26, a line at 12, and writing at 7", y + 34));
+let bolt = [vec2(LEFT + 120, y + 90), vec2(LEFT + 60, y + 250), vec2(LEFT + 190, y + 290), vec2(LEFT + 90, y + 470), vec2(LEFT + 230, y + 500), vec2(LEFT + 150, y + 680)];
+for i in 1..bolt.len() {
+	storm.add(new_line(bolt[i - 1], bolt[i]), steady.call("Levin", INK, 26.0));
+}
+storm.add(new_line(vec2(LEFT + 380, y + 140), vec2(RIGHT - 20, y + 140)), steady.call("Levin", INK, 12.0));
+let struck = new_style(new_brush_style(INK, "Levin", 7, #{ min_pressure: 0.35, max_pressure: 0.85 }), new_handwriting_style());
+storm.add(write_line("Lorem ipsum dolor", vec2(LEFT + 380, y + 330), #{ style: struck, type: new_type_style(PLAIN, 64) }));
+storm.add(write_line("sit amet", vec2(LEFT + 380, y + 450), #{ style: struck, type: new_type_style(PLAIN, 64) }));
+book.bind("appendix", storm);
+
+// Stars that mean harm, and the sheen they're awash in.
+let cruel = sheet("pens");
+cruel.add(subhead("cruel stars", TOP));
+cruel.add(caption("Baleful Star: stars of eight needles, four long and four short, black at the heart, in a sheen that slides", TOP + 50));
+cruel.add(caption("through an oil-slick's colours and differs star to star: a wave at 26, a ring at 14", TOP + 84));
+let y = TOP + 240;
+cruel.add(wave(LEFT + 20, LEFT + 620, y, 160), steady.call("Baleful Star", BLUE, 26.0));
+cruel.add(new_circle(vec2(RIGHT - 160, y), 110), steady.call("Baleful Star", BLUE, 14.0));
+y += 190;
+cruel.add(caption("Witch Oil: a film all but black whose thin bright bands run through the spectrum, lying where they lie", y));
+cruel.add(caption("on the page whatever stroke uncovers them: two strokes at 22 side by side, the bands going on between them", y + 34));
+for row in 0..2 {
+	cruel.add(new_line(vec2(LEFT + 60, y + 130 + row * 50), vec2(RIGHT - 60, y + 130 + row * 50)), steady.call("Witch Oil", BLUE, 22.0));
+}
+y += 290;
+cruel.add(caption("together: a pool of Witch Oil, two rings and their middle at 24, ringed by Baleful Stars at 16", y));
+let pool = vec2(W / 2, y + 280);
+cruel.add(new_circle(pool, 10), steady.call("Witch Oil", BLUE, 24.0));
+for r in [50.0, 105.0] {
+	cruel.add(new_circle(pool, r), steady.call("Witch Oil", BLUE, 24.0));
+}
+cruel.add(new_circle(pool, 205), steady.call("Baleful Star", BLUE, 16.0));
+book.bind("appendix", cruel);
+
+// Blood: written in, running under the page, and tolling.
+let blood = sheet("pens");
+blood.add(subhead("sanguinations", TOP));
+blood.add(caption("Sanguine: wet blood, pooling dark at its rim, beading now and then and darkening toward brown the longer", TOP + 50));
+blood.add(caption("the stroke runs: writing at 2.5, and a line and a ring at 5", TOP + 84));
+let y = TOP + 180;
+let bled = new_style(new_brush_style(RED, "Sanguine", 2.5, #{ min_pressure: 0.35, max_pressure: 0.85 }), new_handwriting_style());
+blood.add(write_line("Lorem ipsum dolor sit amet", vec2(LEFT, y), #{ style: bled, type: new_type_style(PLAIN, 52) }));
+blood.add(new_line(vec2(LEFT, y + 90), vec2(LEFT + 700, y + 90)), steady.call("Sanguine", RED, 5.0));
+blood.add(new_circle(vec2(RIGHT - 110, y + 30), 80), steady.call("Sanguine", RED, 5.0));
+y += 190;
+blood.add(caption("Veinwork: lays nothing of its own down, only bares the vessels under the page, thick ones winding and", y));
+blood.add(caption("capillaries between: four strokes at 30 side by side find the same vessels going on", y + 34));
+for row in 0..4 {
+	blood.add(new_line(vec2(LEFT + 60, y + 130 + row * 80), vec2(RIGHT - 60, y + 130 + row * 80)), steady.call("Veinwork", RED, 30.0));
+}
+y += 480;
+blood.add(caption("Knell: a toll every little way along the stroke, each spreading in four rings that fade outward and cross", y));
+blood.add(caption("the last toll's, its heart empty: a line at 30, a ring at 18", y + 34));
+blood.add(new_line(vec2(LEFT + 100, y + 180), vec2(LEFT + 600, y + 180)), steady.call("Knell", RED, 30.0));
+blood.add(new_circle(vec2(RIGHT - 160, y + 180), 90), steady.call("Knell", RED, 18.0));
+book.bind("appendix", blood);
+
+// Bones, a hand that unwrites, and a script nobody wrote.
+let bones = sheet("pens");
+bones.add(subhead("bones and unwriting", TOP));
+bones.add(caption("Keybone: a spine with keys for ribs, each vertebra a key's bow, its shaft out to either side to the teeth", TOP + 50));
+bones.add(caption("of its bit, every shaft snapped somewhere: a spine at 30, a ring at 20", TOP + 84));
+let y = TOP + 230;
+bones.add(wave(LEFT + 60, LEFT + 640, y, 60), steady.call("Keybone", INK, 30.0));
+bones.add(new_circle(vec2(RIGHT - 150, y), 70), steady.call("Keybone", INK, 20.0));
+y += 190;
+bones.add(caption("Harrow: lays no ink down; drags what's written under it along the stroke in furrows, as claws would:", y));
+bones.add(caption("three lines in the book's pen, then a wave of it at 14 through them", y + 34));
+for row in 0..3 {
+	bones.add(write_line("Lorem ipsum dolor sit amet, consectetur adipiscing", vec2(LEFT, y + 110 + row * 64), #{ style: TEXT, type: new_type_style(PLAIN, 40) }));
+}
+bones.add(wave(LEFT + 20, RIGHT - 20, y + 174, 150), steady.call("Harrow", INK, 14.0));
+y += 340;
+bones.add(caption("Glossolalia: writes a script of its own, a letter a dab: a lobed bowl opened on one side and a stave", y));
+bones.add(caption("struck through at one of four angles, no two alike: three lines at 14, a ring at 10", y + 34));
+for row in 0..3 {
+	bones.add(new_line(vec2(LEFT + 20, y + 120 + row * 80), vec2(LEFT + 640, y + 120 + row * 80)), steady.call("Glossolalia", INK, 14.0));
+}
+bones.add(new_circle(vec2(RIGHT - 150, y + 200), 100), steady.call("Glossolalia", INK, 10.0));
+book.bind("appendix", bones);
+
+// The library's heavy darks. A rite drawn in a dry brush, claws, and a lock
+// of pen lines.
+let rite = sheet("pens");
+rite.add(subhead("a rite", TOP));
+rite.add(caption("Flying White: a loaded brush of stiff bristles: pressed hard, solid; lifting, the ink gives out bristle by", TOP + 50));
+rite.add(caption("bristle and the stroke splits into streaks: a circle at 6 and its star at 5, tapering from 0.15 to 1, and strokes at 16", TOP + 84));
+let dry = |colour, size| new_style(new_brush_style(colour, "Flying White", size, #{ min_pressure: 0.15, max_pressure: 1.0, pressure_profile: "taper" }), new_handwriting_style());
+let hub = vec2(LEFT + 250, TOP + 370);
+rite.add(new_circle(hub, 200), dry.call(RED, 6.0));
+rite.add(new_circle(hub, 168), dry.call(RED, 2.5));
+for i in 0..5 {
+	let a = -PI() / 2 + i * 4 * PI() / 5;
+	let b = -PI() / 2 + (i + 1) * 4 * PI() / 5;
+	rite.add(new_line(hub + vec2(a.cos(), a.sin()) * 158, hub + vec2(b.cos(), b.sin()) * 158), dry.call(RED, 5.0));
+}
+rite.add(wave(LEFT + 540, RIGHT - 20, TOP + 280, 150), dry.call(INK, 16.0));
+rite.add(new_line(vec2(LEFT + 540, TOP + 470), vec2(RIGHT - 20, TOP + 470)), dry.call(INK, 16.0));
+let y = TOP + 640;
+rite.add(caption("Rend: claws: gouges side by side, unevenly spaced and ragged, each biting to its own depth, so they give", y));
+rite.add(caption("out one after another as the hand lifts: three rakes at 26, tapering from 0.1 to 1", y + 34));
+let claw = new_style(new_brush_style(INK, "Rend", 26, #{ min_pressure: 0.1, max_pressure: 1.0, pressure_profile: "taper" }), new_handwriting_style());
+rite.add(new_line(vec2(LEFT + 20, y + 190), vec2(LEFT + 420, y + 110)), claw);
+rite.add(new_line(vec2(LEFT + 330, y + 250), vec2(LEFT + 760, y + 130)), claw);
+rite.add(new_line(vec2(LEFT + 640, y + 230), vec2(RIGHT - 20, y + 150)), claw);
+y += 330;
+rite.add(caption("Strands: a lock of pen lines drawn at once, of several weights, wavering, skipping where the pen did and", y));
+rite.add(caption("drawing together to a point as the hand lifts: two locks at 22, tapering from 0.1 to 1", y + 34));
+let lock = new_style(new_brush_style(INK, "Strands", 22, #{ min_pressure: 0.1, max_pressure: 1.0, pressure_profile: "taper" }), new_handwriting_style());
+rite.add(wave(LEFT + 20, RIGHT - 20, y + 130, 90), lock);
+rite.add(wave(LEFT + 20, RIGHT - 20, y + 215, 90), lock);
+book.bind("appendix", rite);
+
+// A thing with its hackles up.
+let harm = sheet("pens");
+harm.add(subhead("hackles", TOP));
+harm.add(caption("Horrid: a solid dark, ragged at the edge, with fine spines of every length and lean standing out of it on", TOP + 50));
+harm.add(caption("both sides, close as hackles: a stroke at 30 tapering from 0.2 to 1, a ring at 24, and a frame at 14", TOP + 84));
+let steady = |name, colour, size| new_style(new_brush_style(colour, name, size, #{ min_pressure: 0.85, max_pressure: 0.85, pressure_profile: "constant" }), new_handwriting_style());
+let y = TOP + 250;
+harm.add(wave(LEFT + 20, LEFT + 640, y, 90), new_style(new_brush_style(INK, "Horrid", 30, #{ min_pressure: 0.2, max_pressure: 1.0, pressure_profile: "taper" }), new_handwriting_style()));
+harm.add(new_circle(vec2(RIGHT - 150, y), 80), steady.call("Horrid", INK, 24.0));
+harm.add(new_rectangle(vec2(W / 2, y + 420), 860, 380), steady.call("Horrid", INK, 14.0));
+harm.add(write_line("Lorem ipsum dolor sit amet", vec2(LEFT + 150, y + 420), #{ style: new_style(new_brush_style(RED, "Flying White", 3, #{ min_pressure: 0.3, max_pressure: 1.0, pressure_profile: "taper" }), new_handwriting_style()), type: new_type_style(PLAIN, 60) }));
+book.bind("appendix", harm);
+
+// The library's gothic brushes: a velvet black, a blackletter blade, gauze,
+// char coming apart, and an etcher's needle; and Balefire, which burns.
+let gothic = sheet("pens");
+gothic.add(subhead("gothic", TOP));
+gothic.add(caption("each a stroke tapering from 0.1 to 1, and writing: Mezzotint at 26, a velvet black breaking into grain at its", TOP + 50));
+gothic.add(caption("edge; Fraktur at 9, a square-cut blade held at a slant; Shroud at 30, black gauze in folds; Cinder at 20,", TOP + 84));
+gothic.add(caption("char shedding flakes up the page; Drypoint at 12, a needle's line with its burr; Balefire at 26, tongues of flame", TOP + 118));
+let y = TOP + 230;
+for b in [["Mezzotint", 26.0, 8.0], ["Fraktur", 9.0, 4.0], ["Shroud", 30.0, 9.0], ["Cinder", 20.0, 6.0], ["Drypoint", 12.0, 5.0], ["Balefire", 26.0, 8.0]] {
+	gothic.add(write(b[0], LEFT, y - 60, 22));
+	gothic.add(wave(LEFT + 20, LEFT + 520, y + 20, 70), new_style(new_brush_style(INK, b[0], b[1], #{ min_pressure: 0.1, max_pressure: 1.0, pressure_profile: "taper" }), new_handwriting_style()));
+	gothic.add(write_line("Lorem ipsum", vec2(LEFT + 580, y + 20), #{ style: new_style(new_brush_style(INK, b[0], b[2], #{ min_pressure: 0.35, max_pressure: 0.9 }), new_handwriting_style()), type: new_type_style(PLAIN, 72) }));
+	y += 185;
+}
+book.bind("appendix", gothic);
 
 // ---- the title page and the contents, which go first ----
 

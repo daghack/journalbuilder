@@ -1,0 +1,179 @@
+name: Keybone
+description: A spine with keys for ribs. Each vertebra is a key's bow, its shaft running out to either side to the teeth of its bit, and every shaft is snapped somewhere along it, none in the same place.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      spacing: 0.2
+      stabilize: 0.5
+  round:
+    type: circle
+    name: Round the vertebra
+    comment: soft to its rim, so it measures how far out along the rib a point is
+    inputs:
+      softness: 1.0
+  bow:
+    type: curve
+    name: Bow
+    comment: a ring about the spine, the key's bow and the vertebra both
+    inputs:
+      curve: [[0.0, 0.0], [0.8, 0.0], [0.855, 1.0], [0.91, 0.0], [1.0, 0.0]]
+  shaft:
+    type: circle
+    name: Shaft
+    comment: a needle across the stroke
+    inputs:
+      aspect: 0.045
+      softness: 0.1
+  outside_bow:
+    type: remap
+    name: From the bow outward
+    inputs:
+      clamp: true
+      in_high: 0.82
+      in_low: 0.8
+      out_high: 0.0
+      out_low: 1.0
+  bit:
+    type: circle
+    name: Bit
+    comment: a wider needle, a little askew, which the teeth are cut from
+    inputs:
+      aspect: 0.13
+      rotation: 0.12
+      softness: 0.06
+  teeth_at:
+    type: curve
+    name: Two teeth near the tip
+    inputs:
+      curve: [[0.0, 0.0], [0.04, 0.0], [0.06, 1.0], [0.14, 1.0], [0.16, 0.0], [0.2, 0.0], [0.22, 1.0], [0.3, 1.0], [0.32, 0.0], [1.0, 0.0]]
+  teeth:
+    type: multiply
+  lean:
+    type: random
+    name: Each rib's lean
+  lean_angle:
+    type: remap
+    inputs:
+      clamp: true
+      out_high: 0.12
+      out_low: -0.12
+  leaning:
+    type: add
+  snap:
+    type: random
+    name: Where it snapped
+  snap_at:
+    type: remap
+    name: Somewhere along the shaft
+    inputs:
+      clamp: true
+      out_high: 0.7
+      out_low: 0.35
+  snap_start:
+    type: add
+    inputs:
+      b: 0.01
+  snap_end:
+    type: add
+    inputs:
+      b: 0.07
+  snap_end_edge:
+    type: add
+    inputs:
+      b: 0.08
+  gap_in:
+    type: remap
+    inputs:
+      clamp: true
+  gap_out:
+    type: remap
+    inputs:
+      clamp: true
+      out_high: 0.0
+      out_low: 1.0
+  gap:
+    type: multiply
+  whole:
+    type: invert
+    name: The shaft but for the gap
+  shaft_out:
+    type: multiply
+  snapped:
+    type: multiply
+  span:
+    type: random
+    name: Each rib's span
+  span_range:
+    type: remap
+    inputs:
+      clamp: true
+      out_high: 1.0
+      out_low: 0.72
+  sized:
+    type: multiply
+  sum_a:
+    type: add
+  sum_b:
+    type: add
+  full:
+    type: remap
+    name: Between nothing and full
+    inputs:
+      clamp: true
+  paint:
+    type: paint
+    inputs:
+      buildup: 0.0
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- bit.mask -> teeth.a
+- bow.output -> sum_a.a
+- full.output -> stamp.tip
+- gap.result -> whole.input
+- gap_in.output -> gap.a
+- gap_out.output -> gap.b
+- lean.value -> lean_angle.input
+- lean_angle.output -> leaning.b
+- leaning.result -> bit.rotation_input
+- leaning.result -> shaft.rotation_input
+- outside_bow.output -> shaft_out.b
+- paint_color.color -> stamp.color
+- pen_input.drawing_angle -> leaning.a
+- pen_input.position -> paint.position
+- pen_input.pressure -> sized.a
+- round.mask -> bow.input
+- round.mask -> gap_in.input
+- round.mask -> gap_out.input
+- round.mask -> outside_bow.input
+- round.mask -> teeth_at.input
+- shaft.mask -> shaft_out.a
+- shaft_out.result -> snapped.a
+- sized.result -> paint.size
+- snap.value -> snap_at.input
+- snap_at.output -> gap_in.in_low
+- snap_at.output -> snap_end.a
+- snap_at.output -> snap_end_edge.a
+- snap_at.output -> snap_start.a
+- snap_end.result -> gap_out.in_low
+- snap_end_edge.result -> gap_out.in_high
+- snap_start.result -> gap_in.in_high
+- snapped.result -> sum_a.b
+- span.value -> span_range.input
+- span_range.output -> sized.b
+- stamp.dab -> paint.rgba
+- sum_a.result -> sum_b.a
+- sum_b.result -> full.input
+- teeth.result -> sum_b.b
+- teeth_at.output -> teeth.b
+- whole.output -> snapped.b
+exposed_ports:
+  brush_settings.size: {}
+  brush_settings.spacing: {}
+  shaft.aspect: {}
+  paint.opacity: {}

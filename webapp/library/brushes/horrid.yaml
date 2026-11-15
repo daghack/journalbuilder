@@ -1,0 +1,114 @@
+name: Horrid
+description: A black thing with its hackles up. The stroke is a solid dark, ragged at the edge, and out of it on both sides stand fine spines of every length and lean, close as hackles, most short, a few very long, so that its outline is never where the eye expects it.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      spacing: 0.025
+      stabilize: 0.5
+  round:
+    type: circle
+    name: Round it
+    comment: soft to its rim and a little out of true, so the body and each spine's length can be cut from it
+    inputs:
+      algorithm: 1
+      amplitude: 0.1
+      frequency: 5.0
+      softness: 1.0
+  random:
+    type: random
+  body:
+    type: remap
+    name: Body
+    inputs:
+      clamp: true
+      in_high: 0.7
+      in_low: 0.66
+  spine:
+    type: circle
+    name: Spine
+    comment: a superformula of one lobe, a thin spike from the middle out to the rim
+    inputs:
+      algorithm: 2
+      frequency: 1.0
+      n1: 0.04
+      n2: 1.0
+      n3: 1.0
+      softness: 0.04
+  side:
+    type: random
+    name: Which side
+  side_angle:
+    type: remap
+    name: Out to the left or the right
+    inputs:
+      clamp: true
+      in_high: 0.51
+      in_low: 0.49
+      out_high: 1.5708
+      out_low: -1.5708
+  lean:
+    type: random
+    name: Its lean
+  lean_angle:
+    type: remap
+    inputs:
+      clamp: true
+      out_high: 1.1
+      out_low: -1.1
+  angle_a:
+    type: add
+  angle_b:
+    type: add
+  length:
+    type: random
+    name: Its length
+  length_curve:
+    type: curve
+    name: Mostly short, a few very long
+    comment: the whole dab is this much of its full size, so the body swells and shrinks with its spines and its edge is never even
+    inputs:
+      curve: [[0.0, 0.42], [0.6, 0.55], [0.9, 0.75], [1.0, 1.0]]
+  sized:
+    type: multiply
+  sum:
+    type: add
+  full:
+    type: remap
+    name: Between nothing and full
+    inputs:
+      clamp: true
+  paint:
+    type: paint
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- angle_a.result -> angle_b.a
+- angle_b.result -> spine.rotation_input
+- body.output -> sum.a
+- full.output -> stamp.tip
+- lean.value -> lean_angle.input
+- lean_angle.output -> angle_b.b
+- length.value -> length_curve.input
+- length_curve.output -> sized.b
+- paint_color.color -> stamp.color
+- pen_input.drawing_angle -> angle_a.a
+- pen_input.position -> paint.position
+- pen_input.pressure -> sized.a
+- sized.result -> paint.size
+- random.value -> round.seed
+- round.mask -> body.input
+- side.value -> side_angle.input
+- side_angle.output -> angle_a.b
+- spine.mask -> sum.b
+- stamp.dab -> paint.rgba
+- sum.result -> full.input
+exposed_ports:
+  brush_settings.size: {}
+  body.in_low: {}
+  lean_angle.out_high: {}
+  paint.opacity: {}

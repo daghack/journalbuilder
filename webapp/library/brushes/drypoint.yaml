@@ -1,0 +1,137 @@
+name: Drypoint
+description: A needle dragged through copper. The line is fine and sure, with a fainter one beside it where the point skidded, and along both the burr it threw up holds ink in a soft grit, so the line has a shadow of its own.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      spacing: 0.015
+      stabilize: 0.5
+  across:
+    type: circle
+    name: Across the line
+    comment: a needle across the stroke; only what lies on it is drawn
+    inputs:
+      aspect: 0.09
+      softness: 0.08
+  round:
+    type: circle
+    name: Round the point
+    comment: soft to its rim, so it measures how far from the line a point is
+    inputs:
+      softness: 1.0
+  waver:
+    type: noise
+    name: The hand's waver
+    inputs:
+      octaves: 2.0
+      space: 0
+  waver_size:
+    type: multiply
+    inputs:
+      b: 0.8
+  waver_by:
+    type: remap
+    inputs:
+      clamp: true
+      out_high: 0.035
+      out_low: -0.035
+  wavering:
+    type: add
+  lines:
+    type: curve
+    name: The line, and the skid beside it
+    comment: the line is the right-hand end; the skid is the lower peak
+    inputs:
+      curve: [[0.0, 0.0], [0.7, 0.0], [0.725, 0.35], [0.75, 0.0], [0.9, 0.0], [0.93, 1.0], [1.0, 1.0]]
+  burr_grit:
+    type: noise
+    name: Burr
+    comment: fine and pinned to the page
+    inputs:
+      octaves: 3.0
+      roughness: 0.75
+      seed: 6
+      space: 0
+  grit_size:
+    type: multiply
+    inputs:
+      b: 0.02
+  burr_near:
+    type: curve
+    name: Close about the line
+    inputs:
+      curve: [[0.0, 0.0], [0.3, 0.0], [0.7, 0.55], [1.0, 1.0]]
+  burr_reach:
+    type: multiply
+    inputs:
+      b: 0.5
+  burr_rise:
+    type: subtract
+    inputs:
+      a: 0.72
+  burr_edge:
+    type: add
+    inputs:
+      b: 0.05
+  burr:
+    type: remap
+    inputs:
+      clamp: true
+      out_high: 0.85
+      out_low: 0.0
+  sum:
+    type: add
+  full:
+    type: remap
+    name: Between nothing and full
+    inputs:
+      clamp: true
+  drawn:
+    type: multiply
+  press:
+    type: curve
+    name: Pressing deepens it
+    inputs:
+      curve: [[0.0, 0.45], [1.0, 1.0]]
+  paint:
+    type: paint
+    inputs:
+      buildup: 0.0
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- across.mask -> drawn.a
+- brush_settings.size -> grit_size.a
+- brush_settings.size -> waver_size.a
+- burr.output -> sum.b
+- burr_edge.result -> burr.in_high
+- burr_grit.value -> burr.input
+- burr_near.output -> burr_reach.a
+- burr_reach.result -> burr_rise.b
+- burr_rise.result -> burr.in_low
+- burr_rise.result -> burr_edge.a
+- drawn.result -> stamp.tip
+- full.output -> drawn.b
+- grit_size.result -> burr_grit.scale
+- lines.output -> sum.a
+- paint_color.color -> stamp.color
+- pen_input.drawing_angle -> across.rotation_input
+- pen_input.position -> paint.position
+- pen_input.pressure -> press.input
+- press.output -> paint.size
+- round.mask -> burr_near.input
+- round.mask -> wavering.a
+- stamp.dab -> paint.rgba
+- sum.result -> full.input
+- waver.value -> waver_by.input
+- waver_by.output -> wavering.b
+- waver_size.result -> waver.scale
+- wavering.result -> lines.input
+exposed_ports:
+  brush_settings.size: {}
+  burr_reach.b: {}
+  paint.opacity: {}

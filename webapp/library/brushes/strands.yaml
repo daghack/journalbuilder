@@ -1,0 +1,111 @@
+name: Strands
+description: A lock of pen lines drawn at once, fine strokes of several weights running side by side down the stroke, wavering a little, skipping where the pen did, and drawing together to a point as the hand lifts, for hair, water, smoke and the grain of things.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      spacing: 0.015
+      stabilize: 0.5
+  across:
+    type: circle
+    name: Across the lock
+    comment: a needle across the stroke; only what lies on it is drawn, so the rings below become lines
+    inputs:
+      aspect: 0.09
+      softness: 0.08
+  round:
+    type: circle
+    name: Round the lock
+    comment: soft to its rim, so it measures how far from the middle a point is
+    inputs:
+      softness: 1.0
+  waver:
+    type: noise
+    name: Waver
+    comment: pinned to the page, so the lines wander smoothly
+    inputs:
+      octaves: 2.0
+      space: 0
+  waver_size:
+    type: multiply
+    inputs:
+      b: 0.9
+  waver_by:
+    type: remap
+    inputs:
+      clamp: true
+      out_high: 0.06
+      out_low: -0.06
+  wavering:
+    type: add
+  lines:
+    type: curve
+    name: Seven lines a side, of several weights
+    comment: each peak is a line at that distance from the middle
+    inputs:
+      curve: [[0.0, 0.0], [0.05, 0.0], [0.07, 1.0], [0.085, 1.0], [0.105, 0.0], [0.19, 0.0], [0.21, 1.0], [0.245, 1.0], [0.265, 0.0], [0.33, 0.0], [0.345, 1.0], [0.355, 1.0], [0.37, 0.0], [0.45, 0.0], [0.47, 1.0], [0.5, 1.0], [0.52, 0.0], [0.6, 0.0], [0.615, 1.0], [0.625, 1.0], [0.64, 0.0], [0.75, 0.0], [0.77, 1.0], [0.795, 1.0], [0.815, 0.0], [0.94, 0.0], [0.96, 1.0], [1.0, 1.0]]
+  full:
+    type: remap
+    name: Between nothing and full
+    inputs:
+      clamp: true
+  skips:
+    type: noise
+    name: Where the pen skipped
+    inputs:
+      octaves: 2.0
+      seed: 9
+      space: 0
+  skip_size:
+    type: multiply
+    inputs:
+      b: 0.1
+  skipped:
+    type: remap
+    inputs:
+      clamp: true
+      in_high: 0.27
+      in_low: 0.22
+  drawn:
+    type: multiply
+  inked:
+    type: multiply
+  gather:
+    type: curve
+    name: Lifting gathers the lock
+    inputs:
+      curve: [[0.0, 0.12], [1.0, 1.0]]
+  paint:
+    type: paint
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- across.mask -> drawn.a
+- brush_settings.size -> skip_size.a
+- brush_settings.size -> waver_size.a
+- drawn.result -> inked.a
+- full.output -> drawn.b
+- gather.output -> paint.size
+- inked.result -> stamp.tip
+- lines.output -> full.input
+- paint_color.color -> stamp.color
+- pen_input.drawing_angle -> across.rotation_input
+- pen_input.position -> paint.position
+- pen_input.pressure -> gather.input
+- round.mask -> wavering.a
+- skip_size.result -> skips.scale
+- skipped.output -> inked.b
+- skips.value -> skipped.input
+- stamp.dab -> paint.rgba
+- waver.value -> waver_by.input
+- waver_by.output -> wavering.b
+- waver_size.result -> waver.scale
+- wavering.result -> lines.input
+exposed_ports:
+  brush_settings.size: {}
+  waver_by.out_high: {}
+  paint.opacity: {}

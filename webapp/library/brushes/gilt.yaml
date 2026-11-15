@@ -1,0 +1,75 @@
+name: Gilt
+description: Gold leaf laid on and burnished unevenly, bright where it caught the burnisher, dull where it didn't, with a glint here and there, for illuminated capitals and seals.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      stabilize: 0.5
+  circle:
+    type: circle
+    inputs:
+      softness: 0.05
+  burnish:
+    type: noise
+    name: Burnish
+    comment: broad patches of bright and dull, pinned to the page
+    inputs:
+      octaves: 3.0
+      roughness: 0.55
+      scale: 10.0
+      space: 0
+      warp: 1.5
+  burnish_light:
+    type: remap
+    inputs:
+      clamp: true
+      in_high: 0.8
+      in_low: 0.2
+      out_high: 0.35
+      out_low: -0.4
+  glints:
+    type: noise
+    name: Glints
+    inputs:
+      octaves: 2.0
+      roughness: 0.4
+      scale: 1.8
+      space: 0
+      seed: 7
+  glint_light:
+    type: remap
+    name: Only the brightest catch the light
+    inputs:
+      clamp: true
+      in_high: 0.9
+      in_low: 0.74
+      out_high: 0.7
+      out_low: 0.0
+  light:
+    type: add
+  hsv:
+    type: hsv
+  paint:
+    type: paint
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- burnish.value -> burnish_light.input
+- burnish_light.output -> light.a
+- circle.mask -> stamp.tip
+- glint_light.output -> light.b
+- glints.value -> glint_light.input
+- hsv.output -> stamp.color
+- light.result -> hsv.value
+- paint_color.color -> hsv.color
+- pen_input.position -> paint.position
+- pen_input.pressure -> paint.size
+- stamp.dab -> paint.rgba
+exposed_ports:
+  brush_settings.stabilize: {}
+  brush_settings.size: {}
+  paint.opacity: {}

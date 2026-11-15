@@ -1,0 +1,86 @@
+name: Star Trail
+description: A path drawn in stars rather than ink, four-pointed glints of every size scattered along it with gaps between, some bright and some faint, for star charts, constellations and the road a comet took.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      spacing: 1.0
+      stabilize: 0.5
+  star:
+    type: circle
+    name: Four-pointed glint
+    inputs:
+      algorithm: 2
+      frequency: 4.0
+      n1: 0.35
+      n2: 1.0
+      n3: 1.0
+      softness: 0.05
+  tilt:
+    type: random
+    name: Each star's tilt
+  tilt_angle:
+    type: multiply
+    inputs:
+      b: 0.8
+  size:
+    type: random
+    name: Each star's size
+  size_curve:
+    type: curve
+    name: Mostly small
+    comment: most stars are small, and a few are large
+    inputs:
+      curve: [[0.0, 0.18], [0.75, 0.4], [1.0, 1.0]]
+  sized:
+    type: multiply
+  present:
+    type: random
+    name: Is there a star here
+  gate:
+    type: remap
+    name: Two in three
+    inputs:
+      clamp: true
+      in_high: 0.36
+      in_low: 0.34
+  shown:
+    type: multiply
+  bright:
+    type: random
+    name: How bright
+  brightness:
+    type: remap
+    inputs:
+      clamp: true
+      out_high: 1.0
+      out_low: 0.45
+  paint:
+    type: paint
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- bright.value -> brightness.input
+- brightness.output -> paint.build_flow
+- gate.output -> shown.b
+- paint_color.color -> stamp.color
+- pen_input.position -> paint.position
+- pen_input.pressure -> sized.a
+- present.value -> gate.input
+- shown.result -> stamp.tip
+- size.value -> size_curve.input
+- size_curve.output -> sized.b
+- sized.result -> paint.size
+- star.mask -> shown.a
+- stamp.dab -> paint.rgba
+- tilt.value -> tilt_angle.a
+- tilt_angle.result -> star.rotation_input
+exposed_ports:
+  brush_settings.size: {}
+  brush_settings.spacing: {}
+  star.n1: {}
+  paint.opacity: {}

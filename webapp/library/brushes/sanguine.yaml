@@ -1,0 +1,80 @@
+name: Sanguine
+description: Written in blood and still wet, the line pooling dark at its rim as it dries, swelling into a bead where the pen lingered and darkening toward brown the longer the stroke runs.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      stabilize: 0.5
+  circle:
+    type: circle
+    inputs:
+      algorithm: 1
+      amplitude: 0.12
+      frequency: 6.0
+      softness: 0.08
+  random:
+    type: random
+  bead:
+    type: random
+    name: Does it bead here
+  bead_curve:
+    type: curve
+    name: A bead now and then
+    inputs:
+      curve: [[0.0, 0.58], [0.5, 0.58], [0.9, 0.58], [0.96, 1.0], [1.0, 1.0]]
+  sized:
+    type: multiply
+  wet:
+    type: remap
+    name: Wet enough to write
+    inputs:
+      clamp: true
+      out_high: 1.0
+      out_low: 0.55
+  lengths:
+    type: divide
+    name: How far along, in dab-widths
+  dried:
+    type: remap
+    name: Drying as it goes
+    comment: the wire to Value maps 0..1 onto its -1..1, so 0.5 is the blood as it is and 0.3 is 40% darker
+    inputs:
+      clamp: true
+      in_high: 60.0
+      in_low: 0.0
+      out_high: 0.3
+      out_low: 0.5
+  hsv:
+    type: hsv
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  watercolor:
+    type: watercolor
+    inputs:
+      deposit: 0.95
+      pickup_size: 0.3
+      wetness: 0.9
+connections:
+- bead.value -> bead_curve.input
+- bead_curve.output -> sized.b
+- brush_settings.size -> lengths.b
+- circle.mask -> watercolor.mask
+- dried.output -> hsv.value
+- hsv.output -> watercolor.color
+- lengths.result -> dried.input
+- paint_color.color -> hsv.color
+- pen_input.distance -> lengths.a
+- pen_input.position -> watercolor.position
+- pen_input.pressure -> sized.a
+- pen_input.pressure -> wet.input
+- random.value -> circle.seed
+- sized.result -> watercolor.size
+- wet.output -> watercolor.flow
+exposed_ports:
+  brush_settings.size: {}
+  dried.in_high: {}
+  watercolor.deposit: {}
+  watercolor.wetness: {}
+  watercolor.opacity: {}

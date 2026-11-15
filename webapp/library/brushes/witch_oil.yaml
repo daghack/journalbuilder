@@ -1,0 +1,70 @@
+name: Witch Oil
+description: A film of something that isn't oil, its colours running in bands through the spectrum and back as a slick's do on black water, the bands lying where they lie on the page whatever stroke uncovers them.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      stabilize: 0.5
+  circle:
+    type: circle
+    inputs:
+      algorithm: 1
+      amplitude: 0.08
+      frequency: 6.0
+      softness: 0.7
+  random:
+    type: random
+  film:
+    type: noise
+    name: The film's thickness
+    comment: warped hard and pinned to the page; its contours are the colour bands
+    inputs:
+      octaves: 2.0
+      roughness: 0.3
+      scale: 90.0
+      space: 0
+      warp: 2.2
+  bands:
+    type: multiply
+    name: Nearly twice round the spectrum
+    inputs:
+      b: 620.0
+  lustre:
+    type: curve
+    name: Lustre
+    comment: all but black, with thin bright bands; the wire to Value maps 0..1 onto its -1..1, so 0.5 leaves the colour be
+    inputs:
+      curve: [[0.0, 0.2], [0.14, 0.2], [0.22, 0.68], [0.3, 0.2], [0.48, 0.2], [0.56, 0.68], [0.64, 0.2], [0.82, 0.2], [0.9, 0.68], [0.98, 0.2], [1.0, 0.2]]
+  hsv:
+    type: hsv
+    inputs:
+      saturation: 0.4
+  paint:
+    type: paint
+    inputs:
+      buildup: 0.0
+      wash_flow: 0.8
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- bands.result -> hsv.hue
+- circle.mask -> stamp.tip
+- film.value -> bands.a
+- film.value -> lustre.input
+- lustre.output -> hsv.value
+- hsv.output -> stamp.color
+- paint_color.color -> hsv.color
+- pen_input.position -> paint.position
+- pen_input.pressure -> paint.size
+- random.value -> circle.seed
+- stamp.dab -> paint.rgba
+exposed_ports:
+  brush_settings.size: {}
+  film.scale: {}
+  bands.b: {}
+  paint.wash_flow: {}
+  paint.opacity: {}

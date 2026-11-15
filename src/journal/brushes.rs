@@ -1,7 +1,7 @@
 //! Brushes: Darkly brush graphs, kept in Darkly's own format, the YAML its
 //! brush builder copies and its built-in brushes are kept in
 //! (`PortableBrush`). A journal's are its `brushes/NAME.yaml`, in front of
-//! the library's, which are Darkly's built-ins. A brush is called by the
+//! the library's: Darkly's built-ins, and the library's own. A brush is called by the
 //! `name` its file gives, as Darkly calls it ("Ink Pen"), or by its file's
 //! name if it gives none.
 //!
@@ -132,7 +132,7 @@ pub fn json_to_file(json: &str) -> Result<String, String> {
     serde_yaml_ng::to_string(&portable).map_err(|e| e.to_string())
 }
 
-/// Darkly's built-in brushes, which the library's files are, by name: what
+/// Darkly's built-in brushes, which the library has files of, by name: what
 /// styles draw with when no journal's brushes are at hand.
 pub fn builtins() -> &'static BTreeMap<String, Arc<BrushGraph>> {
     static BUILTINS: OnceLock<BTreeMap<String, Arc<BrushGraph>>> = OnceLock::new();

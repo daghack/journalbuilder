@@ -1,0 +1,89 @@
+name: Driving Rain
+description: A stroke drawn as rain, slanting hairlines of every length driven before the wind, some heavy and some barely there, for a storm's sky and a night nobody should be out in.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      spacing: 0.3
+      stabilize: 0.5
+  streak:
+    type: circle
+    name: Streak
+    comment: a soft needle, slanted the way the wind drives it
+    inputs:
+      aspect: 0.06
+      rotation: 0.35
+      softness: 0.1
+  gust:
+    type: random
+    name: Gust
+  gust_angle:
+    type: remap
+    name: The wind shifts a little
+    inputs:
+      clamp: true
+      out_high: 0.09
+      out_low: -0.09
+  turned:
+    type: add
+  length:
+    type: random
+    name: Each streak's length
+  length_curve:
+    type: curve
+    name: Mostly short
+    inputs:
+      curve: [[0.0, 0.25], [0.7, 0.5], [1.0, 1.0]]
+  sized:
+    type: multiply
+  present:
+    type: random
+    name: Is there a streak here
+  gate:
+    type: remap
+    name: Two in three
+    inputs:
+      clamp: true
+      in_high: 0.341
+      in_low: 0.34
+  shown:
+    type: multiply
+  weight:
+    type: random
+    name: How heavy
+  heaviness:
+    type: remap
+    inputs:
+      clamp: true
+      out_high: 1.0
+      out_low: 0.45
+  paint:
+    type: paint
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- gate.output -> shown.b
+- gust.value -> gust_angle.input
+- gust_angle.output -> turned.a
+- heaviness.output -> paint.build_flow
+- length.value -> length_curve.input
+- length_curve.output -> sized.b
+- paint_color.color -> stamp.color
+- pen_input.position -> paint.position
+- pen_input.pressure -> sized.a
+- present.value -> gate.input
+- shown.result -> stamp.tip
+- sized.result -> paint.size
+- stamp.dab -> paint.rgba
+- streak.mask -> shown.a
+- turned.result -> streak.rotation_input
+- weight.value -> heaviness.input
+exposed_ports:
+  brush_settings.size: {}
+  brush_settings.spacing: {}
+  streak.rotation: {}
+  paint.opacity: {}

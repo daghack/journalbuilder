@@ -1,0 +1,90 @@
+name: Shroud
+description: A length of black gauze drawn across the page. It lies in soft folds that run the stroke's length, darker where the cloth doubles and thin enough between to see through, and one laid over another deepens it, for veils, smoke and whatever stands behind them.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      spacing: 0.008
+      stabilize: 0.5
+  across:
+    type: circle
+    name: Across the cloth
+    comment: a needle across the stroke; only what lies on it is drawn, so the folds below run the stroke's length
+    inputs:
+      aspect: 0.3
+      softness: 0.6
+  round:
+    type: circle
+    name: Round the cloth
+    comment: soft to its rim, so it measures how far from the middle a point is
+    inputs:
+      softness: 1.0
+  sway:
+    type: noise
+    name: Sway
+    comment: pinned to the page, so the folds wander
+    inputs:
+      octaves: 2.0
+      space: 0
+  sway_size:
+    type: multiply
+    inputs:
+      b: 2.2
+  sway_by:
+    type: remap
+    inputs:
+      clamp: true
+      out_high: 0.3
+      out_low: -0.3
+  swaying:
+    type: add
+  folds:
+    type: curve
+    name: Folds
+    comment: thin at the hem (the left-hand end), doubling here and there toward the middle
+    inputs:
+      curve: [[0.0, 0.0], [0.1, 0.2], [0.24, 0.55], [0.4, 0.3], [0.58, 0.85], [0.76, 0.45], [0.9, 1.0], [1.0, 0.7]]
+  thin:
+    type: multiply
+    name: Gauze, not cloth
+    inputs:
+      b: 0.72
+  drawn:
+    type: multiply
+  gather:
+    type: curve
+    name: Lifting gathers it
+    inputs:
+      curve: [[0.0, 0.15], [1.0, 1.0]]
+  paint:
+    type: paint
+    inputs:
+      buildup: 0.0
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- across.mask -> drawn.a
+- brush_settings.size -> sway_size.a
+- drawn.result -> stamp.tip
+- folds.output -> thin.a
+- gather.output -> paint.size
+- paint_color.color -> stamp.color
+- pen_input.drawing_angle -> across.rotation_input
+- pen_input.position -> paint.position
+- pen_input.pressure -> gather.input
+- round.mask -> swaying.a
+- stamp.dab -> paint.rgba
+- sway.value -> sway_by.input
+- sway_by.output -> swaying.b
+- sway_size.result -> sway.scale
+- swaying.result -> folds.input
+- thin.result -> drawn.b
+exposed_ports:
+  brush_settings.size: {}
+  thin.b: {}
+  sway_by.out_high: {}
+  paint.opacity: {}

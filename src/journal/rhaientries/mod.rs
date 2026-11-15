@@ -668,9 +668,10 @@ brush.color = \"darkredd\";", BRUSH)).expect_err("bad color should fail").to_str
         let names: Vec<String> = names.into_iter().map(|n| n.into_string().unwrap()).collect();
         assert!(names.contains(&"Calligraphy".to_string()) && names.contains(&"Ink Pen".to_string()), "{:?}", names);
         assert!(names.windows(2).all(|w| w[0] < w[1]));
-        let mut darklys: Vec<String> = ::darkly::brush::builtin_brushes::all().into_iter().map(|b| b.metadata.name).collect();
-        darklys.sort();
-        assert_eq!(names, darklys, "brush_names() should list Darkly's brushes");
+        for darkly in ::darkly::brush::builtin_brushes::all() {
+            assert!(names.contains(&darkly.metadata.name), "brush_names() should list Darkly's {}", darkly.metadata.name);
+        }
+        assert!(names.contains(&"Iron Gall Quill".to_string()), "brush_names() should list the library's own: {:?}", names);
         for name in &names {
             engine().engine.run(&format!("new_brush_style(\"black\", {:?}, 1.0);", name)).unwrap();
         }

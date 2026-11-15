@@ -1,0 +1,54 @@
+name: Knell
+description: A bell nobody rang, tolling along the stroke. Each toll spreads in rings that fade as they widen and cross the last toll's rings, and the heart of every one is eaten out.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      spacing: 0.45
+      stabilize: 0.5
+  toll:
+    type: circle
+    name: One toll
+    comment: soft from its heart to its rim and a little out of true, so its rings can be cut from it
+    inputs:
+      algorithm: 1
+      amplitude: 0.05
+      frequency: 5.0
+      softness: 1.0
+  random:
+    type: random
+  rings:
+    type: curve
+    name: Four rings, fading outward
+    comment: nothing at the heart (the right-hand end); each peak is a ring
+    inputs:
+      curve: [[0.0, 0.0], [0.085, 0.0], [0.12, 0.3], [0.155, 0.0], [0.325, 0.0], [0.36, 0.5], [0.395, 0.0], [0.565, 0.0], [0.6, 0.75], [0.635, 0.0], [0.805, 0.0], [0.84, 1.0], [0.875, 0.0], [1.0, 0.0]]
+  full:
+    type: remap
+    name: Between nothing and full
+    inputs:
+      clamp: true
+  paint:
+    type: paint
+    inputs:
+      buildup: 0.0
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- full.output -> stamp.tip
+- paint_color.color -> stamp.color
+- pen_input.position -> paint.position
+- pen_input.pressure -> paint.size
+- random.value -> toll.seed
+- rings.output -> full.input
+- stamp.dab -> paint.rgba
+- toll.mask -> rings.input
+exposed_ports:
+  brush_settings.size: {}
+  brush_settings.spacing: {}
+  toll.amplitude: {}
+  paint.opacity: {}

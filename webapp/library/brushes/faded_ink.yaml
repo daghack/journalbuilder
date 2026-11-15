@@ -1,0 +1,104 @@
+name: Faded Ink
+description: Old ink gone brown and patchy with age, each stroke faded its own amount and the page fading in broad, soft blotches, as on a scroll left in the sun.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      stabilize: 0.5
+  circle:
+    type: circle
+    inputs:
+      algorithm: 1
+      amplitude: 0.04
+      frequency: 6.0
+      softness: 0.08
+  hsv:
+    type: hsv
+    name: Aged
+    comment: iron gall browns and greys as it ages
+    inputs:
+      saturation: 0.1
+      value: 0.2
+  blotches:
+    type: noise
+    name: Sun blotches
+    comment: broad and pinned to the page, so the fading lies across strokes
+    inputs:
+      octaves: 3.0
+      roughness: 0.5
+      scale: 90.0
+      space: 0
+  blotch_depth:
+    type: remap
+    name: How far it fades
+    inputs:
+      clamp: true
+      in_high: 0.75
+      in_low: 0.25
+      out_high: 1.0
+      out_low: 0.4
+  grain:
+    type: noise
+    name: Worn grain
+    inputs:
+      octaves: 3.0
+      roughness: 0.6
+      scale: 2.5
+      space: 0
+  grain_depth:
+    type: remap
+    inputs:
+      clamp: true
+      in_high: 0.7
+      in_low: 0.3
+      out_high: 1.0
+      out_low: 0.7
+  multiply:
+    type: multiply
+  multiply_2:
+    type: multiply
+  stroke_fade:
+    type: random
+    name: Each stroke's fade
+    inputs:
+      mode: 1
+  stroke_opacity:
+    type: remap
+    inputs:
+      clamp: true
+      out_high: 0.95
+      out_low: 0.65
+  random:
+    type: random
+  paint:
+    type: paint
+    inputs:
+      buildup: 0.0
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- blotch_depth.output -> multiply.b
+- blotches.value -> blotch_depth.input
+- circle.mask -> multiply.a
+- grain.value -> grain_depth.input
+- grain_depth.output -> multiply_2.b
+- hsv.output -> stamp.color
+- multiply.result -> multiply_2.a
+- multiply_2.result -> stamp.tip
+- paint_color.color -> hsv.color
+- pen_input.position -> paint.position
+- pen_input.pressure -> paint.size
+- pen_input.pressure -> paint.wash_flow
+- random.value -> circle.seed
+- stamp.dab -> paint.rgba
+- stroke_fade.value -> stroke_opacity.input
+- stroke_opacity.output -> paint.opacity
+exposed_ports:
+  brush_settings.stabilize: {}
+  brush_settings.size: {}
+  blotch_depth.out_low: {}
+  paint.wash_flow: {}

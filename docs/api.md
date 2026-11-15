@@ -3532,6 +3532,42 @@ The built-in library, webapp/library/, holds what any journal can use; a journal
 | `brushes/smudge` | Smudge: a fingertip dragged through what's drawn, leaving nothing of its own. |
 | `brushes/sponge` | Sponge: a textured brush for big, smooth shapes. |
 
+| brush, the library's own | what it draws |
+|---|---|
+| `brushes/iron_gall_quill` | Iron Gall Quill: a cut quill held at a slant, broad one way and a hairline the other, its edge faintly bitten and its ink a little thinner where the parchment's tooth stands proud: a scribe's text. |
+| `brushes/crowquill` | Crowquill: a fine steel mapping pen, a hairline under a light hand that swells only when pressed hard: coastlines, rivers, contours and a map's small lettering. |
+| `brushes/dry_reed` | Dry Reed: a reed pen nearly out of ink, catching only the tooth's high spots, the hollows filling as it presses harder: tapering ends break up. |
+| `brushes/feathered_ink` | Feathered Ink: ink wicking out along the paper's fibres into a faint, hairy halo round a dark line. |
+| `brushes/faded_ink` | Faded Ink: old ink gone brown and patchy, each stroke faded its own amount and the page in broad, soft blotches. |
+| `brushes/sepia_wash` | Sepia Wash: a thin wash with a broken edge that pools dark at its rim as it dries: shading a coast, a hill or a stain. |
+| `brushes/gilt` | Gilt: gold leaf burnished unevenly, bright and dull in patches with a glint here and there, in the style's colour: capitals and seals. |
+| `brushes/scorch` | Scorch: a burn, brown at its ragged rim and charred black at its heart, building where it dwells: singed edges and holes burnt through. |
+| `brushes/guilloche` | Guilloche: an engraver's rosette stamped close along the stroke in outline only, its lobes weaving into a turned ribbon wherever the stroke bends: banknote and charter borders. |
+| `brushes/star_trail` | Star Trail: a path of four-pointed stars of every size, some bright and some faint, with gaps between: star charts and constellations. |
+| `brushes/thornline` | Thornline: a briar's stem that sprouts a thorn now and then, raked back on one side or the other: briar borders and vines. |
+| `brushes/enchanted_ink` | Enchanted Ink: ink whose colour drifts through the spectrum along each stroke and shimmers, with a faint glow about it: wards and sigils. |
+| `brushes/twisted_cord` | Twisted Cord: strands laid slantwise over each other, lit along their middles and in the ink where they turn under: cartouches, bindings and ties. |
+| `brushes/driving_rain` | Driving Rain: slanting hairlines of every length and weight scattered along the stroke: a storm's sky. |
+| `brushes/levin` | Levin: lightning, crackling along the stroke in short crooked strikes with a longer fork now and then and a pale glare about it. |
+| `brushes/baleful_star` | Baleful Star: stars of eight needles, four long and four short, black at the heart, in a sheen that slides through an oil-slick's colours from heart to tip and differs star to star. |
+| `brushes/witch_oil` | Witch Oil: a film all but black whose thin bright bands run through the spectrum, lying where they lie on the page whatever stroke uncovers them. |
+| `brushes/sanguine` | Sanguine: wet blood, pooling dark at its rim, beading now and then and darkening toward brown the longer the stroke runs. |
+| `brushes/veinwork` | Veinwork: lays nothing of its own down, only bares the vessels under the page, thick ones winding and capillaries between; strokes side by side find the same vessels. |
+| `brushes/knell` | Knell: a toll every little way along the stroke, each spreading in four rings that fade outward and cross the last toll's, its heart empty. |
+| `brushes/keybone` | Keybone: a spine with keys for ribs: each vertebra a key's bow, its shaft out to either side to the teeth of its bit, every shaft snapped somewhere. |
+| `brushes/harrow` | Harrow: lays no ink down; drags what's drawn under it along the stroke in furrows, as claws would (like Smudge, it only reaches what its own canvas drew before it). |
+| `brushes/glossolalia` | Glossolalia: writes a script of its own, a letter a dab: a lobed bowl opened on one side and a stave struck through at one of four angles, no two alike. |
+| `brushes/flying_white` | Flying White: a loaded brush of stiff bristles: solid black pressed hard, splitting into streaks bristle by bristle as it lifts, with dry tails at a tapering stroke's ends. |
+| `brushes/rend` | Rend: claws: ragged gouges side by side, unevenly spaced, each biting to its own depth, so they give out one after another as pressure falls. |
+| `brushes/strands` | Strands: a lock of fine pen lines of several weights drawn at once, wavering and skipping, gathering to a point as pressure falls: hair, water, smoke, grain. |
+| `brushes/horrid` | Horrid: a solid dark with a ragged edge, and fine spines of every length and lean standing out of it on both sides. |
+| `brushes/mezzotint` | Mezzotint: a solid velvet black along the stroke's middle, breaking into grain toward its edge, coarser and sparser the further out. |
+| `brushes/fraktur` | Fraktur: a blackletter pen, a flat square-cut nib held at a slant: heavy one way, a razor the other, its strokes ending in the nib's sharp corners. |
+| `brushes/shroud` | Shroud: black gauze in soft folds down the stroke's length, thin enough between to see through; strokes laid over each other deepen. |
+| `brushes/cinder` | Cinder: a charred stroke with a ragged edge, shedding flakes that rise up the page, thick about it and thinning as they go. |
+| `brushes/drypoint` | Drypoint: a fine needle line with a fainter skid beside it and a soft grit of burr along both. |
+| `brushes/balefire` | Balefire: slender pointed tongues of flame standing up the page from the stroke, most low and a few leaping, their feet run together. |
+
 | file | what it is |
 |---|---|
 | `locks/doublering`, `keyed_doublering`, `huffman`, `huffman_apply`, `huffman_encode`, `maze_lock`, `shift_cipher`, `shift_vigenere`, `star_chart`, `substitution_cipher`, `vigenere_cipher`, `rail_fence`, `columnar_transposition`, `book_cipher`, `circular_maze_lock`, `steiner_triples`, `steiner_cipher`, `star_alignment` | Lock types (see Locks for each's options). |

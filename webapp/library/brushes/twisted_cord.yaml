@@ -1,0 +1,75 @@
+name: Twisted Cord
+description: A cord of twisted strands in a single stroke, each strand laid slantwise over the last, shaded light along its middle and dark where it turns under, for a map's cartouche, a seal's binding or a scroll's ties.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      spacing: 0.1
+      stabilize: 0.5
+  strand:
+    type: circle
+    name: Strand
+    inputs:
+      aspect: 0.4
+      softness: 0.35
+  slant:
+    type: add
+    name: Laid slantwise
+    inputs:
+      b: 0.75
+  body:
+    type: remap
+    name: Solid, to hide the strand under it
+    inputs:
+      clamp: true
+      in_high: 0.12
+      in_low: 0.0
+  light:
+    type: remap
+    name: Lit along its middle
+    comment: the wire to Value maps 0..1 onto its -1..1, so 0.5 is the ink as it is and 0.9 is 80% lighter
+    inputs:
+      clamp: true
+      in_high: 0.95
+      in_low: 0.3
+      out_high: 0.9
+      out_low: 0.5
+  pale:
+    type: remap
+    name: And paler there
+    comment: 0.5 is the ink's own saturation; 0.2 is 60% greyer
+    inputs:
+      clamp: true
+      in_high: 0.95
+      in_low: 0.3
+      out_high: 0.2
+      out_low: 0.5
+  hsv:
+    type: hsv
+  paint:
+    type: paint
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- body.output -> stamp.tip
+- hsv.output -> stamp.color
+- light.output -> hsv.value
+- strand.mask -> pale.input
+- pale.output -> hsv.saturation
+- paint_color.color -> hsv.color
+- pen_input.drawing_angle -> slant.a
+- pen_input.position -> paint.position
+- pen_input.pressure -> paint.size
+- slant.result -> strand.rotation_input
+- stamp.dab -> paint.rgba
+- strand.mask -> body.input
+- strand.mask -> light.input
+exposed_ports:
+  brush_settings.size: {}
+  brush_settings.spacing: {}
+  slant.b: {}
+  paint.opacity: {}

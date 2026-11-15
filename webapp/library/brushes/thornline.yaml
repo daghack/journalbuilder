@@ -1,0 +1,95 @@
+name: Thornline
+description: A bramble's stem in a single stroke, a fine line that sprouts a hooked thorn now and then on one side or the other, each raked back toward where the stroke began, for briar borders, hedges and cursed vines.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      spacing: 0.04
+      stabilize: 0.5
+  spot:
+    type: circle
+    name: Whole dab
+    comment: soft all the way in, so the stem can be cut from its middle
+    inputs:
+      softness: 1.0
+  stem:
+    type: remap
+    name: Stem
+    comment: the dab's middle, a small hard disc, so the stem stays round on tight curves
+    inputs:
+      clamp: true
+      in_high: 0.975
+      in_low: 0.955
+  thorn:
+    type: circle
+    name: Thorn
+    comment: a superformula of one lobe, a spike from the dab's middle out to its rim
+    inputs:
+      algorithm: 2
+      frequency: 1.0
+      n1: 0.1
+      n2: 1.0
+      n3: 1.0
+      softness: 0.08
+  side:
+    type: random
+    name: Which side
+  side_angle:
+    type: remap
+    name: Raked back, left or right
+    inputs:
+      clamp: true
+      in_high: 0.51
+      in_low: 0.49
+      out_high: 2.2
+      out_low: -2.2
+  thorn_angle:
+    type: add
+  sprout:
+    type: random
+    name: Does a thorn sprout here
+  gate:
+    type: remap
+    name: One dab in thirty
+    inputs:
+      clamp: true
+      in_high: 0.9661
+      in_low: 0.966
+  shown:
+    type: multiply
+  sum:
+    type: add
+  clamp:
+    type: remap
+    inputs:
+      clamp: true
+  paint:
+    type: paint
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- clamp.output -> stamp.tip
+- gate.output -> shown.b
+- paint_color.color -> stamp.color
+- spot.mask -> stem.input
+- pen_input.drawing_angle -> thorn_angle.a
+- pen_input.position -> paint.position
+- pen_input.pressure -> paint.size
+- shown.result -> sum.b
+- side.value -> side_angle.input
+- side_angle.output -> thorn_angle.b
+- sprout.value -> gate.input
+- stamp.dab -> paint.rgba
+- stem.output -> sum.a
+- sum.result -> clamp.input
+- thorn.mask -> shown.a
+- thorn_angle.result -> thorn.rotation_input
+exposed_ports:
+  brush_settings.size: {}
+  stem.in_low: {}
+  gate.in_low: {}
+  paint.opacity: {}

@@ -1,0 +1,129 @@
+name: Rend
+description: Claws drawn across the page. Gouges run side by side, unevenly spaced and ragged at their edges, each biting to its own depth, so that as the hand lifts they give out one after another and the last of them trails off alone.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      spacing: 0.015
+      stabilize: 0.5
+  across:
+    type: circle
+    name: Across the paw
+    comment: a needle across the stroke; only what lies on it is drawn, so the rings below become gouges
+    inputs:
+      aspect: 0.09
+      softness: 0.08
+  round:
+    type: circle
+    name: Round the paw
+    comment: soft to its rim, so it measures how far from the middle a point is
+    inputs:
+      softness: 1.0
+  lopside:
+    type: circle
+    name: One side unlike the other
+    comment: a lobe out to one side only, soft, which shifts that side's claws against the other's
+    inputs:
+      algorithm: 2
+      frequency: 1.0
+      n1: 1.2
+      n2: 1.0
+      n3: 1.0
+      rotation: 1.5708
+      softness: 1.0
+  lopside_by:
+    type: multiply
+    inputs:
+      b: 0.2
+  inward:
+    type: multiply
+    name: Room for the shift
+    inputs:
+      b: 0.8
+  uneven:
+    type: add
+  tear:
+    type: noise
+    name: Torn edges
+    comment: pinned to the page and fine, so each gouge's edge is ragged
+    inputs:
+      octaves: 3.0
+      roughness: 0.7
+      space: 0
+  tear_size:
+    type: multiply
+    inputs:
+      b: 0.05
+  tear_by:
+    type: remap
+    inputs:
+      clamp: true
+      out_high: 0.07
+      out_low: -0.07
+  torn:
+    type: add
+  claws:
+    type: curve
+    name: The claws, each of its own depth
+    comment: each peak is a claw at that distance from the middle; a taller peak bites deeper and lasts longer
+    inputs:
+      curve: [[0.0, 0.0], [0.1, 0.0], [0.19, 0.75], [0.28, 0.0], [0.42, 0.0], [0.53, 1.0], [0.64, 0.0], [0.78, 0.0], [0.87, 0.6], [0.96, 0.0], [1.0, 0.0]]
+  bite:
+    type: curve
+    name: How deep a claw must be to mark
+    comment: pressed hard, they all mark, and wide; lifting, only the deepest
+    inputs:
+      curve: [[0.0, 1.0], [0.4, 0.8], [0.8, 0.45], [1.0, 0.25]]
+  bite_edge:
+    type: add
+    inputs:
+      b: 0.06
+  gouged:
+    type: remap
+    inputs:
+      clamp: true
+  drawn:
+    type: multiply
+  spread:
+    type: curve
+    name: The paw hardly closes
+    inputs:
+      curve: [[0.0, 0.8], [1.0, 1.0]]
+  paint:
+    type: paint
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- across.mask -> drawn.a
+- bite.output -> bite_edge.a
+- bite.output -> gouged.in_low
+- bite_edge.result -> gouged.in_high
+- brush_settings.size -> tear_size.a
+- claws.output -> gouged.input
+- drawn.result -> stamp.tip
+- gouged.output -> drawn.b
+- paint_color.color -> stamp.color
+- pen_input.drawing_angle -> across.rotation_input
+- pen_input.position -> paint.position
+- pen_input.pressure -> bite.input
+- pen_input.pressure -> spread.input
+- lopside.mask -> lopside_by.a
+- lopside_by.result -> uneven.b
+- pen_input.drawing_angle -> lopside.rotation_input
+- inward.result -> uneven.a
+- round.mask -> inward.a
+- uneven.result -> torn.a
+- spread.output -> paint.size
+- stamp.dab -> paint.rgba
+- tear.value -> tear_by.input
+- tear_by.output -> torn.b
+- tear_size.result -> tear.scale
+- torn.result -> claws.input
+exposed_ports:
+  brush_settings.size: {}
+  tear_by.out_high: {}
+  paint.opacity: {}

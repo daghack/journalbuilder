@@ -1,0 +1,105 @@
+name: Feathered Ink
+description: Ink on thirsty paper, its line wicking out along the fibres into a faint, hairy halo round a dark core, as on cheap rag paper or a letter left in the damp.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      stabilize: 0.5
+  circle:
+    type: circle
+    name: Wet spot
+    comment: soft all the way to its rim, so the core can be cut from its middle and the halo spread to its edge
+    inputs:
+      algorithm: 1
+      amplitude: 0.08
+      frequency: 7.0
+      softness: 1.0
+  core:
+    type: remap
+    name: Core
+    comment: the inner part of the wet spot, hard-edged, where the ink is
+    inputs:
+      clamp: true
+      in_high: 0.7
+      in_low: 0.6
+  fibres:
+    type: noise
+    name: Fibres
+    comment: warped hard, so the noise runs in threads; pinned to the page
+    inputs:
+      octaves: 5.0
+      roughness: 0.7
+      scale: 2.4
+      space: 0
+      warp: 2.2
+  fibre_reach:
+    type: remap
+    name: Which fibres wick
+    inputs:
+      clamp: true
+      in_high: 0.75
+      in_low: 0.44
+  halo_reach:
+    type: remap
+    name: How far it wicks
+    comment: nearly the whole wet spot, fading only at its rim
+    inputs:
+      clamp: true
+      in_high: 0.3
+      in_low: 0.02
+  halo:
+    type: multiply
+    name: Halo
+  halo_strength:
+    type: multiply
+    name: Halo's strength
+    inputs:
+      b: 0.5
+  sum:
+    type: add
+    name: Core and halo
+  clamp:
+    type: remap
+    name: At most full
+    inputs:
+      clamp: true
+  random:
+    type: random
+  curve:
+    type: curve
+    name: Quick ink
+    inputs:
+      curve: [[0.0, 0.0], [0.3, 0.8], [1.0, 1.0]]
+  paint:
+    type: paint
+    inputs:
+      buildup: 0.0
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- circle.mask -> core.input
+- circle.mask -> halo_reach.input
+- halo_reach.output -> halo.a
+- clamp.output -> stamp.tip
+- core.output -> sum.a
+- curve.output -> paint.wash_flow
+- fibre_reach.output -> halo.b
+- fibres.value -> fibre_reach.input
+- halo.result -> halo_strength.a
+- halo_strength.result -> sum.b
+- paint_color.color -> stamp.color
+- pen_input.position -> paint.position
+- pen_input.pressure -> curve.input
+- pen_input.pressure -> paint.size
+- random.value -> circle.seed
+- stamp.dab -> paint.rgba
+- sum.result -> clamp.input
+exposed_ports:
+  brush_settings.stabilize: {}
+  brush_settings.size: {}
+  halo_strength.b: {}
+  paint.opacity: {}

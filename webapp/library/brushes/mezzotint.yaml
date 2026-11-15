@@ -1,0 +1,78 @@
+name: Mezzotint
+description: A black with no bottom to it. Along the stroke's middle it is solid and velvet; toward the edge it breaks into grain, coarser and sparser the further out, as a mezzotint's darks do and soot rubbed into paper, for shadows that have weight.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      spacing: 0.05
+      stabilize: 0.5
+  reach:
+    type: circle
+    name: How far the dark reaches
+    inputs:
+      algorithm: 1
+      amplitude: 0.08
+      frequency: 5.0
+      softness: 1.0
+  random:
+    type: random
+  grain:
+    type: noise
+    name: Grain
+    comment: pinned to the page and sized to the brush, so the dark keeps one tooth however it's laid
+    inputs:
+      octaves: 3.0
+      roughness: 0.75
+      space: 0
+  grain_size:
+    type: multiply
+    inputs:
+      b: 0.022
+  depth:
+    type: multiply
+    name: Deeper toward the middle
+    inputs:
+      b: 1.0
+  rise:
+    type: subtract
+    name: How high the grain must stand to take ink
+    inputs:
+      a: 0.96
+  rise_edge:
+    type: add
+    inputs:
+      b: 0.06
+  inked:
+    type: remap
+    inputs:
+      clamp: true
+  paint:
+    type: paint
+    inputs:
+      buildup: 0.0
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- brush_settings.size -> grain_size.a
+- depth.result -> rise.b
+- grain.value -> inked.input
+- grain_size.result -> grain.scale
+- inked.output -> stamp.tip
+- paint_color.color -> stamp.color
+- pen_input.position -> paint.position
+- pen_input.pressure -> paint.size
+- random.value -> reach.seed
+- reach.mask -> depth.a
+- rise.result -> inked.in_low
+- rise.result -> rise_edge.a
+- rise_edge.result -> inked.in_high
+- stamp.dab -> paint.rgba
+exposed_ports:
+  brush_settings.size: {}
+  grain_size.b: {}
+  depth.b: {}
+  paint.opacity: {}

@@ -1,0 +1,113 @@
+name: Enchanted Ink
+description: Ink with a spell on it, its colour drifting through the spectrum along each stroke and shimmering where the page catches the light, with a faint glow of its own about it, for wards, sigils and a wizard's marginalia.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      stabilize: 0.5
+  glow:
+    type: circle
+    name: Glow
+    inputs:
+      algorithm: 1
+      amplitude: 0.06
+      frequency: 5.0
+      softness: 1.0
+  core:
+    type: remap
+    name: Line
+    inputs:
+      clamp: true
+      in_high: 0.66
+      in_low: 0.56
+  halo:
+    type: multiply
+    name: Glow's strength
+    inputs:
+      b: 0.22
+  sum:
+    type: add
+  clamp:
+    type: remap
+    inputs:
+      clamp: true
+  lengths:
+    type: divide
+    name: How far along, in dab-widths
+    comment: so the drift is the same at any render scale
+  drift:
+    type: multiply
+    name: Drift
+    comment: degrees of hue per dab-width along the stroke
+    inputs:
+      b: 18.0
+  shimmer:
+    type: noise
+    name: Shimmer
+    inputs:
+      octaves: 3.0
+      roughness: 0.5
+      scale: 8.0
+      space: 0
+      warp: 1.0
+  shimmer_hue:
+    type: remap
+    inputs:
+      clamp: true
+      out_high: 35.0
+      out_low: -35.0
+  shimmer_light:
+    type: remap
+    comment: the wire to Value maps 0..1 onto its -1..1, so 0.5 here leaves the colour be and 0.675 lightens it by 35%
+    inputs:
+      clamp: true
+      in_high: 0.85
+      in_low: 0.55
+      out_high: 0.675
+      out_low: 0.5
+  hue:
+    type: add
+  hsv:
+    type: hsv
+    inputs:
+      saturation: 0.35
+  random:
+    type: random
+  paint:
+    type: paint
+    inputs:
+      buildup: 0.0
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- clamp.output -> stamp.tip
+- core.output -> sum.a
+- drift.result -> hue.a
+- glow.mask -> core.input
+- glow.mask -> halo.a
+- halo.result -> sum.b
+- hsv.output -> stamp.color
+- hue.result -> hsv.hue
+- paint_color.color -> hsv.color
+- brush_settings.size -> lengths.b
+- lengths.result -> drift.a
+- pen_input.distance -> lengths.a
+- pen_input.position -> paint.position
+- pen_input.pressure -> paint.size
+- pen_input.pressure -> paint.wash_flow
+- random.value -> glow.seed
+- shimmer.value -> shimmer_hue.input
+- shimmer.value -> shimmer_light.input
+- shimmer_hue.output -> hue.b
+- shimmer_light.output -> hsv.value
+- stamp.dab -> paint.rgba
+- sum.result -> clamp.input
+exposed_ports:
+  brush_settings.size: {}
+  drift.b: {}
+  halo.b: {}
+  paint.opacity: {}

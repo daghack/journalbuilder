@@ -1,0 +1,92 @@
+name: Balefire
+description: Whatever is drawn in it burns. Tongues of flame stand up the page from the stroke, slender and pointed, leaning this way and that, most of them low and a few leaping high, their feet run together into a bed of fire along the line.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      spacing: 0.03
+      stabilize: 0.5
+  round:
+    type: circle
+    name: Round the flame's foot
+    inputs:
+      algorithm: 1
+      amplitude: 0.1
+      frequency: 5.0
+      softness: 1.0
+  random:
+    type: random
+  bed:
+    type: remap
+    name: The bed of the fire
+    inputs:
+      clamp: true
+      in_high: 0.86
+      in_low: 0.8
+  tongue:
+    type: circle
+    name: Tongue
+    comment: a superformula of one lobe, a slender flame from the foot up the page to the rim
+    inputs:
+      algorithm: 2
+      frequency: 1.0
+      n1: 0.085
+      n2: 1.0
+      n3: 1.0
+      rotation: -1.5708
+      softness: 0.05
+  lean:
+    type: random
+    name: Its lean
+  lean_angle:
+    type: remap
+    inputs:
+      clamp: true
+      out_high: 0.5
+      out_low: -0.5
+  leap:
+    type: random
+    name: How high it leaps
+  leap_curve:
+    type: curve
+    name: Mostly low, a few leaping
+    inputs:
+      curve: [[0.0, 0.25], [0.55, 0.45], [0.88, 0.7], [1.0, 1.0]]
+  sized:
+    type: multiply
+  sum:
+    type: add
+  full:
+    type: remap
+    name: Between nothing and full
+    inputs:
+      clamp: true
+  paint:
+    type: paint
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- bed.output -> sum.a
+- full.output -> stamp.tip
+- leap.value -> leap_curve.input
+- leap_curve.output -> sized.b
+- lean.value -> lean_angle.input
+- lean_angle.output -> tongue.rotation_input
+- paint_color.color -> stamp.color
+- pen_input.position -> paint.position
+- pen_input.pressure -> sized.a
+- random.value -> round.seed
+- round.mask -> bed.input
+- sized.result -> paint.size
+- stamp.dab -> paint.rgba
+- sum.result -> full.input
+- tongue.mask -> sum.b
+exposed_ports:
+  brush_settings.size: {}
+  tongue.n1: {}
+  lean_angle.out_high: {}
+  paint.opacity: {}

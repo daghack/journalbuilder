@@ -1,0 +1,122 @@
+name: Veinwork
+description: What runs under the page's skin. The stroke lays nothing down of its own, only bares the vessels already there, thick ones winding and fine ones between, and another stroke beside it finds the same vessels going on.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      stabilize: 0.5
+  spot:
+    type: circle
+    name: Where the skin is lifted
+    inputs:
+      algorithm: 1
+      amplitude: 0.12
+      frequency: 5.0
+      softness: 0.8
+  random:
+    type: random
+  vessels:
+    type: noise
+    name: Vessels
+    comment: warped hard and pinned to the page; a vessel runs wherever it crosses its middle value
+    inputs:
+      octaves: 3.0
+      roughness: 0.45
+      scale: 70.0
+      space: 0
+      warp: 2.5
+  vessel_near:
+    type: remap
+    name: Rising to the middle
+    inputs:
+      clamp: true
+      in_high: 0.5
+      in_low: 0.465
+  vessel_far:
+    type: remap
+    name: Falling from it
+    inputs:
+      clamp: true
+      in_high: 0.535
+      in_low: 0.5
+      out_high: 0.0
+      out_low: 1.0
+  vessel:
+    type: multiply
+  fine:
+    type: noise
+    name: Capillaries
+    inputs:
+      octaves: 3.0
+      roughness: 0.5
+      scale: 22.0
+      seed: 5
+      space: 0
+      warp: 2.0
+  fine_near:
+    type: remap
+    inputs:
+      clamp: true
+      in_high: 0.5
+      in_low: 0.47
+  fine_far:
+    type: remap
+    inputs:
+      clamp: true
+      in_high: 0.53
+      in_low: 0.5
+      out_high: 0.0
+      out_low: 1.0
+  capillary:
+    type: multiply
+  faint:
+    type: multiply
+    name: Fainter than the vessels
+    inputs:
+      b: 0.5
+  sum:
+    type: add
+  full:
+    type: remap
+    name: At most full
+    inputs:
+      clamp: true
+  bared:
+    type: multiply
+  paint:
+    type: paint
+    inputs:
+      buildup: 0.0
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- bared.result -> stamp.tip
+- capillary.result -> faint.a
+- faint.result -> sum.b
+- fine.value -> fine_far.input
+- fine.value -> fine_near.input
+- fine_far.output -> capillary.b
+- fine_near.output -> capillary.a
+- full.output -> bared.b
+- paint_color.color -> stamp.color
+- pen_input.position -> paint.position
+- pen_input.pressure -> paint.size
+- random.value -> spot.seed
+- spot.mask -> bared.a
+- stamp.dab -> paint.rgba
+- sum.result -> full.input
+- vessel.result -> sum.a
+- vessel_far.output -> vessel.b
+- vessel_near.output -> vessel.a
+- vessels.value -> vessel_far.input
+- vessels.value -> vessel_near.input
+exposed_ports:
+  brush_settings.size: {}
+  vessels.scale: {}
+  vessels.warp: {}
+  faint.b: {}
+  paint.opacity: {}

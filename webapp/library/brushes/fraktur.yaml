@@ -1,0 +1,53 @@
+name: Fraktur
+description: A blackletter pen, its nib a flat blade cut dead square and held at a slant. Its strokes are heavy one way and a razor the other, and they begin and end in the nib's own sharp corners, not in a round.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      spacing: 0.02
+      stabilize: 0.5
+  nib:
+    type: circle
+    name: Blade
+    comment: a superformula of four sides, squared off and squashed flat, turned to the pen's angle
+    inputs:
+      algorithm: 2
+      aspect: 0.16
+      frequency: 4.0
+      n1: 12.0
+      n2: 12.0
+      n3: 12.0
+      rotation: 0.7
+      softness: 0.03
+  quick:
+    type: curve
+    name: Quick ink
+    inputs:
+      curve: [[0.0, 0.0], [0.2, 0.85], [1.0, 1.0]]
+  press:
+    type: curve
+    name: The blade hardly narrows
+    inputs:
+      curve: [[0.0, 0.6], [1.0, 1.0]]
+  paint:
+    type: paint
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- nib.mask -> stamp.tip
+- paint_color.color -> stamp.color
+- pen_input.position -> paint.position
+- pen_input.pressure -> press.input
+- pen_input.pressure -> quick.input
+- press.output -> paint.size
+- quick.output -> paint.build_flow
+- stamp.dab -> paint.rgba
+exposed_ports:
+  brush_settings.size: {}
+  nib.rotation: {}
+  nib.aspect: {}
+  paint.opacity: {}

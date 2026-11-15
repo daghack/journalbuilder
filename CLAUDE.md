@@ -48,8 +48,10 @@ the same change:
   glyph of every glyphset by themselves; the symbol sets page draws each
   symbol set (add a name to its list).
 - **A brush** (`webapp/library/brushes/NAME.yaml`, Darkly's format): the
-  pens page draws every `brush_names()` entry by itself; add examples only
-  for new brush settings, and name the file in docs/api.md's library.
+  pens page draws Darkly's by itself, from `brush_names()`, and has no room
+  for more. A brush of the library's own goes in its `LIBRARY_BRUSHES`
+  list, which the pens page skips, and gets drawn on an appendix page
+  instead. Name the file in docs/api.md's library either way.
 - **A lock or helper type** (`webapp/library/locks/`, `helpers/`): a row
   locking and unlocking an example.
 - **An illustration** (`webapp/library/illustrations/*.rhai`): attach it

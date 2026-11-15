@@ -1,0 +1,60 @@
+name: Guilloche
+description: An engraver's rosette stamped close along the stroke and drawn only in outline, so its lobes cross and weave into the turned ribbon of a banknote, a deed or a guild charter's border, twisting wherever the stroke bends.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      spacing: 0.06
+      stabilize: 0.5
+  rosette:
+    type: circle
+    name: Rosette
+    inputs:
+      algorithm: 2
+      aspect: 0.55
+      frequency: 3.0
+      n1: 2.0
+      n2: 4.0
+      n3: 4.0
+      softness: 0.05
+  outline:
+    type: multiply
+    name: Only its outline
+    comment: mask times its inverse peaks along the soft edge alone
+  inverse:
+    type: invert
+  strength:
+    type: multiply
+    inputs:
+      b: 4.0
+  clamp:
+    type: remap
+    inputs:
+      clamp: true
+  paint:
+    type: paint
+    inputs:
+      buildup: 0.0
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- clamp.output -> stamp.tip
+- inverse.output -> outline.b
+- outline.result -> strength.a
+- paint_color.color -> stamp.color
+- pen_input.position -> paint.position
+- pen_input.pressure -> paint.size
+- rosette.mask -> inverse.input
+- rosette.mask -> outline.a
+- stamp.dab -> paint.rgba
+- strength.result -> clamp.input
+exposed_ports:
+  brush_settings.size: {}
+  brush_settings.spacing: {}
+  rosette.rotation: {}
+  rosette.frequency: {}
+  paint.opacity: {}

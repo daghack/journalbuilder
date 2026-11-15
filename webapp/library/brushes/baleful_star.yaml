@@ -1,0 +1,181 @@
+name: Baleful Star
+description: Stars that mean harm, eight needles each, four long and four short, washed in a sheen that slides through an oil-slick's colours from heart to tip and differs star to star, with a thin glare about them.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      spacing: 1.0
+      stabilize: 0.5
+  long_rays:
+    type: circle
+    name: Four long needles
+    inputs:
+      algorithm: 2
+      frequency: 4.0
+      n1: 0.12
+      n2: 1.0
+      n3: 1.0
+      softness: 0.04
+  short_rays:
+    type: circle
+    name: Four between them
+    inputs:
+      algorithm: 2
+      frequency: 4.0
+      n1: 0.12
+      n2: 1.0
+      n3: 1.0
+      rotation: 0.7854
+      softness: 0.04
+  round:
+    type: circle
+    name: Round the star
+    comment: soft to its rim, so it measures how far out a point is
+    inputs:
+      softness: 1.0
+  short_reach:
+    type: remap
+    name: The short ones stop halfway
+    inputs:
+      clamp: true
+      in_high: 0.6
+      in_low: 0.55
+  shortened:
+    type: multiply
+  rays:
+    type: add
+  glare:
+    type: multiply
+    name: Glare
+    inputs:
+      b: 0.12
+  lit:
+    type: add
+  full:
+    type: remap
+    name: At most full
+    inputs:
+      clamp: true
+  tilt:
+    type: random
+    name: Each star's tilt
+  tilt_angle:
+    type: multiply
+    inputs:
+      b: 0.7
+  size:
+    type: random
+    name: Each star's size
+  size_curve:
+    type: curve
+    name: Mostly small
+    inputs:
+      curve: [[0.0, 0.2], [0.75, 0.45], [1.0, 1.0]]
+  sized:
+    type: multiply
+  present:
+    type: random
+    name: Is there a star here
+  gate:
+    type: remap
+    name: Two in three
+    inputs:
+      clamp: true
+      in_high: 0.341
+      in_low: 0.34
+  shown:
+    type: multiply
+  own_hue:
+    type: random
+    name: Each star's own colour
+  own_degrees:
+    type: multiply
+    inputs:
+      b: 360.0
+  slide:
+    type: multiply
+    name: Sliding from heart to tip
+    inputs:
+      b: 200.0
+  sheen:
+    type: noise
+    name: Sheen
+    comment: pinned to the page, so near stars share the film's colours
+    inputs:
+      octaves: 2.0
+      scale: 30.0
+      space: 0
+      warp: 1.5
+  sheen_degrees:
+    type: multiply
+    inputs:
+      b: 300.0
+  hue_a:
+    type: add
+  hue_b:
+    type: add
+  heart:
+    type: remap
+    name: A black heart
+    comment: the wire to Value maps 0..1 onto its -1..1, so 0.38 darkens the rays a quarter and 0.05 is all but black
+    inputs:
+      clamp: true
+      in_high: 0.93
+      in_low: 0.78
+      out_high: 0.05
+      out_low: 0.38
+  hsv:
+    type: hsv
+    inputs:
+      saturation: 0.3
+  paint:
+    type: paint
+    inputs:
+      buildup: 0.0
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- full.output -> shown.a
+- gate.output -> shown.b
+- glare.result -> lit.b
+- hsv.output -> stamp.color
+- hue_a.result -> hue_b.a
+- hue_b.result -> hsv.hue
+- lit.result -> full.input
+- long_rays.mask -> rays.a
+- own_degrees.result -> hue_a.a
+- own_hue.value -> own_degrees.a
+- paint_color.color -> hsv.color
+- pen_input.position -> paint.position
+- pen_input.pressure -> sized.a
+- present.value -> gate.input
+- rays.result -> lit.a
+- heart.output -> hsv.value
+- round.mask -> glare.a
+- round.mask -> heart.input
+- round.mask -> short_reach.input
+- round.mask -> slide.a
+- sheen.value -> sheen_degrees.a
+- sheen_degrees.result -> hue_b.b
+- short_rays.mask -> shortened.a
+- short_reach.output -> shortened.b
+- shortened.result -> rays.b
+- shown.result -> stamp.tip
+- size.value -> size_curve.input
+- size_curve.output -> sized.b
+- sized.result -> paint.size
+- slide.result -> hue_a.b
+- stamp.dab -> paint.rgba
+- tilt.value -> tilt_angle.a
+- tilt_angle.result -> long_rays.rotation_input
+- tilt_angle.result -> short_rays.rotation_input
+exposed_ports:
+  brush_settings.size: {}
+  brush_settings.spacing: {}
+  long_rays.n1: {}
+  glare.b: {}
+  paint.opacity: {}

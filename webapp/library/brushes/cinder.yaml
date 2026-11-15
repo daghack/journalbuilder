@@ -1,0 +1,114 @@
+name: Cinder
+description: A thing burnt through and coming apart. The stroke is charred black, ragged at its edge, and flakes of it are lifting off and going up the page, thick about the stroke and thinning as they rise.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      spacing: 0.06
+      stabilize: 0.5
+  round:
+    type: circle
+    name: Round the char
+    inputs:
+      algorithm: 1
+      amplitude: 0.14
+      frequency: 6.0
+      softness: 1.0
+  random:
+    type: random
+  char:
+    type: remap
+    name: Char
+    inputs:
+      clamp: true
+      in_high: 0.82
+      in_low: 0.78
+  flakes:
+    type: noise
+    name: Flakes
+    comment: locked to the dab and different for every one, so each dab sheds its own
+    inputs:
+      octaves: 2.0
+      roughness: 0.6
+      space: 1
+  flake_size:
+    type: multiply
+    inputs:
+      b: 0.05
+  shed:
+    type: random
+    name: Each dab's own flakes
+  rising:
+    type: circle
+    name: Up the page
+    comment: a fat lobe upward, soft, so flakes are shed above the stroke and thin as they rise
+    inputs:
+      algorithm: 2
+      frequency: 1.0
+      n1: 1.0
+      n2: 1.0
+      n3: 1.0
+      rotation: -1.5708
+      softness: 1.0
+  near:
+    type: multiply
+    name: Thicker near the stroke
+    inputs:
+      b: 0.3
+  rare:
+    type: subtract
+    name: How rare a flake is
+    inputs:
+      a: 0.8
+  rare_edge:
+    type: add
+    inputs:
+      b: 0.012
+  flake:
+    type: remap
+    inputs:
+      clamp: true
+  lifted:
+    type: multiply
+  sum:
+    type: add
+  full:
+    type: remap
+    name: Between nothing and full
+    inputs:
+      clamp: true
+  paint:
+    type: paint
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- brush_settings.size -> flake_size.a
+- char.output -> sum.a
+- flake.output -> lifted.a
+- flake_size.result -> flakes.scale
+- flakes.value -> flake.input
+- full.output -> stamp.tip
+- lifted.result -> sum.b
+- near.result -> rare.b
+- paint_color.color -> stamp.color
+- pen_input.position -> paint.position
+- pen_input.pressure -> paint.size
+- random.value -> round.seed
+- rare.result -> flake.in_low
+- rare.result -> rare_edge.a
+- rare_edge.result -> flake.in_high
+- rising.mask -> lifted.b
+- rising.mask -> near.a
+- round.mask -> char.input
+- shed.value -> flakes.variation
+- stamp.dab -> paint.rgba
+- sum.result -> full.input
+exposed_ports:
+  brush_settings.size: {}
+  rare.a: {}
+  rising.rotation: {}
+  paint.opacity: {}
