@@ -51,7 +51,7 @@ use std::rc::Rc;
 
 use super::canvas::{CanvasData, TextRun};
 use super::options::{check_keys, Settings};
-use super::text_settings::{RuleStyle, TypeStyle};
+use super::text_settings::{RuleStyle, TextSettings, TypeStyle};
 use super::{check_finite, RhaiResult, Style};
 use crate::journal::avoid::AvoidanceTree;
 use crate::journal::fonts::FontBook;
@@ -333,6 +333,9 @@ pub(super) struct Styled {
     /// its script, which can't be while a call holds the generator.
     scripted: Option<super::symbol_sets::SymbolSet>,
     pending: std::cell::RefCell<Vec<Symbol>>,
+    /// The style the call gave, as given, for a scripted set: laid over
+    /// every stroke its script draws (see `TextSettings::symbol_style`).
+    restyle: Option<Dynamic>,
 }
 
 /// How text is set and drawn at some point in it: the settings of the
@@ -406,7 +409,7 @@ impl Styled {
                 let mut rules = Vec::new();
                 let base = State::base(type_, &mut rules);
                 let glyphs = base.type_.glyphset(caller)?.build(text, symdict, rng);
-                return Ok(Styled { look_of: vec![0; glyphs.len()], glyphs, looks: vec![base.look], rules, scripted: None, pending: Default::default() });
+                return Ok(Styled { look_of: vec![0; glyphs.len()], glyphs, looks: vec![base.look], rules, scripted: None, pending: Default::default(), restyle: None });
             }
             FlowText::Symbols(symbols) => {
                 let mut rules = Vec::new();
@@ -414,7 +417,7 @@ impl Styled {
                 let font = base.type_.glyphset(caller)?;
                 let glyphs = symbols.set.text_glyphs(&font, &symbols.symbols, rng);
                 let scripted = symbols.set.is_scripted().then(|| symbols.set.clone());
-                return Ok(Styled { look_of: vec![0; glyphs.len()], glyphs, looks: vec![base.look], rules, scripted, pending: Default::default() });
+                return Ok(Styled { look_of: vec![0; glyphs.len()], glyphs, looks: vec![base.look], rules, scripted, pending: Default::default(), restyle: None });
             }
         };
         let spans = spans.then(&markdown.spans);
@@ -469,29 +472,40 @@ impl Styled {
             k = end;
         }
         let looks = std::iter::once(base.look).chain(states.into_iter().map(|s| s.look)).collect();
-        Ok(Styled { glyphs, look_of, looks, rules, scripted: None, pending: Default::default() })
+        Ok(Styled { glyphs, look_of, looks, rules, scripted: None, pending: Default::default(), restyle: None })
     }
 
-    /// What a text call writes, a string or `markdown(...)`, set in
-    /// `type_`: marked-up text styled by the spans it names, from `spans`
-    /// (the call's settings' `spans`, which plain text ignores) and the
-    /// markdown's own.
-    pub(super) fn of_text(caller: &str, text: &FlowText, type_: &TypeStyle, spans: Option<&Dynamic>, symdict: &FontBook, rng: &mut dyn rand::RngCore) -> RhaiResult<Styled> {
-        let spans = match (text, spans) {
+    /// What a text call writes, a string or `markdown(...)`, set in its
+    /// settings' type: marked-up text styled by the spans it names, from
+    /// the settings' `spans` (which plain text ignores) and the markdown's
+    /// own; a scripted set's symbols drawn in the settings' symbol_style,
+    /// if they give one.
+    pub(super) fn of_text(caller: &str, text: &FlowText, settings: &TextSettings, symdict: &FontBook, rng: &mut dyn rand::RngCore) -> RhaiResult<Styled> {
+        let spans = match (text, settings.spans.as_ref()) {
             (FlowText::Marked(_), Some(spans)) => Spans::from_dynamic(&format!("{} 'spans'", caller), spans)?,
             _ => Spans::default(),
         };
-        Styled::new(caller, text, type_, &spans, symdict, rng)
+        let mut styled = Styled::new(caller, text, &settings.type_, &spans, symdict, rng)?;
+        styled.restyle = settings.symbol_style.clone();
+        Ok(styled)
     }
 
     /// Draw what a scripted symbol set's script gives for the glyphs
     /// `draw_row` and `draw` kept, onto `canvas`, in order: after the
-    /// call's own work, with the generator free for the script. Does
-    /// nothing for text that isn't such symbols.
+    /// call's own work, with the generator free for the script; each
+    /// stroke in the call's style, if it gave one (a whole style in place
+    /// of the stroke's, a map of settings over it). Does nothing for text
+    /// that isn't such symbols.
     pub(super) fn finish(&self, engine: &Engine, canvas: &mut CanvasData) -> RhaiResult<()> {
         let Some(set) = &self.scripted else { return Ok(()) };
         let glyphs: Vec<Symbol> = std::mem::take(&mut *self.pending.borrow_mut());
-        for drawing in set.drawn(engine, &glyphs)? {
+        for mut drawing in set.drawn(engine, &glyphs)? {
+            if let Some(restyle) = &self.restyle {
+                let caller = format!("symbol set '{}' 'style'", set.inner().name);
+                for stroke in &mut drawing.strokes {
+                    stroke.style = Style::given(&caller, restyle, &stroke.style)?;
+                }
+            }
             canvas.strokes.extend(drawing.strokes);
             canvas.commits.extend(drawing.commits);
         }

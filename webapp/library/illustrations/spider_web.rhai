@@ -17,8 +17,9 @@
 // source's, draws the web. The symbols are symbol_set's, a SymbolSet, each
 // at glyph_size (the set's own size if that's 0) or smaller in a gap that
 // hasn't room, turned to the web (its foot to the hub) unless turned is
-// false; a blank symbol leaves its gap empty. Unwired, a near-black ink
-// pen and the fine letters set in red. With editor, each symbol is committed
+// false; a blank symbol leaves its gap empty. They're in the set's own
+// styles, or with restyle_set in glyph_style's pen. Unwired, a near-black
+// ink pen and the fine letters set in red. With editor, each symbol is committed
 // to the visual editor as EDITOR_N, N its place along the thread.
 
 import "lib/symbol_rings" as rings;
@@ -26,13 +27,13 @@ import "lib/chance" as chance;
 
 fn options() {
 	#{
-		base: 27, spokes: 9, size: 900.0, sag: 0.25, ragged: 1.0, seed: 0, turned: true, glyph_size: 40.0, editor: "",
+		base: 27, spokes: 9, size: 900.0, sag: 0.25, ragged: 1.0, seed: 0, turned: true, glyph_size: 40.0, editor: "", restyle_set: false,
 		thread_ink: "#2b1d12", glyph_ink: "#9b2318",
 	}
 }
 
 fn inputs(o) {
-	#{ message: `Base${o.base}Symbol`, thread_style: "TextStyle", symbol_set: "SymbolSet" }
+	#{ message: `Base${o.base}Symbol`, thread_style: "TextStyle", symbol_set: "SymbolSet", glyph_style: "TextStyle" }
 }
 
 fn fallbacks(o) {
@@ -41,6 +42,7 @@ fn fallbacks(o) {
 	#{
 		thread_style: #{ style: new_style(new_brush_style(o.thread_ink, "Ink Pen", 0.9, steady), hand) },
 		symbol_set: symbol_set("fine_letters", #{ color: o.glyph_ink }),
+		glyph_style: #{ style: new_style(new_brush_style(o.glyph_ink, "Ink Pen", 2.2, #{ min_pressure: 0.4, max_pressure: 0.8 }), hand) },
 	}
 }
 
@@ -132,7 +134,9 @@ fn render(o, i) {
 		let wide = (corners[1] - corners[0]).length();
 		let at = middle + inward * (hangs.call(m) + hangs.call(m + n)) * 0.4;
 		let turn = if o.turned { (-inward).angle() + PI() / 2.0 } else { 0.0 };
-		let mark = write_at(set.text([s]), at, #{ type: #{ glyph_scale: min(top, min(high, wide * 0.9) * 0.68) }, turn: turn });
+		let settings = #{ type: #{ glyph_scale: min(top, min(high, wide * 0.9) * 0.68) }, turn: turn };
+		if o.restyle_set { settings.style = i.glyph_style.style; }
+		let mark = write_at(set.text([s]), at, settings);
 		if o.editor != "" { mark = mark.commit_to_editor(`${o.editor}_${m}`); }
 		c.add(mark);
 	}

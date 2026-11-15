@@ -65,28 +65,44 @@ import { VisualEditService } from '../services/visual-edit.service';
     </section>
 
     @if (one(); as name) {
-      @if (symbolic(name); as s) {
+      @let held = symbolics(name);
+      @if (held.length) {
         <section class="panel-section">
-          <h3>Symbols of {{ name }}</h3>
-          <label class="field">
-            <span>Symbol set</span>
-            <select [disabled]="!edit.readable()" (change)="pickSet(name, s, $any($event.target).value)">
-              @for (n of setNames(); track n) { <option [value]="n" [selected]="n === s.symbol_set">{{ n }}</option> }
-              @if (!setNames().includes(s.symbol_set)) { <option [value]="s.symbol_set" selected>{{ s.symbol_set }}</option> }
-            </select>
-          </label>
-          <div class="grid">
-            @for (symbol of s.symbols; track $index) {
-              <label>#{{ $index + 1 }} <input type="number" step="1" min="0" [max]="s.base - 1" [value]="symbol" [disabled]="!edit.readable()" (change)="pickSymbol(name, s, $index, $event)" /></label>
-            }
-          </div>
-          <div class="row">
-            <button type="button" (click)="addSymbol(name, s)" [disabled]="!edit.readable()" title="One more symbol, after the last">Add</button>
-            <button type="button" (click)="removeSymbol(name, s)" [disabled]="!edit.readable() || s.symbols.length < 2" title="Take the last symbol away">Remove</button>
-            <span class="spacer"></span>
-            <button type="button" (click)="edit.setSymbolic(name, s, s.script_symbol_set, s.script_symbols)" title="Back to the symbols and set the script gave">Script's</button>
-          </div>
-          <p class="hint">{{ s.symbol_set }} has {{ s.base }} symbols, 0 to {{ s.base - 1 }}.</p>
+          <h3>{{ held.length === 1 ? 'Symbols of ' + name : held.length + ' symbolics in ' + name }}</h3>
+          @if (held.length > 1) {
+            <div class="symbolics">
+              @for (h of held; track $index) {
+                <button type="button" class="symbolic" [class.on]="picked(held) === $index" [class.edited]="edited(h)"
+                        (click)="edit.symbolic.set($index)" [title]="'Symbolic ' + $index + ': ' + h.symbol_set + ' ' + h.symbols.join(' ') + (edited(h) ? ' (edited)' : '')">
+                  <span class="hint">{{ $index }}</span> {{ h.symbol_set }} <span class="values">{{ h.symbols.join(' ') }}</span>
+                </button>
+              }
+            </div>
+            <p class="hint">Pick one here, or click it on the page.</p>
+          }
+          @let index = picked(held);
+          @if (index !== null) {
+            @let s = held[index];
+            <label class="field">
+              <span>Symbol set</span>
+              <select [disabled]="!edit.readable()" (change)="pickSet(name, s, $any($event.target).value)">
+                @for (n of setNames(); track n) { <option [value]="n" [selected]="n === s.symbol_set">{{ n }}</option> }
+                @if (!setNames().includes(s.symbol_set)) { <option [value]="s.symbol_set" selected>{{ s.symbol_set }}</option> }
+              </select>
+            </label>
+            <div class="grid">
+              @for (symbol of s.symbols; track $index) {
+                <label>#{{ $index + 1 }} <input type="number" step="1" min="0" [max]="s.base - 1" [value]="symbol" [disabled]="!edit.readable()" (change)="pickSymbol(name, s, $index, $event)" /></label>
+              }
+            </div>
+            <div class="row">
+              <button type="button" (click)="addSymbol(name, s)" [disabled]="!edit.readable()" title="One more symbol, after the last">Add</button>
+              <button type="button" (click)="removeSymbol(name, s)" [disabled]="!edit.readable() || s.symbols.length < 2" title="Take the last symbol away">Remove</button>
+              <span class="spacer"></span>
+              <button type="button" (click)="edit.setSymbolic(name, s, s.script_symbol_set, s.script_symbols)" [disabled]="!edited(s)" title="Back to the symbols and set the script gave">Script's</button>
+            </div>
+            <p class="hint">{{ s.symbol_set }} has {{ s.base }} symbols, 0 to {{ s.base - 1 }}.</p>
+          }
         </section>
       }
       <section class="panel-section">
@@ -189,6 +205,11 @@ import { VisualEditService } from '../services/visual-edit.service';
     .icon { min-width: 26px; padding: 2px 4px; }
     .icon.off { opacity: 0.5; }
     button.on { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+    .symbolics { display: flex; flex-direction: column; gap: 1px; max-height: 14em; overflow-y: auto; }
+    .symbolic { display: flex; gap: 6px; align-items: baseline; text-align: left; background: transparent; border: 0; border-radius: 4px; padding: 2px 4px; color: inherit; font-size: 12px; cursor: pointer; }
+    .symbolic.on { background: var(--editor-selection); font-weight: 600; }
+    .symbolic.edited .values { color: var(--accent); }
+    .symbolic .values { font-family: var(--mono); margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
     .grid label { display: flex; flex-direction: column; gap: 2px; color: var(--muted); }
     .grid input { width: 100%; }
@@ -231,9 +252,21 @@ export class CanvasToolbarComponent {
     });
   }
 
-  /** What the committed canvas `name` is drawn from, if it's a symbolic. */
-  protected symbolic(name: string): SymbolicInfo | null {
-    return this.edit.committed().find((c) => c.name === name)?.symbolic ?? null;
+  /** The symbolics the committed canvas `name` holds. */
+  protected symbolics(name: string): SymbolicInfo[] {
+    return this.edit.committed().find((c) => c.name === name)?.symbolics ?? [];
+  }
+
+  /** Which of `held` is picked to change: the only one, or the one picked, if any. */
+  protected picked(held: SymbolicInfo[]): number | null {
+    if (held.length === 1) return 0;
+    const index = this.edit.symbolic();
+    return index !== null && index < held.length ? index : null;
+  }
+
+  /** Whether `s` is drawn as other than the script made it. */
+  protected edited(s: SymbolicInfo): boolean {
+    return s.symbol_set !== s.script_symbol_set || s.symbols.length !== s.script_symbols.length || s.symbols.some((n, i) => n !== s.script_symbols[i]);
   }
 
   protected pickSet(name: string, s: SymbolicInfo, set: string) {
@@ -241,11 +274,11 @@ export class CanvasToolbarComponent {
     this.edit.setSymbolic(name, s, set, s.symbols.map((n) => Math.min(n, base - 1)));
   }
 
-  protected pickSymbol(name: string, s: SymbolicInfo, index: number, event: Event) {
+  protected pickSymbol(name: string, s: SymbolicInfo, at: number, event: Event) {
     const value = this.number(event);
     if (value === null) return;
     const symbols = [...s.symbols];
-    symbols[index] = Math.max(0, Math.min(s.base - 1, Math.round(value)));
+    symbols[at] = Math.max(0, Math.min(s.base - 1, Math.round(value)));
     this.edit.setSymbolic(name, s, s.symbol_set, symbols);
   }
 

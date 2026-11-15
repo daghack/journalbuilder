@@ -2,7 +2,11 @@
   "version": 1,
   "canvases": {
     "last.1.corner_0": {
-      "symbols": [3]
+      "symbolics": {
+        "b335ba09-a7c3-83f9-5581-bb7a64f247f0": {
+          "symbols": [3]
+        }
+      }
     }
   }
 }

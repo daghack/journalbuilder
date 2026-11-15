@@ -11,7 +11,8 @@
 // the walls and the heart's glyph. The cells' symbols are symbol_set's, a
 // SymbolSet, glyph_size across (the set's own size if that's 0) or
 // smaller if the cells haven't room, upright or, with turned, each turned
-// to its ring, its foot to the heart. Unwired, near-black ink pens and
+// to its ring, its foot to the heart, in the set's own styles, or with
+// restyle_set in glyph_style's pen. Unwired, near-black ink pens and
 // the fine letters set in red. With editor, each cell's symbol is committed to
 // the visual editor as EDITOR_RING_CELL.
 
@@ -19,11 +20,11 @@ import "lib/circular_maze" as lab;
 import "lib/symbol_rings" as rings;
 
 fn options() {
-	#{ size: 900.0, heart: "basic_eye", turned: false, glyph_size: 60.0, editor: "", wall_ink: "#2b1d12", glyph_ink: "#9b2318" }
+	#{ size: 900.0, heart: "basic_eye", turned: false, glyph_size: 60.0, editor: "", restyle_set: false, wall_ink: "#2b1d12", glyph_ink: "#9b2318" }
 }
 
 fn inputs(o) {
-	#{ maze: "CircularMaze", wall_style: "TextStyle", symbol_set: "SymbolSet", heart_style: "TextStyle" }
+	#{ maze: "CircularMaze", wall_style: "TextStyle", symbol_set: "SymbolSet", heart_style: "TextStyle", glyph_style: "TextStyle" }
 }
 
 fn fallbacks(o) {
@@ -32,6 +33,7 @@ fn fallbacks(o) {
 		wall_style: #{ style: new_style(new_brush_style(o.wall_ink, "Ink Pen", 2.0, #{ min_pressure: 0.4, max_pressure: 0.7, pressure_profile: "constant" }), hand) },
 		heart_style: #{ style: new_style(new_brush_style(o.wall_ink, "Ink Pen", 1.6, #{ min_pressure: 0.4, max_pressure: 0.7, pressure_profile: "constant" }), hand) },
 		symbol_set: symbol_set("fine_letters", #{ color: o.glyph_ink }),
+		glyph_style: #{ style: new_style(new_brush_style(o.glyph_ink, "Ink Pen", 2.2, #{ min_pressure: 0.4, max_pressure: 0.8 }), hand) },
 	}
 }
 
@@ -92,7 +94,9 @@ fn render(o, i) {
 		for s in 0..n {
 			let at = centre + toward((s + 0.5) / n) * (inner.call(k) + wide * 0.5);
 			let turn = if o.turned { 2.0 * PI() * (s + 0.5) / n } else { 0.0 };
-			let mark = write_at(set.text([l.symbols[k][s]]), at, #{ type: #{ glyph_scale: size }, turn: turn });
+			let settings = #{ type: #{ glyph_scale: size }, turn: turn };
+			if o.restyle_set { settings.style = i.glyph_style.style; }
+			let mark = write_at(set.text([l.symbols[k][s]]), at, settings);
 			if o.editor != "" { mark = mark.commit_to_editor(`${o.editor}_${k}_${s}`); }
 			c.add(mark);
 		}

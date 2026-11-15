@@ -31,15 +31,17 @@
 // glyph_size across (the set's own size if that's 0) or smaller if the
 // ring hasn't room, and whose base is the ring's (the base option is 0,
 // the set's whole, unless it gives fewer). The set then draws every
-// symbol, borders still in glyph_style's pen; unwired, the glyphs
-// are glyph_style's, as above.
+// symbol in its own styles, borders still in glyph_style's pen, or with
+// restyle_set, in the styles' pens as the glyphs would be (the ring's in
+// glyph_style's, each middle symbol in its walk's), its glyphs still the
+// set's; unwired, the glyphs are glyph_style's, as above.
 
 import "lib/symbol_rings" as rings;
 
 fn options() {
 	#{
 		base: 0, first: 2, second: 5, steps: 0, bordered: true, center_bordered: true, size: 900.0, center_scale: 3.0, glyph_size: 0.0,
-		dash: 14.0, gap: 10.0, glyph_ink: "#2b1d12", first_ink: "#9b2318", second_ink: "#23409b",
+		restyle_set: false, dash: 14.0, gap: 10.0, glyph_ink: "#2b1d12", first_ink: "#9b2318", second_ink: "#23409b",
 		joined_ink: "#5f2a6e",
 	}
 }

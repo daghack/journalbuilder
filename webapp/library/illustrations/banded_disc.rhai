@@ -25,7 +25,9 @@
 //
 // The canvas is size across and down, the disc's centre in its middle.
 // The inscription is written in text_style (unwired, the eldritch script
-// in rough ink), at the band's size whatever the style's. With editor,
+// in rough ink), at the band's size whatever the style's. The marks are
+// in symbol_set's own styles, or with restyle_set in glyph_style's pen
+// (unwired, text_style's pen; red doesn't change it). With editor,
 // each mark is committed to the visual editor as EDITOR_BAND_K, BAND the
 // band's place in the list.
 
@@ -34,7 +36,7 @@ import "lib/plates" as plates;
 
 fn options() {
 	#{
-		size: 600.0, seed: 0, editor: "", ink: "#2b1d12", blood: "#9b2318",
+		size: 600.0, seed: 0, editor: "", restyle_set: false, ink: "#2b1d12", blood: "#9b2318",
 		bands: [
 			#{ rule: 0.97, double: true },
 			#{ ticks: [0.905, 0.944], long: 0.956 },
@@ -53,20 +55,22 @@ fn options() {
 }
 
 fn inputs(o) {
-	#{ symbols: "Any", symbol_set: "SymbolSet", inscription: "String", text_style: "TextStyle" }
+	#{ symbols: "Any", symbol_set: "SymbolSet", inscription: "String", text_style: "TextStyle", glyph_style: "TextStyle" }
 }
 
 fn fallbacks(o) {
+	let rough = new_style(new_brush_style(o.ink, "Rough Ink", o.size * 0.002, #{
+		min_pressure: 0.5, max_pressure: 0.8, pressure_profile: "taper", pressure_wander: 0.2, color_jitter: 0.04,
+	}), new_handwriting_style(#{ glyph_rotation_jitter: 0.03, glyph_scale_jitter: 0.04 }));
 	#{
 		symbols: [],
 		symbol_set: symbol_set("priests"),
 		inscription: "",
 		text_style: #{
-			style: new_style(new_brush_style(o.ink, "Rough Ink", o.size * 0.002, #{
-				min_pressure: 0.5, max_pressure: 0.8, pressure_profile: "taper", pressure_wander: 0.2, color_jitter: 0.04,
-			}), new_handwriting_style(#{ glyph_rotation_jitter: 0.03, glyph_scale_jitter: 0.04 })),
+			style: rough,
 			type: new_type_style(glyphset("eldritch"), o.size * 0.04, #{ glyph_tracking: 0.04 }),
 		},
+		glyph_style: #{ style: rough },
 	}
 }
 
@@ -132,11 +136,13 @@ fn render(o, i) {
 				for k in 0..count { symbols.push(k % set.base); }
 			}
 			let medal = (b.size ?? 0.2) * r / 2.0;
+			let settings = #{ type: #{ glyph_scale: medal * 1.31 } };
+			if o.restyle_set { settings.style = i.glyph_style.style; }
 			for k in 0..symbols.len() {
 				let p = centre + plates::toward(k * 1.0 / symbols.len() + turn) * at * r;
 				c.add(new_circle(p, medal), inks::band(ink, 2.4 * u * weight));
 				c.add(new_circle(p, medal * 0.83), inks::fine(ink, 0.7 * u * weight));
-				let m = write_at(set.text([symbols[k]]), p, #{ type: #{ glyph_scale: medal * 1.31 } });
+				let m = write_at(set.text([symbols[k]]), p, settings);
 				if o.editor != "" { m = m.commit_to_editor(`${o.editor}_${n}_${k}`); }
 				c.add(m);
 			}

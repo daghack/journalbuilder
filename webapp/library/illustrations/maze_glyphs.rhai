@@ -11,12 +11,13 @@
 //
 // symbol_set, a SymbolSet, draws the cells' symbols instead of glyph_style
 // when it's wired: each symbol is the set's own (the cell's symbol 0 to 26
-// of the set's), at its size or smaller if a cell hasn't room, upright.
+// of the set's), at its size or smaller if a cell hasn't room, upright, in
+// the set's own styles, or with restyle_set in glyph_style's pen.
 // With editor, each cell's symbol is committed to the visual editor as
 // EDITOR_N, N the cell's place in walking order, so any can be changed.
 
 fn options() {
-	#{ cell: 70.0, corridors: "#9b2318", glyphs: "#2b1d12", editor: "" }
+	#{ cell: 70.0, corridors: "#9b2318", glyphs: "#2b1d12", editor: "", restyle_set: false }
 }
 
 fn inputs(o) {
@@ -42,9 +43,11 @@ fn render(o, i) {
 	if i.symbol_set != () {
 		let set = i.symbol_set;
 		let size = min(set.size, o.cell * 0.8);
+		let settings = #{ type: #{ glyph_scale: size } };
+		if o.restyle_set { settings.style = i.glyph_style.style; }
 		for (cell, k) in i.maze.cells() {
 			if cell.symbol >= set.base { throw `maze_glyphs: symbol ${cell.symbol} is outside the symbol set '${set.name}' (0 to ${set.base - 1})`; }
-			let mark = write_at(set.text([cell.symbol]), vec2(cell.x * o.cell, cell.y * o.cell), #{ type: #{ glyph_scale: size } });
+			let mark = write_at(set.text([cell.symbol]), vec2(cell.x * o.cell, cell.y * o.cell), settings);
 			if o.editor != "" { mark = mark.commit_to_editor(`${o.editor}_${k}`); }
 			c.add(mark);
 		}

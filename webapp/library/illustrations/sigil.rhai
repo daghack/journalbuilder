@@ -18,7 +18,8 @@
 // Draws word, the symbols the line goes through, and ordering, the ring,
 // in symbol_set, a SymbolSet: its glyphs at its size, or smaller if the
 // ring hasn't room, upright; a blank symbol a gap in the ring (the line
-// still goes there). line_style, a TextStyle, a style source's, draws the
+// still goes there), in the set's own styles, or with restyle_set in
+// glyph_style's pen. line_style, a TextStyle, a style source's, draws the
 // sigil. Unwired, a red ink pen, and the symbols the letters set, in ink.
 // With editor, each symbol of the ring is committed to the visual editor
 // as EDITOR_0 to EDITOR_N, so any can be changed there.
@@ -28,11 +29,11 @@ import "lib/permutations" as perm;
 import "lib/inks" as inks;
 
 fn options() {
-	#{ base: 27, size: 700.0, show_ring: true, bordered: false, editor: "", line_ink: "#9b2318", glyph_ink: "#2b1d12" }
+	#{ base: 27, size: 700.0, show_ring: true, bordered: false, editor: "", restyle_set: false, line_ink: "#9b2318", glyph_ink: "#2b1d12" }
 }
 
 fn inputs(o) {
-	#{ word: `Base${o.base}Symbol`, ordering: `Base${o.base}Symbol`, line_style: "TextStyle", symbol_set: "SymbolSet" }
+	#{ word: `Base${o.base}Symbol`, ordering: `Base${o.base}Symbol`, line_style: "TextStyle", symbol_set: "SymbolSet", glyph_style: "TextStyle" }
 }
 
 fn fallbacks(o) {
@@ -43,6 +44,7 @@ fn fallbacks(o) {
 		ordering: ordering,
 		line_style: #{ style: new_style(new_brush_style(o.line_ink, "Ink Pen", 2.0, #{ min_pressure: 0.5, max_pressure: 0.8, pressure_profile: "constant" }), hand) },
 		symbol_set: symbol_set("letters", #{ color: o.glyph_ink }),
+		glyph_style: #{ style: new_style(new_brush_style(o.glyph_ink, "Ink Pen", 2.2, #{ min_pressure: 0.4, max_pressure: 0.8 }), hand) },
 	}
 }
 
@@ -59,10 +61,12 @@ fn render(o, i) {
 	// Where each symbol stands.
 	let place = perm::inverse(i.ordering);
 	if o.show_ring {
+		let settings = #{ type: #{ glyph_scale: glyph } };
+		if o.restyle_set { settings.style = i.glyph_style.style; }
 		for k in 0..o.base {
 			let at = centre + toward(k, o.base) * radius;
 			if o.bordered { c.add(new_circle(at, glyph * 0.75), inks::contour(o.glyph_ink, 1.4)); }
-			let mark = write_at(set.text([i.ordering[k]]), at, #{ type: #{ glyph_scale: glyph } });
+			let mark = write_at(set.text([i.ordering[k]]), at, settings);
 			if o.editor != "" { mark = mark.commit_to_editor(`${o.editor}_${k}`); }
 			c.add(mark);
 		}
