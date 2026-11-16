@@ -27,6 +27,8 @@
 import "lib/inks" as inks;
 import "lib/plates" as plates;
 import "lib/chance" as chance;
+import "lib/shapes" as shapes;
+import "lib/engraving" as engraving;
 import "lib/book" as book;
 
 fn options() {
@@ -82,7 +84,7 @@ fn render(o, i) {
 	c.add(frame.rules, inks::contour(black, s * 0.0018));
 	c.add(frame.ticks, inks::detail(black, s * 0.0011));
 	// The year's days in a band of tiny ticks, round a rim of solid black.
-	book::fill_ring(c, centre, s * 0.472, s * 0.484, black);
+	engraving::dark(c, shapes::ring(centre, s * 0.472, s * 0.484), black, 3.0);
 	c.add(new_circle(centre, s * 0.492), inks::contour(black, s * 0.0016));
 	c.add(plates::ticks(centre, 364, s * 0.4875, s * 0.495, 28, s * 0.5), inks::fine(black, s * 0.0009));
 	// Writing round, between two rules.
@@ -122,11 +124,10 @@ fn render(o, i) {
 			// The month the count starts from: a star in the first, and a
 			// pointer in red from it across the months' band.
 			mark(c, o, "start", i.stars_set, start, at, medal * 1.9, 0.0);
-			let pointer = new_path();
-			for side in [-1.0, 1.0] {
+			let pointer = shapes::join([-1.0, 1.0].map(|side| {
 				let off = plates::toward(turn + 0.25) * s * 0.0035 * side;
-				pointer.append(new_line(centre + plates::toward(turn) * (ring + medal * 1.35) + off, centre + plates::toward(turn) * s * 0.426 + off));
-			}
+				new_line(centre + plates::toward(turn) * (ring + medal * 1.35) + off, centre + plates::toward(turn) * s * 0.426 + off)
+			}));
 			c.add(pointer, inks::detail(red, s * 0.0013));
 		} else {
 			mark(c, o, `marks_${k - 1}`, i.marks_set, digits[k - 1], at, medal * 1.78, 0.0);
@@ -146,10 +147,9 @@ fn render(o, i) {
 	c.add(new_circle(centre, s * 0.11), inks::detail(black, s * 0.0011));
 	c.add(plates::ticks(centre, 104, s * 0.112, s * 0.124, 8, s * 0.134), inks::fine(black, s * 0.0009));
 	// The cross: heavy, to the first ring.
-	let cross = new_path();
-	for k in 0..4 {
-		cross.append(new_line(centre + plates::toward(k / 4.0) * s * 0.134, centre + plates::toward(k / 4.0) * s * 0.196));
-	}
+	let cross = shapes::join(shapes::times(4, |k| {
+		new_line(centre + plates::toward(k / 4.0) * s * 0.134, centre + plates::toward(k / 4.0) * s * 0.196)
+	}));
 	c.add(cross, inks::band(black, s * 0.0016));
 	mark(c, o, "hub", i.stars_set, hub, centre, s * 0.215, 0.0);
 

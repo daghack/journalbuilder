@@ -73,7 +73,16 @@
 //             Witch Oil, Sanguine, Veinwork, Knell, Keybone, Harrow and
 //             Glossolalia; and its heavy darks: Flying White, Rend,
 //             Strands and Horrid; its gothic ones, Mezzotint, Fraktur,
-//             Shroud, Cinder and Drypoint; and Balefire
+//             Shroud, Cinder and Drypoint; and Balefire; more puzzle
+//             locks: routes and marks (knights_tour and turning_grille,
+//             their tour and grille drawn, scytale, morse_code, baconian)
+//             and keyed ciphers (autokey, homophonic,
+//             straddling_checkerboard, trifid, chaocipher)
+//             and the library's drawing helpers: lib/shapes,
+//             lib/engraving, lib/gothic and lib/leaves; a leaf aged,
+//             folded and walled, ribbons of writing, rings, offset
+//             curves and construction lines; paths joined from a list
+//             and shapes shaded on their shadow side
 //
 // Pages are bound with new_book: numbered, named and listed in the
 // contents.
@@ -3559,6 +3568,248 @@ for b in [["Mezzotint", 26.0, 8.0], ["Fraktur", 9.0, 4.0], ["Shroud", 30.0, 9.0]
 	y += 185;
 }
 book.bind("appendix", gothic);
+
+// More puzzle locks, each locked and unlocked: two routes through a grid
+// (a knight's tour and a turning grille, each drawn beside its row), a
+// strip wound on a rod, marks (Morse's and Bacon's), and keyed ciphers
+// (autokey, homophones, a straddling checkerboard, the trifid's cube and
+// Chaocipher's two wheels).
+// Each row: the lock's name, two lines saying what it does, the lock, its
+// inputs, the value to write (its name, or a function writing the result
+// out), and the input unlocking gives back. Gives the rows drawn, and
+// each one's result.
+let lock_rows = |rows| {
+	let drawn = new_canvas();
+	let results = [];
+	let y = TOP + 120;
+	for row in rows {
+		let result = row[2].run(row[3]);
+		assert(row[2].unlock(result).text(row[5]) == row[3][row[5]].text(), `${row[0]} should unlock`);
+		drawn.add(write_in(row[0], LEFT, y, 26, HEADING, PLAIN));
+		drawn.add(caption(row[1][0], y + 40)).add(caption(row[1][1], y + 74));
+		let said = if type_of(row[4]) == "string" { result.text(row[4]) } else { row[4].call(result) };
+		drawn.add(write(said, LEFT + 40, y + 116, 22));
+		results.push(result);
+		y += 230;
+	}
+	#{ canvas: drawn, results: results }
+};
+
+let routes = sheet("locks");
+routes.add(subhead("routes and marks", TOP));
+routes.add(caption("new_lock(name).add(part, lock type, options), run and unlocked", TOP + 50));
+let shown = lock_rows.call([
+	["knights_tour", ["size 5, seed 3: THE HOUNDS RUN AT NIGHT written along a knight's", "tour, read by rows; the tour (k.tour, a KnightsTour), from red"],
+		new_lock("tour").add("k", "knights_tour", #{ base: 27, size: 5, seed: 3 }), #{ "k.plain_text": symbols(27, "THE HOUNDS RUN AT NIGHT") }, "k.cipher_text", "k.plain_text"],
+	["turning_grille", ["size 4, seed 1: TURN THE PLATE written through the holes, turned", "and on; the grille (g.grille, a TurningGrille) as it first lies"],
+		new_lock("grille").add("g", "turning_grille", #{ base: 27, size: 4, seed: 1 }), #{ "g.plain_text": symbols(27, "TURN THE PLATE") }, "g.cipher_text", "g.plain_text"],
+	["scytale", ["faces 3: BLADES IN THE NIGHT written along a rod a face at a time, then read", "along the strip wound round it"],
+		new_lock("rod").add("s", "scytale", #{ base: 27, faces: 3 }), #{ "s.plain_text": symbols(27, "BLADES IN THE NIGHT") }, "s.cipher_text", "s.plain_text"],
+	["morse_code", ["SOS AT DAWN as marks in base 3, 0 a gap, 1 a dot, 2 a dash, each gap written", "here as a space: each code ended by a gap, a space a gap alone"],
+		new_lock("morse").add("m", "morse_code"), #{ "m.plain_text": symbols(27, "SOS AT DAWN") }, |r| r.get("m.marks").symbols().reduce(|said, m| said + (if m == 0 { " " } else { `${m}` }), ""), "m.plain_text"],
+	["baconian", ["kinds 2, base 26: BACON as five marks a letter, its number in base 2 (grouped", "here in fives), for a cover text to hide in two founts"],
+		new_lock("bacon").add("b", "baconian", #{ base: 26 }), #{ "b.plain_text": symbols(26, "BACON") }, |r| r.get("b.marks").symbols().reduce(|said, m, k| said + (if k > 0 && k % 5 == 0 { " " } else { "" }) + m, ""), "b.plain_text"],
+]);
+routes.add(shown.canvas);
+// The knight's tour: its board, the knight's way square to square.
+let tour = shown.results[0].get("k.tour").value();
+let size = tour.size;
+let cell = 32.0;
+let corner = vec2(RIGHT - size * cell, TOP + 104);
+let centre = |square| corner + vec2((square % size) * cell + cell / 2.0, (square / size) * cell + cell / 2.0);
+for k in 0..=size {
+	routes.add(new_line(corner + vec2(k * cell, 0), corner + vec2(k * cell, size * cell)), CAPTION);
+	routes.add(new_line(corner + vec2(0, k * cell), corner + vec2(size * cell, k * cell)), CAPTION);
+}
+routes.add(new_polyline(tour.squares.map(|s| centre.call(s))), TEXT);
+routes.add(new_circle(centre.call(tour.squares[0]), 5), CAPTION);
+// The grille: its plate, the holes cut, in a pen that doesn't taper off
+// at the corners.
+let grille = shown.results[1].get("g.grille").value();
+let size = grille.size;
+let corner = vec2(RIGHT - size * cell, TOP + 344);
+let cut = |colour| new_style(new_brush_style(colour, "Ink Pen", 1.6, #{ min_pressure: 0.6, max_pressure: 0.6, pressure_profile: "constant" }), new_handwriting_style());
+routes.add(new_rectangle(corner + vec2(size, size) * cell / 2.0, size * cell + 12, size * cell + 12), cut.call(INK));
+for hole in grille.holes {
+	let hole = new_rectangle(corner + vec2((hole % size) * cell + cell / 2.0, (hole / size) * cell + cell / 2.0), cell - 8, cell - 8);
+	routes.add(hole, cut.call(RED)).add(hole.hatch(3.0), cut.call(RED));
+}
+book.bind("appendix", routes);
+
+let keyed = sheet("locks");
+keyed.add(subhead("keyed ciphers", TOP));
+keyed.add(caption("new_lock(name).add(part, lock type, options), run and unlocked", TOP + 50));
+let shown = lock_rows.call([
+	["autokey", ["primer QUEENLY, base 26: ATTACKATDAWN shifted by the primer and then by", "the text itself"],
+		new_lock("auto").add("a", "autokey", #{ base: 26 }), #{ "a.plain_text": symbols(26, "ATTACKATDAWN"), "a.key": symbols(26, "QUEENLY") }, "a.cipher_text", "a.plain_text"],
+	["homophonic", ["digits 2, seed 5: THE WATER IS STILL, each symbol one of its numbers, as many as", "it's common, written as digits (h.table, a Homophones, the key)"],
+		new_lock("homo").add("h", "homophonic", #{ seed: 5 }), #{ "h.plain_text": symbols(27, "THE WATER IS STILL") }, "h.cipher_text", "h.plain_text"],
+	["straddling_checkerboard", ["key ESTONIAR, base 26, blanks 2 and 6: ATTACK as digits, the top row's", "letters a digit each, the rows below' two"],
+		new_lock("board").add("c", "straddling_checkerboard", #{ base: 26 }), #{ "c.plain_text": symbols(26, "ATTACK"), "c.key": symbols(26, "ESTONIAR") }, "c.cipher_text", "c.plain_text"],
+	["trifid", ["key OBSIDIAN, period 5: THREE STONES, each symbol a square, a row and a", "column of the cube, mixed five at a time"],
+		new_lock("cube").add("t", "trifid"), #{ "t.plain_text": symbols(27, "THREE STONES"), "t.key": symbols(27, "OBSIDIAN") }, "t.cipher_text", "t.plain_text"],
+	["chaocipher", ["Rubin's wheels, base 26: WELLDONEISBETTERTHANWELLSAID found on the right wheel,", "the left's written, and both wheels stirred after every symbol"],
+		new_lock("wheels").add("c", "chaocipher"), #{ "c.plain_text": symbols(26, "WELLDONEISBETTERTHANWELLSAID"), "c.left": symbols(26, "HXUCZVAMDSLKPEFJRIGTWOBNYQ"), "c.right": symbols(26, "PTLNBQDEOYSFAVZKGJRIHWXUMC") }, "c.cipher_text", "c.plain_text"],
+]);
+keyed.add(shown.canvas);
+book.bind("appendix", keyed);
+
+// The library's drawing helpers, lib/shapes, lib/engraving, lib/gothic
+// and lib/leaves: what the gothic samples' pages are drawn with, for any
+// journal to import.
+import "lib/shapes" as shapes;
+import "lib/engraving" as engraving;
+import "lib/gothic" as gothic;
+import "lib/leaves" as leaves;
+
+let drawn = sheet("files");
+drawn.add(subhead("shapes", TOP));
+drawn.add(caption("import \"lib/shapes\" as shapes: arrays from a function (steps, times), curves, arcs, ellipses and whorls", TOP + 50));
+drawn.add(caption("as points, closed shapes wound one way (closed), tubes and slivers, and the arches, lancets and foils of tracery", TOP + 78));
+let y = TOP + 250;
+let limb = shapes::closed(shapes::tube([vec2(LEFT + 10, y + 60), vec2(LEFT + 70, y - 30), vec2(LEFT + 160, y - 70)], [34.0, 22.0, 6.0]));
+engraving::mass(drawn, limb, shapes::sliver([vec2(LEFT + 34, y + 28), vec2(LEFT + 72, y - 20), vec2(LEFT + 124, y - 46)], 5.0), INK, 1.2);
+drawn.add(shapes::shape(shapes::foil_points(vec2(LEFT + 320, y), 80.0, 4, 0.35, 0.0)), LINE);
+drawn.add(shapes::shape(shapes::foil_points(vec2(LEFT + 320, y), 40.0, 3, 0.35, 0.0)), CAPTION);
+let foot = vec2(LEFT + 520, y + 80);
+drawn.add(shapes::shape(shapes::lancet_points(foot, 110.0, 100.0, 1.0)), LINE);
+drawn.add(new_polyline(shapes::arch_order(foot + vec2(-55, -100), foot + vec2(55, -100), 1.0, 14.0, 18)), CAPTION);
+drawn.add(new_polyline(shapes::whorl_points(vec2(LEFT + 720, y), 6.0, 80.0, 3.0, 1.0, 0.0)), LINE);
+drawn.add(new_polyline(shapes::steps(40, |j| vec2(LEFT + 850 + j * 4.0, y + 40.0 * (j * 0.3).sin()))), LINE);
+for label in [["tube, sliver", 0], ["foil_points", 250], ["lancet_points,", 450], ["whorl_points", 650], ["steps", 850]] {
+	drawn.add(write_in(label[0], LEFT + label[1], y + 140, 22, CAPTION, PLAIN));
+}
+drawn.add(write_in("arch_order", LEFT + 450, y + 168, 22, CAPTION, PLAIN));
+
+drawn.add(subhead("engraving", TOP + 470));
+drawn.add(caption("import \"lib/engraving\" as engraving: shapes massed in an ink, holes left bare (mass, dark, velvet), and", TOP + 520));
+drawn.add(caption("black water: level lines laid so close they close up, the moon's road (moon_road) left bare in it", TOP + 548));
+let y = TOP + 720;
+let pool = shapes::closed(shapes::ellipse_points(vec2(LEFT + 190, y), 190.0, 80.0, 80));
+engraving::black_water(drawn, pool, engraving::moon_road(LEFT + 190.0, y - 70.0, y + 70.0, 36.0, 5), INK);
+let rock = shapes::closed(shapes::loop_curve([vec2(LEFT + 430, y + 70), vec2(LEFT + 460, y - 40), vec2(LEFT + 540, y - 80), vec2(LEFT + 620, y - 20), vec2(LEFT + 640, y + 70)], 8));
+let cracks = new_path().append(shapes::sliver([vec2(LEFT + 470, y + 40), vec2(LEFT + 500, y - 10), vec2(LEFT + 550, y - 50)], 6.0))
+	.append(shapes::sliver([vec2(LEFT + 560, y + 50), vec2(LEFT + 590, y), vec2(LEFT + 610, y - 20)], 4.0));
+engraving::mass(drawn, rock, cracks, INK, 1.4);
+engraving::velvet(drawn, shapes::closed(shapes::lancet_points(vec2(LEFT + 780, y + 80), 100.0, 90.0, 1.0)), INK, 3.0);
+engraving::dark(drawn, shapes::closed(shapes::ellipse_points(vec2(LEFT + 940, y), 50.0, 50.0, 40)), RED, 3.0);
+for label in [["black_water,", 80], ["mass", 480], ["velvet", 740], ["dark", 910]] {
+	drawn.add(write_in(label[0], LEFT + label[1], y + 140, 22, CAPTION, PLAIN));
+}
+drawn.add(write_in("moon_road", LEFT + 80, y + 168, 22, CAPTION, PLAIN));
+
+drawn.add(subhead("functional helpers", TOP + 960));
+drawn.add(caption("shapes::steps(n, f): f(0) to f(n); shapes::times(n, f): f(0) to f(n - 1), points along a span or round a loop;", TOP + 1010));
+drawn.add(caption("shapes::polar(a), the unit vec at angle a; shapes::reversed(points), a copy backwards; shapes::behind(path,", TOP + 1038));
+drawn.add(caption("solid), what of a path shows behind a solid; shapes::cell_centre(n, cols, centre, cell), the middle of a grid's cell n", TOP + 1066));
+let y = TOP + 1170;
+let ring = shapes::times(12, |k| vec2(LEFT + 150, y) + shapes::polar(2.0 * PI() * k / 12.0) * 60.0);
+for p in ring { drawn.add(new_circle(p, 6.0), LINE); }
+let solid = shapes::closed(shapes::ellipse_points(vec2(LEFT + 480, y), 50.0, 50.0, 40));
+let rays = new_path();
+for k in 0..9 { rays.append(new_line(vec2(LEFT + 320 + k * 40, y - 66), vec2(LEFT + 320 + k * 40, y + 66))); }
+drawn.add(shapes::behind(rays, solid), LINE).add(solid, CAPTION);
+for n in 0..9 { drawn.add(write_in(`${n}`, 0, 0, 24, TEXT, PLAIN).translate_by(shapes::cell_centre(n, 3, vec2(LEFT + 800, y), 50.0) - vec2(6, 0))); }
+for label in [["times, polar", 70], ["behind", 440], ["cell_centre", 740]] {
+	drawn.add(write_in(label[0], LEFT + label[1], y + 104, 22, CAPTION, PLAIN));
+}
+book.bind("appendix", drawn);
+
+let figures = sheet("files");
+figures.add(subhead("gothic figures", TOP));
+figures.add(caption("import \"lib/gothic\" as gothic: headstones, bare trees, rooks, reeds, a star that watches, looking-glasses,", TOP + 50));
+figures.add(caption("swords and knives of black glass: outlines as closed shapes to mass, and what's drawn in the ink it's given", TOP + 78));
+let y = TOP + 300;
+for (kind, k) in ["round", "gothic", "shoulder", "cross"] {
+	let foot = vec2(LEFT + 50 + k * 110, y + 60);
+	figures.add(shapes::shape(gothic::headstone(foot, 80.0, 150.0, kind, (k - 1.5) * 0.04)), LINE);
+	figures.add(write_in(kind, foot.x - 36, y + 100, 20, CAPTION, PLAIN));
+}
+engraving::mass(figures, gothic::rook(vec2(LEFT + 560, y - 70), 140.0, 0.5, 0.1), new_path(), INK, 1.2);
+engraving::mass(figures, gothic::perched_rook(vec2(LEFT + 560, y + 60), 90.0, 1.0), new_path(), INK, 1.2);
+figures.add(new_line(vec2(LEFT + 500, y + 60), vec2(LEFT + 640, y + 60)), LINE);
+figures.add(gothic::watcher(vec2(LEFT + 760, y - 20), 26.0, 4, INK));
+let glass = gothic::looking_glass(vec2(LEFT + 930, y - 10), 50.0, 70.0, INK, #{ width: 26.0, crest: false, drop: false });
+figures.add(glass.canvas);
+gothic::glints(figures, glass.glass, vec2(LEFT + 930, y - 10), 45.0, RED);
+for label in [["headstone", 140], ["rook, perched_rook", 480], ["watcher", 720], ["looking_glass, glints", 820]] {
+	figures.add(write_in(label[0], LEFT + label[1], y + 134, 22, CAPTION, PLAIN));
+}
+let y = TOP + 660;
+let tree = gothic::bare_tree(vec2(LEFT + 130, y + 100), -PI() / 2.0, 110.0, 16.0, 3, 7);
+let limbs = new_path();
+for l in tree.limbs { limbs.append(shapes::shape(l)); }
+engraving::mass(figures, limbs, new_path(), INK, 1.2);
+for t in tree.twigs { figures.add(new_polyline(shapes::curve(t[0], 4)), LINE); }
+engraving::mass(figures, gothic::reeds(y + 100, LEFT + 300, LEFT + 520, 130.0, 16, 3), new_path(), INK, 1.0);
+let steel = gothic::sword(vec2(LEFT + 640, y + 20), vec2(RIGHT - 20, y - 60), 22.0, INK);
+let black = gothic::sword(vec2(LEFT + 640, y + 90), vec2(RIGHT - 20, y + 10), 22.0, INK, #{ black: true });
+figures.add(steel.canvas).add(black.canvas);
+for label in [["bare_tree", 70], ["reeds", 370], ["sword, black: true", 640]] {
+	figures.add(write_in(label[0], LEFT + label[1], y + 140, 22, CAPTION, PLAIN));
+}
+let y = TOP + 890;
+figures.add(gothic::glass_knife(vec2(LEFT + 60, y), vec2(LEFT + 400, y - 30), 34.0, 90.0, 2, INK).canvas);
+figures.add(gothic::backwards("LOREM IPSUM", vec2(LEFT + 720, y - 10), leaves::figures_hand(36.0, INK)));
+for label in [["glass_knife", 140], ["backwards, as a glass shows it", 560]] {
+	figures.add(write_in(label[0], LEFT + label[1], y + 60, 22, CAPTION, PLAIN));
+}
+
+figures.add(subhead("leaves", TOP + 1010));
+figures.add(caption("import \"lib/leaves\" as leaves: leaf(name, seed) ages a page, bind walls it with an account; notes, centred", TOP + 1060));
+figures.add(caption("text, and the hands: the account's (wall_hand), notes (note_hand), figures, headings (title_hand), carved", TOP + 1088));
+let y = TOP + 1170;
+figures.add(leaves::note("Lorem ipsum dolor sit amet.", vec2(LEFT, y - 30), 300, #{ ink: RED, size: 30, turn: -0.03 }).canvas);
+figures.add(leaves::centred("lorem ipsum", vec2(LEFT + 470, y), leaves::wall_hand(30.0, INK)));
+figures.add(leaves::centred("LOREM", vec2(LEFT + 690, y), leaves::title_hand(40.0, INK)));
+figures.add(leaves::centred("IPSUM", vec2(LEFT + 880, y), leaves::carved_hand(36.0, INK)));
+for label in [["note", 60], ["centred, wall_hand", 360], ["title_hand", 620], ["carved_hand", 820]] {
+	figures.add(write_in(label[0], LEFT + label[1], y + 90, 22, CAPTION, PLAIN));
+}
+book.bind("appendix", figures);
+
+// A leaf aged and walled as leaves::bind does it, ribbons of writing, and
+// what the night almanac brought into the library: shapes::ring,
+// shapes::offset and plates::construction.
+let aged = sheet("files");
+aged.add(subhead("leaves, aged", TOP));
+aged.add(caption("leaves::leaf(name, seed, o): stains (tea), foxing (fox), a fold (fold: \"down\" or \"across\"), tide-lines (tide)", TOP + 50));
+aged.add(caption("and burnt edges (burn); place and jot keep the wall off what's put on it; wall (density) walls it, as bind does", TOP + 78));
+let leaf = leaves::leaf("sample", 9, #{ size: vec2(460, 600), fold: "down", tide: 1, burn: 0.6, foxing: 70, stains: 2 });
+let at = vec2(230, 230);
+leaves::place(leaf, new_canvas().add(new_circle(at, 80.0), LINE).add(new_polygon(at, 66, 5, #{ step: 2 }), CAPTION), 10);
+leaves::jot(leaf, "Lorem ipsum dolor sit amet.", vec2(70, 450), 300, #{ ink: RED, size: 28, turn: -0.02 });
+let walled = leaves::wall(content("lorem"), new_rectangle(leaf.size / 2.0, 420, 560), leaf.avoid, leaves::wall_hand(14.0, INK));
+aged.add(new_canvas().add(leaf.under).add(walled).add(leaf.figures).add(leaf.over).translate_by(vec2(LEFT, TOP + 140)));
+let band = leaves::ribbon([vec2(LEFT + 540, TOP + 250), vec2(LEFT + 680, TOP + 190), vec2(LEFT + 830, TOP + 260), vec2(RIGHT - 20, TOP + 200)], 46.0,
+	"lorem ipsum dolor sit amet", leaves::wall_hand(24.0, INK), INK);
+aged.add(band.canvas);
+let spine = shapes::curve([vec2(LEFT + 540, TOP + 520), vec2(LEFT + 610, TOP + 450), vec2(LEFT + 680, TOP + 540), vec2(LEFT + 750, TOP + 470)], 10);
+aged.add(new_polyline(spine), LINE);
+for d in [-24.0, -12.0, 12.0, 24.0] { aged.add(new_polyline(shapes::offset(spine, d)), CAPTION); }
+engraving::dark(aged, shapes::ring(vec2(LEFT + 820, TOP + 490), 34.0, 50.0), RED, 3.0);
+engraving::dark(aged, shapes::ring(vec2(LEFT + 820, TOP + 490), 0.0, 14.0), INK, 3.0);
+let heart = vec2(LEFT + 955, TOP + 490);
+plates::construction(aged, heart, 70, 56, INK, #{ weight: 3.0 });
+aged.add(new_circle(heart, 36.0), LINE);
+for label in [["leaf, place, jot, wall", LEFT + 100, TOP + 790], ["ribbon", LEFT + 720, TOP + 330], ["offset", LEFT + 600, TOP + 650], ["ring", LEFT + 800, TOP + 650], ["construction", LEFT + 890, TOP + 650]] {
+	aged.add(write_in(label[0], label[1], label[2], 22, CAPTION, PLAIN));
+}
+
+aged.add(subhead("joined and shaded", TOP + 880));
+aged.add(caption("shapes::join(items): one path of a list of paths, as times, steps and map give them; engraving::shade(region,", TOP + 930));
+aged.add(caption("gap, o): a shape hatched as path.hatch hatches it, its lit side (lit, a vec toward the light) left bare", TOP + 958));
+let y = TOP + 1110;
+let hub = vec2(LEFT + 150, y);
+aged.add(shapes::join(shapes::times(16, |k| new_line(hub + shapes::polar(k * PI() / 8.0) * 30, hub + shapes::polar(k * PI() / 8.0) * (64 + 10 * (k % 2))))), LINE);
+let orb = shapes::closed(shapes::ellipse_points(vec2(LEFT + 450, y), 70.0, 70.0, 60));
+aged.add(orb, LINE).add(engraving::shade(orb, 3.0, #{ angle: [0.8], lit: vec2(-26, -20) }), CAPTION);
+let door = shapes::closed(shapes::lancet_points(vec2(LEFT + 750, y + 80), 110.0, 90.0, 1.0));
+aged.add(door, LINE).add(engraving::shade(door, 4.0, #{ angle: [1.2], roughness: 0.6, lit: vec2(-36, 0) }), CAPTION);
+for label in [["join, times, polar", LEFT + 60], ["shade, lit from the top left", LEFT + 330], ["shade, lit from the left", LEFT + 650]] {
+	aged.add(write_in(label[0], label[1], y + 120, 22, CAPTION, PLAIN));
+}
+book.bind("appendix", aged);
 
 // ---- the title page and the contents, which go first ----
 

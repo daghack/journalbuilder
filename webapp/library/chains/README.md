@@ -61,7 +61,17 @@ fn example() {
 | `options()` *(optional)* | the chain's options, declared as a lock file declares its own (`integer(3)`, `one_of([...], default)`; see locks/README.md), which `chain(name, options)` gives |
 | `chain(o)` | `sources` (optional: the journal's files it draws on, below), `locks` (each id's `type` and `options`), `connect` (`[output, input]` pairs), `fixed` (values for inputs, by port) and `illustrations` (each id's `type`, `options` and `inputs`, each illustration input -> the port it draws) |
 | `layout()` *(optional)* | where the lock editor draws each lock and illustration |
-| `example()` *(optional)* | a value for every open input, by port: the editor's test case, which `journalbuild --check-locks` and `cargo test` lock and unlock, needing the inputs back |
+| `example()` *(optional)* | a value for every open input, by port: the editor's test case, which `journalbuild --check-locks` and `cargo test` lock and unlock, needing the inputs back, and the fixed inputs too. A chain whose inputs are all fixed is checked without one. |
+
+## A page's secrets
+
+A journal can keep a page's puzzle as a chain of its own, its secrets
+fixed: `chains/PAGE.rhai`, whose `fixed` holds every input, so the entry
+only runs it and draws what it gives (`chain("PAGE").run()`, and
+`unlock` for what the page shows of the secrets themselves).
+`--check-locks NAME` locks and unlocks it with no example needed, and
+fails if unlocking doesn't give each secret back: the puzzle is checked
+solvable. The gothic samples keep theirs so.
 
 ## Sources
 

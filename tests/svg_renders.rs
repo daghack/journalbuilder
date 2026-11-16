@@ -156,6 +156,7 @@ first_pages!(
     black_priests,
     copper_letter_1,
     first_codex,
+    gothic_samples,
     journal_entries,
     lang_font,
     loche_rules,

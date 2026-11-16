@@ -191,20 +191,27 @@ impl LockLibrary {
 
     /// Build chain file `name` with its defaults and, if it has an
     /// example, lock it and unlock what that gives, which must be the
-    /// example's inputs back. Returns how many examples it has, 0 or 1.
+    /// example's inputs back, and its fixed inputs too. A chain whose
+    /// inputs are all fixed is its own example. Returns how many examples
+    /// it has, 0 or 1.
     pub fn check_chain(self: &Rc<Self>, name: &str) -> Result<usize, String> {
         let chain_file = self.chain_file(name)?;
         let spec = self.chain_spec(name, Map::new())?;
         let lock = self.chain_lock(&spec)?;
-        if !chain_file.defines("example", 0) {
+        let open = Self::chain_inputs(&spec, &lock);
+        let has_example = chain_file.defines("example", 0);
+        if !has_example && !(open.is_empty() && !spec.fixed.is_empty()) {
             return Ok(0);
         }
-        let at = |e: String| format!("{}: example(): {}", chain_file.file, e);
-        let given = self.call(&chain_file, "example", ())
-            .map_err(|e| e.located(&chain_file.file))?
-            .try_cast::<Map>()
-            .ok_or_else(|| at("must return a map of the chain's open inputs to values, #{ \"lock.port\": value }".into()))?;
-        let open = Self::chain_inputs(&spec, &lock);
+        let at = |e: String| format!("{}: {}{}", chain_file.file, if has_example { "example(): " } else { "" }, e);
+        let given = if has_example {
+            self.call(&chain_file, "example", ())
+                .map_err(|e| e.located(&chain_file.file))?
+                .try_cast::<Map>()
+                .ok_or_else(|| at("must return a map of the chain's open inputs to values, #{ \"lock.port\": value }".into()))?
+        } else {
+            Map::new()
+        };
         if let Some(unknown) = given.keys().find(|port| !open.contains_key(port.as_str())) {
             return Err(at(format!("'{}' isn't an open input of the chain; open: {}", unknown, sorted(open.keys()).into_iter().cloned().collect::<Vec<_>>().join(", "))));
         }
@@ -220,6 +227,15 @@ impl LockLibrary {
             let back = back.get(port).ok_or_else(|| at(format!("unlocking didn't give back '{}'", port)))?;
             if !same_value(&back.data, &given.data) {
                 return Err(at(format!("unlocking gave back '{}' as {}, not {}", port, show(&back.data, &given.var_type), show(&given.data, &given.var_type))));
+            }
+        }
+        // What the chain fixes is its secret as much as what it's given:
+        // unlocking must recover that too.
+        for (port, value) in &spec.fixed {
+            let back = back.get(port).ok_or_else(|| at(format!("unlocking didn't give back the fixed '{}'", port)))?;
+            let fixed = from_script(value.clone(), &back.var_type).map_err(|e| at(format!("fixed: '{}': {}", port, e)))?;
+            if !same_value(&back.data, &fixed.data) {
+                return Err(at(format!("unlocking gave back the fixed '{}' as {}, not {}", port, show(&back.data, &back.var_type), show(&fixed.data, &back.var_type))));
             }
         }
         Ok(1)
