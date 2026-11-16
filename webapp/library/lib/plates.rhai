@@ -1,6 +1,6 @@
 // What a plate is built from besides its subject: frames, ticks, rulers,
 // points and rings of glyphs round a ring, rings and lines ruled twice,
-// inscriptions, blots. For the puzzle illustrations, with lib/inks' pens.
+// construction lines, inscriptions, blots. For the puzzle illustrations, with lib/inks' pens.
 // import "lib/plates" as plates;
 
 import "lib/chance" as chance;
@@ -159,6 +159,23 @@ fn ruler(a, b, count, short, every, long) {
 fn double_ring(c, centre, radius, gap, ink, weight) {
 	c.add(new_circle(centre, radius), inks::contour(ink, weight));
 	c.add(new_circle(centre, radius - gap), inks::fine(ink, weight * 0.45));
+}
+
+// The lines a figure is built on, as a draughtsman leaves them, added to
+// canvas c in pencil in `ink`: a cross through `centre` reaching `reach`
+// each way, and a compass circle `radius` round it (0 for none), broken
+// where the pen was lifted. o.weight (1): how heavy the pencil is.
+fn construction(c, centre, reach, radius, ink) { construction(c, centre, reach, radius, ink, #{}) }
+fn construction(c, centre, reach, radius, ink, o) {
+	let weight = o.weight ?? 1.0;
+	let lines = new_path();
+	lines.append(new_line(centre - vec2(reach, 0), centre + vec2(reach, 0)));
+	lines.append(new_line(centre - vec2(0, reach), centre + vec2(0, reach)));
+	c.add(lines, inks::pencil(ink, weight));
+	if radius > 0.0 {
+		c.add(new_arc(centre, radius, -1.3, 1.9), inks::pencil(ink, 0.9 * weight));
+		c.add(new_arc(centre, radius, 2.3, 4.5), inks::pencil(ink, 0.9 * weight));
+	}
 }
 
 // A line ruled twice, added to canvas c: a contour `weight` wide from a to

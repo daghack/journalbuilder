@@ -10,6 +10,7 @@
 
 import "lib/inks" as inks;
 import "lib/plates" as plates;
+import "lib/leaves" as leaves;
 import "lib/book" as book;
 
 const INK = inks::black();
@@ -37,8 +38,8 @@ const TOP = 55.0;
 const BOTTOM = 1545.0;
 let first_at = vec2(64, 70);
 let last_at = vec2(RIGHT - 813, 566);
-book::place(leaf, first.translate_by(first_at), 11);
-book::place(leaf, last.translate_by(last_at), 13);
+leaves::place(leaf, first.translate_by(first_at), 11);
+leaves::place(leaf, last.translate_by(last_at), 13);
 book::jot(leaf, "The near one: five houses. It gains three every year.", vec2(524, TOP + 8), RIGHT - 540, #{ size: 36, turn: 0.02, margin: 0 });
 book::jot(leaf, "The weeper gains five. The middle one loses one.", vec2(LEFT + 6, 556), 250, #{ size: 31, turn: -0.03, margin: 0 });
 book::jot(leaf, "One line. All three. Count again.", vec2(LEFT + 6, 1400), 390, #{ size: 38, ink: BLOOD, turn: 0.02, margin: 0 });
@@ -64,7 +65,7 @@ for (period, k) in seen.value().periods {
 	leaf.figures.add(write_line(`${step} of ${period}`, at + vec2(-36, 92), book::note_hand(26.0, BLOOD)));
 }
 // The wheels' strip, under the last plate.
-book::clear(leaf, new_rectangle(vec2((465 + RIGHT) / 2.0, (1385 + BOTTOM) / 2.0), RIGHT - 465, BOTTOM - 1385), 0);
+leaves::clear(leaf, new_rectangle(vec2((465 + RIGHT) / 2.0, (1385 + BOTTOM) / 2.0), RIGHT - 465, BOTTOM - 1385), 0);
 
 journal_entry.add(book::bind(leaf, content("watch"), #{
 	area: new_rectangle(vec2((LEFT + RIGHT) / 2.0, (TOP + BOTTOM) / 2.0), RIGHT - LEFT, BOTTOM - TOP),

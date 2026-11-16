@@ -6,6 +6,7 @@
 
 import "lib/inks" as inks;
 import "lib/plates" as plates;
+import "lib/leaves" as leaves;
 import "lib/book" as book;
 
 const INK = inks::black();
@@ -25,16 +26,16 @@ let leaf = book::leaf("index", 15, #{ foxing: 170 });
 // in their medallions, the thirteen-pointed star three ways, and what
 // watches at the heart.
 let centre = vec2(330, 335);
-book::construction(leaf.under, centre, 300, 292, SEPIA);
+plates::construction(leaf.under, centre, 300, 292, SEPIA);
 let table = illustration("banded_disc", #{ size: 540.0, seed: 17, editor: "table" })
 	.run(#{ inscription: "every two of them once never none never twice", text_style: book::loud_hand(22, INK) })[0];
-book::place(leaf, table.translate_by(centre - vec2(270, 270)), 4);
+leaves::place(leaf, table.translate_by(centre - vec2(270, 270)), 4);
 
 // ---- the ribbon ----
-let band = book::ribbon([vec2(640, 30), vec2(668, 210), vec2(645, 430), vec2(560, 610), vec2(380, 690), vec2(180, 680), vec2(30, 700)], 46.0,
+let band = leaves::ribbon([vec2(640, 30), vec2(668, 210), vec2(645, 430), vec2(560, 610), vec2(380, 690), vec2(180, 680), vec2(30, 700)], 46.0,
 	"the true ones keep the rule and the liars break it", book::loud_hand(28, INK), INK);
 leaf.figures.add(band.canvas);
-book::clear(leaf, band.hole, 4);
+leaves::clear(leaf, band.hole, 4);
 
 // ---- his note ----
 book::jot(leaf, "Twenty-six of them are true. The rest are liars, and they lie in the way I can't yet see. Only one seal binds any two. Read the true ones by their numbers, the least first.",
@@ -44,7 +45,7 @@ book::jot(leaf, "Twenty-six of them are true. The rest are liars, and they lie i
 // A triple on the ring of thirteen, as he worked it: the ring, its places,
 // the three joined, and the lines he ruled to find them.
 let worked = vec2(940, 500);
-book::construction(leaf.under, worked, 150, 0.0, SEPIA);
+plates::construction(leaf.under, worked, 150, 0.0, SEPIA);
 plates::double_ring(leaf.figures, worked, 104, 6, INK, 1.6);
 leaf.figures.add(plates::ticks(worked, 13, 98, 112, 0, 0.0), inks::detail(INK, 1.0));
 let corners = plates::around(worked, 98, 13);
@@ -59,12 +60,12 @@ for k in 0..13 {
 	leaf.figures.add(write_at(points.text([k]), places[k], #{ type: #{ glyph_scale: 28.0 } }));
 	leaf.under.add(new_line(worked, spokes[k]), inks::pencil(SEPIA, 0.6));
 }
-book::clear(leaf, new_circle(worked, 146), 2);
+leaves::clear(leaf, new_circle(worked, 146), 2);
 book::jot(leaf, "0, 3, 9: the first", worked + vec2(60, 132), 200, #{ size: 22, turn: -0.03, margin: 4 });
 
 // ---- the seals ----
 for seal in illustration("triads", #{ seed: 3, editor: "cards", cell_width: 170.0, cell_height: 134.0 }).run(#{ cards: heap }) {
-	book::place(leaf, seal.translate_by(vec2(46, 728)), 5);
+	leaves::place(leaf, seal.translate_by(vec2(46, 728)), 5);
 }
 
 // ---- the account, walled round it all ----

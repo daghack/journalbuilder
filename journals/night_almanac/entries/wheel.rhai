@@ -5,6 +5,8 @@
 
 import "lib/inks" as inks;
 import "lib/plates" as plates;
+import "lib/shapes" as shapes;
+import "lib/leaves" as leaves;
 import "lib/book" as book;
 
 const INK = inks::black();
@@ -23,9 +25,8 @@ let leaf = book::leaf("wheel", 14);
 // them.
 let at = vec2(80, 22);
 let size = 1040.0;
-book::place(leaf, illustration("month_wheel", #{ size: size, editor: "wheel" }).run(#{ marks: phases })[0].translate_by(at), 6);
-let ruled = new_path();
-for y in [at.y + size * 0.012, at.y + size - size * 0.012] { ruled.append(new_line(vec2(30, y), vec2(leaf.size.x - 30, y))); }
+leaves::place(leaf, illustration("month_wheel", #{ size: size, editor: "wheel" }).run(#{ marks: phases })[0].translate_by(at), 6);
+let ruled = shapes::join([at.y + size * 0.012, at.y + size - size * 0.012].map(|y| new_line(vec2(30, y), vec2(leaf.size.x - 30, y))));
 for x in [at.x + size * 0.012, at.x + size - size * 0.012] { ruled.append(new_line(vec2(x, 8), vec2(x, at.y + size + 70))); }
 leaf.under.add(ruled, inks::pencil(SEPIA, 0.9));
 leaf.avoid.add(ruled, #{ margin: 3 });
@@ -38,7 +39,7 @@ for d in 0..8 {
 	key.add(write_at(moons.text([d]), vec2(150 + d * 56, 1190), #{ type: #{ glyph_scale: 42.0 } }));
 }
 plates::double_rule(key, vec2(118, 1228), vec2(586, 1228), 8.0, INK, 1.4);
-book::place(leaf, key, 10);
+leaves::place(leaf, key, 10);
 
 // His notes on it.
 book::jot(leaf, "Old to old. The star first. Two to a letter.", vec2(660, 1150), 440, #{ size: 40, ink: BLOOD, turn: -0.02, margin: 6 });

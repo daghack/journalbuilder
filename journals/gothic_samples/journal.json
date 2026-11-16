@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "title": "Gothic Samples",
+  "description": "Samples of the newer locks as three gothic books, five entries each. The Ossuary Psalter: the sexton's psalter of Saint Ysolt-under-Fen, its secrets kept in a sigil, the pillars of the nave, the rose window, the churchyard railings, an epitaph, the stars over the spire and the bells. The Black Door: a sleeper's night-book of the black door without a knob that stands on the heath beneath the watching stars, the glasses that show it, and what knocks. The Black Mere: a mere-keeper's night-book of the black water below the hall that never stirs, the shapes that turn beneath it, the knives of black glass kept for what comes up, and the hunt along its banks by night. The accounts and the secrets are placeholders for your own.",
+  "entries": [
+    "psalter_title", "psalter_vespers", "psalter_nave", "psalter_churchyard", "psalter_belfry",
+    "door_title", "door_heath", "door_glass", "door_chamber", "door_threshold",
+    "mere_title", "mere_soundings", "mere_blades", "mere_hunt", "mere_deep"
+  ]
+}

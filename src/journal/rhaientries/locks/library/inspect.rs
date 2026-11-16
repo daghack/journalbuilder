@@ -530,6 +530,18 @@ mod tests {
     }
 
     #[test]
+    fn a_chain_with_its_inputs_fixed_is_its_own_example() {
+        let example = r#"fn example() { #{ "shift.plain_text": symbols(27, "KEY"), "vig.plain_text": symbols(27, "ATTACK AT DAWN") } }"#;
+        assert!(SHIFTED.contains(example));
+        let fixed = SHIFTED.replace(example, "")
+            .replace("fixed: #{},", r#"fixed: #{ "shift.plain_text": symbols(27, "KEY"), "vig.plain_text": symbols(27, "ATTACK AT DAWN") },"#);
+        assert_eq!(with_chains(&[("fixed", &fixed)]).check_chain("fixed").unwrap(), 1);
+        // One input left open, and no example: nothing to check it with.
+        let half = SHIFTED.replace(example, "").replace("fixed: #{},", r#"fixed: #{ "shift.plain_text": symbols(27, "KEY") },"#);
+        assert_eq!(with_chains(&[("half", &half)]).check_chain("half").unwrap(), 0);
+    }
+
+    #[test]
     fn chain_files_name_their_mistakes() {
         let cases = [
             ("unknown_key", SHIFTED.replace("fixed: #{},", "fixed: #{}, inputs: #{},"), "chains/unknown_key.rhai: chain(o): returned 'inputs'; it returns sources, locks, connect, fixed, illustrations"),
