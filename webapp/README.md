@@ -248,7 +248,7 @@ reuse BuildKit's caches.
 | `frontend/src/app/workers/` | the web workers the engine runs in. `eval.worker` runs the entry as you type, sends its pages, then sends each page's SVG, the page shown first. `darkly.worker` renders with Darkly. `tools.worker` answers the other editors. Typing never waits on any of them. |
 | `frontend/src/app/services/` | `JournalStore` (the journal, kept in IndexedDB), `JournalIoService` (open, import, export), `LibraryService` (the library's files), `JournalService` (the entry shown, its pages), `RenderService` (the script and Darkly workers), `ToolsService` (the tools worker), `FileService` (picking files and directories, downloads) |
 | `frontend/src/app/shell/`, `layout/` | the journal bar, the files sidebar, which file shows, and the three resizable columns the editors have |
-| `frontend/src/app/fonts/` | the glyphset editor. `font-file.ts` reads and writes glyphset files; `glyph-path.ts` reads and writes path data; `glyph-edit.ts` is what the canvas does to a path. |
+| `frontend/src/app/fonts/` | the glyphset editor. `font-file.ts` reads and writes glyphset files; `glyph-path.ts` reads and writes path data; `glyph-edit.ts` is what the canvas does to a path; `glyph-link.ts` draws linked glyphs from their parents and places them and reference pictures. |
 | `frontend/src/app/locks/` | the chain editor. `chain-model.ts` is the graph and its rules; `chain-source.ts` writes it as a chain file. |
 | `frontend/src/app/resources/` | the lock, illustration, layout, style and helper editor, the content editor, and the library banner |
 | `frontend/src/app/editor/` | the CodeMirror editor and its rhai highlighting (`rhai-language.ts`) |

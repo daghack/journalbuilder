@@ -18,7 +18,23 @@
 //!
 //! - `glyphs` maps each character (or, in a set of symbols, each name) to
 //!   SVG path data spanning about -1..1, y down, or to a list of variants,
-//!   one of which is picked at random each time the character is set.
+//!   one of which is picked at random each time the character is set; or
+//!   to another glyph of the glyphset, linked:
+//!
+//!   ```json
+//!   "b": { "from": "d", "move": [0, 0], "turn": 0, "scale": [-1, 1], "skew": 0, "add": "M ..." }
+//!   ```
+//!
+//!   A linked glyph is drawn as the glyph it's linked to (`from`, which may
+//!   itself be linked), as that is now: each of its variants with every
+//!   point `p` moved to `move + R(turn) K(skew) S(scale) p`, about the
+//!   origin (turns clockwise and skews sideways in degrees, as the visual
+//!   editor's edits do), then its own strokes, `add`, over each. All but
+//!   `from` may be left out.
+//! - `references` is the glyph editor's: a picture behind a glyph to draw
+//!   over, `{ "A": { "image": "scan", "move", "turn", "scale", "skew",
+//!   "opacity" } }`, a journal's `images/` picture fitted in -1..1 and
+//!   transformed as a linked glyph is. The drawing ignores it.
 //! - `character_padding` is room between neighbouring glyphs' outlines and
 //!   `space_width` the width of a space, both in font sizes (default 0 and
 //!   0.5). A tab is four spaces.
@@ -60,6 +76,9 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
+use parry2d::math::Vec2;
+
+use super::affine::Affine;
 use super::paths::StrokePath;
 use super::symbol::{Joins, Symbol, SymbolBase, SymbolType};
 
@@ -125,7 +144,105 @@ struct FontEntry {
     #[serde(default)]
     glyph_padding: BTreeMap<String, f32>,
     joins: Option<JoinsEntry>,
+    /// The glyph editor's pictures behind glyphs; checked, not drawn.
+    #[serde(default)]
+    references: BTreeMap<String, ReferenceEntry>,
     glyphs: BTreeMap<String, Variants>,
+}
+
+/// Where a linked glyph's parent, or a reference picture, is put: every
+/// point `p` to `move + R(turn) K(skew) S(scale) p`, about the origin.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Placed {
+    #[serde(default, rename = "move")]
+    offset: [f32; 2],
+    #[serde(default)]
+    turn: f32,
+    #[serde(default = "unit_scale")]
+    scale: [f32; 2],
+    #[serde(default)]
+    skew: f32,
+}
+
+fn unit_scale() -> [f32; 2] {
+    [1.0, 1.0]
+}
+
+impl Placed {
+    fn check(&self) -> Result<(), String> {
+        if self.offset.iter().chain(&self.scale).chain([&self.turn, &self.skew]).any(|v| !v.is_finite()) {
+            return Err("every number should be finite".into());
+        }
+        if self.scale.contains(&0.0) {
+            return Err("a scale can't be 0".into());
+        }
+        if self.skew.abs() >= 89.0 {
+            return Err(format!("the skew should be under 89 degrees either way, got {}", self.skew));
+        }
+        Ok(())
+    }
+    fn affine(&self) -> Affine {
+        Affine::scale(self.scale[0], self.scale[1])
+            .then(&Affine::skew(self.skew))
+            .then(&Affine::rotate(self.turn))
+            .then(&Affine::translate(Vec2::new(self.offset[0], self.offset[1])))
+    }
+}
+
+/// A glyph linked to another: its variants, placed, with strokes of its own.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LinkEntry {
+    from: String,
+    #[serde(default, rename = "move")]
+    offset: [f32; 2],
+    #[serde(default)]
+    turn: f32,
+    #[serde(default = "unit_scale")]
+    scale: [f32; 2],
+    #[serde(default)]
+    skew: f32,
+    add: Option<String>,
+}
+
+impl LinkEntry {
+    fn placed(&self) -> Placed {
+        Placed { offset: self.offset, turn: self.turn, scale: self.scale, skew: self.skew }
+    }
+}
+
+/// A picture the glyph editor shows behind a glyph.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReferenceEntry {
+    image: String,
+    #[serde(default, rename = "move")]
+    offset: [f32; 2],
+    #[serde(default)]
+    turn: f32,
+    #[serde(default = "unit_scale")]
+    scale: [f32; 2],
+    #[serde(default)]
+    skew: f32,
+    #[serde(default = "full_opacity")]
+    opacity: f32,
+}
+
+fn full_opacity() -> f32 {
+    1.0
+}
+
+impl ReferenceEntry {
+    fn check(&self) -> Result<(), String> {
+        if self.image.is_empty() {
+            return Err("its image should be a picture's name".into());
+        }
+        if !(0.0..=1.0).contains(&self.opacity) {
+            return Err(format!("its opacity should be from 0 to 1, got {}", self.opacity));
+        }
+        Placed { offset: self.offset, turn: self.turn, scale: self.scale, skew: self.skew }.check()
+    }
 }
 
 /// A glyphset file's `joins`: which glyphs join, and the heights their
@@ -146,10 +263,56 @@ fn default_space_width() -> f32 {
 }
 
 #[derive(Deserialize)]
-#[serde(untagged)]
+#[serde(untagged, expecting = "a glyph: path data, a list of variants' path data, or a linked glyph, { \"from\", \"move\", \"turn\", \"scale\", \"skew\", \"add\" }")]
 enum Variants {
     One(String),
     Many(Vec<String>),
+    Linked(LinkEntry),
+}
+
+/// Glyph `key`'s variants as paths, a linked glyph's from the glyph it's
+/// linked to (each glyph read once, into `done`); `seen` holds the links
+/// followed to it, which mustn't loop.
+fn glyph_paths<'a>(
+    key: &'a str,
+    glyphs: &'a BTreeMap<String, Variants>,
+    done: &mut BTreeMap<&'a str, Vec<StrokePath>>,
+    seen: &mut Vec<&'a str>,
+) -> Result<Vec<StrokePath>, String> {
+    if let Some(paths) = done.get(key) {
+        return Ok(paths.clone());
+    }
+    if seen.contains(&key) {
+        seen.push(key);
+        return Err(format!("glyphs are linked in a loop: {}", seen.join(" -> ")));
+    }
+    let parse = |data: &String| data.parse::<StrokePath>().map_err(|e| format!("glyph '{}': {}", key, e));
+    let paths = match &glyphs[key] {
+        Variants::One(data) => vec![parse(data)?],
+        Variants::Many(data) if data.is_empty() => return Err(format!("glyph '{}' has no variants", key)),
+        Variants::Many(data) => data.iter().map(parse).collect::<Result<_, _>>()?,
+        Variants::Linked(link) => {
+            let Some((from, _)) = glyphs.get_key_value(&link.from) else {
+                return Err(format!("glyph '{}' is linked to '{}', which isn't a glyph", key, link.from));
+            };
+            let placed = link.placed();
+            placed.check().map_err(|e| format!("glyph '{}': {}", key, e))?;
+            let add = link.add.as_ref().map(parse).transpose()?;
+            let affine = placed.affine();
+            seen.push(key);
+            let parents = glyph_paths(from, glyphs, done, seen)?;
+            seen.pop();
+            parents.into_iter().map(|mut path| {
+                path.map_points(|p| affine.apply(p));
+                if let Some(add) = &add {
+                    path.append(add.clone());
+                }
+                path
+            }).collect()
+        }
+    };
+    done.insert(key, paths.clone());
+    Ok(paths)
 }
 
 /// A font's glyphs as loaded: every variant of each glyph, in file order.
@@ -364,17 +527,17 @@ impl FontBook {
                     return Err(bad(format!("joins.x_height and joins.baseline must be numbers, the x-height above (less than) the baseline, got {} and {}", joins.x_height, joins.baseline)));
                 }
             }
-            let mut glyphs = BTreeMap::new();
-            for (key, variants) in &entry.glyphs {
-                let paths: Vec<&String> = match variants {
-                    Variants::One(path) => vec![path],
-                    Variants::Many(paths) => paths.iter().collect(),
-                };
-                if paths.is_empty() {
-                    return Err(bad(format!("glyph '{}' has no variants", key)));
+            for (key, reference) in &entry.references {
+                if !entry.glyphs.contains_key(key) {
+                    return Err(bad(format!("references gives '{}', which isn't a glyph", key)));
                 }
-                let bases = paths.into_iter().map(|data| {
-                    let path: StrokePath = data.parse().map_err(|e| bad(format!("glyph '{}': {}", key, e)))?;
+                reference.check().map_err(|e| bad(format!("the reference for '{}': {}", key, e)))?;
+            }
+            let mut glyphs = BTreeMap::new();
+            let mut done = BTreeMap::new();
+            for key in entry.glyphs.keys() {
+                let paths = glyph_paths(key, &entry.glyphs, &mut done, &mut Vec::new()).map_err(bad)?;
+                let bases = paths.into_iter().map(|path| {
                     let ends = entry.joins.as_ref().and_then(|joins| path.subpaths().first().and_then(|first| {
                         let points: Vec<_> = first.commands().iter().filter_map(|c| c.ending_point()).collect();
                         let high = |y: f32| (y - joins.x_height).abs() < (y - joins.baseline).abs();
@@ -386,8 +549,8 @@ impl FontBook {
                             x_height: joins.baseline - joins.x_height,
                         })
                     }));
-                    Ok(Rc::new(SymbolBase::new(SymbolType::Pathed(path)).with_joins(ends)))
-                }).collect::<Result<Vec<_>, String>>()?;
+                    Rc::new(SymbolBase::new(SymbolType::Pathed(path)).with_joins(ends))
+                }).collect();
                 glyphs.insert(key.clone(), bases);
             }
             loaded.insert(name.clone(), (Rc::new(Glyphs { name: name.clone(), glyphs, padding: entry.glyph_padding.clone(), joins: entry.joins.is_some() }), entry));
@@ -669,6 +832,55 @@ mod tests {
             (r#"{ "f": { "space_width": 0, "glyphs": {} } }"#, "font 'f': space_width must be"),
             (r#"{ "f": { "glyphs": { "a": [] } } }"#, "font 'f': glyph 'a' has no variants"),
             (r#"{ "f": { "colour": 1, "glyphs": {} } }"#, "unknown field `colour`"),
+        ] {
+            let err = FontBook::from_bytes(json.as_bytes()).expect_err(json);
+            assert!(err.contains(want), "{}: {}", want, err);
+        }
+    }
+
+    /// Glyph `key`'s variants' points, rounded.
+    fn points(font: &Font, key: &str) -> Vec<Vec<(f32, f32)>> {
+        font.glyphs.glyphs[key].iter().map(|base| {
+            let SymbolType::Pathed(path) = base.kind() else { panic!("{} isn't pathed", key) };
+            path.commands().iter().filter_map(|c| c.ending_point()).map(|p| ((p.x * 1000.0).round() / 1000.0, (p.y * 1000.0).round() / 1000.0)).collect()
+        }).collect()
+    }
+
+    #[test]
+    fn linked_glyphs_are_their_parents_placed_with_strokes_of_their_own() {
+        let b = book(r#"{ "f": { "glyphs": {
+            "d": ["M 0.5 -1 L 0.5 0", "M 0.4 -1 L 0.4 0"],
+            "b": { "from": "d", "scale": [-1, 1] },
+            "p": { "from": "b", "turn": 90, "move": [0, 0.5], "add": "M 0 0 L 0.1 0" },
+            "q": { "from": "d", "skew": 45, "scale": [2, 2] }
+        } } }"#);
+        let f = b.font("f").unwrap();
+        // Every variant of the glyph it's linked to, as it is.
+        assert_eq!(points(&f, "b"), [vec![(-0.5, -1.0), (-0.5, 0.0)], vec![(-0.4, -1.0), (-0.4, 0.0)]]);
+        // Scaled, skewed, turned clockwise, then moved; its own strokes,
+        // where they are, after.
+        assert_eq!(points(&f, "p")[0], [(1.0, 0.0), (0.0, 0.0), (0.0, 0.0), (0.1, 0.0)]);
+        assert_eq!(points(&f, "q")[0], [(-1.0, -2.0), (1.0, 0.0)]);
+        for (json, want) in [
+            (r#"{ "f": { "glyphs": { "a": { "from": "z" } } } }"#, "font 'f': glyph 'a' is linked to 'z', which isn't a glyph"),
+            (r#"{ "f": { "glyphs": { "a": { "from": "b" }, "b": { "from": "c" }, "c": { "from": "a" } } } }"#, "glyphs are linked in a loop: a -> b -> c -> a"),
+            (r#"{ "f": { "glyphs": { "a": "M 0 0 L 1 0", "b": { "from": "a", "scale": [0, 1] } } } }"#, "glyph 'b': a scale can't be 0"),
+            (r#"{ "f": { "glyphs": { "a": "M 0 0 L 1 0", "b": { "from": "a", "add": "L 1" } } } }"#, "glyph 'b': path data must start with a moveto"),
+            (r#"{ "f": { "glyphs": { "a": { "from": "a", "rotate": 1 } } } }"#, "a linked glyph"),
+        ] {
+            let err = FontBook::from_bytes(json.as_bytes()).expect_err(json);
+            assert!(err.contains(want), "{}: {}", want, err);
+        }
+    }
+
+    #[test]
+    fn references_are_checked_and_not_drawn() {
+        let b = book(r#"{ "f": { "references": { "a": { "image": "scan", "move": [0.1, 0], "scale": [2, 2], "opacity": 0.4 } }, "glyphs": { "a": "M 0 0 L 1 0" } } }"#);
+        assert_eq!(points(&b.font("f").unwrap(), "a"), [vec![(0.0, 0.0), (1.0, 0.0)]]);
+        for (json, want) in [
+            (r#"{ "f": { "references": { "z": { "image": "scan" } }, "glyphs": {} } }"#, "references gives 'z', which isn't a glyph"),
+            (r#"{ "f": { "references": { "a": { "image": "scan", "opacity": 2 } }, "glyphs": { "a": "M 0 0" } } }"#, "the reference for 'a': its opacity should be from 0 to 1"),
+            (r#"{ "f": { "references": { "a": { "picture": "scan" } }, "glyphs": { "a": "M 0 0" } } }"#, "unknown field `picture`"),
         ] {
             let err = FontBook::from_bytes(json.as_bytes()).expect_err(json);
             assert!(err.contains(want), "{}: {}", want, err);

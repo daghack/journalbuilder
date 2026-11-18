@@ -1,12 +1,15 @@
 import { Component, computed, effect, inject, signal } from '@angular/core';
+import { VALID_NAME, bytesToDataUrl, journalName } from '../journal/journal-files';
 import { LibraryBannerComponent } from '../resources/library-banner.component';
 import { FontEditorService } from './font-editor.service';
 import { FALLBACK_GLYPH, fallbackLoop, fallbackOf, optionRaw, withOption } from './font-file';
+import { NEW_REFERENCE_OPACITY, linkedTo, replacePlacement, type Placement } from './glyph-link';
+import { PlacementFieldsComponent } from './placement-fields.component';
 
 /** The right: the glyphset shown, its options, and the glyph drawn. */
 @Component({
   selector: 'app-font-panel',
-  imports: [LibraryBannerComponent],
+  imports: [LibraryBannerComponent, PlacementFieldsComponent],
   template: `
     <app-library-banner [path]="editor.fontPath()" [own]="editor.fontOwn()" [builtin]="!!editor.builtinFont()" (copy)="copyIn()" (revert)="editor.useLibraryFont()" />
     <section class="panel-section">
@@ -81,20 +84,95 @@ import { FALLBACK_GLYPH, fallbackLoop, fallbackOf, optionRaw, withOption } from 
           <div class="row">
             <input type="text" class="key" aria-label="Glyph key" [value]="keyDraft() ?? glyph.key" (input)="keyDraft.set($any($event.target).value)" (keydown.enter)="renameGlyph()" />
             <button type="button" (click)="renameGlyph()" [disabled]="keyDraft() === null || keyDraft() === glyph.key">Rename</button>
-            <span class="hint">variant {{ (editor.selection()?.variant ?? 0) + 1 }} of {{ glyph.variants.length }}</span>
+            <span class="hint">variant {{ (editor.selection()?.variant ?? 0) + 1 }} of {{ editor.variantCount() }}</span>
           </div>
           @if (glyphError(); as error) { <p class="problem">{{ error }}</p> }
           <div class="row">
-            <button type="button" (click)="editor.duplicateVariant()" title="Add a copy of this variant to draw differently">Duplicate variant</button>
-            <button type="button" (click)="editor.deleteVariant()" [disabled]="glyph.variants.length < 2">Delete variant</button>
-            <button type="button" class="danger" (click)="editor.deleteGlyph()">Delete glyph</button>
+            <input type="text" class="key" aria-label="The copy's key" placeholder="copy's key" [value]="copyKey()" (input)="copyKey.set($any($event.target).value)"
+                   (keydown.enter)="duplicate(true)" />
+            <button type="button" (click)="duplicate(false)" [disabled]="!copyKey()" title="A copy of this glyph under a new key, to change on its own">Duplicate</button>
+            <button type="button" (click)="duplicate(true)" [disabled]="!copyKey()"
+                    title="A glyph drawn from this one and kept in step with it: move, turn, mirror or scale it, and give it strokes of its own">Linked copy</button>
+          </div>
+          @if (children().length) {
+            <p class="hint">Drawn from it, and changed with it: {{ children().join(', ') }}.</p>
+          }
+          <div class="row">
+            <button type="button" (click)="editor.duplicateVariant()" [disabled]="!!glyph.link" [title]="glyph.link ? 'A linked glyph has its parent’s variants' : 'Add a copy of this variant to draw differently'">Duplicate variant</button>
+            <button type="button" (click)="editor.deleteVariant()" [disabled]="!!glyph.link || glyph.variants.length < 2">Delete variant</button>
+            <button type="button" class="danger" (click)="editor.deleteGlyph()" [title]="children().length ? 'Delete it: the glyphs drawn from it keep what they draw, as paths of their own' : 'Delete it'">Delete glyph</button>
           </div>
           <label class="stack">
-            <span class="hint">Path data (SVG: M, L, Q, C, Z; y down, about −1 to 1)</span>
+            <span class="hint">{{ glyph.link ? 'Its own strokes, drawn over its parent’s (path data)' : 'Path data (SVG: M, L, Q, C, Z; y down, about −1 to 1)' }}</span>
             <textarea rows="5" spellcheck="false" [class.invalid]="!!editor.path()?.error" [value]="editor.variant() ?? ''"
                       (input)="editor.setVariantText($any($event.target).value, 'path-text')" (blur)="editor.settle()"></textarea>
           </label>
           @if (editor.path()?.error; as error) { <p class="problem">{{ error }}</p> }
+        </section>
+
+        @if (glyph.link; as link) {
+          <section class="panel-section">
+            <h3>Linked</h3>
+            <p class="hint">Drawn from another glyph as that is now, placed as here, about the origin, with its own strokes over it. The Parent tool (P) moves, turns and scales it on the canvas.</p>
+            <label class="field">
+              <span>from</span>
+              <select aria-label="The glyph it's drawn from" (change)="relink($any($event.target).value)">
+                @for (key of parentChoices(); track key) {
+                  <option [value]="key" [selected]="key === link.from">{{ key }}</option>
+                }
+                @if (!hasParent()) { <option [value]="link.from" selected disabled>{{ link.from }} (gone)</option> }
+              </select>
+            </label>
+            @if (linkError(); as error) { <p class="problem">{{ error }}</p> }
+            @if (editor.drawError(); as error) { <p class="problem">{{ error }}</p> }
+            <app-placement-fields [placement]="link" (changed)="placeLink($event)" />
+            <div class="row">
+              <button type="button" (click)="editor.detachGlyph()" [disabled]="!!editor.drawError()"
+                      [title]="'Draw it with paths of its own, as it is now: it no longer follows ' + link.from">Detach</button>
+            </div>
+          </section>
+        }
+
+        <section class="panel-section">
+          <h3>Reference picture</h3>
+          @if (glyph.reference; as ref) {
+            <label class="field">
+              <span>picture</span>
+              <select aria-label="Reference picture" (change)="useImage($any($event.target).value)">
+                @for (name of editor.images(); track name) { <option [value]="name" [selected]="name === ref.image">{{ name }}</option> }
+                @if (!editor.referenceUrl()) { <option [value]="ref.image" selected disabled>{{ ref.image }} (missing)</option> }
+              </select>
+            </label>
+            @if (!editor.referenceUrl()) { <p class="problem">There's no picture images/{{ ref.image }}.png or .jpg.</p> }
+            <label class="field">
+              <span>opacity</span>
+              <input type="range" min="0.05" max="1" step="0.05" [value]="ref.opacity ?? 1" (input)="setOpacity($any($event.target).value)" (change)="editor.settle()" />
+            </label>
+            <app-placement-fields [placement]="ref" (changed)="placeReference($event)" />
+            <div class="row">
+              <button type="button" (click)="importReference()" title="Use a PNG or JPEG of yours instead, added to the journal's images">Import another…</button>
+              <button type="button" class="danger" (click)="editor.setReference(undefined)" title="Take the picture away from this glyph (the picture stays in the journal's images)">Remove</button>
+            </div>
+          } @else {
+            <p class="hint">A picture behind the glyph to draw over: fitted in −1 to 1, then moved, turned and scaled with the Reference tool (R). It's kept in the glyphset file; the drawing ignores it.</p>
+            <div class="row">
+              <button type="button" (click)="importReference()" title="A PNG or JPEG of yours, added to the journal's images">Import picture…</button>
+              @if (editor.images().length) {
+                <select aria-label="A picture of the journal's" (change)="useImage($any($event.target).value); $any($event.target).value = ''">
+                  <option value="" selected>or a picture of the journal's…</option>
+                  @for (name of editor.images(); track name) { <option [value]="name">{{ name }}</option> }
+                </select>
+              }
+            </div>
+            @if (editor.lastReference(); as last) {
+              @if (last.key !== glyph.key) {
+                <div class="row">
+                  <button type="button" (click)="editor.setReference(last.reference)" [title]="'The picture ' + last.key + ' has, where it has it'">Same as {{ last.key }}'s</button>
+                </div>
+              }
+            }
+          }
+          @if (referenceError(); as error) { <p class="problem">{{ error }}</p> }
         </section>
       }
 
@@ -128,6 +206,9 @@ export class FontPanelComponent {
   protected readonly fontError = signal<string | null>(null);
   protected readonly keyDraft = signal<string | null>(null);
   protected readonly glyphError = signal<string | null>(null);
+  protected readonly copyKey = signal('');
+  protected readonly linkError = signal<string | null>(null);
+  protected readonly referenceError = signal<string | null>(null);
 
   constructor() {
     // Another font or glyph shown: what was typed for the last one's name goes.
@@ -140,7 +221,81 @@ export class FontPanelComponent {
       this.editor.selection();
       this.keyDraft.set(null);
       this.glyphError.set(null);
+      this.linkError.set(null);
+      this.referenceError.set(null);
     });
+  }
+
+  /** The glyphs drawn straight from the one shown. */
+  protected readonly children = computed(() => {
+    const key = this.editor.glyph()?.key;
+    return (this.editor.font()?.glyphs ?? []).filter((g) => g.link?.from === key).map((g) => g.key);
+  });
+
+  /** The glyphs the one shown could be drawn from: any not drawn from it. */
+  protected readonly parentChoices = computed(() => {
+    const font = this.editor.font();
+    const glyph = this.editor.glyph();
+    if (!font || !glyph) return [];
+    const own = linkedTo(font, glyph.key);
+    return font.glyphs.filter((g) => !own.has(g.key)).map((g) => g.key);
+  });
+  protected readonly hasParent = computed(() => this.parentChoices().includes(this.editor.link()?.from ?? ''));
+
+  protected duplicate(linked: boolean) {
+    const error = this.editor.duplicateGlyph(this.copyKey(), linked);
+    this.glyphError.set(error);
+    if (!error) this.copyKey.set('');
+  }
+
+  protected relink(from: string) {
+    this.linkError.set(this.editor.relinkGlyph(from));
+  }
+
+  protected placeLink(p: Placement) {
+    this.editor.setLink((link) => replacePlacement(link, p));
+  }
+
+  protected placeReference(p: Placement) {
+    this.editor.updateReference((reference) => replacePlacement(reference, p));
+  }
+
+  protected setOpacity(value: string) {
+    const opacity = Math.min(1, Math.max(0.05, Number(value)));
+    this.editor.updateReference((reference) => ({ ...reference, opacity }), 'reference-opacity');
+  }
+
+  /** Picture `name` behind the glyph: in place of the one it has, or fitted in -1..1, faint. */
+  protected useImage(name: string) {
+    if (!name) return;
+    const reference = this.editor.glyph()?.reference;
+    this.editor.setReference(reference ? { ...reference, image: name } : { image: name, opacity: NEW_REFERENCE_OPACITY });
+    this.editor.settle();
+  }
+
+  /** A PNG or JPEG of the user's, added to the journal's images under a name they give, behind the glyph. */
+  protected importReference() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/png,image/jpeg';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const ext = file.type === 'image/png' ? 'png' : file.type === 'image/jpeg' ? 'jpg' : null;
+      if (!ext) return this.referenceError.set('A reference picture is a PNG or a JPEG.');
+      const taken = new Set(this.editor.images());
+      const base = journalName(file.name.replace(/\.[^.]*$/, ''), 'reference');
+      let suggested = base;
+      for (let i = 2; taken.has(suggested); i++) suggested = `${base}_${i}`;
+      const typed = prompt("The picture's name, in the journal's images:", suggested)?.trim();
+      if (!typed) return;
+      if (!VALID_NAME.test(typed)) return this.referenceError.set('A name is letters, digits and _ only.');
+      if (taken.has(typed)) return this.referenceError.set(`There's a picture called ${typed} already: pick it from the list, or give this one another name.`);
+      this.referenceError.set(null);
+      this.editor.addImage(typed, ext, bytesToDataUrl(new Uint8Array(await file.arrayBuffer()), ext));
+      this.useImage(typed);
+    };
+    input.click();
   }
 
   protected readonly fallback = computed(() => {
