@@ -2,6 +2,7 @@
 // glyphs in file order, written back in the layout fonts.json is kept in
 // (one glyph to a line), so a glyph changed is a line changed.
 
+import { placementProblem, readLink, readReferences, writeLink, writeReference, type GlyphLink, type Reference } from './glyph-link';
 import { parsePath } from './glyph-path';
 
 /** A font: its options other than glyphs, and its glyphs, in file order. */
@@ -12,12 +13,19 @@ export interface Font {
   glyphs: Glyph[];
 }
 
-/** A glyph: its key (a character, or a name like "basic_eye") and its variants' path data. */
+/**
+ * A glyph: its key (a character, or a name like "basic_eye") and its
+ * variants' path data; or, linked, another glyph's variants placed (see
+ * glyph-link.ts), and no variants of its own. The editor's picture behind
+ * it, if it has one, is kept with it.
+ */
 export interface Glyph {
   key: string;
   variants: string[];
   /** Written as a list, even with one variant. */
   list: boolean;
+  link?: GlyphLink;
+  reference?: Reference;
 }
 
 export type FontsFile = Font[];
@@ -142,7 +150,16 @@ export function parseFonts(text: string): FontsFile {
     if (entry.kind !== 'object') throw new Error(`font '${name}' should be an object, { glyphs, ... }`);
     const options: [string, string][] = [];
     let glyphs: Glyph[] | null = null;
+    let references: [string, Reference][] = [];
     for (const [key, value] of entry.entries) {
+      if (key === 'references') {
+        try {
+          references = readReferences(value.raw);
+        } catch (err) {
+          throw new Error(`font '${name}': ${(err as Error).message}`);
+        }
+        continue;
+      }
       if (key !== 'glyphs') {
         options.push([key, value.raw]);
         continue;
@@ -153,10 +170,16 @@ export function parseFonts(text: string): FontsFile {
         if (variants.kind === 'array' && variants.items.every((item) => item.kind === 'string')) {
           return { key: glyphKey, variants: variants.items.map((item) => (item as { value: string }).value), list: true };
         }
-        throw new Error(`font '${name}': glyph '${glyphKey}' should be path data, or a list of it`);
+        if (variants.kind === 'object') return { key: glyphKey, variants: [], list: false, link: readLink(`font '${name}': glyph '${glyphKey}'`, variants.raw) };
+        throw new Error(`font '${name}': glyph '${glyphKey}' should be path data, a list of it, or a linked glyph`);
       });
     }
     if (!glyphs) throw new Error(`font '${name}' has no glyphs`);
+    for (const [key, reference] of references) {
+      const glyph = glyphs.find((g) => g.key === key);
+      if (!glyph) throw new Error(`font '${name}': references gives '${key}', which isn't a glyph`);
+      glyph.reference = reference;
+    }
     return { name, options, glyphs };
   });
 }
@@ -175,10 +198,17 @@ export function serializeFonts(fonts: FontsFile): string {
   fonts.forEach((font, i) => {
     lines.push(`\t${jsonString(font.name, true)}: {`);
     for (const [key, raw] of font.options) lines.push(`\t\t${jsonString(key, true)}: ${raw},`);
+    // The editor's pictures behind glyphs, in the glyphs' order, one to a line.
+    const referenced = font.glyphs.filter((glyph) => glyph.reference);
+    if (referenced.length) {
+      lines.push('\t\t"references": {');
+      referenced.forEach((glyph, j) => lines.push(`\t\t\t${jsonString(glyph.key, false)}: ${writeReference(glyph.reference!)}${j < referenced.length - 1 ? ',' : ''}`));
+      lines.push('\t\t},');
+    }
     lines.push('\t\t"glyphs": {');
     font.glyphs.forEach((glyph, j) => {
       const comma = j < font.glyphs.length - 1 ? ',' : '';
-      const value = glyph.list || glyph.variants.length !== 1
+      const value = glyph.link ? writeLink(glyph.link) : glyph.list || glyph.variants.length !== 1
         ? `[${glyph.variants.map((d) => jsonString(d, false)).join(', ')}]`
         : jsonString(glyph.variants[0], false);
       lines.push(`\t\t\t${jsonString(glyph.key, false)}: ${value}${comma}`);
@@ -314,6 +344,28 @@ export function checkFonts(fonts: FontsFile): FontProblem[] {
     for (const glyph of font.glyphs) {
       if (keys.has(glyph.key)) problem(`there are two glyphs '${glyph.key}'`, { glyph: glyph.key });
       keys.add(glyph.key);
+      const reference = glyph.reference;
+      if (reference) {
+        const wrong = !reference.image ? "its image should be a picture's name"
+          : reference.opacity !== undefined && !(reference.opacity >= 0 && reference.opacity <= 1) ? `its opacity should be from 0 to 1, got ${reference.opacity}`
+            : placementProblem(reference);
+        if (wrong) problem(`the reference for '${glyph.key}': ${wrong}`, { glyph: glyph.key });
+      }
+      if (glyph.link) {
+        const link = glyph.link;
+        const where = { glyph: glyph.key };
+        if (!font.glyphs.some((g) => g.key === link.from)) problem(`glyph '${glyph.key}' is linked to '${link.from}', which isn't a glyph`, where);
+        const wrong = placementProblem(link);
+        if (wrong) problem(`glyph '${glyph.key}': ${wrong}`, where);
+        try {
+          parsePath(link.add ?? '');
+        } catch (err) {
+          problem(`glyph '${glyph.key}': ${(err as Error).message}`, where);
+        }
+        const loop = linkLoop(font, glyph.key);
+        if (loop) problem(`glyphs are linked in a loop: ${loop.join(' -> ')}`, where);
+        continue;
+      }
       if (glyph.variants.length === 0) problem(`glyph '${glyph.key}' has no variants`, { glyph: glyph.key });
       glyph.variants.forEach((d, variant) => {
         try {
@@ -336,6 +388,18 @@ export function checkFonts(fonts: FontsFile): FontProblem[] {
     if (loop) problems.push({ font: font.name, option: 'fallback', message: `fonts fall back in a loop: ${loop.join(' -> ')}` });
   }
   return problems;
+}
+
+/** The loop of links starting at glyph `key` and coming back to it, if they do. */
+export function linkLoop(font: Font, key: string): string[] | null {
+  const byKey = new Map(font.glyphs.map((glyph) => [glyph.key, glyph]));
+  const seen = [key];
+  let current = byKey.get(key)?.link?.from;
+  while (current !== undefined && !seen.includes(current)) {
+    seen.push(current);
+    current = byKey.get(current)?.link?.from;
+  }
+  return current === key ? [...seen, key] : null;
 }
 
 /** The loop of fallbacks starting at `name`, if its fallbacks loop. */

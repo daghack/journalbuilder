@@ -78,6 +78,10 @@ impl SymbolBase {
     pub fn is_blank(&self) -> bool {
         matches!(self.symbol_type, SymbolType::Blank(_, _))
     }
+    /// What it is: a blank, or strokes.
+    pub fn kind(&self) -> &SymbolType {
+        &self.symbol_type
+    }
 
     fn generate_hull(symbol_type: &SymbolType ) -> parry2d::shape::ConvexPolygon {
         let points =

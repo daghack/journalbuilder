@@ -1,6 +1,6 @@
 import { Component, ElementRef, computed, effect, inject, signal, viewChildren } from '@angular/core';
 import { FontEditorService } from './font-editor.service';
-import { bounds, parsePath } from './glyph-path';
+import { bounds } from './glyph-path';
 
 /** The left: every glyph of the font, each with its variants drawn small; pick one to draw. */
 @Component({
@@ -15,13 +15,13 @@ import { bounds, parsePath } from './glyph-path';
     <ol class="glyphs" role="listbox" aria-label="Glyphs">
       @for (row of rows(); track row.index) {
         <li #row class="glyph" [class.selected]="row.index === editor.selection()?.glyph">
-          <span class="key" [title]="row.key">{{ row.key }}</span>
+          <span class="key" [title]="row.from === null ? row.key : row.key + ', drawn from ' + row.from">{{ row.key }}@if (row.from !== null) {<span class="from">↳{{ row.from }}</span>}</span>
           <span class="variants">
             @for (d of row.variants; track $index) {
               <button type="button" class="variant" role="option" [attr.aria-selected]="row.index === editor.selection()?.glyph && $index === editor.selection()?.variant"
                       [class.on]="row.index === editor.selection()?.glyph && $index === editor.selection()?.variant"
                       (click)="editor.select(row.index, $index)" [title]="row.key + ', variant ' + ($index + 1)">
-                <svg [attr.viewBox]="frame()"><path [attr.d]="d" /></svg>
+                <svg [attr.viewBox]="frame()"><path [class.linked]="row.from !== null" [attr.d]="d" /></svg>
               </button>
             }
           </span>
@@ -45,6 +45,8 @@ import { bounds, parsePath } from './glyph-path';
     .variant.on { border-color: var(--accent); }
     .variant svg { width: 100%; height: 100%; display: block; }
     .variant path { fill: none; stroke: #2b1d12; stroke-width: 0.08; stroke-linecap: round; stroke-linejoin: round; }
+    .variant path.linked { stroke: #2a5d8a; }
+    .from { display: block; font-size: 9px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
     .none { font-size: 12px; color: var(--muted); padding: 8px; }
   `,
 })
@@ -59,7 +61,7 @@ export class GlyphListComponent {
     const filter = this.filter().trim();
     if (!font) return [];
     return font.glyphs
-      .map((glyph, index) => ({ index, key: glyph.key, variants: glyph.variants }))
+      .map((glyph, index) => ({ index, key: glyph.key, variants: this.editor.drawnVariants(glyph.key), from: glyph.link?.from ?? null }))
       .filter((row) => !filter || row.key.includes(filter));
   });
 
@@ -67,13 +69,12 @@ export class GlyphListComponent {
   protected readonly frame = computed(() => {
     const font = this.editor.font();
     let box = { minX: -1, minY: -1, maxX: 1, maxY: 1 };
+    const drawn = this.editor.drawn();
     for (const glyph of font?.glyphs ?? []) {
-      try {
-        const b = bounds(parsePath(glyph.variants[0]));
-        if (b) box = { minX: Math.min(box.minX, b.minX), minY: Math.min(box.minY, b.minY), maxX: Math.max(box.maxX, b.maxX), maxY: Math.max(box.maxY, b.maxY) };
-      } catch {
-        // Unreadable: the panel says so.
-      }
+      // Unreadable ones are left out: the panel says why.
+      const first = drawn.get(glyph.key)?.paths?.[0];
+      const b = first ? bounds(first) : null;
+      if (b) box = { minX: Math.min(box.minX, b.minX), minY: Math.min(box.minY, b.minY), maxX: Math.max(box.maxX, b.maxX), maxY: Math.max(box.maxY, b.maxY) };
     }
     const pad = 0.1;
     const size = Math.max(box.maxX - box.minX, box.maxY - box.minY) + 2 * pad;

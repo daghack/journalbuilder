@@ -11,6 +11,11 @@ import type { GlyphCanvasComponent } from './glyph-canvas.component';
       <button type="button" [class.on]="editor.tool() === t.tool" (click)="editor.tool.set(t.tool)" [title]="t.title">{{ t.label }}</button>
     }
     <span class="sep"></span>
+    <button type="button" [class.on]="editor.tool() === 'parent'" [disabled]="!editor.link()" (click)="editor.tool.set('parent')"
+            [title]="editor.link() ? 'Move, turn and scale the glyph this one is drawn from: drag it, its corners or the round handle; Shift for 15° turns or a free scale, Alt from the centre (P)' : 'For a linked glyph: duplicate a glyph as a linked copy to draw one'">Parent</button>
+    <button type="button" [class.on]="editor.tool() === 'reference'" [disabled]="!editor.glyph()?.reference" (click)="editor.tool.set('reference')"
+            [title]="editor.glyph()?.reference ? 'Move, turn and scale the reference picture: drag it, its corners or the round handle; Shift for 15° turns or a free scale, Alt from the centre (R)' : 'Give the glyph a reference picture in the panel first'">Reference</button>
+    <span class="sep"></span>
     @if (editor.pickedSegment()) {
       <span class="muted">Curve:</span>
       <button type="button" (click)="editor.convertPicked('L')" title="Make the picked curve a straight line">Line</button>
@@ -27,6 +32,7 @@ import type { GlyphCanvasComponent } from './glyph-canvas.component';
     <span class="sep"></span>
     <label title="Snap points to a 0.05 grid (hold Alt not to)"><input type="checkbox" [checked]="editor.snap()" (change)="editor.snap.set($any($event.target).checked)" /> Snap</label>
     <label title="Show the glyph's other variants faintly"><input type="checkbox" [checked]="editor.onion()" (change)="editor.onion.set($any($event.target).checked)" /> Variants</label>
+    <label title="Show the glyph's reference picture behind it"><input type="checkbox" [checked]="editor.showReference()" (change)="editor.showReference.set($any($event.target).checked)" /> Picture</label>
     <span class="spacer"></span>
     <button type="button" (click)="canvas()?.zoom(1 / 1.25)" title="Zoom out" aria-label="Zoom out">−</button>
     <button type="button" (click)="canvas()?.fit()" title="Fit the glyph (F)">Fit</button>

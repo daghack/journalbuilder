@@ -3183,12 +3183,24 @@ glyphsets/NAME.json: a glyphset, a JSON object. Glyph units span about -1 to 1, 
 
 | key | default | what it does | takes |
 |---|---|---|---|
-| `glyphs` | required | Each character's glyph (or each symbol's, by name): SVG path data, or an array of variants, one picked at random each time it's set. A cursive glyph's first stroke runs from where it's entered to where it's left; dots and crossbars come after. | an object of strings or arrays of strings. |
+| `glyphs` | required | Each character's glyph (or each symbol's, by name): SVG path data, or an array of variants, one picked at random each time it's set; or a linked glyph, drawn from another glyph of the glyphset (see below). A cursive glyph's first stroke runs from where it's entered to where it's left; dots and crossbars come after. | an object of strings, arrays of strings, or linked glyphs. |
 | `character_padding` | 0 | Room between glyphs' outlines, in glyph scales. | a number of at least 0. |
 | `space_width` | 0.5 | A space's width, in glyph scales. | a positive number. |
 | `fallback` | none | The glyphset to look in for characters this one hasn't. | a glyphset's name. |
 | `glyph_padding` | none | Room some glyphs keep on top of character_padding, in glyph scales. | an object of glyphs to numbers of at least 0. |
 | `joins` | none | Joins words up, as glyphset.joined says: enter and leave, the glyphs that join the glyph before and the glyph after; leave_high, those left high, after which a variant entered high is drawn; x_height and baseline, the heights a variant's entry is told high or low by, and between them the x-height how far apart glyphs join is measured in. | an object: enter, leave and leave_high (default none), strings of glyphs; x_height and baseline, glyph units, x_height less than baseline. |
+| `references` | none | The glyph editor's pictures behind glyphs, to draw over: each a picture of the journal's (images/), fitted in -1 to 1, placed as a linked glyph's parent is, and faded. The drawing ignores them. | an object of glyphs to { image, move, turn, scale, skew, opacity }: image, a picture's name; opacity (1), 0 to 1; the rest as a linked glyph's. |
+
+A linked glyph is the glyph it's linked to as that is now, so it changes when that does: each of its variants with every point p moved to move + R(turn) K(skew) S(scale) p, about the glyph's origin (as the visual editor's edits are, but about 0, 0), then the linked glyph's own strokes over each. It may be linked to a linked glyph, but links mustn't loop. `"b": { "from": "d", "scale": [-1, 1] }` is d mirrored; `"É": { "from": "E", "add": "M 0 -1.3 L 0.2 -1.5" }` is E with an accent.
+
+| key | default | what it does | takes |
+|---|---|---|---|
+| `from` | required | The glyph it's drawn from. | a glyph of the glyphset. |
+| `move` | [0, 0] | How far it's moved, right and down. | [x, y], glyph units. |
+| `turn` | 0 | How far it's turned, clockwise. | degrees. |
+| `scale` | [1, 1] | How much it's stretched each way; negative mirrors it. | [x, y], neither 0. |
+| `skew` | 0 | How far it leans: points further down go further right. | degrees, under 89 either way. |
+| `add` | none | Strokes of its own, drawn over each variant where they are (not moved). | SVG path data. |
 
 ### `text_style(name), text_style(name, options)`
 

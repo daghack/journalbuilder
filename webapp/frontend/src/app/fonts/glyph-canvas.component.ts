@@ -1,19 +1,30 @@
 import { Component, ElementRef, computed, effect, inject, signal, viewChild, type OnDestroy } from '@angular/core';
+import { about, apply, chain, inverse, rotate, scale, svgMatrix, translate, type Affine } from '../journal/canvas-edits';
 import { FontEditorService } from './font-editor.service';
 import * as edit from './glyph-edit';
 import type { PointRef } from './glyph-edit';
-import { bounds, dist, dot, ellipse, formatPath, nearestOnSegment, parsePath, type GlyphPath, type Point } from './glyph-path';
+import { placementAffine, referenceBox, withPlacement } from './glyph-link';
+import { bounds, dist, dot, ellipse, formatPath, nearestOnSegment, type GlyphPath, type Point } from './glyph-path';
 
 /** How near, in screen pixels, a click must be to a point or curve to take it. */
 const HIT_PX = 8;
 /** Grid steps snapped to, in glyph units. */
 const SNAP = 0.05;
+/** How far the turning handle sits beyond its box, in screen pixels. */
+const TURN_PX = 26;
+
+/** A corner of a box, as canvas-edits' maps take them. */
+type Corner = [number, number];
 
 type Drag =
   | { kind: 'points'; from: Point; base: GlyphPath; refs: PointRef[]; lead: Point; moved: boolean }
   | { kind: 'marquee'; from: Point; to: Point; add: boolean }
   | { kind: 'ellipse'; centre: Point; base: GlyphPath; to: Point }
-  | { kind: 'pan'; x: number; y: number; centre: Point };
+  | { kind: 'pan'; x: number; y: number; centre: Point }
+  // The parent or reference tool's: moved, turned about the box's centre, or scaled from a corner.
+  | { kind: 'place'; how: 'move' | 'turn' | 'corner'; i: number; from: Point; start: Affine; frame: Corner[]; centre: Corner; key: string };
+
+let placings = 0;
 
 /**
  * The glyph variant shown, large, to draw on: its points and curves to pick
@@ -26,17 +37,31 @@ type Drag =
   template: `
     <svg #svg [attr.viewBox]="viewBox()" (pointerdown)="down($event)" (pointermove)="move($event)" (pointerup)="up($event)"
          (pointercancel)="drag.set(null)" (dblclick)="doubleClick($event)" (wheel)="wheel($event)" [class]="'tool-' + editor.tool()">
+      <rect class="em" x="-1" y="-1" width="2" height="2" />
       <g class="grid">
         @for (line of grid(); track line.key) {
           <line [attr.x1]="line.x1" [attr.y1]="line.y1" [attr.x2]="line.x2" [attr.y2]="line.y2" [class]="line.kind" />
         }
       </g>
+      <rect class="em-edge" x="-1" y="-1" width="2" height="2" />
+      @for (label of emLabels; track label.text + label.x + label.y) {
+        <text class="em-label" [attr.x]="label.x + label.dx * 4 / scale()" [attr.y]="label.y + label.dy * 4 / scale()" [attr.font-size]="10 / scale()"
+              [attr.text-anchor]="label.anchor" [attr.dominant-baseline]="label.baseline">{{ label.text }}</text>
+      }
+      @if (reference(); as ref) {
+        <image class="reference" [attr.href]="ref.url" [attr.x]="ref.box.x" [attr.y]="ref.box.y" [attr.width]="ref.box.w" [attr.height]="ref.box.h"
+               preserveAspectRatio="none" [attr.transform]="ref.transform" [attr.opacity]="ref.opacity" />
+      }
       @for (guide of guideLines(); track guide.name) {
         <line class="guide" [attr.x1]="frame().x" [attr.x2]="frame().x + frame().w" [attr.y1]="guide.y" [attr.y2]="guide.y" />
         <text class="guide-label" [attr.x]="frame().x + 6 / scale()" [attr.y]="guide.y - 4 / scale()" [attr.font-size]="11 / scale()">{{ guide.name }}</text>
       }
       @if (editor.onion()) {
         @for (d of siblings(); track $index) { <path class="onion" [attr.d]="d" /> }
+      }
+      @if (inheritedData(); as d) {
+        <path class="ink inherited-ink" [attr.d]="d" />
+        <path class="inherited" [attr.d]="d" />
       }
       @if (shownData(); as d) {
         <path class="ink" [attr.d]="d" />
@@ -60,10 +85,22 @@ type Drag =
       @if (marquee(); as m) {
         <rect class="marquee" [attr.x]="m.x" [attr.y]="m.y" [attr.width]="m.w" [attr.height]="m.h" />
       }
+      @if (gizmo(); as g) {
+        <g class="gizmo" [class.reference-gizmo]="editor.tool() === 'reference'">
+          <polygon class="frame" [attr.points]="g.points" data-handle="move" />
+          <line class="stem" [attr.x1]="g.topMid[0]" [attr.y1]="g.topMid[1]" [attr.x2]="g.turn[0]" [attr.y2]="g.turn[1]" />
+          <circle class="handle turn" data-handle="turn" [attr.cx]="g.turn[0]" [attr.cy]="g.turn[1]" [attr.r]="r() * 1.3" />
+          @for (c of g.corners; track $index) {
+            <rect class="handle" [attr.data-handle]="'corner-' + $index" [attr.x]="c[0] - r() * 1.1" [attr.y]="c[1] - r() * 1.1" [attr.width]="r() * 2.2" [attr.height]="r() * 2.2" />
+          }
+        </g>
+      }
     </svg>
     @if (editor.path()?.error; as error) {
       <p class="unreadable">This variant's path data doesn't read: {{ error }}. Fix it in the panel on the right.</p>
-    } @else if (!editor.variant()) {
+    } @else if (editor.drawError(); as error) {
+      <p class="unreadable">This glyph can't be drawn: {{ error }}. Link it to another glyph in the panel on the right.</p>
+    } @else if (editor.variant() === null) {
       <p class="unreadable">Pick a glyph on the left, or add one.</p>
     }
     <span class="readout">{{ readout() }}</span>
@@ -75,6 +112,10 @@ type Drag =
     svg.tool-select { cursor: default; }
     svg:not(.tool-select) { cursor: crosshair; }
     :host(.panning) svg { cursor: grabbing; }
+    .em { fill: #fffdf8; stroke: none; }
+    .em-edge { fill: none; stroke: #b39a6e; stroke-width: 1.25px; vector-effect: non-scaling-stroke; pointer-events: none; }
+    .em-label { fill: #9a8562; font-family: var(--mono); pointer-events: none; }
+    .reference { pointer-events: none; }
     .grid line { stroke: #e9e4da; stroke-width: 1px; vector-effect: non-scaling-stroke; }
     .grid line.major { stroke: #d6cfc2; }
     .grid line.axis { stroke: #b9b0a2; }
@@ -83,6 +124,16 @@ type Drag =
     .onion { fill: none; stroke: #d7cfc3; stroke-width: 2px; vector-effect: non-scaling-stroke; }
     .ink { fill: none; stroke: #2b1d12; stroke-opacity: 0.18; stroke-width: 0.09; stroke-linecap: round; stroke-linejoin: round; }
     .centre { fill: none; stroke: #2b1d12; stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
+    .inherited-ink { stroke: #2a5d8a; stroke-opacity: 0.16; }
+    .inherited { fill: none; stroke: #2a5d8a; stroke-width: 1.5px; stroke-dasharray: 5 3; vector-effect: non-scaling-stroke; }
+    .gizmo .frame { fill: rgb(42 93 138 / 0.04); stroke: #2a5d8a; stroke-width: 1px; vector-effect: non-scaling-stroke; cursor: move; }
+    .gizmo .stem { stroke: #2a5d8a; stroke-width: 1px; vector-effect: non-scaling-stroke; }
+    .gizmo .handle { fill: #fff; stroke: #2a5d8a; stroke-width: 1.25px; vector-effect: non-scaling-stroke; cursor: nwse-resize; }
+    .gizmo .handle.turn { cursor: grab; }
+    .reference-gizmo .frame, .reference-gizmo .stem { stroke: #8a5a2a; }
+    .reference-gizmo .frame { fill: rgb(138 90 42 / 0.04); }
+    .reference-gizmo .handle { stroke: #8a5a2a; }
+    svg.tool-parent, svg.tool-reference { cursor: move; }
     .picked-segment { fill: none; stroke: #9b2318; stroke-width: 3px; vector-effect: non-scaling-stroke; }
     .handle { stroke: #8a8378; stroke-width: 1px; vector-effect: non-scaling-stroke; }
     .anchor { fill: #fff; stroke: #2b1d12; stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
@@ -134,6 +185,71 @@ export class GlyphCanvasComponent implements OnDestroy {
   /** A point's marker radius, in glyph units. */
   protected readonly r = computed(() => 4 / this.scale());
 
+  /** The -1..1 square's edges, labelled where the axes cross them. */
+  protected readonly emLabels = [
+    { text: '-1', x: -1, y: 0, dx: -1, dy: 0, anchor: 'end', baseline: 'middle' },
+    { text: '1', x: 1, y: 0, dx: 1, dy: 0, anchor: 'start', baseline: 'middle' },
+    { text: '-1', x: 0, y: -1, dx: 0, dy: -1, anchor: 'middle', baseline: 'auto' },
+    { text: '1', x: 0, y: 1, dx: 0, dy: 1, anchor: 'middle', baseline: 'hanging' },
+  ];
+
+  /** A linked glyph's parent, as placed: drawn, not edited. */
+  protected readonly inheritedData = computed(() => {
+    const path = this.editor.inherited();
+    return path?.length ? formatPath(path) : null;
+  });
+
+  /** The reference picture's size, once it's loaded. */
+  private readonly imageSize = signal<{ url: string; width: number; height: number } | null>(null);
+
+  /** The reference picture behind the glyph, where its placement puts it. */
+  protected readonly reference = computed(() => {
+    const reference = this.editor.glyph()?.reference;
+    const url = this.editor.referenceUrl();
+    const size = this.imageSize();
+    if (!reference || !url || !this.editor.showReference() || size?.url !== url) return null;
+    return {
+      url, box: referenceBox(size.width, size.height), transform: svgMatrix(placementAffine(reference)),
+      opacity: reference.opacity ?? 1,
+    };
+  });
+
+  /** The parent or reference tool's box, where it's placed, with its handles. */
+  protected readonly gizmo = computed(() => {
+    const tool = this.editor.tool();
+    let box: { x: number; y: number; w: number; h: number };
+    let m: Affine;
+    if (tool === 'parent') {
+      const link = this.editor.link();
+      if (!link) return null;
+      const b = this.editor.parentPath() ? bounds(this.editor.parentPath()!) : null;
+      // A flat or empty parent gets a box with room to grab.
+      const pad = (lo: number, hi: number) => (hi - lo < 0.1 ? [(lo + hi) / 2 - 0.05, (lo + hi) / 2 + 0.05] : [lo, hi]);
+      const [x0, x1] = b ? pad(b.minX, b.maxX) : [-1, 1];
+      const [y0, y1] = b ? pad(b.minY, b.maxY) : [-1, 1];
+      box = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+      m = placementAffine(link);
+    } else if (tool === 'reference') {
+      const reference = this.editor.glyph()?.reference;
+      const size = this.imageSize();
+      if (!reference || !size || size.url !== this.editor.referenceUrl()) return null;
+      box = referenceBox(size.width, size.height);
+      m = placementAffine(reference);
+    } else {
+      return null;
+    }
+    const corners: Corner[] = ([[box.x, box.y], [box.x + box.w, box.y], [box.x + box.w, box.y + box.h], [box.x, box.y + box.h]] as Corner[])
+      .map((c) => apply(m, c));
+    const mid = (a: Corner, b: Corner): Corner => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    const topMid = mid(corners[0], corners[1]);
+    const centre = mid(corners[0], corners[2]);
+    const out: Corner = [topMid[0] - centre[0], topMid[1] - centre[1]];
+    const length = Math.hypot(out[0], out[1]);
+    const unit: Corner = length > 1e-9 ? [out[0] / length, out[1] / length] : [0, -1];
+    const turn: Corner = [topMid[0] + (unit[0] * TURN_PX) / this.scale(), topMid[1] + (unit[1] * TURN_PX) / this.scale()];
+    return { corners, centre, topMid, turn, points: corners.map((c) => c.join(',')).join(' '), m };
+  });
+
   protected readonly grid = computed(() => {
     const f = this.frame();
     const step = this.scale() > 150 ? 0.1 : 0.5;
@@ -158,7 +274,7 @@ export class GlyphCanvasComponent implements OnDestroy {
     const glyph = this.editor.glyph();
     const selection = this.editor.selection();
     if (!glyph || !selection) return [];
-    return glyph.variants.filter((_, i) => i !== selection.variant);
+    return this.editor.drawnVariants(glyph.key).filter((_, i) => i !== selection.variant);
   });
 
   protected readonly points = computed(() => {
@@ -207,6 +323,16 @@ export class GlyphCanvasComponent implements OnDestroy {
 
   constructor() {
     effect(() => this.observer.observe(this.svg().nativeElement));
+    // The reference picture's size, to fit it in -1..1.
+    effect(() => {
+      const url = this.editor.referenceUrl();
+      if (!url || this.imageSize()?.url === url) return;
+      const image = new Image();
+      image.onload = () => {
+        if (this.editor.referenceUrl() === url) this.imageSize.set({ url, width: image.naturalWidth, height: image.naturalHeight });
+      };
+      image.src = url;
+    });
     // A different glyph: fit it in view.
     effect(() => {
       this.editor.selection();
@@ -224,13 +350,9 @@ export class GlyphCanvasComponent implements OnDestroy {
   fit() {
     const glyph = this.editor.glyph();
     let box = { minX: -1, minY: -1, maxX: 1, maxY: 1 };
-    for (const d of glyph?.variants ?? []) {
-      try {
-        const b = bounds(parsePath(d));
-        if (b) box = { minX: Math.min(box.minX, b.minX), minY: Math.min(box.minY, b.minY), maxX: Math.max(box.maxX, b.maxX), maxY: Math.max(box.maxY, b.maxY) };
-      } catch {
-        // Unreadable: fit the rest.
-      }
+    for (const path of (glyph && this.editor.drawn().get(glyph.key)?.paths) ?? []) {
+      const b = bounds(path);
+      if (b) box = { minX: Math.min(box.minX, b.minX), minY: Math.min(box.minY, b.minY), maxX: Math.max(box.maxX, b.maxX), maxY: Math.max(box.maxY, b.maxY) };
     }
     const { width, height } = this.size();
     const w = box.maxX - box.minX, h = box.maxY - box.minY;
@@ -289,11 +411,15 @@ export class GlyphCanvasComponent implements OnDestroy {
       return;
     }
     if (event.button !== 0) return;
+    const tool = this.editor.tool();
+    if (tool === 'parent' || tool === 'reference') {
+      this.downPlacing(event);
+      return;
+    }
     const path = this.editor.current();
     if (!path) return;
     this.svg().nativeElement.setPointerCapture(event.pointerId);
     const p = this.at(event);
-    const tool = this.editor.tool();
     this.editor.settle();
 
     if (tool === 'select') {
@@ -361,6 +487,8 @@ export class GlyphCanvasComponent implements OnDestroy {
       this.centre.set({ x: drag.centre.x - (event.clientX - drag.x) / this.scale(), y: drag.centre.y - (event.clientY - drag.y) / this.scale() });
     } else if (drag.kind === 'marquee') {
       this.drag.set({ ...drag, to: p });
+    } else if (drag.kind === 'place') {
+      this.movePlacing(drag, p, event);
     } else if (drag.kind === 'ellipse') {
       const to = this.snapped(p, event);
       this.drag.set({ ...drag, to });
@@ -380,7 +508,9 @@ export class GlyphCanvasComponent implements OnDestroy {
     const draft = this.draft();
     this.draft.set(null);
     if (!drag) return;
-    if (drag.kind === 'marquee') {
+    if (drag.kind === 'place') {
+      this.editor.settle();
+    } else if (drag.kind === 'marquee') {
       const box = this.marqueeOf(drag);
       const path = this.shown();
       if (!path) return;
@@ -395,6 +525,43 @@ export class GlyphCanvasComponent implements OnDestroy {
     } else if (drag.kind === 'points' && drag.moved && draft) {
       this.editor.setPath(draft);
     }
+  }
+
+  /** The parent or reference tool: a handle, or anywhere else to move it. */
+  private downPlacing(event: PointerEvent) {
+    const g = this.gizmo();
+    if (!g) return;
+    const handle = (event.target as Element).closest('[data-handle]')?.getAttribute('data-handle') ?? 'move';
+    const [how, i] = handle.split('-') as ['move' | 'turn' | 'corner', string | undefined];
+    this.svg().nativeElement.setPointerCapture(event.pointerId);
+    this.editor.settle();
+    this.drag.set({ kind: 'place', how, i: Number(i ?? 0), from: this.at(event), start: g.m, frame: g.corners, centre: g.centre, key: `place-${++placings}` });
+  }
+
+  /** The placement a drag of the parent or reference tool makes: the map it started at, then the gesture's. */
+  private movePlacing(drag: Extract<Drag, { kind: 'place' }>, p: Point, event: PointerEvent) {
+    let t: Affine | null;
+    if (drag.how === 'move') {
+      let by: Corner = [p.x - drag.from.x, p.y - drag.from.y];
+      if (event.shiftKey) by = Math.abs(by[0]) >= Math.abs(by[1]) ? [by[0], 0] : [0, by[1]];
+      if (this.editor.snap() && !event.altKey) {
+        // Where it's moved to on the grid, not by a step of it.
+        const at: Corner = [drag.start[4] + by[0], drag.start[5] + by[1]];
+        by = [Math.round(at[0] / SNAP) * SNAP - drag.start[4], Math.round(at[1] / SNAP) * SNAP - drag.start[5]];
+      }
+      t = translate(by);
+    } else if (drag.how === 'turn') {
+      const c = drag.centre;
+      let degrees = ((Math.atan2(p.y - c[1], p.x - c[0]) - Math.atan2(drag.from.y - c[1], drag.from.x - c[0])) * 180) / Math.PI;
+      if (event.shiftKey) degrees = Math.round(degrees / 15) * 15;
+      t = about(rotate(degrees), c);
+    } else {
+      t = cornerGesture(drag.frame, drag.i, [p.x, p.y], !event.shiftKey, event.altKey);
+    }
+    if (!t) return;
+    const m = chain(drag.start, t);
+    if (this.editor.tool() === 'parent') this.editor.setLink((link) => withPlacement(link, m), drag.key);
+    else this.editor.updateReference((reference) => withPlacement(reference, m), drag.key);
   }
 
   private marqueeOf(drag: Extract<Drag, { kind: 'marquee' }>) {
@@ -437,6 +604,8 @@ export class GlyphCanvasComponent implements OnDestroy {
     const step = event.shiftKey ? 0.1 : 0.01;
     const arrows: Record<string, [number, number]> = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
     const tools: Record<string, Parameters<FontEditorService['tool']['set']>[0]> = { v: 'select', m: 'stroke', l: 'L', q: 'Q', c: 'C', d: 'dot', e: 'ellipse' };
+    if (this.editor.link()) tools['p'] = 'parent';
+    if (this.editor.glyph()?.reference) tools['r'] = 'reference';
     if (event.key in arrows) {
       event.preventDefault();
       this.editor.nudge(...arrows[event.key]);
@@ -454,4 +623,33 @@ export class GlyphCanvasComponent implements OnDestroy {
       this.fit();
     }
   }
+}
+
+/**
+ * A corner drag of the box `frame` (corners top left, top right, bottom
+ * right, bottom left) to `p`: scaled from the opposite corner (its centre
+ * with `fromCentre`), uniformly, or each way as far as the pointer is.
+ */
+function cornerGesture(frame: Corner[], i: number, p: Corner, uniform: boolean, fromCentre: boolean): Affine | null {
+  const [tl, tr, , bl] = frame;
+  // The box's frame: the unit square to the glyph.
+  const f: Affine = [tr[0] - tl[0], tr[1] - tl[1], bl[0] - tl[0], bl[1] - tl[1], tl[0], tl[1]];
+  const back = inverse(f);
+  const unitCorners: Corner[] = [[0, 0], [1, 0], [1, 1], [0, 1]];
+  const own = unitCorners[i];
+  const anchor: Corner = fromCentre ? [0.5, 0.5] : unitCorners[(i + 2) % 4];
+  const glyphAnchor = apply(f, anchor);
+  if (uniform || !back) {
+    // As far along the diagonal as the pointer is.
+    const d = [frame[i][0] - glyphAnchor[0], frame[i][1] - glyphAnchor[1]];
+    const length2 = d[0] * d[0] + d[1] * d[1];
+    if (length2 < 1e-12) return null;
+    const k = ((p[0] - glyphAnchor[0]) * d[0] + (p[1] - glyphAnchor[1]) * d[1]) / length2;
+    return Math.abs(k) < 1e-3 ? null : about(scale(k, k), glyphAnchor);
+  }
+  const q = apply(back, p);
+  const kx = own[0] !== anchor[0] ? (q[0] - anchor[0]) / (own[0] - anchor[0]) : 1;
+  const ky = own[1] !== anchor[1] ? (q[1] - anchor[1]) / (own[1] - anchor[1]) : 1;
+  if (Math.abs(kx) < 1e-3 || Math.abs(ky) < 1e-3) return null;
+  return chain(back, about(scale(kx, ky), anchor), f);
 }
