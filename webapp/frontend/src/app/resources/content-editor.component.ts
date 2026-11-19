@@ -4,6 +4,7 @@ import { readSymbols, symbolHelp, symbolsIn, textOf, typedText, writeSymbols } f
 import type { Preview } from '../scribe';
 import { JournalStore } from '../services/journal-store.service';
 import { LibraryService } from '../services/library.service';
+import { LinkedContentService } from '../services/linked-content.service';
 import { ToolsService } from '../services/tools.service';
 import { ShellService } from '../shell/shell.service';
 import { ThreePaneComponent } from '../layout/three-pane.component';
@@ -37,7 +38,11 @@ function previewScript(name: string, ext: string): string {
   template: `
     <app-three-pane key="content" [right]="ext() !== 'json'" [rightFraction]="0.4" [rightMin]="320">
     <section center class="centre">
-    <app-library-banner [path]="path()" [own]="own()" [builtin]="builtin()" (copy)="copyIn()" (revert)="revert()" />
+    @if (linkedFrom(); as from) {
+      <p class="linked-note">⇄ Linked from <code>{{ from }}</code>: read from your disk whenever it changes. Edit it there.</p>
+    } @else {
+      <app-library-banner [path]="path()" [own]="own()" [builtin]="builtin()" (copy)="copyIn()" (revert)="revert()" />
+    }
     @if (ext() === 'json') {
       <div class="symbols">
         <label class="row">Base
@@ -72,7 +77,7 @@ function previewScript(name: string, ext: string): string {
     }
     </section>
     @if (ext() !== 'json') {
-      <textarea right class="text" [class.mono]="ext() === 'graph'" [spellcheck]="ext() !== 'graph'" aria-label="The text" [value]="text()" (input)="setText($any($event.target).value)"></textarea>
+      <textarea right class="text" [readOnly]="!!linkedFrom()" [class.mono]="ext() === 'graph'" [spellcheck]="ext() !== 'graph'" aria-label="The text" [value]="text()" (input)="setText($any($event.target).value)"></textarea>
     }
     </app-three-pane>
   `,
@@ -86,6 +91,7 @@ function previewScript(name: string, ext: string): string {
     .row { display: flex; align-items: center; gap: 8px; }
     .column { display: flex; flex-direction: column; gap: 4px; }
     .mono, code { font-family: var(--mono); }
+    .linked-note { margin: 0; padding: 8px 12px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--border); }
     .error { color: var(--danger); margin: 0; white-space: pre-wrap; font-size: 12px; }
   `,
 })
@@ -94,6 +100,7 @@ export class ContentEditorComponent {
   private readonly library = inject(LibraryService);
   private readonly tools = inject(ToolsService);
   private readonly shell = inject(ShellService);
+  private readonly links = inject(LinkedContentService);
 
   protected readonly bases = Array.from({ length: 26 }, (_, i) => i + 2);
   protected readonly symbolHelp = symbolHelp;
@@ -103,9 +110,14 @@ export class ContentEditorComponent {
   protected readonly ext = computed(() => splitPath(this.path() ?? '')?.ext ?? 'txt');
   protected readonly own = computed(() => (this.path() ?? '') in this.store.files());
   protected readonly builtin = computed(() => this.library.has(this.path() ?? ''));
+  /** The link it's read from, if it's linked content. */
+  protected readonly linkedFrom = computed(() => {
+    const path = this.path() ?? '';
+    return this.links.links().find((link) => link.state === 'connected' && path in link.files)?.path ?? null;
+  });
   protected readonly text = computed(() => {
     const path = this.path();
-    return path ? (this.store.files()[path] ?? this.library.files()[path] ?? '') : '';
+    return path ? (this.store.linked()[path] ?? this.store.files()[path] ?? this.library.files()[path] ?? '') : '';
   });
 
   // ---- symbols ----
@@ -192,7 +204,7 @@ export class ContentEditorComponent {
 
   private write(text: string) {
     const path = this.path();
-    if (path && text !== this.text()) this.store.setFile(path, text);
+    if (path && !this.linkedFrom() && text !== this.text()) this.store.setFile(path, text);
   }
 
   protected setText(text: string) {

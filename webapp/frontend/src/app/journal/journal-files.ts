@@ -100,6 +100,8 @@ export interface Manifest {
   entries: string[];
   /** Library files an export copied in, as paths: an import drops them. */
   bundled?: string[];
+  /** Content outside the journal, in front of its own: folders and content files, each a path from the journal's directory (or absolute) for journalbuild; the editor reads them through files the user links. */
+  linked_content?: string[];
 }
 
 /** A journal: its name (its directory's), manifest, and files by path, journal.json aside. */
@@ -151,7 +153,7 @@ export function editsPath(name: string): string {
 export function checkManifest(value: unknown): Manifest {
   if (!value || typeof value !== 'object') throw new Error('journal.json should be a JSON object');
   const m = value as Record<string, unknown>;
-  const known = ['version', 'title', 'description', 'entries', 'bundled'];
+  const known = ['version', 'title', 'description', 'entries', 'bundled', 'linked_content'];
   const unknown = Object.keys(m).find((key) => !known.includes(key));
   if (unknown) throw new Error(`journal.json has '${unknown}', which a manifest doesn't: ${known.join(', ')}`);
   if (m['version'] !== MANIFEST_VERSION) throw new Error(`journal.json is version ${String(m['version'])}; this editor reads ${MANIFEST_VERSION}`);
@@ -165,12 +167,19 @@ export function checkManifest(value: unknown): Manifest {
   }
   const bundled = m['bundled'];
   if (bundled !== undefined && (!Array.isArray(bundled) || bundled.some((p) => typeof p !== 'string'))) throw new Error("journal.json's bundled should list paths");
+  const linked = m['linked_content'];
+  if (linked !== undefined) {
+    if (!Array.isArray(linked) || linked.some((p) => typeof p !== 'string' || !p.trim())) throw new Error("journal.json's linked_content should list paths");
+    const twice = linked.find((p, i) => linked.indexOf(p) !== i);
+    if (twice !== undefined) throw new Error(`journal.json's linked_content lists '${twice}' twice`);
+  }
   return {
     version: MANIFEST_VERSION,
     title: m['title'],
     ...(typeof m['description'] === 'string' && m['description'] ? { description: m['description'] } : {}),
     entries: entries as string[],
     ...(bundled ? { bundled: bundled as string[] } : {}),
+    ...(Array.isArray(linked) && linked.length ? { linked_content: linked as string[] } : {}),
   };
 }
 

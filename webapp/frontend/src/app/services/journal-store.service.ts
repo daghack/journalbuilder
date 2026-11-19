@@ -3,6 +3,7 @@ import {
   BLANK_ENTRY, MANIFEST_VERSION, VALID_NAME, blankJournal, checkEntries, checkManifest, editsPath, entryPath, journalHash, kindOf, snakeCase, splitPath,
   type JournalData, type Manifest,
 } from '../journal/journal-files';
+import { withLinked } from '../journal/linked-content';
 import { idbGet, idbSet } from './idb';
 
 const KEY = 'journal';
@@ -41,10 +42,13 @@ export class JournalStore {
   readonly files = computed(() => this.journal().files);
   /** Whether it's changed since it was last saved (exported, or loaded). */
   readonly dirty = computed(() => journalHash(this.journal()) !== this.saved());
-  /** Its files besides the entries (and their edits, which go with each run), which every script runs with: changes only when they do. */
+  /** Its linked content as last read (see LinkedContentService), by path: never saved, exported or edited. */
+  readonly linked = signal<Record<string, string>>({}, { equal: sameFiles });
+  /** Its files besides the entries (and their edits, which go with each run), with its linked content in front of its own, which every script runs with: changes only when they do. */
   readonly resources = computed(() => {
     const files = this.files();
-    return Object.fromEntries(Object.entries(files).filter(([path]) => kindOf(path) !== 'entries' && kindOf(path) !== 'edits'));
+    const own = Object.fromEntries(Object.entries(files).filter(([path]) => kindOf(path) !== 'entries' && kindOf(path) !== 'edits'));
+    return withLinked(own, this.linked());
   }, { equal: sameFiles });
   /** Entry files the manifest doesn't list. */
   readonly unlisted = computed(() => Object.keys(this.files())
@@ -99,6 +103,11 @@ export class JournalStore {
   /** Start a new journal: one blank entry, and the library. */
   newJournal() {
     this.load(blankJournal());
+  }
+
+  /** Its linked content, as just read. */
+  setLinked(files: Record<string, string>) {
+    this.linked.set(files);
   }
 
   /** The journal as it now is has been saved (exported). */
@@ -186,7 +195,7 @@ export class JournalStore {
     });
   }
 
-  setManifest(patch: Partial<Pick<Manifest, 'title' | 'description'>>) {
+  setManifest(patch: Partial<Pick<Manifest, 'title' | 'description' | 'linked_content'>>) {
     this.update((j) => ({ ...j, manifest: checkManifest({ ...j.manifest, ...patch }) }));
   }
 

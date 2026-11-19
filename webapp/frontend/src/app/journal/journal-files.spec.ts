@@ -32,6 +32,13 @@ describe('a journal', () => {
     expect(() => checkManifest({ version: 1, title: 'T', entries: ['a'], colour: 1 })).toThrow("has 'colour'");
   });
 
+  it('keeps the content it links', () => {
+    expect(checkManifest({ version: 1, title: 'T', entries: ['a'], linked_content: ['../notes', 'letter.md'] }).linked_content).toEqual(['../notes', 'letter.md']);
+    expect(checkManifest({ version: 1, title: 'T', entries: ['a'], linked_content: [] })).toEqual({ version: 1, title: 'T', entries: ['a'] });
+    expect(() => checkManifest({ version: 1, title: 'T', entries: ['a'], linked_content: [''] })).toThrow('should list paths');
+    expect(() => checkManifest({ version: 1, title: 'T', entries: ['a'], linked_content: ['x', 'x'] })).toThrow("lists 'x' twice");
+  });
+
   it('writes its manifest as journalbuild reads it', () => {
     expect(manifestText(journal.manifest)).toBe('{\n  "version": 1,\n  "title": "Letters",\n  "description": "Two letters.",\n  "entries": [\n    "letter_1",\n    "reply"\n  ]\n}\n');
   });

@@ -3,11 +3,26 @@ import { showEditorTab } from '../layout/pane-state';
 import { CONTENT_TYPES, KINDS, VALID_NAME, bytesToDataUrl, contentType, entryPath, journalName, nameOf, pathOf, splitPath, type KindInfo } from '../journal/journal-files';
 import { template } from '../journal/templates';
 import { StyleBuilderComponent } from '../resources/style-builder.component';
+import { CONTENT_ACCEPT, contentExt, importedName, importedText, type Imported } from '../journal/linked-content';
+import { symbolHelp } from '../journal/symbols';
 import { JournalStore } from '../services/journal-store.service';
 import { LibraryService } from '../services/library.service';
+import { LinkedContentService, type LinkState, type PickedLink } from '../services/linked-content.service';
 import { ShellService } from './shell.service';
 
 const OPEN_KEY = 'journal-editor.sidebar-open';
+
+/** A file being imported: its text, the type it's kept as (its extension's to start with), and the name it'll have; symbols' base and whether they're strict. */
+interface ImportRow {
+  file: File;
+  text: string;
+  /** Its file's type, by extension. */
+  fromExt: string;
+  ext: string;
+  name: string;
+  base: number;
+  strict: boolean;
+}
 
 /** A file as the sidebar lists it. */
 interface Item {
@@ -50,7 +65,9 @@ const open = signal<Record<string, boolean>>(readOpen());
                 [value]="store.manifest().description ?? ''" (change)="setDescription($any($event.target).value)"></textarea>
     </header>
     @for (group of groups(); track group.info.kind) {
-      <section>
+      <section [class.dropping]="group.info.kind === 'content' && dropping()"
+               (dragover)="group.info.kind === 'content' && dragOver($event)" (dragleave)="dropping.set(false)"
+               (drop)="group.info.kind === 'content' && drop($event)">
         <h3>
           <button type="button" class="toggle" (click)="toggle(group.info.kind)" [attr.aria-expanded]="isOpen(group.info.kind)">
             <span class="chevron">{{ isOpen(group.info.kind) ? '▾' : '▸' }}</span>{{ group.info.label }}
@@ -85,9 +102,43 @@ const open = signal<Record<string, boolean>>(readOpen());
                 </span>
               </li>
             } @empty {
-              @if (!group.library.length) { <li class="empty">none</li> }
+              @if (!group.library.length && !(group.info.kind === 'content' && links.links().length)) { <li class="empty">none</li> }
             }
           </ul>
+          @if (group.info.kind === 'content') {
+            <div class="content-tools">
+              <button type="button" (click)="importContent()" title="Copy a .md, .txt, .json or .graph file into the journal (or drop files here)">import…</button>
+              @if (links.supported) {
+                <button type="button" (click)="link('file')" title="Read a content file from your disk each run, as it is then">link file…</button>
+                <button type="button" (click)="link('folder')" title="Read a folder's content files from your disk each run, as they are then">link folder…</button>
+              }
+            </div>
+            @for (link of links.links(); track link.path) {
+              <div class="link" [title]="stateNote(link.state)">
+                <span class="link-path">⇄ {{ link.path }}</span>
+                <span class="link-state" [class]="link.state">{{ stateLabel(link.state) }}</span>
+                <span class="link-actions">
+                  @if (link.state === 'unconnected' || link.state === 'missing') {
+                    <button type="button" (click)="connect(link.path)" title="Pick the file or folder it links">connect…</button>
+                  }
+                  @if (link.state === 'permission') {
+                    <button type="button" (click)="reconnect(link.path)" title="Let the page read it again">reconnect</button>
+                  }
+                  <button type="button" (click)="links.unlink(link.path)" title="Take it out of journal.json">✕</button>
+                </span>
+              </div>
+              <ul class="linked">
+                @for (path of linkedPaths(link.files); track path) {
+                  <li [class.selected]="shell.selected() === path">
+                    <button type="button" class="file" (click)="openFile(path)" [title]="path + ', linked from ' + (link.picked ?? link.path) + ': read from your disk, edited there'">
+                      {{ nameOf(path) }} <span class="note">{{ tag(path) }}</span>
+                      @if (path in store.files()) { <span class="override" title="Stands in for the journal's own file of the same name">⇄</span> }
+                    </button>
+                  </li>
+                }
+              </ul>
+            }
+          }
           @if (group.library.length) {
             <button type="button" class="library-toggle" (click)="toggle('library:' + group.info.kind)">
               {{ isOpen('library:' + group.info.kind) ? '▾' : '▸' }} library <span class="count">{{ group.library.length }}</span>
@@ -114,6 +165,61 @@ const open = signal<Record<string, boolean>>(readOpen());
       </section>
     }
     @if (message(); as m) { <p class="message">{{ m }}</p> }
+
+    <dialog #importDialog (close)="importRows.set([])">
+      <form method="dialog" (submit)="$event.preventDefault(); finishImport()">
+        <h2>Import content</h2>
+        <p class="hint">Copied into the journal's content/, as content("name") reads it.</p>
+        <div class="rows">
+          @for (row of importRows(); track row.file; let i = $index) {
+            <div class="import-row">
+              <span class="from">{{ row.file.name }}</span>
+              <input type="text" spellcheck="false" aria-label="Its name" [value]="row.name" (input)="changeImport(i, { name: $any($event.target).value.trim() })" />
+              <select aria-label="The content type it's kept as" (change)="changeImport(i, { ext: $any($event.target).value })">
+                @for (t of contentTypes; track t.ext) { <option [value]="t.ext" [selected]="t.ext === row.ext">{{ t.label }}</option> }
+              </select>
+              @if (row.ext === 'json') {
+                <span class="symbol-options">
+                  <label>Base
+                    <select (change)="changeImport(i, { base: +$any($event.target).value })">
+                      @for (b of bases; track b) { <option [value]="b" [selected]="b === row.base">{{ b }}</option> }
+                    </select>
+                  </label>
+                  <label [title]="'Strict: the text must be written in base ' + row.base + ' already (' + symbolHelp(row.base) + '). Otherwise it is made to fit as it is read: capitals, what the base cannot write dropped.'">
+                    <input type="checkbox" [checked]="row.strict" (change)="changeImport(i, { strict: $any($event.target).checked })" /> Strict
+                  </label>
+                </span>
+                @if (converted(row); as c) {
+                  @if (!('error' in c) && c.reads !== undefined) {
+                    <span class="row-note">{{ c.note ? c.note + ' ' : '' }}{{ c.count }} symbol{{ c.count === 1 ? '' : 's' }}, reading <code>{{ clip(c.reads) }}</code></span>
+                  }
+                }
+              }
+              @if (importProblem(row); as p) { <span class="row-note" [class.bad]="p.bad">{{ p.text }}</span> }
+            </div>
+          }
+        </div>
+        <div class="dialog-actions">
+          <button type="button" (click)="importDialog.close()">Cancel</button>
+          <button type="submit" [disabled]="!canImport()">Import</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog #linkDialog (close)="picked.set(null); linkProblem.set(null)">
+      <form method="dialog" (submit)="$event.preventDefault(); finishLink(linkPath.value)">
+        <h2>Link {{ picked()?.as }}</h2>
+        <p class="hint">{{ picked()?.name }} is read from your disk each run, and again whenever it changes: edit it there. The journal keeps a link to it, not a copy.</p>
+        <label>Where journalbuild finds it, from the journal's folder (or absolute)
+          <input #linkPath type="text" spellcheck="false" (input)="linkProblem.set(null)" />
+        </label>
+        @if (linkProblem(); as p) { <p class="message">{{ p }}</p> }
+        <div class="dialog-actions">
+          <button type="button" (click)="linkDialog.close()">Cancel</button>
+          <button type="submit">Link</button>
+        </div>
+      </form>
+    </dialog>
 
     <dialog #newContent (close)="contentProblem.set(null)">
       <form method="dialog" (submit)="$event.preventDefault(); addContent(contentName.value, contentKind.value)">
@@ -164,6 +270,25 @@ const open = signal<Record<string, boolean>>(readOpen());
     .library-toggle { background: transparent; border: 0; padding: 2px 8px 2px 24px; color: var(--muted); cursor: pointer; font-size: 11px; }
     .library .file { color: var(--muted); padding-left: 36px; }
     .message { margin: 8px; color: var(--danger); }
+    section.dropping { outline: 2px dashed var(--accent); outline-offset: -2px; }
+    .content-tools { display: flex; gap: 6px; padding: 2px 8px 2px 24px; }
+    .content-tools button, .link-actions button { background: transparent; border: 0; padding: 0; color: var(--muted); cursor: pointer; font-size: 11px; }
+    .content-tools button:hover, .link-actions button:hover { color: var(--accent); }
+    .link { display: flex; align-items: center; gap: 6px; padding: 3px 8px 0 24px; }
+    .link-path { flex: 1; min-width: 0; font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .link-state { font-size: 11px; color: var(--muted); }
+    .link-state.permission, .link-state.missing { color: var(--warning); }
+    .link-actions { display: inline-flex; gap: 4px; }
+    .linked .file { padding-left: 36px; }
+    .rows { display: flex; flex-direction: column; gap: 8px; max-height: 50vh; overflow: auto; }
+    .import-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: center; font-size: 13px; }
+    .import-row .from { grid-column: 1 / -1; color: var(--muted); font-size: 11px; font-family: var(--mono); }
+    .import-row .row-note { grid-column: 1 / -1; font-size: 11px; color: var(--muted); }
+    .import-row .row-note.bad { color: var(--danger); }
+    .import-row .row-note code { font-family: var(--mono); word-break: break-all; }
+    .symbol-options { grid-column: 1 / -1; display: flex; gap: 12px; align-items: center; }
+    dialog .symbol-options label { flex-direction: row; align-items: center; gap: 4px; margin: 0; font-size: 12px; }
+    dialog p.hint { font-size: 12px; color: var(--muted); margin: 0 0 10px; }
     dialog { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--fg); padding: 20px; width: min(420px, calc(100vw - 32px)); }
     dialog::backdrop { background: rgb(0 0 0 / 0.45); }
     dialog h2 { margin: 0 0 12px; font-size: 16px; }
@@ -176,6 +301,16 @@ export class FileSidebarComponent {
   protected readonly store = inject(JournalStore);
   protected readonly shell = inject(ShellService);
   private readonly library = inject(LibraryService);
+  protected readonly links = inject(LinkedContentService);
+  protected readonly dropping = signal(false);
+  /** Files being imported, each with the name it'll have. */
+  protected readonly importRows = signal<ImportRow[]>([]);
+  private readonly importDialog = viewChild.required<ElementRef<HTMLDialogElement>>('importDialog');
+  /** What's picked to link, waiting for its path. */
+  protected readonly picked = signal<PickedLink | null>(null);
+  protected readonly linkProblem = signal<string | null>(null);
+  private readonly linkDialog = viewChild.required<ElementRef<HTMLDialogElement>>('linkDialog');
+  private readonly linkPath = viewChild.required<ElementRef<HTMLInputElement>>('linkPath');
   protected readonly message = signal<string | null>(null);
   private readonly open = open;
   protected readonly nameOf = nameOf;
@@ -279,6 +414,153 @@ export class FileSidebarComponent {
       this.create(info, typed, ext, bytesToDataUrl(new Uint8Array(await file.arrayBuffer()), ext));
     };
     input.click();
+  }
+
+  /** A content file's type, as the list tags it. */
+  protected tag(path: string): string {
+    return contentType(splitPath(path)?.ext ?? '');
+  }
+
+  protected linkedPaths(files: Record<string, string>): string[] {
+    return Object.keys(files).sort();
+  }
+
+  protected stateLabel(state: LinkState): string {
+    return { connected: 'read', permission: 'needs permission', unconnected: 'not connected', missing: "can't be read", unsupported: 'not in this browser' }[state];
+  }
+
+  protected stateNote(state: LinkState): string {
+    return {
+      connected: 'Read from your disk, and again whenever it changes.',
+      permission: 'The browser needs your leave to read it again this visit.',
+      unconnected: "Not picked in this browser yet: connect it to the file or folder journal.json's path names.",
+      missing: "It's gone, or couldn't be read: connect it again.",
+      unsupported: "This browser can't read files from your disk: the journal's own content is used. Chrome and Edge can.",
+    }[state];
+  }
+
+  /** Content from files the user picks on their disk, copied into the journal. */
+  protected importContent() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = CONTENT_ACCEPT;
+    input.multiple = true;
+    input.onchange = () => void this.startImport([...(input.files ?? [])]);
+    input.click();
+  }
+
+  protected dragOver(event: DragEvent) {
+    if (!event.dataTransfer?.types.includes('Files')) return;
+    event.preventDefault();
+    this.dropping.set(true);
+  }
+
+  protected drop(event: DragEvent) {
+    this.dropping.set(false);
+    const files = [...(event.dataTransfer?.files ?? [])];
+    if (!files.length) return;
+    event.preventDefault();
+    void this.startImport(files);
+  }
+
+  /** Read `files` and ask what to call each: content files only. */
+  private async startImport(files: File[]) {
+    const rows: ImportRow[] = [];
+    const skipped: string[] = [];
+    for (const file of files) {
+      const ext = contentExt(file.name);
+      if (ext) rows.push({ file, fromExt: ext, ext, text: await file.text(), name: importedName(file.name), base: 27, strict: true });
+      else skipped.push(file.name);
+    }
+    if (skipped.length) this.say(`${skipped.join(', ')} ${skipped.length === 1 ? "isn't" : "aren't"} content: content is a .md, .txt, .json or .graph file.`);
+    if (!rows.length) return;
+    this.importRows.set(rows);
+    this.importDialog().nativeElement.showModal();
+  }
+
+  protected readonly bases = Array.from({ length: 26 }, (_, i) => i + 2);
+  protected readonly symbolHelp = symbolHelp;
+
+  protected changeImport(i: number, change: Partial<ImportRow>) {
+    this.importRows.update((rows) => rows.map((row, j) => (j === i ? { ...row, ...change } : row)));
+  }
+
+  /** `row`'s file as the content it's kept as. */
+  protected converted(row: ImportRow): Imported {
+    return importedText(row.text, row.fromExt, row);
+  }
+
+  protected clip(text: string): string {
+    return text.length > 80 ? `${text.slice(0, 80)}…` : text;
+  }
+
+  /** What's wrong with importing `row` as it's named (bad), or what it'll do. */
+  protected importProblem(row: ImportRow): { text: string; bad: boolean } | null {
+    if (!VALID_NAME.test(row.name)) return { text: 'A name is letters, digits and _ only.', bad: true };
+    const converted = this.converted(row);
+    if ('error' in converted) return { text: converted.error, bad: true };
+    const rows = this.importRows();
+    if (rows.filter((r) => r.name === row.name).length > 1) return { text: 'Two files are given this name.', bad: true };
+    const all = { ...this.library.files(), ...this.store.files() };
+    const other = CONTENT_TYPES.find((t) => t.ext !== row.ext && pathOf('content', row.name, t.ext) in all);
+    if (other) return { text: `There's ${other.label} content called ${row.name}: content("${row.name}") would be ambiguous.`, bad: true };
+    const path = pathOf('content', row.name, row.ext);
+    if (path in this.store.files()) return { text: `Replaces the journal's ${row.name}.`, bad: false };
+    if (this.library.has(path)) return { text: `Stands in for the library's ${row.name}.`, bad: false };
+    return null;
+  }
+
+  protected readonly canImport = computed(() => this.importRows().length > 0 && this.importRows().every((row) => !this.importProblem(row)?.bad));
+
+  protected finishImport() {
+    if (!this.canImport()) return;
+    const rows = this.importRows();
+    for (const row of rows) {
+      const converted = this.converted(row);
+      if (!('error' in converted)) this.store.setFile(pathOf('content', row.name, row.ext), converted.text);
+    }
+    this.importDialog().nativeElement.close();
+    this.open.update((open) => ({ ...open, content: true }));
+    this.openFile(pathOf('content', rows[0].name, rows[0].ext));
+    this.say(null);
+  }
+
+  /** Link a file or folder the user picks on their disk, once they say where journalbuild finds it. */
+  protected async link(as: 'file' | 'folder') {
+    let picked: PickedLink | null;
+    try {
+      picked = await this.links.pickNew(as);
+    } catch (err) {
+      return this.say(`It couldn't be picked: ${(err as Error).message}`);
+    }
+    if (!picked) return;
+    this.picked.set(picked);
+    this.linkProblem.set(null);
+    this.linkPath().nativeElement.value = `../${picked.name}`;
+    this.linkDialog().nativeElement.showModal();
+    this.linkPath().nativeElement.select();
+  }
+
+  protected async finishLink(path: string) {
+    const picked = this.picked();
+    if (!picked) return;
+    const problem = await this.links.add(picked, path);
+    if (problem) return this.linkProblem.set(problem);
+    this.linkDialog().nativeElement.close();
+    this.open.update((open) => ({ ...open, content: true }));
+    const files = Object.keys(this.links.links().find((link) => link.path === path.trim())?.files ?? {}).sort();
+    this.say(files.length ? null : `${picked.name} has no content files in it: .txt, .md, .json or .graph, named letters, digits and _.`);
+    if (files.length) this.openFile(files[0]);
+  }
+
+  protected async connect(path: string) {
+    const problem = await this.links.connect(path);
+    if (problem) this.say(problem);
+  }
+
+  protected async reconnect(path: string) {
+    const problem = await this.links.reconnect(path);
+    if (problem) this.say(problem);
   }
 
   /** New content called `name`, of the type kept in files ending `ext`: none of another type may share its name. */
