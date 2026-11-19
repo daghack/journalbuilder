@@ -44,6 +44,9 @@ fn load(resources: &Resources, cache: &RefCell<HashMap<String, Image>>, name: &s
     if let Some(image) = cache.borrow().get(name) {
         return Ok(image.clone());
     }
+    if !super::content::resource_name(name) {
+        return Err(format!("image: '{}' isn't an image name: no slashes, not starting with a dot", name).into());
+    }
     let images = match resources.image_files(name).as_slice() {
         [] => return Err(format!("image: no image named '{}': it'd be {} or {}", name, resources.png_images.path(name).display(), resources.jpg_images.path(name).display()).into()),
         [one] => (*one).clone(),

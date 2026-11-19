@@ -15,7 +15,9 @@ directories; a journal's file stands in for the library's of the same
 name. `edits/ENTRY.json` holds the visual editor's edits to the
 canvases an entry commits to it (`canvas.commit_to_editor(name)`),
 applied at the call; the web editor writes it and drops edits for
-names no longer committed. Anything any journal might use goes in the library; what only one
+names no longer committed. `journal.json`'s `linked_content` names content
+kept outside the journal (folders and files on disk), read when asked for
+and in front of the journal's own. Anything any journal might use goes in the library; what only one
 journal uses goes in that journal. `journalbuild NAME [--entry E]`
 renders into `NAME_output/ENTRY/`.
 

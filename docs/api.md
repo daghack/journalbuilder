@@ -1110,7 +1110,7 @@ A picture, images/NAME.png or NAME.jpg, decoded once however often it's asked fo
 
 | argument | what it does | takes |
 |---|---|---|
-| `name` | Which picture; there mustn't be both a .png and a .jpg of that name. | a picture's name without its extension. |
+| `name` | Which picture; there mustn't be both a .png and a .jpg of that name. | a picture's name without its extension: no slashes, not starting with a dot. |
 
 ### `image.name, image.width, image.height`
 
@@ -3150,6 +3150,8 @@ A value kind's default drawing as a parts map for canvas.add(parts, styles): eac
 
 A journal is a directory: its manifest, journal.json; its entries, entries/NAME.rhai, each a script building a journal_entry of pages; and files of its own, each kind in a directory of its own: locks/, helpers/, layouts/, illustrations/, chains/ and lib/ (rhai files), styles/ and glyphsets/ (NAME.json), brushes/ (NAME.yaml, Darkly brushes: see Brush files), symbolsets/ (NAME.json or NAME.rhai: see Symbol set files), content/ (NAME.txt, a String; NAME.md, Markdown; NAME.json, Symbols: { base, text }, with strict: true or not, or { base, symbols }; or NAME.graph, a Graph), and images/ (NAME.png or NAME.jpg, pictures for image(name)). They stand in front of the built-in library's, webapp/library/, which has the same directories: a journal's file stands in for the library's of the same name. Beside them, edits/ENTRY.json holds the visual editor's edits to the canvases entry ENTRY commits to it (canvas.commit_to_editor); the library has none. Each entry runs on its own, sharing the journal's files but not code with the other entries.
 
+Content can also be linked: kept outside the journal, in files and folders journal.json's linked_content names, and read when content(name) asks for it, so each build (or, in the web editor, each run) sees it as it is then. A linked folder gives the content files directly inside it (NAME.txt, NAME.md, NAME.json and NAME.graph, as content/ does); a linked file gives itself, named for its name without its extension. Linked content stands in front of the journal's own content, earlier links in front of later ones, so content the journal keeps of the same name is used where a link isn't there. A link that isn't there gives nothing, and journalbuild warns of it. The web editor reads links through the file or folder the user picks for each (in browsers that can read the user's files: Chrome and Edge), again whenever they change; it never saves or exports their files. It can also import a content file, copying it into the journal.
+
 journal.json: the journal's manifest, a JSON object.
 
 | key | default | what it does | takes |
@@ -3159,6 +3161,7 @@ journal.json: the journal's manifest, a JSON object.
 | `description` | none | What it is. | a string. |
 | `entries` | required | Its entries, in order: entries/NAME.rhai each. | a non-empty array of names: letters, digits and underscores. |
 | `bundled` | none | Library files an export copied in beside the journal's own, as paths from the journal (locks/huffman.rhai), so an import can drop them. | an array of strings. |
+| `linked_content` | none | Content outside the journal, in front of its own (see above): folders of content files, and content files, which a path ending .txt, .md, .json or .graph names. | an array of paths, none twice: each from the journal's directory (../notes), or absolute, ~/ starting from the home directory. |
 
 edits/ENTRY.json: the visual editor's edits to entry ENTRY's committed canvases, a JSON object, written by the web editor. An edit is applied when its canvas is committed: its corners pinned, then moved, turned, scaled and skewed about the centre C of the box its strokes cover, to C + move + R(turn)·K(skew)·S(scale)·(p − C), then re-inked. An edit for a name the entry doesn't commit is warned of; the web editor drops it.
 
@@ -3216,11 +3219,11 @@ A text style file's bundle, styles/NAME.json, the journal's or the library's: #{
 
 ### `content(name)`
 
-A content file, content/NAME.txt, NAME.md, NAME.json or NAME.graph, the journal's or the library's: a .graph file's Graph, as graph::parse reads it; a .txt or .md file's text, without the newline ending the file (markdown(content(name)) sets marked-up text), or a .json file's symbols: its text made to fit its base, as symbols(base, text, #{ lenient: true }) gives them, or with strict: true in the file, read as symbols(base, text) reads it, text the base can't write being an error; or the symbols the file holds, { base, symbols }.
+A content file, content/NAME.txt, NAME.md, NAME.json or NAME.graph, linked (see Journals and Their Files), the journal's or the library's: a .graph file's Graph, as graph::parse reads it; a .txt or .md file's text, without the newline ending the file (markdown(content(name)) sets marked-up text), or a .json file's symbols: its text made to fit its base, as symbols(base, text, #{ lenient: true }) gives them, or with strict: true in the file, read as symbols(base, text) reads it, text the base can't write being an error; or the symbols the file holds, { base, symbols }.
 
 | argument | what it does | takes |
 |---|---|---|
-| `name` | Which content file; there mustn't be more than one of that name. | a content file's name without its extension. |
+| `name` | Which content file; there mustn't be more than one of that name. | a content file's name without its extension: no slashes, not starting with a dot. |
 
 Any script, an entry or a lock, layout, illustration or chain file, imports shared functions from lib/: import "lib/NAME" as NAME; then NAME::f(x) calls lib/NAME.rhai's function f. A lib function runs in the engine of the script importing it: a lock file's lib functions can't draw.
 

@@ -22,6 +22,9 @@ pub fn register(engine: &mut Engine, resources: Resources) {
 }
 
 fn content(resources: &Resources, name: &str) -> RhaiResult<Dynamic> {
+    if !resource_name(name) {
+        return Err(format!("content: '{}' isn't a content name: no slashes, not starting with a dot", name).into());
+    }
     let kinds = resources.content_kinds(name);
     let read = |sources: &super::Sources| sources.read(name)
         .map_err(|e| format!("content: couldn't read {}: {}", sources.path(name).display(), e));
@@ -48,6 +51,12 @@ fn content(resources: &Resources, name: &str) -> RhaiResult<Dynamic> {
         several => Err(format!("content: '{}' is ambiguous: there's {}; rename one", name,
             several.iter().map(|ext| format!("{}.{}", name, ext)).collect::<Vec<_>>().join(" and ")).into()),
     }
+}
+
+/// Whether `name` can name a file of a resource directory: not empty, no
+/// slashes, not starting with a dot, so it's never outside it.
+pub(crate) fn resource_name(name: &str) -> bool {
+    !name.is_empty() && !name.contains(['/', '\\']) && !name.starts_with('.')
 }
 
 /// A text file's text without the newline that ends it.
@@ -133,6 +142,8 @@ mod tests {
         assert!(result.is_ok(), "{:?}", result.err());
         for (script, want) in [
             (r#"content("nope")"#, "content: no content named 'nope'; content: "),
+            (r#"content("../note")"#, "content: '../note' isn't a content name"),
+            (r#"content(".hidden")"#, "content: '.hidden' isn't a content name"),
             (r#"content("both")"#, "content: 'both' is ambiguous: there's both.txt and both.md and both.graph"),
             (r#"content("bad")"#, "bad.json: symbols: symbol 4 (item 0) is outside Base3's 0-2"),
             (r#"content("too_strict")"#, "too_strict.json: symbols (strict): ',' isn't a base-27 symbol"),

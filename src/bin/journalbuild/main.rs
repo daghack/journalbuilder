@@ -270,7 +270,10 @@ fn run(args: &Args) -> Result<(), String> {
         eprintln!("warning: {} isn't in {}'s journal.json, so it isn't built", journal.entry_path(&unlisted).display(), journal_name);
     }
     let library = Resources::dir(&args.library_dir);
-    for path in journal.resources(library.clone()).overrides() {
+    for link in journal.missing_links() {
+        eprintln!("warning: {}'s linked content {} isn't there", journal_name, link.display());
+    }
+    for path in journal.own_resources(library.clone()).overrides() {
         eprintln!("note: {}'s {} stands in for the library's", journal_name, path);
     }
     let entries = match &args.entries {

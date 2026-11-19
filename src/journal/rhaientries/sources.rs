@@ -36,12 +36,15 @@ pub struct Sources {
     under: Option<Rc<Sources>>,
     /// Where the names of these' own files are noted as they're read.
     used: Option<Rc<RefCell<BTreeSet<String>>>>,
+    /// The one file of the directory's these are, if just one: a linked
+    /// file (see `Resources::with_linked_content`).
+    only: Option<Rc<str>>,
 }
 
 impl Sources {
     /// The scripts in `dir`.
     pub fn dir(dir: impl Into<PathBuf>) -> Self {
-        Sources { dir: dir.into(), ext: "rhai", embedded: None, overlay: None, under: None, used: None }
+        Sources { dir: dir.into(), ext: "rhai", embedded: None, overlay: None, under: None, used: None, only: None }
     }
 
     /// Scripts compiled in, by name, shown as if they were in `dir`.
@@ -58,6 +61,17 @@ impl Sources {
     pub fn with_ext(mut self, ext: &'static str) -> Self {
         self.ext = ext;
         self
+    }
+
+    /// Only the directory's file called `name`: one file of a directory.
+    pub fn only(mut self, name: &str) -> Self {
+        self.only = Some(name.into());
+        self
+    }
+
+    /// Whether `name` is one these can have: any, or the one file they are.
+    fn admits(&self, name: &str) -> bool {
+        self.only.as_deref().is_none_or(|only| only == name)
     }
 
     /// The files' extension.
@@ -118,6 +132,9 @@ impl Sources {
     pub fn has_own(&self, name: &str) -> bool {
         if self.overlaid(name).is_some() {
             return true;
+        }
+        if !self.admits(name) {
+            return false;
         }
         match &self.embedded {
             Some(scripts) => scripts.contains_key(name),
@@ -190,6 +207,7 @@ impl Sources {
                 .filter_map(|entry| entry.ok().map(|entry| entry.path()))
                 .filter(|path| path.is_file() && path.extension().is_some_and(|ext| ext == self.ext))
                 .filter_map(|path| path.file_stem().map(|stem| stem.to_string_lossy().into_owned()))
+                .filter(|name| self.admits(name))
                 .collect(),
         };
         if let Some(overlay) = &self.overlay {

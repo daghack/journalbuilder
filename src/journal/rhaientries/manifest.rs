@@ -15,6 +15,10 @@
 //! `entries` lists the entries in order. `bundled` lists library files an
 //! export copied in alongside the journal's own (`locks/huffman.rhai`), so
 //! an import can tell them from files the journal changed, and drop them.
+//! `linked_content` lists content kept outside the journal, read as it's
+//! asked for (see `Resources::with_linked_content`): folders of content
+//! files, or content files, each a path from the journal's directory or an
+//! absolute one (`~/` for the home directory).
 
 use super::resources::Resources;
 use super::sources::Sources;
@@ -41,6 +45,9 @@ pub struct Manifest {
     /// Library files an export copied in, as paths from the journal.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bundled: Vec<String>,
+    /// Content outside the journal, in front of its own: folders and files.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub linked_content: Vec<String>,
 }
 
 impl Manifest {
@@ -59,6 +66,14 @@ impl Manifest {
             }
             if manifest.entries[..i].contains(name) {
                 return Err(format!("entry '{}' is listed twice", name));
+            }
+        }
+        for (i, link) in manifest.linked_content.iter().enumerate() {
+            if link.trim().is_empty() {
+                return Err("linked_content has an empty path".to_string());
+            }
+            if manifest.linked_content[..i].contains(link) {
+                return Err(format!("linked_content lists '{}' twice", link));
             }
         }
         Ok(manifest)
@@ -107,9 +122,31 @@ impl Journal {
         self.dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
     }
 
-    /// Its resources, in front of `library`'s.
+    /// Its resources, in front of `library`'s, with its linked content in
+    /// front of its own.
     pub fn resources(&self, library: Resources) -> Resources {
+        self.own_resources(library).with_linked_content(&self.links())
+    }
+
+    /// Its own resources, in front of `library`'s, without its links.
+    pub fn own_resources(&self, library: Resources) -> Resources {
         Resources::dir(&self.dir).over(library)
+    }
+
+    /// Where its linked content is: each path from its directory, or
+    /// absolute, `~/` the home directory.
+    pub fn links(&self) -> Vec<PathBuf> {
+        self.manifest.linked_content.iter().map(|link| {
+            match (link.strip_prefix("~/"), std::env::var_os("HOME")) {
+                (Some(rest), Some(home)) => PathBuf::from(home).join(rest),
+                _ => self.dir.join(link),
+            }
+        }).collect()
+    }
+
+    /// Its links that aren't there.
+    pub fn missing_links(&self) -> Vec<PathBuf> {
+        self.links().into_iter().filter(|link| !link.exists()).collect()
     }
 
     /// Entry files in `entries/` the manifest doesn't list.
@@ -224,5 +261,53 @@ mod tests {
         std::fs::remove_file(dir.join("entries/two.rhai")).unwrap();
         assert!(Journal::open(&dir).unwrap_err().contains("entry 'two' has no file"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn linked_content_is_read_as_it_is_asked_for() {
+        let root = std::env::temp_dir().join(format!("scribe-links-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dir = root.join("journal");
+        for sub in ["journal/entries", "journal/content", "notes", "handouts"] {
+            std::fs::create_dir_all(root.join(sub)).unwrap();
+        }
+        std::fs::write(dir.join(MANIFEST), r#"{ "version": 1, "title": "T", "entries": ["one"],
+            "linked_content": ["../notes", "../handouts/letter.md", "../gone"] }"#).unwrap();
+        std::fs::write(dir.join("content/note.md"), "the journal's").unwrap();
+        std::fs::write(dir.join("content/fallback.txt"), "kept").unwrap();
+        std::fs::write(root.join("notes/note.md"), "linked").unwrap();
+        std::fs::write(root.join("notes/other.txt"), "other").unwrap();
+        std::fs::write(root.join("handouts/letter.md"), "*dear*").unwrap();
+        std::fs::write(root.join("handouts/unlinked.md"), "not linked").unwrap();
+        std::fs::write(dir.join("entries/one.rhai"), "journal_entry.add(new_page());").unwrap();
+        let journal = Journal::open(&dir).unwrap();
+        assert_eq!(journal.missing_links(), [dir.join("../gone")]);
+        let read = |journal: &Journal, want: &str| {
+            let mut engine = journal.engine(Resources::library()).unwrap();
+            let script = format!(r#"let got = content("note") + "|" + content("other") + "|" + content("letter") + "|" + content("fallback");
+                if got != "{}" {{ throw got; }}"#, want);
+            engine.build_entry_str(&script).map(|_| ()).map_err(|e| e.to_string())
+        };
+        assert_eq!(read(&journal, "linked|other|*dear*|kept"), Ok(()));
+        std::fs::write(root.join("notes/note.md"), "changed").unwrap();
+        assert_eq!(read(&journal, "changed|other|*dear*|kept"), Ok(()), "a linked file is read anew");
+        let mut engine = journal.engine(Resources::library()).unwrap();
+        let err = engine.build_entry_str(r#"content("unlinked")"#).unwrap_err();
+        assert!(err.contains("no content named 'unlinked'"), "{}", err);
+        assert!(journal.own_resources(Resources::library()).overrides().is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn linked_content_is_checked() {
+        for (text, want) in [
+            (r#"{ "version": 1, "title": "T", "entries": ["a"], "linked_content": [""] }"#, "linked_content has an empty path"),
+            (r#"{ "version": 1, "title": "T", "entries": ["a"], "linked_content": ["x", "x"] }"#, "linked_content lists 'x' twice"),
+        ] {
+            let err = Manifest::parse(text).unwrap_err();
+            assert!(err.contains(want), "{}\n  wanted: {}\n  got: {}", text, want, err);
+        }
+        let manifest = Manifest::parse(r#"{ "version": 1, "title": "T", "entries": ["a"], "linked_content": ["../notes"] }"#).unwrap();
+        assert_eq!(Manifest::parse(&manifest.to_json()).unwrap(), manifest);
     }
 }

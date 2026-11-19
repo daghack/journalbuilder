@@ -32,7 +32,7 @@ use super::sources::Sources;
 use crate::journal::fonts::FontBook;
 use std::cell::RefCell;
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 /// The built-in library's directory. Resolved at build time, so it's found
@@ -167,6 +167,24 @@ impl Resources {
         }
     }
 
+    /// These resources with linked content in front of their content: each
+    /// of `links` a folder, whose content files (`.txt`, `.md`, `.json`,
+    /// `.graph`) directly inside it are content, or one content file, named
+    /// by its stem; earlier links in front of later ones. They're read when
+    /// asked for, as the rest are, so a change to one is seen at the next
+    /// read. A link that isn't there has none.
+    pub fn with_linked_content(mut self, links: &[PathBuf]) -> Self {
+        for link in links.iter().rev() {
+            for (sources, ext) in [(&mut self.text, "txt"), (&mut self.markdown, "md"), (&mut self.symbols, "json"), (&mut self.graphs, "graph")] {
+                if let Some(linked) = linked_sources(link, ext) {
+                    let under = std::mem::replace(sources, Sources::none("content"));
+                    *sources = linked.over(under);
+                }
+            }
+        }
+        self
+    }
+
     /// These resources, noting each file of theirs read (not those they're
     /// in front of): see `Used`.
     pub fn recording(self) -> (Resources, Used) {
@@ -291,6 +309,28 @@ impl Resources {
         }).collect::<Result<Vec<_>, String>>()?;
         FontBook::from_files(files)
     }
+}
+
+/// The content extensions a link can name a file of.
+pub const CONTENT_EXTS: [&str; 4] = ["txt", "md", "json", "graph"];
+
+/// Whether `link` names one content file (by its extension) rather than a
+/// folder of them.
+pub fn links_a_file(link: &Path) -> bool {
+    !link.is_dir() && link.extension().is_some_and(|ext| CONTENT_EXTS.iter().any(|e| ext == *e))
+}
+
+/// A link's content files with extension `ext`: a folder's, or the one
+/// file it names, if it's of that extension.
+fn linked_sources(link: &Path, ext: &'static str) -> Option<Sources> {
+    if !links_a_file(link) {
+        return Some(Sources::dir(link).with_ext(ext));
+    }
+    if link.extension().is_some_and(|e| e == ext) {
+        let stem = link.file_stem()?.to_string_lossy().into_owned();
+        return Some(Sources::dir(link.parent().unwrap_or(Path::new("."))).with_ext(ext).only(&stem));
+    }
+    None
 }
 
 /// The files of resources read since `Resources::recording` made them,

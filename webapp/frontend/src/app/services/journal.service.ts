@@ -5,6 +5,7 @@ import { keep, stored } from '../layout/pane-state';
 import type { Committed, Evaluation, PageView, ScriptError } from '../scribe';
 import { ShellService } from '../shell/shell.service';
 import { JournalStore } from './journal-store.service';
+import { LinkedContentService } from './linked-content.service';
 import { RenderService } from './render.service';
 
 /** How long typing pauses before the script runs again. */
@@ -31,6 +32,8 @@ export class JournalService {
   private readonly render = inject(RenderService);
   private readonly store = inject(JournalStore);
   private readonly shell = inject(ShellService);
+  /** Reads the journal's linked content into its resources as it changes. */
+  readonly linked = inject(LinkedContentService);
 
   /** The entry being edited, by name. */
   readonly entry = signal<string | null>(null);
