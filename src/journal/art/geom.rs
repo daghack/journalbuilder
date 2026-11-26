@@ -192,6 +192,13 @@ pub(super) fn spline(mut path: StrokePath, points: &[V], continues: bool) -> Str
     if n < 2 {
         return path;
     }
+    cubics(path, points, &spline_tangents(points), n - 1)
+}
+
+/// The tangents `spline` gives an open curve through `points` (at least
+/// two) at each of them.
+fn spline_tangents(points: &[V]) -> Vec<V> {
+    let n = points.len();
     let mut tangents = vec![V::default(); n];
     for i in 1..n - 1 {
         tangents[i] = tangent(points[i - 1], points[i], points[i + 1]);
@@ -205,7 +212,36 @@ pub(super) fn spline(mut path: StrokePath, points: &[V], continues: bool) -> Str
         tangents[0] = chord(0) * 2.0 - tangents[1];
         tangents[n - 1] = chord(n - 2) * 2.0 - tangents[n - 2];
     }
-    cubics(path, points, &tangents, n - 1)
+    tangents
+}
+
+/// Points along the curve `spline` draws through `points` (no two the
+/// same), no further apart than about `step`: the first point, then each
+/// cubic's in turn, ending at the last. Given `start`, the curve sets off
+/// that way instead, as far as a unit tangent would take it times its
+/// length.
+pub(super) fn spline_points(points: &[V], step: f64, start: Option<V>) -> Vec<V> {
+    let n = points.len();
+    if n < 2 {
+        return points.to_vec();
+    }
+    let mut tangents = spline_tangents(points);
+    if let Some(start) = start {
+        tangents[0] = start;
+    }
+    let mut out = vec![points[0]];
+    for i in 0..n - 1 {
+        let (a, b) = (points[i], points[i + 1]);
+        let third = (b - a).len() / 3.0;
+        let (c1, c2) = (a + tangents[i] * third, b - tangents[i + 1] * third);
+        let pieces = ((b - a).len() / step).ceil().max(1.0) as usize;
+        for k in 1..=pieces {
+            let t = k as f64 / pieces as f64;
+            let u = 1.0 - t;
+            out.push(a * (u * u * u) + c1 * (3.0 * u * u * t) + c2 * (3.0 * u * t * t) + b * (t * t * t));
+        }
+    }
+    out
 }
 
 /// A smooth closed curve through `points` and back to the first, as one

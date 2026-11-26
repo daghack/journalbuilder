@@ -82,7 +82,9 @@
 //             lib/engraving, lib/gothic and lib/leaves; a leaf aged,
 //             folded and walled, ribbons of writing, rings, offset
 //             curves and construction lines; paths joined from a list
-//             and shapes shaded on their shadow side
+//             and shapes shaded on their shadow side; trees woven into
+//             ribbons that carry text, art::ribbons, and their
+//             claws, wandering middles and widths that vary
 //
 // Pages are bound with new_book: numbered, named and listed in the
 // contents.
@@ -3810,6 +3812,104 @@ for label in [["join, times, polar", LEFT + 60], ["shade, lit from the top left"
 	aged.add(write_in(label[0], label[1], y + 120, 22, CAPTION, PLAIN));
 }
 book.bind("appendix", aged);
+
+// Trees woven into ribbons that carry text, art::ribbons: over and under
+// in turn, branches joining their trunks, the text only where nothing
+// passes over it.
+let woven = sheet("art");
+woven.add(subhead("woven ribbons", TOP));
+woven.add(caption("art::ribbons(trees, width, settings): each tree (points, edges, as spanning_tree gives them) a trunk and branches,", TOP + 50));
+woven.add(caption("woven over and under the others in turn, its text along them only where nothing passes over it", TOP + 78));
+// A ribbon's lines and rules in an ink, then its text.
+fn draw_ribbon(canvas, r, ink) {
+	canvas.add(r, #{ lines: pen(ink), rules: new_style(new_brush_style(ink, "Ink Pen", 1.0), new_handwriting_style()) }).add(r.text);
+}
+let wave_points = [vec2(140, 470), vec2(330, 400), vec2(520, 500), vec2(720, 410), vec2(900, 500), vec2(1070, 430), vec2(600, 640)];
+let zigzag_points = [vec2(170, 360), vec2(330, 600), vec2(500, 370), vec2(690, 610), vec2(870, 370), vec2(1050, 600), vec2(780, 680)];
+let chain = [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5]];
+let pair = art::ribbons([
+	#{ points: wave_points, edges: chain + [[2, 6]], text: LOREM, style: pen(INK) },
+	#{ points: zigzag_points, edges: chain + [[3, 6]], text: LOREM, style: pen(RED) },
+], 44, #{ type: #{ glyphset: PLAIN }, seed: 1 });
+draw_ribbon(woven, pair[0], INK);
+draw_ribbon(woven, pair[1], RED);
+woven.add(write_in("swallowtail ends, by default; a branch joins its trunk, its text running out from there", LEFT + 60, TOP + 540, 22, CAPTION, PLAIN));
+
+let y = TOP + 610;
+woven.add(caption("#{ ends: \"pointed\", repeat: true }", y));
+woven.add(caption("#{ ends: \"cut\", upright: false, flip: true }", y).translate_by(vec2(520, 0)));
+// A loop nearly closed, and a ribbon across it, from (x, y).
+fn loop_points(x, y) { [vec2(x + 40, y + 100), vec2(x + 240, y + 70), vec2(x + 440, y + 120), vec2(x + 400, y + 290), vec2(x + 200, y + 330), vec2(x + 60, y + 260)] }
+fn cross_points(x, y) { [vec2(x + 60, y + 340), vec2(x + 140, y + 190), vec2(x + 260, y + 90), vec2(x + 380, y + 210), vec2(x + 420, y + 340)] }
+let loose = [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5]];
+let span = [[0, 1], [1, 2], [2, 3], [3, 4]];
+let repeated = art::ribbons([
+	#{ points: loop_points(LEFT, y), edges: loose, text: "lorem ipsum", style: pen(INK) },
+	#{ points: cross_points(LEFT, y), edges: span, text: "dolor sit amet", style: pen(RED) },
+], 34, #{ type: #{ glyphset: PLAIN }, ends: "pointed", repeat: true, seed: 2 });
+draw_ribbon(woven, repeated[0], INK);
+draw_ribbon(woven, repeated[1], RED);
+let cut = art::ribbons([
+	#{ points: loop_points(LEFT + 520, y), edges: loose, text: LOREM, style: pen(INK) },
+	#{ points: cross_points(LEFT + 520, y), edges: span, text: LOREM, style: pen(RED) },
+], 34, #{ type: #{ glyphset: PLAIN }, ends: "cut", upright: false, flip: true, seed: 3 });
+draw_ribbon(woven, cut[0], INK);
+draw_ribbon(woven, cut[1], RED);
+
+// A wall of text kept off a ribbon by its outline.
+let y = TOP + 1000;
+woven.add(caption("avoid.add_region(r.outline): a wall of text kept off the ribbon's band; r.unplaced, what didn't fit", y));
+let band = art::ribbons([#{ points: [vec2(LEFT + 20, y + 220), vec2(LEFT + 380, y + 90), vec2(LEFT + 640, y + 190), vec2(RIGHT - 20, y + 80)], edges: [[0, 1], [1, 2], [2, 3]], text: "lorem ipsum dolor sit amet", style: pen(RED) }], 40, #{ type: #{ glyphset: PLAIN }, seed: 4 })[0];
+let off_band = new_avoidance_tree().add_region(band.outline);
+let wall = new_textbox(#{ center: vec2((LEFT + RIGHT) / 2, y + 150), width: RIGHT - LEFT, height: 200, type: #{ glyph_scale: 14 }, paragraph: new_paragraph_style(#{ layout: "words" }), avoid: off_band });
+woven.add(wall.fill(PLAIN.glyphs(LOREM + LOREM + LOREM)).placed, TEXT);
+draw_ribbon(woven, band, RED);
+assert(band.unplaced == 0, "the band's text should all fit");
+book.bind("appendix", woven);
+
+// Ribbons' claws, wandering middles and widths that vary, all from a
+// seed of their own.
+let clawed = sheet("art");
+clawed.add(subhead("claws, wandering and widths", TOP));
+clawed.add(caption("#{ ends: \"claw\", wander: 12, width_variation: 0.3, seed: 4 }: claws trail past the ends and hook round,", TOP + 50));
+clawed.add(caption("each its own way; the middles wander off the trees' lines and the widths swell and narrow", TOP + 78));
+let scattered = [];
+for ink in [INK, RED] {
+	let points = distribute_points("poisson_disk", 14, [[LEFT + 80, RIGHT - 80], [TOP + 190, TOP + 330]]);
+	scattered.push(#{ points: points, edges: points.spanning_tree(), text: LOREM, style: pen(ink) });
+}
+let thorns = art::ribbons(scattered, 26, #{ type: #{ glyphset: PLAIN }, ends: "claw", wander: 12, width_variation: 0.3, seed: 4 });
+draw_ribbon(clawed, thorns[0], INK);
+draw_ribbon(clawed, thorns[1], RED);
+
+// One ribbon a row, wandering further or varying more down the rows.
+fn row_of(canvas, y, settings) {
+	let r = art::ribbons([#{ points: [vec2(global::LEFT + 230, y), vec2(global::RIGHT - 20, y)], edges: [[0, 1]], text: global::LOREM, style: pen(global::INK) }], 26, #{ type: #{ glyphset: global::PLAIN }, ends: "pointed", seed: 6 } + settings)[0];
+	draw_ribbon(canvas, r, global::INK);
+}
+let y = TOP + 460;
+clawed.add(caption("#{ wander }: how far the middle may wander, either way", y));
+for row in [[0, 0], [12, 1], [24, 2]] {
+	clawed.add(write_in(`wander: ${row[0]}`, LEFT, y + 58 + 70 * row[1], 22, CAPTION, PLAIN));
+	row_of(clawed, y + 50 + 70 * row[1], #{ wander: row[0], width_variation: 0 });
+}
+let y = TOP + 720;
+clawed.add(caption("#{ width_variation }: how much the width varies either way, 0.1 by default", y));
+for row in [[0, 0], [0.25, 1], [0.5, 2]] {
+	clawed.add(write_in(`width_variation: ${row[0]}`, LEFT, y + 58 + 70 * row[1], 22, CAPTION, PLAIN));
+	row_of(clawed, y + 50 + 70 * row[1], #{ width_variation: row[0] });
+}
+
+// The same tree, its claws hooking another way for each seed.
+let y = TOP + 980;
+clawed.add(caption("#{ ends: \"claw\", seed: 1 }, then 2, then 3: the same tree, each claw its own way", y));
+for k in 0..3 {
+	let x = LEFT + 60 + 330 * k;
+	let fork = [vec2(x, y + 80), vec2(x + 110, y + 130), vec2(x + 220, y + 80), vec2(x + 110, y + 200)];
+	let tree = art::ribbons([#{ points: fork, edges: [[0, 1], [1, 2], [1, 3]], text: "lorem ipsum dolor", style: pen(RED) }], 24, #{ type: #{ glyphset: PLAIN }, ends: "claw", seed: k + 1 })[0];
+	draw_ribbon(clawed, tree, RED);
+}
+book.bind("appendix", clawed);
 
 // ---- the title page and the contents, which go first ----
 

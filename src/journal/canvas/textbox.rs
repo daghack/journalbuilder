@@ -472,6 +472,7 @@ impl<'a> TextBox<'a> {
             within: None,
             scale_at: None,
             longest_line: None,
+            apart_on_bends: false,
         };
         let (mut placed, rest) = match self.layout {
             TextBoxLineMode::Flat => place_along_path(symbols, &stroke, &args),
@@ -518,6 +519,7 @@ impl<'a> TextBox<'a> {
             within: Some(region),
             scale_at: None,
             longest_line: Some(self.longest_line()),
+            apart_on_bends: false,
         };
         let mut placed = Vec::new();
         let mut to_place = symbols;
@@ -593,6 +595,7 @@ impl<'a> TextBox<'a> {
             within: Some(region),
             scale_at: None,
             longest_line: None,
+            apart_on_bends: false,
         };
         self.line_spans(y_pos).iter().any(|&(left, right)| {
             let (start, end) = (self.place(left - self.symbol_scale, y_pos), self.place(right + self.symbol_scale, y_pos));

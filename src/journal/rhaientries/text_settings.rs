@@ -543,6 +543,11 @@ impl Jitter {
     pub fn is_none(&self) -> bool {
         *self == Jitter::default()
     }
+    /// About the furthest a glyph `size` across is set off true at any
+    /// point of it: moved, turned and grown.
+    pub(super) fn stray(&self, size: f32) -> f32 {
+        (self.position.0.max(self.position.1) + (self.rotation + self.scale) * size as f64) as f32
+    }
     /// Jitter placed glyphs: for each, across, down, the turn and the
     /// scale, in that order. Nothing is drawn from the generator for a
     /// jitter of 0.

@@ -810,6 +810,9 @@ pub struct SymbolPlacementArgs<'a> {
     /// path (a text box's line in pieces): words kept whole are broken
     /// only if they're longer than this.
     pub longest_line: Option<f32>,
+    /// Where the path bends, glyphs that would overlap the one before on
+    /// the inside of the bend are set further on, clear of it.
+    pub apart_on_bends: bool,
 }
 
 /// Glyphs' scale by how far along the walk they're set, a factor of the
@@ -825,7 +828,7 @@ impl std::fmt::Debug for ScaleField<'_> {
 
 impl SymbolPlacementArgs<'_> {
     pub fn new(symbol_scale: f32) -> Self {
-        SymbolPlacementArgs { avoid: None, padding: 0.0, symbol_scale, spacing: 0.0, baseline_shift: 0.0, angle: None, within: None, scale_at: None, longest_line: None }
+        SymbolPlacementArgs { avoid: None, padding: 0.0, symbol_scale, spacing: 0.0, baseline_shift: 0.0, angle: None, within: None, scale_at: None, longest_line: None, apart_on_bends: false }
     }
 }
 
@@ -862,6 +865,13 @@ const SAMPLES_PER_CURVE: usize = 20;
 /// symbol scale; then how many halvings close in on the first clear spot.
 const SEARCH_STEP: f32 = 0.25;
 const REFINE_STEPS: usize = 4;
+/// Set apart on bends, how far on a glyph is moved at a time, as a fraction
+/// of the symbol scale, and at most how many times; and how much of the
+/// glyph before it may overlap, as a fraction of that glyph's size, so
+/// glyphs set touching on the straight aren't moved.
+const APART_STEP: f32 = 0.04;
+const APART_TRIES: usize = 75;
+const APART_SLACK: f32 = 0.04;
 
 /// A glyph to place, and its outline at the size it's placed.
 #[derive(Clone)]
@@ -962,6 +972,24 @@ impl<'a> Placer<'a> {
             })
     }
 
+    /// Where past `at` along `walk` `piece` must start to clear `before`,
+    /// the glyph set before it, when they're set apart on bends: on the
+    /// inside of a bend they'd overlap.
+    fn clear_of(&self, walk: &Walk, at: f32, piece: &Piece, before: Option<&[Vec2]>) -> f32 {
+        let Some(before) = before.filter(|b| !b.is_empty() && !piece.symbol.is_blank()) else { return at };
+        let centre = before.iter().fold(Vec2::ZERO, |sum, &p| sum + p) / before.len() as f32;
+        let shrunk: Vec<Vec2> = before.iter().map(|&p| centre + (p - centre) * (1.0 - APART_SLACK)).collect();
+        let step = (self.args.symbol_scale * APART_STEP).max(1e-3);
+        let mut at = at;
+        for _ in 0..APART_TRIES {
+            match self.spot(walk, at, piece) {
+                Some(glyph) if shapes_within(&glyph.footprint(), &shrunk, 0.0) => at += step,
+                _ => break,
+            }
+        }
+        at
+    }
+
     /// Whether a glyph placed starting `start` along the current walk hits
     /// anything, keeping `pad` further than the padding from what's avoided.
     fn blocked(&self, placed: &Symbol, start: f32, pad: f32) -> bool {
@@ -982,11 +1010,14 @@ impl<'a> Placer<'a> {
         let mut spacing = spacing.clone();
         let (mut glyphs, mut spans) = (Vec::new(), Vec::new());
         let mut at = start;
+        // The glyph before, to keep clear of on bends.
+        let mut before: Option<Vec<Vec2>> = self.args.apart_on_bends.then(|| self.recent.back().map(|(f, _)| f.clone())).flatten();
         for (k, piece) in run.iter().enumerate() {
             let piece = &self.shaped(walk, at, piece);
             if k > 0 {
                 at = self.start(&spacing, piece, at);
             }
+            at = self.clear_of(walk, at, piece, before.as_deref());
             let glyph = self.spot(walk, at, piece)?;
             if self.blocked(&glyph, at, pad) {
                 return Some(Err(()));
@@ -994,6 +1025,9 @@ impl<'a> Placer<'a> {
             let end = at + piece.outline.width();
             if !piece.symbol.is_blank() {
                 spacing.push(piece.outline.clone(), at);
+                if self.args.apart_on_bends {
+                    before = Some(glyph.footprint());
+                }
             }
             glyphs.push(glyph);
             spans.push((at, end));
@@ -1390,6 +1424,27 @@ mod tests {
         // Turned to the line instead, they lie along it.
         let (placed, _) = place_along_path(symbols, &path, &SymbolPlacementArgs::new(8.0));
         assert!((placed[0].rotation_rad() - (-40.0f32).atan2(30.0)).abs() < 1e-3, "{}", placed[0].rotation_rad());
+    }
+
+    #[test]
+    fn glyphs_move_apart_round_tight_bends_if_asked() {
+        // Wide bars turned round a hairpin: spaced along the line, the ones
+        // round its bend land on each other; asked to, each moves on till
+        // it's clear of the one before.
+        const WIDE: &str = "M -1 -0.3 L 1 -0.3 L 1 0.3 L -1 0.3 Z";
+        let path = StrokePath::new().move_to(0.0, 0.0).line_to(60.0, 0.0).cubic_curve_to(72.0, 0.0, 72.0, -16.0, 60.0, -16.0).line_to(0.0, -16.0);
+        let overlaps = |placed: &[Symbol]| {
+            let shrunk = |g: &Symbol| { let c = g.position(); g.footprint().into_iter().map(|p| c + (p - c) * 0.98).collect::<Vec<_>>() };
+            placed.windows(2).filter(|pair| shapes_within(&shrunk(&pair[0]), &shrunk(&pair[1]), 0.0)).count()
+        };
+        let (placed, _) = place_along_path(vec![glyph(WIDE); 10], &path, &SymbolPlacementArgs::new(8.0));
+        assert!(overlaps(&placed) > 0, "the bend should crowd them");
+        let args = SymbolPlacementArgs { apart_on_bends: true, ..SymbolPlacementArgs::new(8.0) };
+        let (apart, _) = place_along_path(vec![glyph(WIDE); 10], &path, &args);
+        assert!(apart.len() >= 6 && overlaps(&apart) == 0, "{} placed, {} overlapping", apart.len(), overlaps(&apart));
+        // On the straight before the bend, they're set as before.
+        assert_eq!(placed[0].position(), apart[0].position());
+        assert_eq!(placed[1].position(), apart[1].position());
     }
 
     #[test]

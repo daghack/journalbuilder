@@ -22,6 +22,7 @@ mod path;
 mod random;
 mod regions;
 mod resources;
+mod ribbons;
 mod sources;
 mod style;
 mod text;

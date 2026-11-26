@@ -99,7 +99,7 @@ pub(super) type TextSource = (Rc<FontBook>, random::SharedRng);
 
 /// The `angle` option: glyphs held at this angle (radians, 0 upright)
 /// along the path, rather than turned to follow it.
-fn place_text(symbols: Vec<Symbol>, path: &StrokePath, args: &SymbolPlacementArgs, mode: &TextBoxLineMode) -> (Vec<Symbol>, Vec<Symbol>) {
+pub(super) fn place_text(symbols: Vec<Symbol>, path: &StrokePath, args: &SymbolPlacementArgs, mode: &TextBoxLineMode) -> (Vec<Symbol>, Vec<Symbol>) {
     match mode {
         TextBoxLineMode::Flat => place_along_path(symbols, path, args),
         TextBoxLineMode::WordsByBlankSymbol(rules) => place_words_along_path(symbols, path, args, *rules),
@@ -110,25 +110,25 @@ fn place_text(symbols: Vec<Symbol>, path: &StrokePath, args: &SymbolPlacementArg
 /// What the path text calls take, besides a style, a type and a paragraph.
 const PATH_TEXT_KEYS: [&str; 1] = ["avoid"];
 
-struct PathText {
-    caller: &'static str,
+pub(super) struct PathText {
+    pub(super) caller: &'static str,
     /// The text's glyphs, and how each is drawn.
-    styled: Styled,
-    symbols: Vec<Symbol>,
-    style: Style,
-    mode: TextBoxLineMode,
-    avoid: avoid::AvoidOption,
-    spacing: f32,
-    angle: Option<f32>,
-    jitter: Jitter,
+    pub(super) styled: Styled,
+    pub(super) symbols: Vec<Symbol>,
+    pub(super) style: Style,
+    pub(super) mode: TextBoxLineMode,
+    pub(super) avoid: avoid::AvoidOption,
+    pub(super) spacing: f32,
+    pub(super) angle: Option<f32>,
+    pub(super) jitter: Jitter,
     /// The glyph scale, if the type gives one.
-    size: Option<f32>,
+    pub(super) size: Option<f32>,
     /// The paragraph's line height, in glyph scales.
-    line_height: f32,
+    pub(super) line_height: f32,
     /// How far it keeps from what it avoids.
-    clearance: f32,
+    pub(super) clearance: f32,
     /// The settings' own options, besides a style, a type and a paragraph.
-    options: Map,
+    pub(super) options: Map,
 }
 
 impl PathText {
@@ -136,14 +136,22 @@ impl PathText {
         PathText::parse_with(caller, msg, settings, text, &PATH_TEXT_KEYS)
     }
     /// As `parse`, taking `keys` besides a style, a type and a paragraph.
-    fn parse_with(caller: &'static str, msg: &FlowText, settings: Map, (symdict, rng): &TextSource, keys: &[&str]) -> RhaiResult<PathText> {
+    fn parse_with(caller: &'static str, msg: &FlowText, settings: Map, source: &TextSource, keys: &[&str]) -> RhaiResult<PathText> {
+        PathText::read(caller, msg, settings, source, keys, false)
+    }
+    /// As `parse_with`, its words kept whole unless the paragraph's layout
+    /// says otherwise.
+    pub(super) fn parse_words(caller: &'static str, msg: &FlowText, settings: Map, source: &TextSource, keys: &[&str]) -> RhaiResult<PathText> {
+        PathText::read(caller, msg, settings, source, keys, true)
+    }
+    fn read(caller: &'static str, msg: &FlowText, settings: Map, (symdict, rng): &TextSource, keys: &[&str], words: bool) -> RhaiResult<PathText> {
         let text = TextSettings::read_for(caller, msg, settings, keys)?;
         let styled = Styled::of_text(caller, msg, &text, symdict, &mut *rng.borrow_mut())?;
         Ok(PathText {
             caller,
             symbols: styled.glyphs.clone(),
             styled,
-            mode: text.paragraph.line_mode(caller, false)?,
+            mode: text.paragraph.line_mode(caller, words)?,
             avoid: avoid::AvoidOption::parse(caller, &text.options, text.paragraph.clearance(), &text.style)?,
             spacing: text.type_.tracking(),
             angle: text.paragraph.angle(),
@@ -156,18 +164,25 @@ impl PathText {
         })
     }
     /// The glyph scale `caller` sets text at.
-    fn size(&self, caller: &str) -> RhaiResult<f32> {
+    pub(super) fn size(&self, caller: &str) -> RhaiResult<f32> {
         self.size.ok_or_else(|| format!("{}: the type has no 'glyph_scale', the size glyphs are set at", caller).into())
     }
     /// The glyphs placed, which are the text's from glyph `first` on, drawn
     /// as the text styles them.
-    fn draw(&self, engine: &Engine, mut placed: Vec<Symbol>, first: usize, rng: &SharedRng) -> RhaiResult<Canvas> {
+    pub(super) fn draw(&self, engine: &Engine, placed: Vec<Symbol>, first: usize, rng: &SharedRng) -> RhaiResult<Canvas> {
+        self.draw_runs(engine, vec![(placed, first)], rng)
+    }
+    /// Runs of placed glyphs, each glyphs from its `first` on of the text,
+    /// drawn as the text styles them, on one canvas.
+    pub(super) fn draw_runs(&self, engine: &Engine, runs: Vec<(Vec<Symbol>, usize)>, rng: &SharedRng) -> RhaiResult<Canvas> {
         let mut canvas = CanvasData::default();
         {
             let mut rng = rng.borrow_mut();
-            self.jitter.apply(&mut placed, &mut *rng);
             let tree = if self.styled.has_rules() { self.avoid.now() } else { None };
-            self.styled.draw_row(self.caller, &mut canvas, &placed, first, &self.style, tree.as_deref(), self.clearance, &mut *rng)?;
+            for (mut placed, first) in runs {
+                self.jitter.apply(&mut placed, &mut *rng);
+                self.styled.draw_row(self.caller, &mut canvas, &placed, first, &self.style, tree.as_deref(), self.clearance, &mut *rng)?;
+            }
         }
         // A scripted symbol set's script runs with the generator free.
         self.styled.finish(engine, &mut canvas)?;
