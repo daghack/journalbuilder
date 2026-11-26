@@ -2271,6 +2271,52 @@ A chart's tree cut into constellations, a page each: pieces that hold together, 
 | `options.most_stars` | no limit | The most stars a constellation may have: the cut is the one nearest count pieces whose pieces all fit, so there are more pieces than count if that's what it takes (with count 1, as few as fit). | a whole number of at least 2. |
 | `options.split_at` | [] | Stars whose constellation is split in two at them, one more piece each, both keeping the star: its branches from the star (the parts of it that meet only there) are taken round the star by the way they go, from the widest gap between them, and cut into two runs with about as many links each, so the pieces lie either side of it, the leftmost first. | an array of star indices, each with a constellation that has two or more branches from it. |
 
+### `art::ribbons(trees, width, settings)`
+
+Trees woven into ribbons that carry text. Each tree's edges are laid as ribbons: its longest path a trunk, and each other way out to a leaf a branch, leaving the ribbon it grows from smoothly, the two joined where they meet. Where ribbons cross, one passes over the other, over and under in turn along each ribbon as far as they all can; where three or more pile up in one place, each passes over or under the pile as a whole, those over on top. The ribbons are edged, with a rule inside each edge, and cut at their free ends; their widths vary a little along them, and their middles can wander off the trees' lines. Each tree's text runs along its ribbons, the trunk first, then each branch out from where it leaves, in the order they leave, only where nothing passes over it and clear of what does, so no text is ever under another ribbon. Glyphs are turned to the ribbon, centred between the rules, and spaced out on bends so they don't crowd on the inside; words are kept whole. Unless the type gives a glyph_scale, glyphs are as large as fits between the rules where the ribbon is narrowest, less the paragraph's clearance. Takes the type's glyphset, glyph_scale and glyph_tracking, the paragraph's layout (default words), angle, clearance, and the style. Gives an array, a map for each tree: lines, the edges and ends that show; rules, the rules that show; outline, the closed outline of each ribbon's band, hidden parts and all, to keep things off (avoid.add_region) or hatch; text, a canvas of the text; and unplaced, how many of its glyphs didn't fit. canvas.add(r, #{ lines, rules }) draws the parts. The same trees and seed weave the same way.
+
+| argument | what it does | takes |
+|---|---|---|
+| `trees` | The trees to weave, each a map: points, vec2s; edges, [a, b] index pairs into the points, either way round, as spanning_tree gives them (a forest is woven as trees of its own); text, a string or markdown(text); and, each in place of the call's, width, style, type, paragraph and spans. | an array of maps. Fails if a tree's edges close a loop or name a point it hasn't. |
+| `width` | How wide the ribbons are, edge to edge. | a positive number. |
+
+| option | default | what it does | takes |
+|---|---|---|---|
+| `settings.ends` | "swallowtail" | How the free ends are cut: swallowtail, a notch leaving two tails; pointed, narrowing to a point; cut, straight across; claw, trailing on past the end into a point that veers off and hooks round to one side, like a claw or a fang, each its own way (from the seed): turning 70 to 195 degrees by its tip, more and more towards it. | one of those names. |
+| `settings.end_depth` | 0.6 of the width for swallowtail, 0.8 for pointed, 3 for claw | How far back from the end the notch or the point reaches, at most a third of the ribbon; for a claw, how far it trails on past the end, each a quarter longer or shorter than this. | a number of at least 0. |
+| `settings.width_variation` | 0.1 | How much the ribbons' widths vary, as a share of the width either way: they swell and narrow smoothly over a few widths. A branch sets off as wide as the ribbon it leaves is there. | a number from 0 to 0.5. |
+| `settings.wander` | 0 | How far the ribbons' middles may wander off the trees' lines, either way, in bends the longer the further they wander. A branch sets off from where the ribbon it leaves has wandered to. | a number of at least 0. |
+| `settings.seed` | one from the generator | How the widths vary, the middles wander and the claws turn: the same seed gives the same ribbons, without touching the script's generator; left out, the journal's generator picks one. | a whole number. |
+| `settings.rule_inset` | a ninth of the width | How far inside each edge its rule runs. | a number of at least 0, less than half the width. |
+| `settings.repeat` | false | Fills every stretch with the text over and over, rather than setting it once; then nothing is unplaced. | true or false. |
+| `settings.upright` | true | Text reads right way up: the trunk's runs whichever way along it that does, a stretch that turns back on itself is set in pieces, and a branch heading leftward from where it leaves has its glyphs turned right round, its words reading right to left. False sets every ribbon's text along it the way it was laid. | true or false. |
+| `settings.flip` | false | Swaps over and under at every crossing. | true or false. |
+| `settings.avoid` | nothing | What glyphs keep clear of besides the ribbons over them (see Keeping Text Clear). | an avoidance tree, a path, a canvas, a glyph or image paint, or an array of any of these. |
+
+```rhai render=ribbons
+let woven = art::ribbons([
+	#{ points: [vec2(20, 60), vec2(160, 20), vec2(300, 100), vec2(440, 40), vec2(580, 90), vec2(340, 190), vec2(480, 210)], edges: [[0, 1], [1, 2], [2, 3], [3, 4], [2, 5], [5, 6]], text: "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod", style: TEXT.style },
+	#{ points: [vec2(30, 190), vec2(170, 130), vec2(260, 10), vec2(400, 150), vec2(560, 200)], edges: [[0, 1], [1, 2], [2, 3], [3, 4]], text: "tempor incididunt ut labore et dolore magna aliqua", style: RED_PEN },
+], 28, #{ type: #{ glyphset: PLAIN }, seed: 3 });
+page.add(woven[0], #{ lines: PEN, rules: PEN }).add(woven[0].text);
+page.add(woven[1], #{ lines: RED_PEN, rules: RED_PEN }).add(woven[1].text);
+```
+
+![ribbons](images/ribbons.svg)
+
+Claws, on ribbons that wander and change width:
+
+```rhai render=ribbons_claws
+let woven = art::ribbons([
+	#{ points: [vec2(70, 70), vec2(220, 110), vec2(380, 60), vec2(530, 120), vec2(300, 200)], edges: [[0, 1], [1, 2], [2, 3], [2, 4]], text: "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore", style: TEXT.style },
+	#{ points: [vec2(110, 200), vec2(250, 20), vec2(450, 200)], edges: [[0, 1], [1, 2]], text: "et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud", style: RED_PEN },
+], 24, #{ type: #{ glyphset: PLAIN }, ends: "claw", wander: 10, width_variation: 0.3, seed: 5 });
+page.add(woven[0], #{ lines: PEN, rules: PEN }).add(woven[0].text);
+page.add(woven[1], #{ lines: RED_PEN, rules: RED_PEN }).add(woven[1].text);
+```
+
+![ribbons_claws](images/ribbons_claws.svg)
+
 ## Symbol Sets
 
 A symbol set is a glyphset's glyphs as the symbols of a lock, and how each is drawn, so lock values reach the page without being turned into strings and glyphs by hand. A set is a file in symbolsets/ (see Symbol set files): simple, a glyphset's glyphs in a style, or scripted, each drawn by a script. Every text call takes `set.text(symbols)` where it takes a string, applying the same placing, jitter and paragraph options; what write_line, write_at, fit_text and art::spiral_text give for it is a symbolic.

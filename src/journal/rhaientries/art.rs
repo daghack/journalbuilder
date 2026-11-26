@@ -117,6 +117,18 @@
 //! }));
 //! ```
 //!
+//! `ribbons` weaves trees (points and edges, as `spanning_tree` gives them)
+//! into ribbons that pass over and under each other in turn, branches
+//! joining their trunks, each tree's text along its ribbons only where
+//! nothing passes over it. Their widths vary and their middles can wander,
+//! and their ends can trail off into claws, all from a seed. It gives a map
+//! per tree: lines, rules, outline, text and unplaced.
+//!
+//! ```rhai
+//! let woven = art::ribbons([#{ points: points, edges: points.spanning_tree(), text: "lorem ipsum" }], 40, #{ type: #{ glyphset: glyphset("plain") } });
+//! for r in woven { canvas.add(r, #{ lines: ink, rules: ink }).add(r.text); }
+//! ```
+//!
 //! `moon` draws the moon in a phase: 0 new, 0.25 first quarter (right half
 //! lit), 0.5 full, 0.75 last quarter, wrapping round at 1. It gives its
 //! parts as paths: the disc's outline, the terminator between light and
@@ -489,6 +501,10 @@ pub fn register(engine: &mut Engine, text: super::path::TextSource) {
     let mut module = Module::new();
     let marked = text.clone();
     let symbolic = text.clone();
+    let woven = text.clone();
+    module.set_native_fn("ribbons", move |ctx: NativeCallContext, trees: rhai::Array, width: Dynamic, settings: Map| -> RhaiResult<rhai::Array> {
+        super::ribbons::ribbons(&trees, &width, settings, &woven, ctx.engine()).map_err(|err| error(&ctx, super::options::unwrap_runtime(&err)))
+    });
     module.set_native_fn("spiral_text", move |ctx: NativeCallContext, msg: &str, center: Vec2, radius: Dynamic, settings: Map| -> RhaiResult<Canvas> {
         super::path::spiral_text(&super::path::plain(msg), center, &radius, settings, &text, ctx.engine()).map_err(|err| error(&ctx, err.to_string()))
     });
@@ -815,6 +831,44 @@ mod tests {
             ("art::constellations(#{ points: [vec2(0, 0), vec2(1, 0)], edges: [], nodes: [#{ radius: 1.0 }, #{ radius: 1.0 }] }, 2, vec2(0, 0), 900, 600);", "art::constellations: 2 stars need 1 links"),
             ("art::constellations(#{ points: [vec2(0, 0)], edges: [], nodes: [#{ radius: 1.0 }] }, 2, vec2(0, 0), 900, 600, #{ label: 3 });", "art::constellations: unknown option 'label'"),
             ("art::constellations(#{ points: [vec2(0, 0)], edges: [], nodes: [#{ radius: 1.0 }] }, 2, vec2(0, 0), 900, 600, #{ split_at: 0 });", "art::constellations: 'split_at' should be an array of star indices"),
+        ] {
+            let err = engine().build_entry_str(&format!("let ok = 1;\n{}", call)).expect_err(call).to_string();
+            assert!(err.contains(message) && err.contains("line 2"), "{}", err);
+        }
+    }
+
+    #[test]
+    fn ribbons_give_each_tree_its_parts() {
+        let ok: rhai::Array = engine().engine.eval(r#"
+            let ink = new_style(new_brush_style("black", "Ink Pen", 1.0), new_handwriting_style());
+            let trees = [
+                #{ points: [vec2(0, 0), vec2(200, 40), vec2(400, 0)], edges: [[0, 1], [1, 2]], text: "lorem ipsum", style: ink },
+                #{ points: [vec2(0, 60), vec2(200, -40), vec2(400, 60)], edges: [[0, 1], [1, 2]], text: "dolor sit amet", style: ink },
+            ];
+            let settings = #{ type: #{ glyphset: glyphset("plain") }, seed: 7 };
+            let woven = art::ribbons(trees, 30, settings);
+            let again = art::ribbons(trees, 30, settings);
+            let r = woven[0];
+            let canvas = new_canvas().add(r, #{ lines: ink, rules: ink }).add(r.text);
+            let tree = new_avoidance_tree().add_region(r.outline);
+            // Without a seed, one from the journal's generator: another each time.
+            let unseeded = settings;
+            unseeded.remove("seed");
+            let clawed = settings + #{ ends: "claw", wander: 8, width_variation: 0.3 };
+            [woven.len() == 2, r.keys().len() == 5, r.unplaced == 0, `${r.lines}` == `${again[0].lines}`,
+                tree.blocks(vec2(200, 40)), art::ribbons(trees, 30, settings + #{ repeat: true })[1].unplaced == 0,
+                `${art::ribbons(trees, 30, unseeded)[0].lines}` != `${art::ribbons(trees, 30, unseeded)[0].lines}`,
+                `${art::ribbons(trees, 30, clawed)[0].lines}` == `${art::ribbons(trees, 30, clawed)[0].lines}`,
+                `${art::ribbons(trees, 30, clawed)[0].lines}` != `${art::ribbons(trees, 30, clawed + #{ seed: 8 })[0].lines}`]
+        "#).unwrap();
+        assert!(ok.iter().all(|b| b.as_bool().unwrap()), "{:?}", ok);
+        for (call, message) in [
+            ("art::ribbons([#{ points: [vec2(0, 0), vec2(9, 9)], edges: [[0, 1]], text: \"a\" }], 0, #{})", "width must be positive"),
+            ("art::ribbons([#{ points: [vec2(0, 0), vec2(9, 9)], edges: [[0, 1]], text: \"a\" }], 10, #{ ends: \"round\" })", "'ends' should be one of"),
+            ("art::ribbons([#{ points: [vec2(0, 0), vec2(90, 0), vec2(0, 90)], edges: [[0, 1], [1, 2], [2, 0]], text: \"a\" }], 10, #{})", "closes a loop"),
+            ("art::ribbons([#{ points: [vec2(0, 0), vec2(9, 9)], edges: [[0, 1]], text: \"a\" }], 10, #{ width_variation: 0.6 })", "'width_variation' must be from 0 to 0.5"),
+            ("art::ribbons([#{ points: [vec2(0, 0), vec2(9, 9)], edges: [[0, 1]], text: \"a\" }], 10, #{ wander: -1 })", "'wander' must be at least 0"),
+            ("art::ribbons([#{ points: [vec2(0, 0), vec2(9, 9)], edges: [[0, 1]], text: \"a\" }], 10, #{ seed: \"x\" })", "'seed' should be a whole number"),
         ] {
             let err = engine().build_entry_str(&format!("let ok = 1;\n{}", call)).expect_err(call).to_string();
             assert!(err.contains(message) && err.contains("line 2"), "{}", err);
