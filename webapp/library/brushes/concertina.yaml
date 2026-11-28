@@ -1,0 +1,136 @@
+name: Concertina
+description: Razor wire coiled along the stroke, loop over loop like a spring pulled out, every turn the same, with a barb across the wire every so far, for fences round what mustn't get out.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      spacing: 0.01
+      stabilize: 0.5
+  round:
+    type: circle
+    name: Round the coil
+    comment: soft to its rim, so it measures how far from the middle a point is
+    inputs:
+      softness: 1.0
+  rim_in:
+    type: remap
+    name: Out near the rim
+    inputs:
+      clamp: true
+      in_high: 0.07
+      in_low: 0.03
+  rim_out:
+    type: remap
+    inputs:
+      clamp: true
+      in_high: 0.15
+      in_low: 0.11
+      out_high: 0.0
+      out_low: 1.0
+  rim:
+    type: multiply
+  spoke:
+    type: circle
+    name: Where the wire is
+    comment: a superformula of one lobe, a spike from the middle to the rim, turned as the stroke goes; only its point at the rim is drawn
+    inputs:
+      algorithm: 2
+      frequency: 1.0
+      n1: 0.25
+      n2: 1.0
+      n3: 1.0
+      softness: 0.1
+  lengths:
+    type: divide
+    name: How far along, in dab-widths
+  turns:
+    type: multiply
+    name: Radians a dab-width
+    inputs:
+      b: 9.0
+  barb_band:
+    type: curve
+    name: A barb's length
+    comment: across the wire, from inside the coil to its rim
+    inputs:
+      curve: [[0.0, 0.0], [0.02, 1.0], [0.22, 1.0], [0.26, 0.0], [1.0, 0.0]]
+  barb_step:
+    type: multiply
+    name: Degrees a dab-width, a barb a turn
+    inputs:
+      b: 1290.0
+  barb_wheel:
+    type: hsv
+    name: The barbs' wheel
+    comment: red, its hue turned by the distance; red comes round once a turn
+    inputs:
+      color: [1.0, 0.0, 0.0]
+  barb_channels:
+    type: split_color
+  barb_less_green:
+    type: subtract
+  barb_red:
+    type: subtract
+  barb_gate:
+    type: remap
+    name: A barb
+    inputs:
+      clamp: true
+      in_high: 1.0
+      in_low: 0.88
+  barb:
+    type: multiply
+  sum:
+    type: add
+  full:
+    type: remap
+    name: At most full
+    inputs:
+      clamp: true
+  wire:
+    type: multiply
+  paint:
+    type: paint
+    inputs:
+      buildup: 0.0
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- round.mask -> rim_in.input
+- round.mask -> rim_out.input
+- rim_in.output -> rim.a
+- rim_out.output -> rim.b
+- pen_input.distance -> lengths.a
+- brush_settings.size -> lengths.b
+- lengths.result -> turns.a
+- turns.result -> spoke.rotation_input
+- spoke.mask -> wire.a
+- rim.result -> sum.a
+- round.mask -> barb_band.input
+- lengths.result -> barb_step.a
+- barb_step.result -> barb_wheel.hue
+- barb_wheel.output -> barb_channels.color
+- barb_channels.r -> barb_less_green.a
+- barb_channels.g -> barb_less_green.b
+- barb_less_green.result -> barb_red.a
+- barb_channels.b -> barb_red.b
+- barb_red.result -> barb_gate.input
+- barb_gate.output -> barb.a
+- barb_band.output -> barb.b
+- barb.result -> sum.b
+- sum.result -> full.input
+- full.output -> wire.b
+- wire.result -> stamp.tip
+- paint_color.color -> stamp.color
+- pen_input.position -> paint.position
+- pen_input.pressure -> paint.size
+- stamp.dab -> paint.rgba
+exposed_ports:
+  brush_settings.size: {}
+  turns.b: {}
+  barb_step.b: {}
+  paint.opacity: {}

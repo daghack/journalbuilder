@@ -1,0 +1,149 @@
+name: Sutures
+description: "A wound sewn shut: a dark seam down the middle of the stroke, bruised a little either side, crossed at a steady step by stitches, each pulled through a hole either side of it, for scars, the hides of things put together from parts, and the spines of books bound in what they shouldn't be."
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      spacing: 0.01
+      stabilize: 0.5
+  across:
+    type: circle
+    name: Across the wound
+    comment: a needle across the stroke; only what lies on it is drawn, so the rings below become lines along it
+    inputs:
+      aspect: 0.08
+      softness: 0.08
+  round:
+    type: circle
+    name: Round the wound
+    comment: soft to its rim, so it measures how far from the middle a point is
+    inputs:
+      softness: 1.0
+  seam:
+    type: remap
+    name: The seam
+    comment: the dab's middle, a small hard disc
+    inputs:
+      clamp: true
+      in_high: 0.998
+      in_low: 0.9955
+  bruise:
+    type: remap
+    name: Bruised either side
+    inputs:
+      clamp: true
+      in_high: 0.96
+      in_low: 0.92
+      out_high: 0.12
+  stitch:
+    type: remap
+    name: A stitch's length
+    inputs:
+      clamp: true
+      in_high: 0.5
+      in_low: 0.47
+  holes:
+    type: curve
+    name: Its holes
+    comment: a little past either end of the stitch
+    inputs:
+      curve: [[0.0, 0.0], [0.29, 0.0], [0.3, 1.0], [0.4, 1.0], [0.41, 0.0], [1.0, 0.0]]
+  stitch_and_holes:
+    type: add
+  lengths:
+    type: divide
+    name: How far along, in dab-widths
+  stitch_step:
+    type: multiply
+    name: Degrees a dab-width, a stitch a turn
+    inputs:
+      b: 1400.0
+  stitch_wheel:
+    type: hsv
+    comment: cyan, its hue turned by the distance; red comes round once a turn, so the stitches cross at a steady step
+    inputs:
+      color: [0.0, 1.0, 1.0]
+  stitch_channels:
+    type: split_color
+  stitch_less_green:
+    type: subtract
+  stitch_red:
+    type: subtract
+  stitch_gate:
+    type: remap
+    inputs:
+      clamp: true
+      in_high: 0.8
+      in_low: 0.68
+  stitched:
+    type: multiply
+  sum:
+    type: add
+  sum_2:
+    type: add
+  full:
+    type: remap
+    name: At most full
+    inputs:
+      clamp: true
+  drawn:
+    type: multiply
+  started:
+    type: remap
+    name: Once it's moving
+    comment: the first dab has no direction yet
+    inputs:
+      clamp: true
+      in_high: 0.02
+      in_low: 0.01
+  moving:
+    type: multiply
+  paint:
+    type: paint
+    inputs:
+      buildup: 0.0
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- pen_input.drawing_angle -> across.rotation_input
+- round.mask -> seam.input
+- round.mask -> bruise.input
+- round.mask -> stitch.input
+- round.mask -> holes.input
+- stitch.output -> stitch_and_holes.a
+- holes.output -> stitch_and_holes.b
+- pen_input.distance -> lengths.a
+- brush_settings.size -> lengths.b
+- lengths.result -> stitch_step.a
+- stitch_step.result -> stitch_wheel.hue
+- stitch_wheel.output -> stitch_channels.color
+- stitch_channels.r -> stitch_less_green.a
+- stitch_channels.g -> stitch_less_green.b
+- stitch_less_green.result -> stitch_red.a
+- stitch_channels.b -> stitch_red.b
+- stitch_red.result -> stitch_gate.input
+- stitch_and_holes.result -> stitched.a
+- stitch_gate.output -> stitched.b
+- seam.output -> sum.a
+- bruise.output -> sum.b
+- sum.result -> sum_2.a
+- stitched.result -> sum_2.b
+- sum_2.result -> full.input
+- full.output -> drawn.a
+- across.mask -> drawn.b
+- lengths.result -> started.input
+- drawn.result -> moving.a
+- started.output -> moving.b
+- moving.result -> stamp.tip
+- paint_color.color -> stamp.color
+- pen_input.position -> paint.position
+- pen_input.pressure -> paint.size
+- stamp.dab -> paint.rgba
+exposed_ports:
+  brush_settings.size: {}
+  stitch_step.b: {}
+  paint.opacity: {}

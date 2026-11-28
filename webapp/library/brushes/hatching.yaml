@@ -1,0 +1,93 @@
+name: Hatching
+description: An engraver's shading in a single stroke. Every dab is a fine line cut at one slant across the page, whichever way the stroke runs, so a stroke lays a band of even hatching, and pressed harder a second set crosses it at the other slant; the lines swell in the middle and taper at their ends, each a hair off true.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      spacing: 0.08
+      stabilize: 0.5
+  hatch:
+    type: circle
+    name: The hatch
+    comment: a needle at a slant fixed to the page, so the lines stay parallel whichever way the stroke goes
+    inputs:
+      aspect: 0.04
+      rotation: 0.785
+      softness: 0.3
+  cross:
+    type: circle
+    name: The cross-hatch
+    inputs:
+      aspect: 0.04
+      rotation: -0.785
+      softness: 0.3
+  wobble:
+    type: random
+    name: A hair off true
+  wobble_angle:
+    type: remap
+    inputs:
+      clamp: true
+      out_high: 0.05
+      out_low: -0.05
+  pressed:
+    type: remap
+    name: Pressed hard enough to cross
+    inputs:
+      clamp: true
+      in_high: 0.62
+      in_low: 0.55
+  crossed:
+    type: multiply
+  sum:
+    type: add
+  full:
+    type: remap
+    name: At most full
+    inputs:
+      clamp: true
+  reach:
+    type: random
+    name: Each line's length
+  reach_curve:
+    type: remap
+    inputs:
+      clamp: true
+      out_high: 1.0
+      out_low: 0.86
+  sized:
+    type: multiply
+  paint:
+    type: paint
+    inputs:
+      buildup: 0.0
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- wobble.value -> wobble_angle.input
+- wobble_angle.output -> hatch.rotation_input
+- wobble_angle.output -> cross.rotation_input
+- pen_input.pressure -> pressed.input
+- cross.mask -> crossed.a
+- pressed.output -> crossed.b
+- hatch.mask -> sum.a
+- crossed.result -> sum.b
+- sum.result -> full.input
+- full.output -> stamp.tip
+- reach.value -> reach_curve.input
+- reach_curve.output -> sized.a
+- pen_input.pressure -> sized.b
+- sized.result -> paint.size
+- paint_color.color -> stamp.color
+- pen_input.position -> paint.position
+- stamp.dab -> paint.rgba
+exposed_ports:
+  brush_settings.size: {}
+  brush_settings.spacing: {}
+  hatch.rotation: {}
+  pressed.in_low: {}
+  paint.opacity: {}

@@ -1,0 +1,172 @@
+name: Warding
+description: The band of a ward circle in a single stroke. Two rules run along each side of it, a heavy one outside and a fine one in, a row of dots between them, and across the middle ticks stand at a measured step, every one the same distance from the last, so a ring drawn in it is a circle of warding ready for its names.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      spacing: 0.01
+      stabilize: 0.5
+  across:
+    type: circle
+    name: Across the band
+    comment: a needle across the stroke; only what lies on it is drawn, so the rings below become rules along it
+    inputs:
+      aspect: 0.08
+      softness: 0.08
+  round:
+    type: circle
+    name: Round the band
+    comment: soft to its rim, so it measures how far from the middle a point is
+    inputs:
+      softness: 1.0
+  rules:
+    type: curve
+    name: A heavy rule outside, a fine one in
+    comment: inside the needle's wide part, where it's thick enough to draw a rule unbroken
+    inputs:
+      curve: [[0.0, 0.0], [0.21, 0.0], [0.225, 1.0], [0.295, 1.0], [0.31, 0.0], [0.365, 0.0], [0.375, 1.0], [0.395, 1.0], [0.405, 0.0], [1.0, 0.0]]
+  between:
+    type: curve
+    name: Between the rules
+    inputs:
+      curve: [[0.0, 0.0], [0.315, 0.0], [0.325, 1.0], [0.345, 1.0], [0.355, 0.0], [1.0, 0.0]]
+  inside:
+    type: remap
+    name: Inside the fine rules
+    inputs:
+      clamp: true
+      in_high: 0.42
+      in_low: 0.41
+  lengths:
+    type: divide
+    name: How far along, in dab-widths
+  started:
+    type: remap
+    name: Once the stroke knows its way
+    comment: the first dab has no direction yet, so its needle would stand the wrong way
+    inputs:
+      clamp: true
+      in_high: 0.02
+      in_low: 0.01
+  tick_step:
+    type: multiply
+    name: Degrees a dab-width, a tick a turn
+    inputs:
+      b: 800.0
+  tick_wheel:
+    type: hsv
+    name: The ticks' wheel
+    comment: cyan, its hue turned by the distance; red comes round once a turn, half a turn in, so it beats like a clock and never on the stroke's first dab
+    inputs:
+      color: [0.0, 1.0, 1.0]
+  tick_channels:
+    type: split_color
+  tick_less_green:
+    type: subtract
+  tick_red:
+    type: subtract
+    name: Only red, once a turn
+  tick_gate:
+    type: remap
+    name: A tick
+    inputs:
+      clamp: true
+      in_high: 0.94
+      in_low: 0.86
+  tick:
+    type: multiply
+  dot_step:
+    type: multiply
+    name: Four dots a tick
+    inputs:
+      b: 3200.0
+  dot_wheel:
+    type: hsv
+    name: The dots' wheel
+    inputs:
+      color: [0.0, 1.0, 1.0]
+  dot_channels:
+    type: split_color
+  dot_less_green:
+    type: subtract
+  dot_red:
+    type: subtract
+  dot_gate:
+    type: remap
+    name: A dot
+    inputs:
+      clamp: true
+      in_high: 1.0
+      in_low: 0.8
+  dot:
+    type: multiply
+  sum:
+    type: add
+  sum_2:
+    type: add
+  full:
+    type: remap
+    name: At most full
+    inputs:
+      clamp: true
+  drawn:
+    type: multiply
+  begun:
+    type: multiply
+  paint:
+    type: paint
+    inputs:
+      buildup: 0.0
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- pen_input.drawing_angle -> across.rotation_input
+- round.mask -> rules.input
+- round.mask -> between.input
+- round.mask -> inside.input
+- pen_input.distance -> lengths.a
+- brush_settings.size -> lengths.b
+- lengths.result -> started.input
+- lengths.result -> tick_step.a
+- tick_step.result -> tick_wheel.hue
+- tick_wheel.output -> tick_channels.color
+- tick_channels.r -> tick_less_green.a
+- tick_channels.g -> tick_less_green.b
+- tick_less_green.result -> tick_red.a
+- tick_channels.b -> tick_red.b
+- tick_red.result -> tick_gate.input
+- tick_gate.output -> tick.a
+- inside.output -> tick.b
+- lengths.result -> dot_step.a
+- dot_step.result -> dot_wheel.hue
+- dot_wheel.output -> dot_channels.color
+- dot_channels.r -> dot_less_green.a
+- dot_channels.g -> dot_less_green.b
+- dot_less_green.result -> dot_red.a
+- dot_channels.b -> dot_red.b
+- dot_red.result -> dot_gate.input
+- dot_gate.output -> dot.a
+- between.output -> dot.b
+- rules.output -> sum.a
+- tick.result -> sum.b
+- sum.result -> sum_2.a
+- dot.result -> sum_2.b
+- sum_2.result -> full.input
+- full.output -> drawn.a
+- across.mask -> drawn.b
+- drawn.result -> begun.a
+- started.output -> begun.b
+- begun.result -> stamp.tip
+- paint_color.color -> stamp.color
+- pen_input.position -> paint.position
+- pen_input.pressure -> paint.size
+- stamp.dab -> paint.rgba
+exposed_ports:
+  brush_settings.size: {}
+  tick_step.b: {}
+  dot_step.b: {}
+  paint.opacity: {}

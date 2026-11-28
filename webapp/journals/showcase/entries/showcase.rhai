@@ -84,7 +84,11 @@
 //             curves and construction lines; paths joined from a list
 //             and shapes shaded on their shadow side; trees woven into
 //             ribbons that carry text, art::ribbons, and their
-//             claws, wandering middles and widths that vary
+//             claws, wandering middles and widths that vary; four
+//             more of the library's brushes: Warding, Concertina,
+//             Hatching and Foxing; and ten more: Railing, Ashlar,
+//             Fetter, Sutures and Woodgrain, then Plume, Gossamer,
+//             Tidemark, Obsidian and Wyrmscale
 //
 // Pages are bound with new_book: numbered, named and listed in the
 // contents.
@@ -216,7 +220,9 @@ fn bind(section, canvas) {
 const LIBRARY_BRUSHES = ["Iron Gall Quill", "Crowquill", "Dry Reed", "Feathered Ink", "Faded Ink", "Sepia Wash", "Gilt", "Scorch", "Guilloche", "Star Trail", "Thornline", "Enchanted Ink", "Twisted Cord",
 	"Driving Rain", "Levin", "Baleful Star", "Witch Oil", "Sanguine", "Veinwork", "Knell", "Keybone", "Harrow", "Glossolalia",
 	"Flying White", "Rend", "Strands", "Horrid",
-	"Mezzotint", "Fraktur", "Shroud", "Cinder", "Drypoint", "Balefire"];
+	"Mezzotint", "Fraktur", "Shroud", "Cinder", "Drypoint", "Balefire",
+	"Warding", "Concertina", "Hatching", "Foxing",
+	"Railing", "Ashlar", "Fetter", "Sutures", "Woodgrain", "Plume", "Gossamer", "Tidemark", "Obsidian", "Wyrmscale"];
 //
 // A style is what strokes are drawn in: a brush style (the ink: a colour,
 // a Darkly brush, how wide its marks are and how it presses) and a
@@ -3910,6 +3916,125 @@ for k in 0..3 {
 	draw_ribbon(clawed, tree, RED);
 }
 book.bind("appendix", clawed);
+
+// Four more of the library's brushes: a ward circle's band, razor wire,
+// an engraver's hatching and the rust of an old page.
+let wards = sheet("pens");
+wards.add(subhead("wards, wire and wear", TOP));
+let pressed_at = |name, colour, size, p| new_style(new_brush_style(colour, name, size, #{ min_pressure: p, max_pressure: p, pressure_profile: "constant" }), new_handwriting_style());
+let tapering = |name, colour, size| new_style(new_brush_style(colour, name, size, #{ min_pressure: 0.1, max_pressure: 1.0, pressure_profile: "taper" }), new_handwriting_style());
+
+// A ring in new_ellipse, which goes round once, so the ticks' step runs
+// unbroken all the way round.
+wards.add(caption("Warding at 30: a heavy rule and a fine one each side, a row of dots between, and ticks across at a", TOP + 50));
+wards.add(caption("measured step, each the same distance from the last; a ring, a line, and a stroke at 20 tapering from 0.1 to 1", TOP + 84));
+wards.add(new_ellipse(vec2(LEFT + 230, TOP + 320), 170, 170), pressed_at.call("Warding", RED, 30.0, 0.85));
+wards.add(new_line(vec2(LEFT + 540, TOP + 200), vec2(RIGHT - 20, TOP + 200)), pressed_at.call("Warding", INK, 30.0, 0.85));
+wards.add(wave(LEFT + 540, RIGHT - 20, TOP + 400, 90), tapering.call("Warding", INK, 20.0));
+
+wards.add(caption("Concertina at 22, tapering from 0.1 to 1: razor wire coiled along the stroke, loop over loop, every turn the", TOP + 580));
+wards.add(caption("same, and a barb across the wire every so far", TOP + 614));
+wards.add(wave(LEFT + 20, RIGHT - 20, TOP + 720, 60), tapering.call("Concertina", INK, 22.0));
+
+wards.add(caption("Hatching at 36: fine lines at one slant across the page whichever way the stroke runs; at 0.45 a single", TOP + 810));
+wards.add(caption("set, and pressed past 0.55 a second set crosses it, as at 0.9", TOP + 844));
+wards.add(new_line(vec2(LEFT + 40, TOP + 940), vec2(LEFT + 440, TOP + 940)), pressed_at.call("Hatching", INK, 36.0, 0.45));
+wards.add(new_line(vec2(LEFT + 560, TOP + 940), vec2(RIGHT - 40, TOP + 940)), pressed_at.call("Hatching", INK, 36.0, 0.9));
+
+// Over writing, so it's plain the stroke brings up spots and lays nothing
+// else down.
+wards.add(caption("Foxing at 40, over writing: rust spots brought up out of the page, pale with a darker rim, the same spots", TOP + 1040));
+wards.add(caption("wherever a stroke finds them, so the second stroke, over the end of the first, brings up nothing more", TOP + 1074));
+for k in 0..3 {
+	wards.add(write(sub_string(LOREM, k * 70, 70), LEFT, TOP + 1130 + 40 * k, 22));
+}
+wards.add(new_line(vec2(LEFT, TOP + 1170), vec2(LEFT + 620, TOP + 1170)), pressed_at.call("Foxing", RED, 40.0, 0.85));
+wards.add(new_line(vec2(LEFT + 400, TOP + 1170), vec2(RIGHT, TOP + 1170)), pressed_at.call("Foxing", RED, 40.0, 0.85));
+book.bind("appendix", wards);
+
+// Ten more of the library's brushes over three pages: first iron, stone,
+// chain and thread.
+let iron = sheet("pens");
+iron.add(subhead("railings, walls, chains and stitches", TOP));
+iron.add(caption("Railing at 28: two rails along the stroke, and bars standing plumb up the page at a measured step, each", TOP + 50));
+iron.add(caption("topped with a spearhead, whichever way the ground slopes; a line up a slope, and a stroke tapering from 0.1 to 1", TOP + 84));
+iron.add(new_line(vec2(LEFT + 20, TOP + 270), vec2(LEFT + 520, TOP + 210)), pressed_at.call("Railing", INK, 28.0, 0.85));
+iron.add(wave(LEFT + 600, RIGHT - 20, TOP + 240, 60), tapering.call("Railing", INK, 28.0));
+
+iron.add(caption("Ashlar at 30: squared stone in courses, the beds a little chipped, a joint at the end of each block, the blocks", TOP + 350));
+iron.add(caption("of no one length as a slower step leaves joints out, the faces pocked by the chisel; two courses, one on the other", TOP + 384));
+iron.add(new_line(vec2(LEFT + 20, TOP + 480), vec2(RIGHT - 20, TOP + 480)), pressed_at.call("Ashlar", INK, 30.0, 0.85));
+iron.add(new_line(vec2(LEFT + 20, TOP + 572), vec2(RIGHT - 20, TOP + 572)), pressed_at.call("Ashlar", INK, 30.0, 0.85));
+
+// A ring in new_ellipse, which goes round once, so the links run on
+// unbroken all the way round.
+iron.add(caption("Fetter at 22: a chain, its links face-on and edge-on in turn, each through the last, every one the same length", TOP + 680));
+iron.add(caption("however hard the hand presses; a stroke tapering from 0.1 to 1, and a ring at 18 for a shackle", TOP + 714));
+iron.add(wave(LEFT + 20, LEFT + 700, TOP + 840, 80), tapering.call("Fetter", INK, 22.0));
+iron.add(new_ellipse(vec2(RIGHT - 130, TOP + 840), 90, 90), pressed_at.call("Fetter", INK, 18.0, 0.85));
+
+iron.add(caption("Sutures at 26: a seam down the middle, bruised either side, and stitches across it at a steady step, each", TOP + 990));
+iron.add(caption("pulled through a hole either side; a line, and a stroke tapering from 0.1 to 1", TOP + 1024));
+iron.add(new_line(vec2(LEFT + 20, TOP + 1130), vec2(LEFT + 440, TOP + 1130)), pressed_at.call("Sutures", RED, 26.0, 0.85));
+iron.add(wave(LEFT + 520, RIGHT - 20, TOP + 1130, 24), tapering.call("Sutures", RED, 26.0));
+book.bind("appendix", iron);
+
+// Then feather, web and water.
+let quill = sheet("pens");
+quill.add(subhead("feathers, webs and water", TOP));
+quill.add(caption("Plume at 30, tapering from 0.1 to 1: a feather, its shaft down the middle and its barbs raked back either", TOP + 50));
+quill.add(caption("side, close and fine, each its own length, the vane parting here and there", TOP + 84));
+quill.add(wave(LEFT + 40, RIGHT - 40, TOP + 210, 50), tapering.call("Plume", INK, 30.0));
+
+// A web's corner: spokes from the corner, and threads strung across them.
+quill.add(caption("Gossamer at 24: a thread, hair-fine, hung with beads of dew at no set step, most of them small and a few", TOP + 320));
+quill.add(caption("heavy; the corner of a web, its spokes and the threads strung between them, and a thread on its own", TOP + 354));
+let hub = vec2(LEFT + 20, TOP + 400);
+let spokes = [];
+for k in 0..5 {
+	let a = 0.12 + 0.33 * k;
+	spokes.push(vec2(a.cos(), a.sin()));
+}
+for d in spokes {
+	quill.add(new_line(hub, hub + d * 480.0), pressed_at.call("Gossamer", INK, 24.0, 0.85));
+}
+for r in [130.0, 260.0, 390.0] {
+	let strung = [];
+	for d in spokes {
+		strung.push(hub + d * r);
+	}
+	quill.add(new_polyline(strung), pressed_at.call("Gossamer", INK, 24.0, 0.85));
+}
+quill.add(wave(LEFT + 560, RIGHT - 20, TOP + 560, 40), pressed_at.call("Gossamer", INK, 24.0, 0.85));
+
+quill.add(caption("Tidemark at 32: where water stood and dried; barely darker inside, a tide line at its edge, sharp outside and", TOP + 930));
+quill.add(caption("fading in, wandering far from the stroke and back, and a fainter ring inside it; a pool, and a stroke tapering", TOP + 964));
+quill.add(caption("from 0.1 to 1", TOP + 998));
+quill.add(new_ellipse(vec2(LEFT + 190, TOP + 1150), 140, 70), pressed_at.call("Tidemark", RED, 32.0, 0.85));
+quill.add(wave(LEFT + 440, RIGHT - 20, TOP + 1150, 60), tapering.call("Tidemark", RED, 32.0));
+book.bind("appendix", quill);
+
+// Then wood, glass and scale.
+let scutes = sheet("pens");
+scutes.add(subhead("wood, glass and scale", TOP));
+scutes.add(caption("Woodgrain at 22: planks, hard-edged, the grain running along them in close lines that part round knots lying", TOP + 50));
+scutes.add(caption("in the page, so boards laid side by side share their knots; three boards", TOP + 84));
+for k in 0..3 {
+	let y = TOP + 180 + 72 * k;
+	scutes.add(new_line(vec2(LEFT + 20, y), vec2(RIGHT - 20, y)), pressed_at.call("Woodgrain", INK, 22.0, 0.85));
+}
+
+// Crossing, so it's plain the ridges lie in the page.
+scutes.add(caption("Obsidian at 18: black glass, knapped; a solid black with a bitten edge, and pale ridges across it where the", TOP + 430));
+scutes.add(caption("flakes came off, lying in the page, so where the two strokes cross the ridges run on from one into the other", TOP + 464));
+scutes.add(new_line(vec2(LEFT + 20, TOP + 520), vec2(LEFT + 700, TOP + 650)), tapering.call("Obsidian", INK, 18.0));
+scutes.add(new_line(vec2(LEFT + 300, TOP + 660), vec2(RIGHT - 20, TOP + 520)), pressed_at.call("Obsidian", INK, 18.0, 0.85));
+
+scutes.add(caption("Wyrmscale at 28: a serpent's belly, broad scales one over the next down its length, each a lip facing the", TOP + 720));
+scutes.add(caption("way the stroke goes, with a ridge inside it; a stroke tapering from 0.1 to 1, and one at 0.85 the other way", TOP + 754));
+scutes.add(wave(LEFT + 20, RIGHT - 20, TOP + 900, 120), tapering.call("Wyrmscale", INK, 28.0));
+scutes.add(wave(RIGHT - 20, LEFT + 20, TOP + 1110, 80), pressed_at.call("Wyrmscale", INK, 28.0, 0.85));
+book.bind("appendix", scutes);
 
 // ---- the title page and the contents, which go first ----
 

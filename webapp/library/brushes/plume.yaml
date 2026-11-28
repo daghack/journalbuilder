@@ -1,0 +1,183 @@
+name: Plume
+description: "A feather in a single stroke: its shaft down the middle and its barbs raked back on either side, close and fine and fading toward their tips, each its own length, the vane parting here and there as a feather's does; broad where the hand presses and drawn to a point as it lifts, for quills, wings and a raven's black."
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      spacing: 0.035
+      stabilize: 0.5
+  round:
+    type: circle
+    name: Round the feather
+    comment: soft to its rim, so it measures how far from the middle a point is
+    inputs:
+      softness: 1.0
+  shaft:
+    type: remap
+    name: The shaft
+    comment: the dab's middle, a small hard disc
+    inputs:
+      clamp: true
+      in_high: 0.996
+      in_low: 0.993
+  reach:
+    type: random
+    name: Each barb's length
+  reach_curve:
+    type: curve
+    name: Mostly long
+    inputs:
+      curve: [[0.0, 0.3], [0.5, 0.12], [1.0, 0.05]]
+  fade:
+    type: remap
+    name: Fading toward its tip
+    inputs:
+      clamp: true
+      in_high: 0.6
+  barb_left:
+    type: circle
+    name: A barb, left
+    comment: a needle through the shaft, raked back
+    inputs:
+      aspect: 0.03
+      rotation: 0.75
+      softness: 0.1
+  side_left:
+    type: circle
+    name: Its own side, left
+    comment: a superformula of one lobe along the barb, so only its back half is drawn
+    inputs:
+      algorithm: 2
+      frequency: 1.0
+      n1: 0.15
+      n2: 1.0
+      n3: 1.0
+      rotation: 2.3208
+      softness: 0.05
+  part_left:
+    type: random
+    name: Does the vane part, left
+  parted_left:
+    type: remap
+    name: One in nine parts
+    inputs:
+      clamp: true
+      in_high: 0.12
+      in_low: 0.11
+  halved_left:
+    type: multiply
+  barbed_left:
+    type: multiply
+  kept_left:
+    type: multiply
+  barb_right:
+    type: circle
+    name: A barb, right
+    comment: a needle through the shaft, raked back
+    inputs:
+      aspect: 0.03
+      rotation: -0.75
+      softness: 0.1
+  side_right:
+    type: circle
+    name: Its own side, right
+    comment: a superformula of one lobe along the barb, so only its back half is drawn
+    inputs:
+      algorithm: 2
+      frequency: 1.0
+      n1: 0.15
+      n2: 1.0
+      n3: 1.0
+      rotation: -2.3208
+      softness: 0.05
+  part_right:
+    type: random
+    name: Does the vane part, right
+  parted_right:
+    type: remap
+    name: One in nine parts
+    inputs:
+      clamp: true
+      in_high: 0.12
+      in_low: 0.11
+  halved_right:
+    type: multiply
+  barbed_right:
+    type: multiply
+  kept_right:
+    type: multiply
+  sum:
+    type: add
+  sum_2:
+    type: add
+  full:
+    type: remap
+    name: At most full
+    inputs:
+      clamp: true
+  lengths:
+    type: divide
+    name: How far along, in dab-widths
+  started:
+    type: remap
+    name: Once it's moving
+    comment: the first dab has no direction yet
+    inputs:
+      clamp: true
+      in_high: 0.02
+      in_low: 0.01
+  moving:
+    type: multiply
+  paint:
+    type: paint
+    inputs:
+      buildup: 0.0
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- round.mask -> shaft.input
+- reach.value -> reach_curve.input
+- reach_curve.output -> fade.in_low
+- round.mask -> fade.input
+- pen_input.drawing_angle -> barb_left.rotation_input
+- pen_input.drawing_angle -> side_left.rotation_input
+- part_left.value -> parted_left.input
+- barb_left.mask -> halved_left.a
+- side_left.mask -> halved_left.b
+- halved_left.result -> barbed_left.a
+- fade.output -> barbed_left.b
+- barbed_left.result -> kept_left.a
+- parted_left.output -> kept_left.b
+- pen_input.drawing_angle -> barb_right.rotation_input
+- pen_input.drawing_angle -> side_right.rotation_input
+- part_right.value -> parted_right.input
+- barb_right.mask -> halved_right.a
+- side_right.mask -> halved_right.b
+- halved_right.result -> barbed_right.a
+- fade.output -> barbed_right.b
+- barbed_right.result -> kept_right.a
+- parted_right.output -> kept_right.b
+- shaft.output -> sum.a
+- kept_left.result -> sum.b
+- sum.result -> sum_2.a
+- kept_right.result -> sum_2.b
+- sum_2.result -> full.input
+- pen_input.distance -> lengths.a
+- brush_settings.size -> lengths.b
+- lengths.result -> started.input
+- full.output -> moving.a
+- started.output -> moving.b
+- moving.result -> stamp.tip
+- paint_color.color -> stamp.color
+- pen_input.position -> paint.position
+- pen_input.pressure -> paint.size
+- stamp.dab -> paint.rgba
+exposed_ports:
+  brush_settings.size: {}
+  barb_left.rotation: {}
+  barb_right.rotation: {}
+  paint.opacity: {}

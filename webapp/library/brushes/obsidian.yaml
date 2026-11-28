@@ -1,0 +1,73 @@
+name: Obsidian
+description: Black glass, knapped. The stroke is a solid black with a bitten edge, flaked away all along it, and across it the scars where the flakes came off show as fine pale lines, angular, nested one inside another, the same wherever a stroke crosses them, for blades, mirrors and the stones of a black altar.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      spacing: 0.04
+      stabilize: 0.5
+  glass:
+    type: circle
+    name: Knapped edge
+    comment: bitten all round, a new edge each dab
+    inputs:
+      algorithm: 1
+      amplitude: 0.14
+      frequency: 9.0
+      softness: 0.05
+  random:
+    type: random
+  scars:
+    type: noise
+    name: Scars
+    comment: pinned to the page, so the arcs run on from stroke to stroke
+    inputs:
+      octaves: 2.0
+      roughness: 0.4
+      scale: 90.0
+      seed: 23
+      space: 0
+      warp: 0.7
+  arcs:
+    type: curve
+    name: The ridges between them
+    comment: contour lines of the scars, each a pale ridge
+    inputs:
+      curve: [[0.0, 0.0], [0.345, 0.0], [0.3483, 1.0], [0.3517, 1.0], [0.355, 0.0], [0.415, 0.0], [0.4183, 0.7], [0.4217, 0.7], [0.425, 0.0], [0.485, 0.0], [0.4883, 0.85], [0.4917, 0.85], [0.495, 0.0], [0.555, 0.0], [0.5583, 1.0], [0.5617, 1.0], [0.565, 0.0], [0.625, 0.0], [0.6283, 0.7], [0.6317, 0.7], [0.635, 0.0], [0.695, 0.0], [0.6983, 0.85], [0.7017, 0.85], [0.705, 0.0], [1.0, 0.0]]
+  pale:
+    type: multiply
+    name: How pale the arcs
+    inputs:
+      b: 0.85
+  left:
+    type: invert
+    name: What's left black
+  black:
+    type: multiply
+  paint:
+    type: paint
+    inputs:
+      buildup: 0.0
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- random.value -> glass.seed
+- scars.value -> arcs.input
+- arcs.output -> pale.a
+- pale.result -> left.input
+- glass.mask -> black.a
+- left.output -> black.b
+- black.result -> stamp.tip
+- paint_color.color -> stamp.color
+- pen_input.position -> paint.position
+- pen_input.pressure -> paint.size
+- stamp.dab -> paint.rgba
+exposed_ports:
+  brush_settings.size: {}
+  scars.scale: {}
+  pale.b: {}
+  paint.opacity: {}

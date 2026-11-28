@@ -1,0 +1,207 @@
+name: Ashlar
+description: Squared stone laid in a course along the stroke. Its beds run either side, a little ragged where the stone is chipped; a joint crosses the course at the end of every block, the blocks of no one length, as a second, slower step leaves a joint out now and then; and the faces are pocked by the chisel, for walls, towers and the frames of doors.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      spacing: 0.01
+      stabilize: 0.5
+  across:
+    type: circle
+    name: Across the course
+    comment: a needle across the stroke; only what lies on it is drawn, so the rings below become lines along it
+    inputs:
+      aspect: 0.08
+      softness: 0.08
+  round:
+    type: circle
+    name: Round the course
+    comment: soft to its rim, so it measures how far from the middle a point is
+    inputs:
+      softness: 1.0
+  waver:
+    type: noise
+    name: Chipped
+    comment: pinned to the page, so the beds wander smoothly
+    inputs:
+      octaves: 2.0
+      roughness: 0.5
+      scale: 18.0
+      seed: 3
+      space: 0
+      warp: 0.5
+  waver_by:
+    type: remap
+    inputs:
+      clamp: true
+      out_high: 0.03
+      out_low: -0.03
+  wavering:
+    type: add
+  beds:
+    type: curve
+    name: The beds
+    inputs:
+      curve: [[0.0, 0.0], [0.17, 0.0], [0.185, 1.0], [0.225, 1.0], [0.24, 0.0], [1.0, 0.0]]
+  inside:
+    type: remap
+    name: Between the beds
+    inputs:
+      clamp: true
+      in_high: 0.26
+      in_low: 0.25
+  lengths:
+    type: divide
+    name: How far along, in dab-widths
+  joint_step:
+    type: multiply
+    name: Degrees a dab-width, a block a turn
+    inputs:
+      b: 520.0
+  joint_wheel:
+    type: hsv
+    inputs:
+      color: [0.0, 1.0, 1.0]
+  joint_channels:
+    type: split_color
+  joint_less_green:
+    type: subtract
+  joint_red:
+    type: subtract
+  joint_gate:
+    type: remap
+    inputs:
+      clamp: true
+      in_high: 0.94
+      in_low: 0.86
+  skip_step:
+    type: multiply
+    name: A slower step, leaving joints out
+    inputs:
+      b: 190.0
+  skip_wheel:
+    type: hsv
+    inputs:
+      color: [0.0, 1.0, 1.0]
+  skip_channels:
+    type: split_color
+  skip_less_green:
+    type: subtract
+  skip_red:
+    type: subtract
+  skip_gate:
+    type: remap
+    inputs:
+      clamp: true
+      in_high: 0.05
+      in_low: 0.0
+  kept:
+    type: invert
+    name: Unless it's left out
+  jointed:
+    type: multiply
+  joint_line:
+    type: multiply
+  chisel:
+    type: noise
+    name: Chisel marks
+    inputs:
+      octaves: 1.0
+      scale: 2.5
+      seed: 17
+      space: 0
+      warp: 0.3
+  pocks:
+    type: remap
+    name: Only the deepest
+    inputs:
+      clamp: true
+      in_high: 0.84
+      in_low: 0.81
+      out_high: 0.3
+  pocked:
+    type: multiply
+  sum:
+    type: add
+  sum_2:
+    type: add
+  full:
+    type: remap
+    name: At most full
+    inputs:
+      clamp: true
+  drawn:
+    type: multiply
+  started:
+    type: remap
+    name: Once it's moving
+    comment: the first dab has no direction yet
+    inputs:
+      clamp: true
+      in_high: 0.02
+      in_low: 0.01
+  moving:
+    type: multiply
+  paint:
+    type: paint
+    inputs:
+      buildup: 0.0
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- pen_input.drawing_angle -> across.rotation_input
+- waver.value -> waver_by.input
+- round.mask -> wavering.a
+- waver_by.output -> wavering.b
+- wavering.result -> beds.input
+- wavering.result -> inside.input
+- pen_input.distance -> lengths.a
+- brush_settings.size -> lengths.b
+- lengths.result -> joint_step.a
+- joint_step.result -> joint_wheel.hue
+- joint_wheel.output -> joint_channels.color
+- joint_channels.r -> joint_less_green.a
+- joint_channels.g -> joint_less_green.b
+- joint_less_green.result -> joint_red.a
+- joint_channels.b -> joint_red.b
+- joint_red.result -> joint_gate.input
+- lengths.result -> skip_step.a
+- skip_step.result -> skip_wheel.hue
+- skip_wheel.output -> skip_channels.color
+- skip_channels.r -> skip_less_green.a
+- skip_channels.g -> skip_less_green.b
+- skip_less_green.result -> skip_red.a
+- skip_channels.b -> skip_red.b
+- skip_red.result -> skip_gate.input
+- skip_gate.output -> kept.input
+- joint_gate.output -> jointed.a
+- kept.output -> jointed.b
+- jointed.result -> joint_line.a
+- inside.output -> joint_line.b
+- chisel.value -> pocks.input
+- pocks.output -> pocked.a
+- inside.output -> pocked.b
+- beds.output -> sum.a
+- joint_line.result -> sum.b
+- sum.result -> sum_2.a
+- pocked.result -> sum_2.b
+- sum_2.result -> full.input
+- full.output -> drawn.a
+- across.mask -> drawn.b
+- lengths.result -> started.input
+- drawn.result -> moving.a
+- started.output -> moving.b
+- moving.result -> stamp.tip
+- paint_color.color -> stamp.color
+- pen_input.position -> paint.position
+- pen_input.pressure -> paint.size
+- stamp.dab -> paint.rgba
+exposed_ports:
+  brush_settings.size: {}
+  joint_step.b: {}
+  skip_step.b: {}
+  paint.opacity: {}

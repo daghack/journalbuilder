@@ -1,0 +1,160 @@
+name: Railing
+description: A churchyard's iron railing in a single stroke. Two rails run along it, and through them bars stand straight up the page at a measured step, each topped with a spearhead, whichever way the ground slopes, for the railings round graves, gates and the houses of the dead.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      spacing: 0.01
+      stabilize: 0.5
+  across:
+    type: circle
+    name: Across the railing
+    comment: a needle across the stroke; only what lies on it is drawn, so the rings below become lines along it
+    inputs:
+      aspect: 0.08
+      softness: 0.08
+  round:
+    type: circle
+    name: Round the railing
+    comment: soft to its rim, so it measures how far from the middle a point is
+    inputs:
+      softness: 1.0
+  rails:
+    type: curve
+    name: Two rails
+    comment: one a little above the stroke and one a little below
+    inputs:
+      curve: [[0.0, 0.0], [0.5, 0.0], [0.51, 1.0], [0.56, 1.0], [0.57, 0.0], [1.0, 0.0]]
+  railed:
+    type: multiply
+  bar:
+    type: circle
+    name: A bar
+    comment: a needle standing straight up the page, fixed to it, so the bars stay plumb whichever way the stroke runs
+    inputs:
+      aspect: 0.06
+      softness: 0.1
+  below_head:
+    type: remap
+    name: Below its spearhead
+    inputs:
+      clamp: true
+      in_high: 0.29
+      in_low: 0.27
+  bar_cut:
+    type: multiply
+  spear:
+    type: circle
+    name: The spearhead
+    comment: a superformula of one lobe pointing up the page; only its point, out at the rim, is drawn
+    inputs:
+      algorithm: 2
+      frequency: 1.0
+      n1: 0.09
+      n2: 1.0
+      n3: 1.0
+      rotation: -1.5708
+      softness: 0.05
+  head_band:
+    type: curve
+    name: Where the head is
+    inputs:
+      curve: [[0.0, 0.0], [0.005, 1.0], [0.28, 1.0], [0.29, 0.0], [1.0, 0.0]]
+  head:
+    type: multiply
+  post:
+    type: add
+  lengths:
+    type: divide
+    name: How far along, in dab-widths
+  bar_step:
+    type: multiply
+    name: Degrees a dab-width, a bar a turn
+    inputs:
+      b: 2100.0
+  bar_wheel:
+    type: hsv
+    comment: cyan, its hue turned by the distance; red comes round once a turn, so the bars stand at a measured step
+    inputs:
+      color: [0.0, 1.0, 1.0]
+  bar_channels:
+    type: split_color
+  bar_less_green:
+    type: subtract
+  bar_red:
+    type: subtract
+  bar_gate:
+    type: remap
+    inputs:
+      clamp: true
+      in_high: 0.8
+      in_low: 0.7
+  posted:
+    type: multiply
+  sum:
+    type: add
+  full:
+    type: remap
+    name: At most full
+    inputs:
+      clamp: true
+  started:
+    type: remap
+    name: Once it's moving
+    comment: the first dab has no direction yet
+    inputs:
+      clamp: true
+      in_high: 0.02
+      in_low: 0.01
+  moving:
+    type: multiply
+  paint:
+    type: paint
+    inputs:
+      buildup: 0.0
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- pen_input.drawing_angle -> across.rotation_input
+- round.mask -> rails.input
+- rails.output -> railed.a
+- across.mask -> railed.b
+- round.mask -> below_head.input
+- bar.mask -> bar_cut.a
+- below_head.output -> bar_cut.b
+- round.mask -> head_band.input
+- spear.mask -> head.a
+- head_band.output -> head.b
+- bar_cut.result -> post.a
+- head.result -> post.b
+- pen_input.distance -> lengths.a
+- brush_settings.size -> lengths.b
+- lengths.result -> bar_step.a
+- bar_step.result -> bar_wheel.hue
+- bar_wheel.output -> bar_channels.color
+- bar_channels.r -> bar_less_green.a
+- bar_channels.g -> bar_less_green.b
+- bar_less_green.result -> bar_red.a
+- bar_channels.b -> bar_red.b
+- bar_red.result -> bar_gate.input
+- post.result -> posted.a
+- bar_gate.output -> posted.b
+- railed.result -> sum.a
+- posted.result -> sum.b
+- sum.result -> full.input
+- lengths.result -> started.input
+- full.output -> moving.a
+- started.output -> moving.b
+- moving.result -> stamp.tip
+- paint_color.color -> stamp.color
+- pen_input.position -> paint.position
+- pen_input.pressure -> paint.size
+- stamp.dab -> paint.rgba
+exposed_ports:
+  brush_settings.size: {}
+  bar_step.b: {}
+  paint.opacity: {}

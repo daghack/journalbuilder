@@ -3650,6 +3650,20 @@ The built-in library, webapp/library/, holds what any journal can use; a journal
 | `brushes/cinder` | Cinder: a charred stroke with a ragged edge, shedding flakes that rise up the page, thick about it and thinning as they go. |
 | `brushes/drypoint` | Drypoint: a fine needle line with a fainter skid beside it and a soft grit of burr along both. |
 | `brushes/balefire` | Balefire: slender pointed tongues of flame standing up the page from the stroke, most low and a few leaping, their feet run together. |
+| `brushes/warding` | Warding: a ward circle's band: a heavy rule and a fine one each side, a row of dots between, and ticks across at a measured step, every one the same distance from the last (draw rings with `new_ellipse`, which goes round once). |
+| `brushes/concertina` | Concertina: razor wire coiled along the stroke, loop over loop, every turn the same, with a barb across the wire every so far. |
+| `brushes/hatching` | Hatching: fine lines at one slant across the page whichever way the stroke runs, each a hair off true; pressed past 0.55 a second set crosses them: an engraver's shading. |
+| `brushes/foxing` | Foxing: lays no ink of its own, only brings up rust spots pinned to the page, pale with a darker rim and a faint stain round them; going over a stroke again brings up nothing more. |
+| `brushes/railing` | Railing: a churchyard's iron railing: two rails along the stroke, and bars standing plumb up the page at a measured step, each topped with a spearhead, whichever way the stroke slopes. |
+| `brushes/ashlar` | Ashlar: squared stone laid in a course: beds a little chipped either side, a joint across at the end of each block, blocks of no one length as a slower step leaves joints out, the faces pocked by the chisel. |
+| `brushes/fetter` | Fetter: a chain, its links face-on and edge-on in turn, each through the last, every one the same length however hard the hand presses (draw rings with `new_ellipse`, which goes round once). |
+| `brushes/sutures` | Sutures: a wound sewn shut: a seam down the middle, bruised a little either side, crossed at a steady step by stitches, each through a hole either side. |
+| `brushes/woodgrain` | Woodgrain: a plank, hard-edged, its grain in close lines along it that part round knots lying in the page, so boards laid side by side share them. |
+| `brushes/plume` | Plume: a feather: a shaft down the middle and barbs raked back either side, fine and fading to their tips, each its own length, the vane parting here and there. |
+| `brushes/gossamer` | Gossamer: a hair-fine thread hung with beads of dew at no set step, most small and a few heavy, each dark at its rim and clear in the middle. |
+| `brushes/tidemark` | Tidemark: where water stood and dried: barely darker inside, a tide line at the edge, sharp outside and fading in, wandering far from the stroke and back, and a fainter ring inside it. |
+| `brushes/obsidian` | Obsidian: black glass, knapped: a solid black with a bitten edge, and pale angular ridges across it where the flakes came off, lying in the page, so they run on where strokes cross. |
+| `brushes/wyrmscale` | Wyrmscale: a serpent's belly: broad scales one over the next down the stroke, each a lip facing the way it goes, with a ridge inside it. |
 
 | file | what it is |
 |---|---|
