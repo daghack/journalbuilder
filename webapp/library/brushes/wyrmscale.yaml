@@ -1,0 +1,83 @@
+name: Wyrmscale
+description: "A serpent's belly in a single stroke: broad scales laid one over the next down its length, each a curved lip facing the way the stroke goes, shadowed just under its edge, as close as the hand draws them, for wyrms, eels and the coils of what sleeps under the hill."
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      spacing: 0.2
+      stabilize: 0.5
+  round:
+    type: circle
+    name: Round the belly
+    comment: soft to its rim, so it measures how far from the middle a point is
+    inputs:
+      softness: 1.0
+  front:
+    type: circle
+    name: The front of the scale
+    comment: a superformula of one broad lobe facing the way the stroke goes; only the scale's front half is drawn
+    inputs:
+      algorithm: 2
+      frequency: 1.0
+      n1: 0.7
+      n2: 1.0
+      n3: 1.0
+      softness: 0.05
+  lip:
+    type: curve
+    name: Its lip
+    inputs:
+      curve: [[0.0, 0.0], [0.18, 0.0], [0.2, 1.0], [0.27, 1.0], [0.29, 0.0], [1.0, 0.0]]
+  scale:
+    type: multiply
+  ridge_front:
+    type: circle
+    name: The ridge's front
+    comment: a narrower lobe, so the ridge inside the lip is shorter
+    inputs:
+      algorithm: 2
+      frequency: 1.0
+      n1: 0.3
+      n2: 1.0
+      n3: 1.0
+      softness: 0.05
+  ridge:
+    type: curve
+    name: A ridge inside it
+    inputs:
+      curve: [[0.0, 0.0], [0.43, 0.0], [0.445, 0.45], [0.495, 0.45], [0.51, 0.0], [1.0, 0.0]]
+  ridged:
+    type: multiply
+  sum:
+    type: add
+  paint:
+    type: paint
+    inputs:
+      buildup: 0.0
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- pen_input.drawing_angle -> front.rotation_input
+- round.mask -> lip.input
+- lip.output -> scale.a
+- front.mask -> scale.b
+- pen_input.drawing_angle -> ridge_front.rotation_input
+- round.mask -> ridge.input
+- ridge.output -> ridged.a
+- ridge_front.mask -> ridged.b
+- scale.result -> sum.a
+- ridged.result -> sum.b
+- sum.result -> stamp.tip
+- paint_color.color -> stamp.color
+- pen_input.position -> paint.position
+- pen_input.pressure -> paint.size
+- stamp.dab -> paint.rgba
+exposed_ports:
+  brush_settings.size: {}
+  brush_settings.spacing: {}
+  front.n1: {}
+  paint.opacity: {}

@@ -1,0 +1,177 @@
+name: Fetter
+description: A chain in a single stroke, its links face-on and edge-on in turn, each through the last, every one the same, for fetters, gibbets, the chains on a crypt's door and the borders of a gaoler's book.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      spacing: 0.01
+      stabilize: 0.5
+  across:
+    type: circle
+    name: Across the chain
+    comment: a needle across the stroke; only what lies on it is drawn, so the rings below become lines along it
+    inputs:
+      aspect: 0.08
+      softness: 0.08
+  round:
+    type: circle
+    name: Round the chain
+    comment: soft to its rim, so it measures how far from the middle a point is
+    inputs:
+      softness: 1.0
+  lengths:
+    type: divide
+    name: How far along, in dab-widths
+  link_step:
+    type: multiply
+    name: Degrees a dab-width, two links a turn
+    inputs:
+      b: 330.0
+  link_wheel:
+    type: hsv
+    comment: "red, its hue turned by the distance: how far through the pair of links this dab is"
+    inputs:
+      color: [1.0, 0.0, 0.0]
+  link_channels:
+    type: split_color
+  link_less_green:
+    type: subtract
+  link_red:
+    type: subtract
+  link_up:
+    type: add
+    inputs:
+      b: 2.0
+  link_phase:
+    type: multiply
+    inputs:
+      b: 0.33333
+  link_outside:
+    type: curve
+    name: The face-on link's outside
+    comment: where its rim's outer edge crosses the stroke here
+    inputs:
+      curve: [[0.0, 1.0], [0.399, 1.0], [0.4, 0.98182], [0.425, 0.89603], [0.45, 0.84616], [0.475, 0.80466], [0.5, 0.7685], [0.525, 0.73637], [0.55, 0.70754], [0.575, 0.68153], [0.6, 0.65798], [0.625, 0.63664], [0.65, 0.61731], [0.675, 0.59983], [0.7, 0.58405], [0.725, 0.56986], [0.75, 0.55718], [0.775, 0.54592], [0.8, 0.536], [0.825, 0.52738], [0.85, 0.52], [0.875, 0.51382], [0.9, 0.50881], [0.925, 0.50494], [0.95, 0.50219], [0.975, 0.50055], [1.0, 0.5]]
+  link_inside:
+    type: curve
+    name: The face-on link's inside
+    comment: where its rim's inner edge crosses; past the hole the rim is solid
+    inputs:
+      curve: [[0.0, 1.0], [0.399, 1.0], [0.4, 1.0], [0.425, 0.99533], [0.45, 0.9782], [0.475, 0.95812], [0.5, 0.93758], [0.525, 0.91745], [0.55, 0.8981], [0.575, 0.87971], [0.6, 0.86238], [0.625, 0.84615], [0.65, 0.83104], [0.675, 0.81705], [0.7, 0.80417], [0.725, 0.7924], [0.75, 0.78172], [0.775, 0.77212], [0.8, 0.76357], [0.825, 0.75606], [0.85, 0.74959], [0.875, 0.74413], [0.9, 0.73968], [0.925, 0.73623], [0.95, 0.73377], [0.975, 0.7323], [1.0, 0.73181]]
+  outside_hi:
+    type: add
+    inputs:
+      b: 0.004
+  inside_hi:
+    type: add
+    inputs:
+      b: 0.004
+  within:
+    type: remap
+    inputs:
+      clamp: true
+  holed:
+    type: remap
+    inputs:
+      clamp: true
+  hole:
+    type: invert
+  rim:
+    type: multiply
+  edge_on:
+    type: remap
+    name: The link edge-on
+    comment: a bar down the middle, its ends inside the holes of the links either side
+    inputs:
+      clamp: true
+      in_high: 0.97716
+      in_low: 0.96636
+  face_span:
+    type: remap
+    name: Where the face-on link lies
+    inputs:
+      clamp: true
+      in_high: 0.53
+      in_low: 0.51
+  edge_span:
+    type: invert
+    name: And where the edge-on one does
+  edged:
+    type: multiply
+  sum:
+    type: add
+  full:
+    type: remap
+    name: At most full
+    inputs:
+      clamp: true
+  drawn:
+    type: multiply
+  started:
+    type: remap
+    name: Once it's moving
+    comment: the first dab has no direction yet
+    inputs:
+      clamp: true
+      in_high: 0.02
+      in_low: 0.01
+  moving:
+    type: multiply
+  paint:
+    type: paint
+    inputs:
+      buildup: 0.0
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- pen_input.drawing_angle -> across.rotation_input
+- pen_input.distance -> lengths.a
+- brush_settings.size -> lengths.b
+- lengths.result -> link_step.a
+- link_step.result -> link_wheel.hue
+- link_wheel.output -> link_channels.color
+- link_channels.r -> link_less_green.a
+- link_channels.g -> link_less_green.b
+- link_less_green.result -> link_red.a
+- link_channels.b -> link_red.b
+- link_red.result -> link_up.a
+- link_up.result -> link_phase.a
+- link_phase.result -> link_outside.input
+- link_phase.result -> link_inside.input
+- link_outside.output -> outside_hi.a
+- link_inside.output -> inside_hi.a
+- round.mask -> within.input
+- link_outside.output -> within.in_low
+- outside_hi.result -> within.in_high
+- round.mask -> holed.input
+- link_inside.output -> holed.in_low
+- inside_hi.result -> holed.in_high
+- holed.output -> hole.input
+- within.output -> rim.a
+- hole.output -> rim.b
+- round.mask -> edge_on.input
+- link_phase.result -> face_span.input
+- face_span.output -> edge_span.input
+- edge_on.output -> edged.a
+- edge_span.output -> edged.b
+- rim.result -> sum.a
+- edged.result -> sum.b
+- sum.result -> full.input
+- full.output -> drawn.a
+- across.mask -> drawn.b
+- lengths.result -> started.input
+- drawn.result -> moving.a
+- started.output -> moving.b
+- moving.result -> stamp.tip
+- paint_color.color -> stamp.color
+- pen_input.position -> paint.position
+- pen_input.pressure -> paint.size
+- stamp.dab -> paint.rgba
+exposed_ports:
+  brush_settings.size: {}
+  link_step.b: {}
+  paint.opacity: {}

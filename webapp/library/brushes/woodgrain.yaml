@@ -1,0 +1,124 @@
+name: Woodgrain
+description: A plank in a single stroke, its edges hard and its grain running the length of it in close, even lines that swell apart round the knots and close on them in rings, for floors, coffins, the beams of a hall and the boards of a door that mustn't be opened.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      spacing: 0.012
+      stabilize: 0.5
+  across:
+    type: circle
+    name: Across the plank
+    comment: a needle across the stroke; only what lies on it is drawn, so the rings below become lines along it
+    inputs:
+      aspect: 0.1
+      softness: 0.08
+  round:
+    type: circle
+    name: Round the plank
+    comment: soft to its rim, so it measures how far from the middle a point is
+    inputs:
+      softness: 1.0
+  knots:
+    type: noise
+    name: Knots
+    comment: pinned to the page; the grain is the contour lines of the plank's width bent by them
+    inputs:
+      octaves: 2.0
+      roughness: 0.4
+      scale: 45.0
+      seed: 13
+      space: 0
+      warp: 0.6
+  knot_part:
+    type: multiply
+    inputs:
+      b: 0.35
+  width_part:
+    type: multiply
+    inputs:
+      b: 0.65
+  grain_at:
+    type: add
+  grain:
+    type: curve
+    name: The grain's lines
+    comment: "a comb: each tooth is a line where the grain reaches that value"
+    inputs:
+      curve: [[0.0, 0.0], [0.259, 0.0], [0.2663, 1.0], [0.2737, 1.0], [0.281, 0.0], [0.301, 0.0], [0.3083, 0.55], [0.3157, 0.55], [0.323, 0.0], [0.343, 0.0], [0.3503, 0.8], [0.3577, 0.8], [0.365, 0.0], [0.385, 0.0], [0.3923, 0.6], [0.3997, 0.6], [0.407, 0.0], [0.427, 0.0], [0.4343, 1.0], [0.4417, 1.0], [0.449, 0.0], [0.469, 0.0], [0.4763, 0.55], [0.4837, 0.55], [0.491, 0.0], [0.511, 0.0], [0.5183, 0.8], [0.5257, 0.8], [0.533, 0.0], [0.553, 0.0], [0.5603, 0.6], [0.5677, 0.6], [0.575, 0.0], [0.595, 0.0], [0.6023, 1.0], [0.6097, 1.0], [0.617, 0.0], [0.637, 0.0], [0.6443, 0.55], [0.6517, 0.55], [0.659, 0.0], [0.679, 0.0], [0.6863, 0.8], [0.6937, 0.8], [0.701, 0.0], [0.721, 0.0], [0.7283, 0.6], [0.7357, 0.6], [0.743, 0.0], [0.763, 0.0], [0.7703, 1.0], [0.7777, 1.0], [0.785, 0.0], [0.805, 0.0], [0.8123, 0.55], [0.8197, 0.55], [0.827, 0.0], [0.847, 0.0], [0.8543, 0.8], [0.8617, 0.8], [0.869, 0.0], [1.0, 0.0]]
+  edges:
+    type: curve
+    name: The plank's edges
+    inputs:
+      curve: [[0.0, 0.0], [0.15, 0.0], [0.16, 1.0], [0.2, 1.0], [0.21, 0.0], [1.0, 0.0]]
+  inside:
+    type: remap
+    name: Inside its edges
+    inputs:
+      clamp: true
+      in_high: 0.23
+      in_low: 0.21
+  grained:
+    type: multiply
+  sum:
+    type: add
+  full:
+    type: remap
+    name: At most full
+    inputs:
+      clamp: true
+  drawn:
+    type: multiply
+  lengths:
+    type: divide
+    name: How far along, in dab-widths
+  started:
+    type: remap
+    name: Once it's moving
+    comment: the first dab has no direction yet
+    inputs:
+      clamp: true
+      in_high: 0.02
+      in_low: 0.01
+  moving:
+    type: multiply
+  paint:
+    type: paint
+    inputs:
+      buildup: 0.0
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- pen_input.drawing_angle -> across.rotation_input
+- knots.value -> knot_part.a
+- round.mask -> width_part.a
+- width_part.result -> grain_at.a
+- knot_part.result -> grain_at.b
+- grain_at.result -> grain.input
+- round.mask -> edges.input
+- round.mask -> inside.input
+- grain.output -> grained.a
+- inside.output -> grained.b
+- grained.result -> sum.a
+- edges.output -> sum.b
+- sum.result -> full.input
+- full.output -> drawn.a
+- across.mask -> drawn.b
+- pen_input.distance -> lengths.a
+- brush_settings.size -> lengths.b
+- lengths.result -> started.input
+- drawn.result -> moving.a
+- started.output -> moving.b
+- moving.result -> stamp.tip
+- paint_color.color -> stamp.color
+- pen_input.position -> paint.position
+- pen_input.pressure -> paint.size
+- stamp.dab -> paint.rgba
+exposed_ports:
+  brush_settings.size: {}
+  knots.scale: {}
+  paint.opacity: {}

@@ -1,0 +1,159 @@
+name: Foxing
+description: The rust that comes up in an old book's paper. The stroke lays no ink of its own, only brings up the spots already waiting in the page, round blots of every size, each pale in the middle and darkest at its rim, with a faint stain round it and fine specks between; another stroke beside it finds the same spots going on, and going over a stroke again brings up nothing more.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      spacing: 0.05
+      stabilize: 0.5
+  reach:
+    type: circle
+    name: How far the damp reaches
+    comment: soft all the way in, its edge wandering, so the spots fade out unevenly
+    inputs:
+      algorithm: 1
+      amplitude: 0.15
+      frequency: 4.0
+      softness: 1.0
+  random:
+    type: random
+  reach_soft:
+    type: remap
+    name: Full through the middle
+    inputs:
+      clamp: true
+      in_high: 0.45
+  spots:
+    type: noise
+    name: Spots
+    comment: pinned to the page, so another stroke finds the same spots and going over one again adds nothing
+    inputs:
+      octaves: 2.0
+      roughness: 0.35
+      scale: 30.0
+      seed: 7
+      space: 0
+      warp: 0.3
+  halo:
+    type: remap
+    name: The stain round a spot
+    inputs:
+      clamp: true
+      in_high: 0.78
+      in_low: 0.7
+      out_high: 0.1
+  rim_in:
+    type: remap
+    name: Rising to the spot's edge
+    inputs:
+      clamp: true
+      in_high: 0.785
+      in_low: 0.77
+  rim_out:
+    type: remap
+    name: Falling inside it
+    inputs:
+      clamp: true
+      in_high: 0.82
+      in_low: 0.785
+      out_high: 0.0
+      out_low: 1.0
+  rim:
+    type: multiply
+  rim_dark:
+    type: multiply
+    name: How dark the rim
+    inputs:
+      b: 0.25
+  body:
+    type: remap
+    name: The spot's pale middle
+    inputs:
+      clamp: true
+      in_high: 0.79
+      in_low: 0.775
+      out_high: 0.3
+  core:
+    type: remap
+    name: A darker heart in the biggest
+    inputs:
+      clamp: true
+      in_high: 0.86
+      in_low: 0.83
+      out_high: 0.3
+  specks:
+    type: noise
+    name: Specks
+    inputs:
+      octaves: 2.0
+      scale: 12.0
+      seed: 31
+      space: 0
+      warp: 0.5
+      roughness: 0.3
+  speck:
+    type: remap
+    name: Only the highest
+    inputs:
+      clamp: true
+      in_high: 0.83
+      in_low: 0.815
+      out_high: 0.4
+  sum_a:
+    type: add
+  sum_b:
+    type: add
+  sum_c:
+    type: add
+  sum_d:
+    type: add
+  full:
+    type: remap
+    name: At most full
+    inputs:
+      clamp: true
+  brought_up:
+    type: multiply
+  paint:
+    type: paint
+    inputs:
+      buildup: 0.0
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- random.value -> reach.seed
+- reach.mask -> reach_soft.input
+- spots.value -> halo.input
+- spots.value -> rim_in.input
+- spots.value -> rim_out.input
+- spots.value -> body.input
+- spots.value -> core.input
+- rim_in.output -> rim.a
+- rim_out.output -> rim.b
+- rim.result -> rim_dark.a
+- specks.value -> speck.input
+- halo.output -> sum_a.a
+- rim_dark.result -> sum_a.b
+- sum_a.result -> sum_b.a
+- body.output -> sum_b.b
+- sum_b.result -> sum_c.a
+- core.output -> sum_c.b
+- sum_c.result -> sum_d.a
+- speck.output -> sum_d.b
+- sum_d.result -> full.input
+- full.output -> brought_up.a
+- reach_soft.output -> brought_up.b
+- brought_up.result -> stamp.tip
+- paint_color.color -> stamp.color
+- pen_input.position -> paint.position
+- pen_input.pressure -> paint.size
+- stamp.dab -> paint.rgba
+exposed_ports:
+  brush_settings.size: {}
+  spots.scale: {}
+  rim_in.in_low: {}
+  paint.opacity: {}

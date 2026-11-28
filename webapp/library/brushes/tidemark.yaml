@@ -1,0 +1,99 @@
+name: Tidemark
+description: Where water stood on the page and dried. Inside the stain the paper is barely darker; at its edge the water left a tide line, sharp outside and fading in, wandering far from the stroke and back, and a fainter line inside where it stood a while longer, for leaves left out in the rain and books that have been wept on.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      spacing: 0.012
+      stabilize: 0.5
+  across:
+    type: circle
+    name: Across the stain
+    comment: a needle across the stroke; only what lies on it is drawn, so the rings below become lines along it
+    inputs:
+      aspect: 0.14
+      softness: 0.08
+  round:
+    type: circle
+    name: Round the stain
+    comment: soft to its rim, so it measures how far from the middle a point is
+    inputs:
+      softness: 1.0
+  waver:
+    type: noise
+    name: How the water spread
+    comment: pinned to the page, so the edge wanders smoothly and a stroke beside it meets it
+    inputs:
+      octaves: 3.0
+      roughness: 0.55
+      scale: 70.0
+      seed: 21
+      space: 0
+      warp: 1.2
+  waver_by:
+    type: remap
+    inputs:
+      clamp: true
+      out_high: 0.1
+      out_low: -0.1
+  edge:
+    type: add
+  stain:
+    type: curve
+    name: Tide line, ring and stain
+    comment: sharp outside, fading in; a fainter ring inside; the stain itself barely there
+    inputs:
+      curve: [[0.0, 0.0], [0.17, 0.0], [0.185, 0.85], [0.21, 0.6], [0.27, 0.22], [0.35, 0.1], [0.43, 0.1], [0.45, 0.32], [0.47, 0.1], [1.0, 0.08]]
+  edge_in:
+    type: remap
+    name: Within the stain
+    inputs:
+      clamp: true
+  drawn:
+    type: multiply
+  lengths:
+    type: divide
+    name: How far along, in dab-widths
+  started:
+    type: remap
+    name: Once it's moving
+    comment: the first dab has no direction yet
+    inputs:
+      clamp: true
+      in_high: 0.02
+      in_low: 0.01
+  moving:
+    type: multiply
+  paint:
+    type: paint
+    inputs:
+      buildup: 0.0
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- pen_input.drawing_angle -> across.rotation_input
+- waver.value -> waver_by.input
+- round.mask -> edge.a
+- waver_by.output -> edge.b
+- edge.result -> edge_in.input
+- edge_in.output -> stain.input
+- stain.output -> drawn.a
+- across.mask -> drawn.b
+- pen_input.distance -> lengths.a
+- brush_settings.size -> lengths.b
+- lengths.result -> started.input
+- drawn.result -> moving.a
+- started.output -> moving.b
+- moving.result -> stamp.tip
+- paint_color.color -> stamp.color
+- pen_input.position -> paint.position
+- pen_input.pressure -> paint.size
+- stamp.dab -> paint.rgba
+exposed_ports:
+  brush_settings.size: {}
+  waver_by.out_high: {}
+  paint.opacity: {}

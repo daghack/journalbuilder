@@ -1,0 +1,127 @@
+name: Gossamer
+description: A spider's thread, hair-fine, hung with beads of dew at no set step, most of them small and a few heavy, each a bead of glass, dark at its rim and clear in the middle, for webs strung across the corners of a page and the hours before dawn.
+nodes:
+  brush_settings:
+    type: brush_settings
+    inputs:
+      spacing: 0.01
+      stabilize: 0.5
+  round:
+    type: circle
+    name: Round the thread
+    comment: soft to its rim, so it measures how far from the middle a point is
+    inputs:
+      softness: 1.0
+  thread:
+    type: remap
+    name: The thread
+    comment: the dab's middle, a small hard disc
+    inputs:
+      clamp: true
+      in_high: 0.99816
+      in_low: 0.99641
+  dew:
+    type: random
+    name: Is there a bead here
+  dewed:
+    type: remap
+    name: One dab in a hundred and fifty
+    inputs:
+      clamp: true
+      in_high: 0.9938
+      in_low: 0.9933
+  bead_size:
+    type: random
+    name: How big a bead
+  bead_curve:
+    type: curve
+    name: Most small, a few heavy
+    inputs:
+      curve: [[0.0, 0.12], [0.7, 0.22], [1.0, 0.45]]
+  outer:
+    type: subtract
+    name: The bead's edge
+    inputs:
+      a: 1.0
+  outer_hi:
+    type: add
+    inputs:
+      b: 0.03
+  inner:
+    type: add
+    name: Inside its rim
+    inputs:
+      b: 0.06
+  inner_hi:
+    type: add
+    inputs:
+      b: 0.03
+  disc:
+    type: remap
+    inputs:
+      clamp: true
+  hole:
+    type: remap
+    inputs:
+      clamp: true
+  rim:
+    type: subtract
+  clear:
+    type: multiply
+    name: Clear in the middle
+    inputs:
+      b: 0.08
+  bead:
+    type: add
+  beaded:
+    type: multiply
+  sum:
+    type: add
+  full:
+    type: remap
+    name: At most full
+    inputs:
+      clamp: true
+  paint:
+    type: paint
+    inputs:
+      buildup: 0.0
+  paint_color:
+    type: paint_color
+  pen_input:
+    type: pen_input
+  stamp:
+    type: stamp
+connections:
+- round.mask -> thread.input
+- dew.value -> dewed.input
+- bead_size.value -> bead_curve.input
+- bead_curve.output -> outer.b
+- outer.result -> outer_hi.a
+- outer.result -> inner.a
+- inner.result -> inner_hi.a
+- round.mask -> disc.input
+- outer.result -> disc.in_low
+- outer_hi.result -> disc.in_high
+- round.mask -> hole.input
+- inner.result -> hole.in_low
+- inner_hi.result -> hole.in_high
+- disc.output -> rim.a
+- hole.output -> rim.b
+- hole.output -> clear.a
+- rim.result -> bead.a
+- clear.result -> bead.b
+- bead.result -> beaded.a
+- dewed.output -> beaded.b
+- thread.output -> sum.a
+- beaded.result -> sum.b
+- sum.result -> full.input
+- full.output -> stamp.tip
+- paint_color.color -> stamp.color
+- pen_input.position -> paint.position
+- pen_input.pressure -> paint.size
+- stamp.dab -> paint.rgba
+exposed_ports:
+  brush_settings.size: {}
+  dewed.in_low: {}
+  paint.opacity: {}
